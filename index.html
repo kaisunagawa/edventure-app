@@ -465,12 +465,7 @@ const { useState, useEffect, useRef, useCallback } = React;
 // CONFIG — GASのWebアプリURLをここに設定
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 const GAS_URL = "https://script.google.com/macros/s/AKfycbz-Sd_0RHWjm_mUq6U24HC51l7LRnhID1mGNAxzSZ6Gfix9cjwiKiFfr5Kg8oh6eu0-/exec";
-const CURRENT_USER = {
-  email: "work.sunagawa@gmail.com",
-  name: "砂川 Kai",
-  coachName: "コーチ",
-  coachEmail: "",
-};
+let CURRENT_USER = JSON.parse(localStorage.getItem("edventure_user") || "null");
 
 // GAS APIラッパー
 // 読み取り：通常fetch（CORSが通れば使う、失敗時は空データで続行）
@@ -962,7 +957,7 @@ function ChatScreen({ onToast }) {
 }
 
 // ─── 設定画面 ───
-function SettingsScreen({ onToast }) {
+function SettingsScreen({ onToast, onLogout }) {
   const saved = JSON.parse(localStorage.getItem("notifySettings") || '{"start":7,"end":23}');
   const [start, setStart] = useState(saved.start);
   const [end, setEnd] = useState(saved.end);
@@ -1023,6 +1018,10 @@ function SettingsScreen({ onToast }) {
             </div>
           </div>
         </div>
+
+        <button onClick={onLogout} style={{width:"100%",padding:"12px",borderRadius:12,border:"1.5px solid #e53e3e",background:"#fff",color:"#e53e3e",fontSize:15,fontWeight:600,cursor:"pointer",marginTop:8}}>
+          ログアウト
+        </button>
       </div>
     </div>
   );
@@ -1038,11 +1037,72 @@ const TABS = [
 ];
 
 // ─── APP ───
+function LoginScreen({ onLogin }) {
+  const [email, setEmail] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  const login = async () => {
+    const e = email.trim().toLowerCase();
+    if (!e || !e.includes("@")) { setError("メールアドレスを正しく入力してください"); return; }
+    setLoading(true);
+    setError("");
+    const url = new URL(GAS_URL);
+    url.searchParams.set("action", "getUser");
+    url.searchParams.set("studentEmail", e);
+    try {
+      const r = await fetch(url).then(res => res.json());
+      if (r.ok && r.data) {
+        const user = { email: e, name: r.data.name, coachName: r.data.coachName || "コーチ", coachEmail: r.data.coach_email || "" };
+        localStorage.setItem("edventure_user", JSON.stringify(user));
+        CURRENT_USER = user;
+        onLogin(user);
+      } else {
+        setError("このメールアドレスは登録されていません");
+      }
+    } catch {
+      setError("接続エラーが発生しました");
+    }
+    setLoading(false);
+  };
+
+  return (
+    <div style={{height:"100%",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"32px 24px",background:"var(--bg)"}}>
+      <div style={{fontSize:48,marginBottom:16}}>🎯</div>
+      <h1 style={{fontSize:24,fontWeight:700,color:"var(--text)",marginBottom:8}}>EdVenture</h1>
+      <p style={{color:"var(--text-sub)",fontSize:14,marginBottom:40,textAlign:"center"}}>時間管理で目標を達成しよう</p>
+      <div style={{width:"100%",maxWidth:320}}>
+        <input
+          type="email"
+          placeholder="メールアドレスを入力"
+          value={email}
+          onChange={e => setEmail(e.target.value)}
+          onKeyDown={e => e.key === "Enter" && login()}
+          style={{width:"100%",padding:"14px 16px",borderRadius:12,border:"1.5px solid var(--border)",fontSize:16,background:"#fff",marginBottom:12,outline:"none"}}
+        />
+        {error && <p style={{color:"#e53e3e",fontSize:13,marginBottom:12}}>{error}</p>}
+        <button className="btn-primary" style={{width:"100%",padding:"14px"}} onClick={login} disabled={loading}>
+          {loading ? "確認中..." : "ログイン"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function App() {
+  const [user, setUser] = useState(CURRENT_USER);
   const [tab, setTab] = useState("home");
   const [toast, setToast] = useState(null);
 
   const showToast = (msg) => setToast(msg);
+
+  const logout = () => {
+    localStorage.removeItem("edventure_user");
+    CURRENT_USER = null;
+    setUser(null);
+  };
+
+  if (!user) return <LoginScreen onLogin={setUser} />;
 
   return (
     <div style={{height:"100%",position:"relative"}}>
@@ -1051,7 +1111,7 @@ function App() {
         {tab === "log"    && <LogScreen onToast={showToast} />}
         {tab === "report" && <ReportScreen />}
         {tab === "chat"   && <ChatScreen onToast={showToast} />}
-        {tab === "settings" && <SettingsScreen onToast={showToast} />}
+        {tab === "settings" && <SettingsScreen onToast={showToast} onLogout={logout} />}
       </div>
 
       <nav className="nav">
