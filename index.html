@@ -657,10 +657,24 @@ const TIME_BLOCKS = [
 const FOCUS_OPTS = ["高","中","低"];
 const FOCUS_EMOJI = { "高": "🔥", "中": "😐", "低": "😴" };
 
+function formatDateStr(d) {
+  return d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0");
+}
+function addDays(dateStr, n) {
+  const d = new Date(dateStr + "T00:00:00");
+  d.setDate(d.getDate() + n);
+  return formatDateStr(d);
+}
+function isToday(dateStr) {
+  return dateStr === formatDateStr(new Date());
+}
+
 function LogScreen({ onToast }) {
   const nowH = new Date().getHours();
   const defaultBlock = TIME_BLOCKS.find(t => parseInt(t) === nowH) || "09:00-10:00";
+  const todayStr = formatDateStr(new Date());
 
+  const [selectedDate, setSelectedDate] = useState(todayStr);
   const [block, setBlock] = useState(defaultBlock);
   const [task, setTask] = useState("");
   const [focus, setFocus] = useState("高");
@@ -670,13 +684,14 @@ function LogScreen({ onToast }) {
   const timeRef = useRef(null);
 
   useEffect(() => {
-    gasApi("getLogs").then(r => r.ok && setLogs(r.data));
-    // 現在時刻のチップにスクロール
-    setTimeout(() => {
-      const el = timeRef.current?.querySelector(".time-chip.selected");
-      if (el) el.scrollIntoView({ inline: "center", behavior: "smooth" });
-    }, 100);
-  }, []);
+    gasApi("getLogs", { date: selectedDate }).then(r => r.ok && setLogs(r.data));
+    if (isToday(selectedDate)) {
+      setTimeout(() => {
+        const el = timeRef.current?.querySelector(".time-chip.selected");
+        if (el) el.scrollIntoView({ inline: "center", behavior: "smooth" });
+      }, 100);
+    }
+  }, [selectedDate]);
 
   const save = async () => {
     if (!task.trim()) return;
@@ -693,10 +708,16 @@ function LogScreen({ onToast }) {
     <div>
       <div className="form-header">
         <h2>⏱ ログ入力</h2>
-        <p>この1時間、何をしましたか？30秒で記録しよう</p>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:16,marginTop:8}}>
+          <button onClick={() => setSelectedDate(addDays(selectedDate,-1))} style={{background:"none",border:"none",fontSize:20,cursor:"pointer",color:"#fff"}}>‹</button>
+          <span style={{fontSize:14,color:"#fff",fontWeight:600}}>
+            {isToday(selectedDate) ? "今日" : selectedDate}
+          </span>
+          <button onClick={() => setSelectedDate(addDays(selectedDate,1))} disabled={isToday(selectedDate)} style={{background:"none",border:"none",fontSize:20,cursor:"pointer",color: isToday(selectedDate) ? "rgba(255,255,255,0.3)" : "#fff"}}>›</button>
+        </div>
       </div>
 
-      {/* 時間ブロック選択 */}
+      {/* 時間ブロック選択（今日のみ入力可） */}
       <div ref={timeRef} className="time-selector">
         {TIME_BLOCKS.map(t => (
           <button key={t} className={"time-chip" + (block === t ? " selected" : "")} onClick={() => setBlock(t)}>
@@ -705,7 +726,11 @@ function LogScreen({ onToast }) {
         ))}
       </div>
 
-      <div className="form-body">
+      {!isToday(selectedDate) && logs.length === 0 && (
+        <div style={{textAlign:"center",color:"var(--text-sub)",padding:32}}>この日の記録はありません</div>
+      )}
+
+      {isToday(selectedDate) && <div className="form-body">
         <div className="form-group">
           <label className="form-label">何をしましたか？ *</label>
           <input
@@ -740,12 +765,11 @@ function LogScreen({ onToast }) {
         <button className="btn-primary" onClick={save} disabled={!task.trim() || saving}>
           {saving ? <span className="spinner" /> : "保存する"}
         </button>
-      </div>
+      </div>}
 
-      {/* 今日の記録一覧 */}
       {logs.length > 0 && (
         <div className="card" style={{marginBottom: 24}}>
-          <div className="card-title">今日の記録</div>
+          <div className="card-title">{isToday(selectedDate) ? "今日の記録" : selectedDate + "の記録"}</div>
           {logs.map((l, i) => (
             <div key={i} className="log-item">
               <div className="log-time">{l.time_block}</div>
@@ -767,17 +791,21 @@ function LogScreen({ onToast }) {
 
 // ─── 日次レポート ───
 function ReportScreen() {
+  const todayStr = formatDateStr(new Date());
+  const [selectedDate, setSelectedDate] = useState(todayStr);
   const [report, setReport] = useState(null);
   const [logs, setLogs] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    Promise.all([gasApi("getReport"), gasApi("getLogs")]).then(([r, l]) => {
+    setLoading(true);
+    Promise.all([gasApi("getReport", { date: selectedDate }), gasApi("getLogs", { date: selectedDate })]).then(([r, l]) => {
       if (r.ok) setReport(r.data);
+      else setReport(null);
       if (l.ok) setLogs(l.data);
       setLoading(false);
     });
-  }, []);
+  }, [selectedDate]);
 
   if (loading) return (
     <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:300}}>
@@ -798,8 +826,12 @@ function ReportScreen() {
   return (
     <div>
       <div className="report-header">
-        <div className="report-date">
-          {new Date().toLocaleDateString("ja-JP", { year:"numeric", month:"long", day:"numeric" })} のレポート
+        <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:16,marginBottom:4}}>
+          <button onClick={() => setSelectedDate(addDays(selectedDate,-1))} style={{background:"none",border:"none",fontSize:20,cursor:"pointer",color:"#fff"}}>‹</button>
+          <div className="report-date">
+            {isToday(selectedDate) ? "今日" : selectedDate} のレポート
+          </div>
+          <button onClick={() => setSelectedDate(addDays(selectedDate,1))} disabled={isToday(selectedDate)} style={{background:"none",border:"none",fontSize:20,cursor:"pointer",color: isToday(selectedDate) ? "rgba(255,255,255,0.3)" : "#fff"}}>›</button>
         </div>
         <div className="report-score-big">{report.score}</div>
         <div className="report-score-label">/ 100点</div>
