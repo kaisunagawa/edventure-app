@@ -1,0 +1,1074 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>EdVenture</title>
+  <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --primary: #534AB7;
+      --primary-light: #7B74D4;
+      --primary-dark: #3D3589;
+      --bg: #F5F4FC;
+      --bg-card: #FFFFFF;
+      --text: #1A1A2E;
+      --text-sub: #6B6B8A;
+      --border: #E8E6F8;
+      --success: #4CAF7D;
+      --warning: #F5A623;
+      --nav-h: 68px;
+      --safe-bottom: env(safe-area-inset-bottom, 0px);
+    }
+
+    html, body {
+      height: 100%;
+      background: var(--bg);
+      font-family: -apple-system, BlinkMacSystemFont, 'Hiragino Sans', 'Yu Gothic UI', sans-serif;
+      color: var(--text);
+      -webkit-font-smoothing: antialiased;
+    }
+
+    #root {
+      height: 100%;
+      width: 100%;
+      max-width: 100%;
+      margin: 0 auto;
+      position: relative;
+      background: var(--bg);
+      overflow: hidden;
+    }
+
+    .screen {
+      position: absolute;
+      inset: 0;
+      bottom: calc(var(--nav-h) + var(--safe-bottom));
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+
+    /* ─── Nav ─── */
+    .nav {
+      position: absolute;
+      bottom: 0;
+      left: 0; right: 0;
+      height: calc(var(--nav-h) + var(--safe-bottom));
+      background: #fff;
+      border-top: 1px solid var(--border);
+      display: flex;
+      padding-bottom: var(--safe-bottom);
+    }
+    .nav-item {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 4px;
+      cursor: pointer;
+      border: none;
+      background: none;
+      padding: 8px 0 4px;
+      -webkit-tap-highlight-color: transparent;
+      transition: opacity .15s;
+    }
+    .nav-item:active { opacity: .6; }
+    .nav-icon { font-size: 22px; line-height: 1; }
+    .nav-label { font-size: 10px; font-weight: 500; color: var(--text-sub); }
+    .nav-item.active .nav-label { color: var(--primary); }
+    .nav-item.active .nav-icon { filter: none; }
+
+    /* ─── Header ─── */
+    .header {
+      background: var(--primary);
+      color: #fff;
+      padding: 16px 20px 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .header-title { font-size: 18px; font-weight: 700; }
+    .header-sub { font-size: 13px; opacity: .8; margin-top: 2px; }
+    .avatar {
+      width: 40px; height: 40px;
+      border-radius: 50%;
+      background: rgba(255,255,255,.25);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 18px;
+    }
+
+    /* ─── Cards ─── */
+    .card {
+      background: var(--bg-card);
+      border-radius: 16px;
+      padding: 16px;
+      margin: 12px 16px 0;
+      box-shadow: 0 2px 8px rgba(83,74,183,.07);
+    }
+    .card-title {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-sub);
+      text-transform: uppercase;
+      letter-spacing: .5px;
+      margin-bottom: 10px;
+    }
+
+    /* ─── Score Circle ─── */
+    .score-wrap {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+    .score-circle {
+      width: 80px; height: 80px;
+      border-radius: 50%;
+      background: conic-gradient(var(--primary) calc(var(--pct) * 1%), #E8E6F8 0);
+      display: flex; align-items: center; justify-content: center;
+      position: relative;
+      flex-shrink: 0;
+    }
+    .score-inner {
+      width: 62px; height: 62px;
+      border-radius: 50%;
+      background: #fff;
+      display: flex; align-items: center; justify-content: center;
+      flex-direction: column;
+    }
+    .score-num { font-size: 22px; font-weight: 800; color: var(--primary); line-height: 1; }
+    .score-unit { font-size: 10px; color: var(--text-sub); }
+    .score-text { flex: 1; }
+    .score-label { font-size: 16px; font-weight: 700; margin-bottom: 4px; }
+    .score-comment { font-size: 13px; color: var(--text-sub); line-height: 1.5; }
+
+    /* ─── Schedule list ─── */
+    .schedule-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      padding: 10px 0;
+      border-bottom: 1px solid var(--border);
+    }
+    .schedule-item:last-child { border-bottom: none; }
+    .schedule-time {
+      font-size: 12px; font-weight: 600;
+      color: var(--primary);
+      min-width: 48px;
+      padding-top: 2px;
+    }
+    .schedule-ev { font-size: 14px; font-weight: 500; }
+    .schedule-ev-sub { font-size: 12px; color: var(--text-sub); margin-top: 2px; }
+
+    /* ─── Log Form ─── */
+    .form-header {
+      background: var(--primary);
+      padding: 16px 20px 24px;
+      color: #fff;
+    }
+    .form-header h2 { font-size: 18px; font-weight: 700; }
+    .form-header p { font-size: 13px; opacity: .8; margin-top: 4px; }
+
+    .time-selector {
+      display: flex;
+      gap: 8px;
+      overflow-x: auto;
+      padding: 16px 16px 4px;
+      -webkit-overflow-scrolling: touch;
+      scrollbar-width: none;
+    }
+    .time-selector::-webkit-scrollbar { display: none; }
+    .time-chip {
+      flex-shrink: 0;
+      padding: 8px 14px;
+      border-radius: 20px;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      border: 1.5px solid var(--border);
+      background: #fff;
+      color: var(--text-sub);
+      transition: all .15s;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .time-chip.selected {
+      background: var(--primary);
+      border-color: var(--primary);
+      color: #fff;
+    }
+
+    .form-body { padding: 12px 16px 24px; }
+    .form-group { margin-bottom: 16px; }
+    .form-label {
+      font-size: 12px; font-weight: 600;
+      color: var(--text-sub);
+      margin-bottom: 6px;
+      display: block;
+    }
+    .form-input, .form-textarea {
+      width: 100%;
+      padding: 12px 14px;
+      border: 1.5px solid var(--border);
+      border-radius: 12px;
+      font-size: 15px;
+      font-family: inherit;
+      background: #fff;
+      color: var(--text);
+      outline: none;
+      transition: border-color .15s;
+    }
+    .form-input:focus, .form-textarea:focus {
+      border-color: var(--primary);
+    }
+    .form-textarea { resize: none; height: 80px; line-height: 1.5; }
+
+    .focus-row {
+      display: flex;
+      gap: 8px;
+    }
+    .focus-btn {
+      flex: 1;
+      padding: 10px 4px;
+      border-radius: 12px;
+      border: 1.5px solid var(--border);
+      background: #fff;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      text-align: center;
+      color: var(--text-sub);
+      transition: all .15s;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .focus-btn.selected { background: var(--primary); border-color: var(--primary); color: #fff; }
+
+    .btn-primary {
+      width: 100%;
+      padding: 16px;
+      background: var(--primary);
+      color: #fff;
+      border: none;
+      border-radius: 14px;
+      font-size: 16px;
+      font-weight: 700;
+      cursor: pointer;
+      font-family: inherit;
+      transition: background .15s;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .btn-primary:active { background: var(--primary-dark); }
+    .btn-primary:disabled { background: #C0BBE8; cursor: default; }
+
+    /* ─── Toast ─── */
+    .toast {
+      position: fixed;
+      bottom: calc(var(--nav-h) + var(--safe-bottom) + 16px);
+      left: 50%; transform: translateX(-50%);
+      background: var(--text);
+      color: #fff;
+      padding: 12px 20px;
+      border-radius: 24px;
+      font-size: 14px;
+      font-weight: 500;
+      z-index: 999;
+      white-space: nowrap;
+      animation: fadeUp .3s ease;
+    }
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateX(-50%) translateY(8px); }
+      to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+    }
+
+    /* ─── Report ─── */
+    .report-header {
+      background: linear-gradient(135deg, var(--primary) 0%, var(--primary-light) 100%);
+      padding: 20px 20px 32px;
+      color: #fff;
+      text-align: center;
+    }
+    .report-date { font-size: 13px; opacity: .8; margin-bottom: 8px; }
+    .report-score-big {
+      font-size: 64px; font-weight: 800; line-height: 1;
+      margin-bottom: 4px;
+    }
+    .report-score-label { font-size: 14px; opacity: .9; }
+
+    .badge {
+      display: inline-block;
+      padding: 4px 10px;
+      border-radius: 20px;
+      font-size: 11px;
+      font-weight: 600;
+    }
+    .badge-success { background: #E6F6EE; color: var(--success); }
+    .badge-warn { background: #FEF3E0; color: var(--warning); }
+
+    .log-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      padding: 10px 0;
+      border-bottom: 1px solid var(--border);
+    }
+    .log-item:last-child { border-bottom: none; }
+    .log-time {
+      font-size: 12px; font-weight: 700;
+      color: var(--primary);
+      min-width: 44px;
+      padding-top: 2px;
+    }
+    .log-task { font-size: 14px; font-weight: 500; }
+    .log-meta { font-size: 12px; color: var(--text-sub); margin-top: 3px; }
+    .focus-dot {
+      display: inline-block;
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      margin-right: 4px;
+    }
+    .focus-high { background: var(--success); }
+    .focus-mid  { background: var(--warning); }
+    .focus-low  { background: #E57373; }
+
+    /* ─── Chat ─── */
+    .chat-header {
+      background: var(--primary);
+      padding: 16px 20px;
+      color: #fff;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .chat-avatar {
+      width: 36px; height: 36px;
+      border-radius: 50%;
+      background: rgba(255,255,255,.25);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 16px;
+    }
+    .chat-name { font-size: 16px; font-weight: 700; }
+    .chat-status { font-size: 12px; opacity: .8; }
+
+    .messages {
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      justify-content: flex-end;
+      min-height: 100%;
+    }
+    .msg {
+      max-width: 72%;
+      padding: 10px 14px;
+      border-radius: 18px;
+      font-size: 14px;
+      line-height: 1.5;
+      word-break: break-word;
+      white-space: pre-wrap;
+    }
+    .msg-in {
+      background: #fff;
+      border-bottom-left-radius: 4px;
+      align-self: flex-start;
+      box-shadow: 0 1px 4px rgba(0,0,0,.07);
+    }
+    .msg-out {
+      background: var(--primary);
+      color: #fff;
+      border-bottom-right-radius: 4px;
+      align-self: flex-end;
+    }
+    .msg-time {
+      font-size: 10px;
+      color: var(--text-sub);
+      margin-top: 4px;
+    }
+    .msg-time-right { text-align: right; color: rgba(255,255,255,.7); }
+
+    .chat-input-bar {
+      padding: 12px 16px;
+      background: #fff;
+      border-top: 1px solid var(--border);
+      display: flex;
+      gap: 10px;
+      align-items: flex-end;
+    }
+    .chat-input {
+      flex: 1;
+      padding: 10px 14px;
+      border: 1.5px solid var(--border);
+      border-radius: 22px;
+      font-size: 15px;
+      font-family: inherit;
+      outline: none;
+      resize: none;
+      max-height: 100px;
+      line-height: 1.4;
+    }
+    .chat-input:focus { border-color: var(--primary); }
+    .send-btn {
+      width: 42px; height: 42px;
+      border-radius: 50%;
+      background: var(--primary);
+      border: none;
+      color: #fff;
+      font-size: 18px;
+      cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .send-btn:disabled { background: #C0BBE8; cursor: default; }
+
+    /* ─── Spinner ─── */
+    .spinner {
+      width: 20px; height: 20px;
+      border: 2px solid rgba(255,255,255,.3);
+      border-top-color: #fff;
+      border-radius: 50%;
+      animation: spin .6s linear infinite;
+      display: inline-block;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ─── Settings notice ─── */
+    .notice {
+      background: #FEF3E0;
+      border-radius: 12px;
+      padding: 12px 14px;
+      margin: 12px 16px 0;
+      font-size: 13px;
+      color: #8B6914;
+      line-height: 1.5;
+    }
+    .notice strong { font-weight: 700; }
+
+    .section-header {
+      padding: 16px 16px 4px;
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--text-sub);
+      text-transform: uppercase;
+      letter-spacing: .5px;
+    }
+  </style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel">
+const { useState, useEffect, useRef, useCallback } = React;
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// CONFIG — GASのWebアプリURLをここに設定
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+const GAS_URL = "https://script.google.com/macros/s/AKfycbz-Sd_0RHWjm_mUq6U24HC51l7LRnhID1mGNAxzSZ6Gfix9cjwiKiFfr5Kg8oh6eu0-/exec";
+const CURRENT_USER = {
+  email: "[REDACTED_EMAIL]",
+  name: "砂川 Kai",
+  coachName: "コーチ",
+  coachEmail: "",
+};
+
+// GAS APIラッパー
+// 読み取り：通常fetch（CORSが通れば使う、失敗時は空データで続行）
+async function gasApi(action, params = {}) {
+  if (!GAS_URL) return mockApi(action, params);
+  const url = new URL(GAS_URL);
+  url.searchParams.set("action", action);
+  url.searchParams.set("studentEmail", CURRENT_USER.email);
+  Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v));
+  try {
+    const res = await fetch(url.toString(), { redirect: "follow" });
+    return await res.json();
+  } catch (e) {
+    return { ok: true, data: [] };
+  }
+}
+
+// 書き込み：no-corsで確実に届ける（レスポンスは読めないが書き込みは成功する）
+async function gasPost(action, body = {}) {
+  if (!GAS_URL) return mockPost(action, body);
+  const url = new URL(GAS_URL);
+  url.searchParams.set("action", action);
+  url.searchParams.set("studentEmail", CURRENT_USER.email);
+  Object.entries(body).forEach(([k, v]) => {
+    if (v !== undefined && v !== null) url.searchParams.set(k, String(v));
+  });
+  try {
+    await fetch(url.toString(), { mode: "no-cors" });
+  } catch (e) { /* no-corsでは常にopaqueなので無視 */ }
+  return { ok: true };
+}
+
+// ━━━━━━━ モックデータ ━━━━━━━
+const MOCK_LOGS = [
+  { time_block: "07:00", task: "朝の読書", focus_level: "高", memo: "集中できた" },
+  { time_block: "08:00", task: "数学の演習", focus_level: "高", memo: "難しい問題に挑戦" },
+  { time_block: "09:00", task: "英語リスニング", focus_level: "中", memo: "" },
+  { time_block: "10:00", task: "休憩・SNS", focus_level: "低", memo: "長くなりすぎた" },
+  { time_block: "11:00", task: "プログラミング学習", focus_level: "高", memo: "React楽しい！" },
+  { time_block: "13:00", task: "昼食・休憩", focus_level: "中", memo: "" },
+  { time_block: "14:00", task: "歴史の勉強", focus_level: "高", memo: "" },
+];
+
+const MOCK_REPORT = {
+  score: 82,
+  feedback: "今日は全体的に集中力が高く、特に午前中のパフォーマンスが素晴らしかった。数学とプログラミングへの取り組みが際立っています。ただし、10時のSNS時間が予定より長くなった点は改善の余地があります。",
+  action: "明日は休憩にタイマーをセットし、25分勉強→5分休憩のリズムを試してみよう。特に午後の集中力維持を意識して！",
+  highlights: "数学・プログラミングへの高集中",
+  improvement: "SNS・娯楽時間の管理",
+};
+
+const MOCK_MESSAGES = [
+  { message_id: "1", content: "今日のレポートを確認しました。数学の演習、よく頑張りましたね！", sender_name: "山田コーチ", sender_role: "coach", timestamp: "2026-06-27 09:30" },
+  { message_id: "2", content: "ありがとうございます！難しかったですが最後まで解けました。", sender_name: "田中 花子", sender_role: "student", timestamp: "2026-06-27 10:15" },
+  { message_id: "3", content: "SNS時間が長くなってしまったのが悔しいです...", sender_name: "田中 花子", sender_role: "student", timestamp: "2026-06-27 10:16" },
+  { message_id: "4", content: "正直に振り返れているのが大切です👍 明日はタイマーを使ってみましょう。ポモドーロ技法、試したことありますか？", sender_name: "山田コーチ", sender_role: "coach", timestamp: "2026-06-27 11:02" },
+];
+
+const MOCK_SCHEDULE = [
+  { time: "09:00", title: "朝のホームルーム", sub: "Zoom" },
+  { time: "10:00", title: "数学 演習", sub: "自主学習" },
+  { time: "13:00", title: "英語ディスカッション", sub: "グループ" },
+  { time: "15:00", title: "コーチングセッション", sub: "山田コーチ" },
+];
+
+let mockMsgs = [...MOCK_MESSAGES];
+let mockLogs = [...MOCK_LOGS];
+
+function mockApi(action) {
+  if (action === "getReport") return Promise.resolve({ ok: true, data: MOCK_REPORT });
+  if (action === "getLogs") return Promise.resolve({ ok: true, data: mockLogs });
+  if (action === "getMessages") return Promise.resolve({ ok: true, data: mockMsgs });
+  if (action === "getSchedule") return Promise.resolve({ ok: true, data: MOCK_SCHEDULE });
+  return Promise.resolve({ ok: false });
+}
+
+function mockPost(action, body) {
+  if (action === "saveLog") {
+    mockLogs = [...mockLogs, { time_block: body.time_block, task: body.task, focus_level: body.focus_level, memo: body.memo }];
+    return Promise.resolve({ ok: true });
+  }
+  if (action === "sendMessage") {
+    mockMsgs = [...mockMsgs, {
+      message_id: String(Date.now()),
+      content: body.content,
+      sender_name: CURRENT_USER.name,
+      sender_role: "student",
+      timestamp: new Date().toLocaleString("ja"),
+    }];
+    return Promise.resolve({ ok: true });
+  }
+  return Promise.resolve({ ok: true });
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// COMPONENTS
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+function Toast({ msg, onDone }) {
+  useEffect(() => {
+    const t = setTimeout(onDone, 2500);
+    return () => clearTimeout(t);
+  }, []);
+  return <div className="toast">{msg}</div>;
+}
+
+// ─── ホーム画面 ───
+function HomeScreen() {
+  const [report, setReport] = useState(null);
+  const [schedule, setSchedule] = useState([]);
+
+  useEffect(() => {
+    gasApi("getReport").then(r => r.ok && setReport(r.data));
+    gasApi("getSchedule").then(r => r.ok && setSchedule(r.data));
+  }, []);
+
+  const today = new Date().toLocaleDateString("ja-JP", { month: "long", day: "numeric", weekday: "short" });
+
+  return (
+    <div>
+      <div className="header">
+        <div>
+          <div className="header-title">おはようございます 👋</div>
+          <div className="header-sub">{CURRENT_USER.name} · {today}</div>
+        </div>
+        <div className="avatar">🌸</div>
+      </div>
+
+      {!GAS_URL && (
+        <div className="notice">
+          <strong>⚙️ 設定が必要です</strong><br />
+          index.html の <code>GAS_URL</code> にGASのWebアプリURLを設定すると実データが表示されます。現在はデモデータを表示中。
+        </div>
+      )}
+
+      {/* 昨日のスコア */}
+      {report && (
+        <div className="card">
+          <div className="card-title">昨日のAIスコア</div>
+          <div className="score-wrap">
+            <div className="score-circle" style={{"--pct": report.score}}>
+              <div className="score-inner">
+                <div className="score-num">{report.score}</div>
+                <div className="score-unit">点</div>
+              </div>
+            </div>
+            <div className="score-text">
+              <div className="score-label">
+                {report.score >= 80 ? "🎉 Great!" : report.score >= 60 ? "👍 Good!" : "💪 Keep going!"}
+              </div>
+              <div className="score-comment">{report.highlights}</div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 今日の予定 */}
+      <div className="card">
+        <div className="card-title">📅 今日の予定（Googleカレンダー）</div>
+        {schedule.length === 0 ? (
+          <div style={{color:"var(--text-sub)",fontSize:14,padding:"8px 0"}}>予定を取得中...</div>
+        ) : schedule.map((ev, i) => (
+          <div key={i} className="schedule-item">
+            <div className="schedule-time">{ev.time}</div>
+            <div>
+              <div className="schedule-ev">{ev.title}</div>
+              {ev.sub && <div className="schedule-ev-sub">{ev.sub}</div>}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div style={{height:24}} />
+    </div>
+  );
+}
+
+// ─── ログ入力 ───
+const TIME_BLOCKS = [
+  "06:00-07:00","07:00-08:00","08:00-09:00","09:00-10:00","10:00-11:00","11:00-12:00",
+  "12:00-13:00","13:00-14:00","14:00-15:00","15:00-16:00","16:00-17:00","17:00-18:00",
+  "18:00-19:00","19:00-20:00","20:00-21:00","21:00-22:00","22:00-23:00","23:00-24:00",
+];
+const FOCUS_OPTS = ["高","中","低"];
+const FOCUS_EMOJI = { "高": "🔥", "中": "😐", "低": "😴" };
+
+function LogScreen({ onToast }) {
+  const nowH = new Date().getHours();
+  const defaultBlock = TIME_BLOCKS.find(t => parseInt(t) === nowH) || "09:00-10:00";
+
+  const [block, setBlock] = useState(defaultBlock);
+  const [task, setTask] = useState("");
+  const [focus, setFocus] = useState("高");
+  const [memo, setMemo] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [logs, setLogs] = useState([]);
+  const timeRef = useRef(null);
+
+  useEffect(() => {
+    gasApi("getLogs").then(r => r.ok && setLogs(r.data));
+    // 現在時刻のチップにスクロール
+    setTimeout(() => {
+      const el = timeRef.current?.querySelector(".time-chip.selected");
+      if (el) el.scrollIntoView({ inline: "center", behavior: "smooth" });
+    }, 100);
+  }, []);
+
+  const save = async () => {
+    if (!task.trim()) return;
+    setSaving(true);
+    await gasPost("saveLog", { time_block: block, task: task.trim(), focus_level: focus, memo: memo.trim() });
+    setTask(""); setMemo("");
+    onToast("✅ 保存しました！");
+    const r = await gasApi("getLogs");
+    if (r.ok) setLogs(r.data);
+    setSaving(false);
+  };
+
+  return (
+    <div>
+      <div className="form-header">
+        <h2>⏱ ログ入力</h2>
+        <p>この1時間、何をしましたか？30秒で記録しよう</p>
+      </div>
+
+      {/* 時間ブロック選択 */}
+      <div ref={timeRef} className="time-selector">
+        {TIME_BLOCKS.map(t => (
+          <button key={t} className={"time-chip" + (block === t ? " selected" : "")} onClick={() => setBlock(t)}>
+            {t}
+          </button>
+        ))}
+      </div>
+
+      <div className="form-body">
+        <div className="form-group">
+          <label className="form-label">何をしましたか？ *</label>
+          <input
+            className="form-input"
+            placeholder="例：数学の問題演習"
+            value={task}
+            onChange={e => setTask(e.target.value)}
+          />
+        </div>
+
+        <div className="form-group">
+          <label className="form-label">集中度</label>
+          <div className="focus-row">
+            {FOCUS_OPTS.map(f => (
+              <button key={f} className={"focus-btn" + (focus === f ? " selected" : "")} onClick={() => setFocus(f)}>
+                {FOCUS_EMOJI[f]} {f}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="form-group">
+          <label className="form-label">メモ（任意）</label>
+          <textarea
+            className="form-textarea"
+            placeholder="気づいたことや感想..."
+            value={memo}
+            onChange={e => setMemo(e.target.value)}
+          />
+        </div>
+
+        <button className="btn-primary" onClick={save} disabled={!task.trim() || saving}>
+          {saving ? <span className="spinner" /> : "保存する"}
+        </button>
+      </div>
+
+      {/* 今日の記録一覧 */}
+      {logs.length > 0 && (
+        <div className="card" style={{marginBottom: 24}}>
+          <div className="card-title">今日の記録</div>
+          {logs.map((l, i) => (
+            <div key={i} className="log-item">
+              <div className="log-time">{l.time_block}</div>
+              <div>
+                <div className="log-task">{l.task}</div>
+                <div className="log-meta">
+                  <span className="focus-dot" style={{background: l.focus_level === "高" ? "var(--success)" : l.focus_level === "中" ? "var(--warning)" : "#E57373"}} />
+                  集中度：{l.focus_level}
+                  {l.memo ? ` · ${l.memo}` : ""}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── 日次レポート ───
+function ReportScreen() {
+  const [report, setReport] = useState(null);
+  const [logs, setLogs] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    Promise.all([gasApi("getReport"), gasApi("getLogs")]).then(([r, l]) => {
+      if (r.ok) setReport(r.data);
+      if (l.ok) setLogs(l.data);
+      setLoading(false);
+    });
+  }, []);
+
+  if (loading) return (
+    <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:300}}>
+      <div className="spinner" style={{borderColor:"var(--primary)",borderTopColor:"transparent",width:32,height:32,borderWidth:3}} />
+    </div>
+  );
+
+  if (!report) return (
+    <div style={{padding:32,textAlign:"center",color:"var(--text-sub)"}}>
+      <div style={{fontSize:48,marginBottom:12}}>📋</div>
+      <div style={{fontSize:16,fontWeight:600}}>まだレポートがありません</div>
+      <div style={{fontSize:14,marginTop:8}}>ログを入力すると毎晩21時にAIがレポートを生成します</div>
+    </div>
+  );
+
+  const scoreColor = report.score >= 80 ? "var(--success)" : report.score >= 60 ? "var(--warning)" : "#E57373";
+
+  return (
+    <div>
+      <div className="report-header">
+        <div className="report-date">
+          {new Date().toLocaleDateString("ja-JP", { year:"numeric", month:"long", day:"numeric" })} のレポート
+        </div>
+        <div className="report-score-big">{report.score}</div>
+        <div className="report-score-label">/ 100点</div>
+      </div>
+
+      {/* フィードバック */}
+      <div className="card">
+        <div className="card-title">🤖 AIフィードバック</div>
+        <p style={{fontSize:14,lineHeight:1.7,color:"var(--text)"}}>{report.feedback}</p>
+      </div>
+
+      {/* ハイライト・改善点 */}
+      <div className="card">
+        <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+          {report.highlights && (
+            <div>
+              <span className="badge badge-success">✨ 良かった点</span>
+              <p style={{fontSize:13,color:"var(--text-sub)",marginTop:6,lineHeight:1.6}}>{report.highlights}</p>
+            </div>
+          )}
+          {report.improvement && (
+            <div style={{marginTop:12}}>
+              <span className="badge badge-warn">💡 改善点</span>
+              <p style={{fontSize:13,color:"var(--text-sub)",marginTop:6,lineHeight:1.6}}>{report.improvement}</p>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* 明日のアクション */}
+      {report.action && (
+        <div className="card">
+          <div className="card-title">🎯 明日のアクション</div>
+          <p style={{fontSize:14,lineHeight:1.7,color:"var(--text)"}}>{report.action}</p>
+        </div>
+      )}
+
+      {/* ログ一覧 */}
+      {logs.length > 0 && (
+        <div className="card" style={{marginBottom:24}}>
+          <div className="card-title">時間ブロック一覧</div>
+          {logs.map((l, i) => (
+            <div key={i} className="log-item">
+              <div className="log-time">{l.time_block}</div>
+              <div>
+                <div className="log-task">{l.task}</div>
+                <div className="log-meta">
+                  <span className="focus-dot" style={{background: l.focus_level === "高" ? "var(--success)" : l.focus_level === "中" ? "var(--warning)" : "#E57373"}} />
+                  {l.focus_level}集中
+                  {l.memo ? ` · ${l.memo}` : ""}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── チャット ───
+function ChatScreen({ onToast }) {
+  const [messages, setMessages] = useState([]);
+  const [input, setInput] = useState("");
+  const [sending, setSending] = useState(false);
+  const bottomRef = useRef(null);
+  const inputRef = useRef(null);
+
+  const loadMessages = useCallback(async () => {
+    const r = await gasApi("getMessages");
+    if (r.ok) setMessages(r.data);
+  }, []);
+
+  useEffect(() => {
+    loadMessages();
+  }, []);
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
+
+  const composingRef = useRef(false);
+
+  const send = async () => {
+    const content = input.trim();
+    if (!content || sending) return;
+    setSending(true);
+    setInput("");
+    const tempMsg = { message_id: "temp_" + Date.now(), content, sender_role: "student", sender_name: CURRENT_USER.name, timestamp: new Date().toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" }) };
+    setMessages(prev => [...prev, tempMsg]);
+    gasPost("sendMessage", { content, sender_role: "student", sender_name: CURRENT_USER.name });
+    setSending(false);
+    inputRef.current?.focus();
+    setTimeout(() => loadMessages(), 3000);
+  };
+
+  const onKey = (e) => {
+    if (e.key === "Enter" && !e.shiftKey && !composingRef.current) {
+      e.preventDefault();
+      send();
+    }
+  };
+
+  const formatTime = (ts) => {
+    try {
+      const d = new Date(ts.replace(" ", "T"));
+      return isNaN(d) ? ts : d.toLocaleTimeString("ja-JP", { hour:"2-digit", minute:"2-digit" });
+    } catch { return ts; }
+  };
+
+  return (
+    <div style={{display:"flex",flexDirection:"column",height:"100%"}}>
+      <div className="chat-header">
+        <div className="chat-avatar">👨‍🏫</div>
+        <div>
+          <div className="chat-name">{CURRENT_USER.coachName}</div>
+          <div className="chat-status">コーチ · オンライン</div>
+        </div>
+      </div>
+
+      <div className="messages" style={{flex:1,overflowY:"auto"}}>
+        {messages.length === 0 && (
+          <div style={{textAlign:"center",color:"var(--text-sub)",fontSize:14,marginTop:40}}>
+            メッセージはまだありません
+          </div>
+        )}
+        {messages.map((m) => {
+          const isMe = m.sender_role === "student";
+          return (
+            <div key={m.message_id} style={{alignSelf: isMe ? "flex-end" : "flex-start", maxWidth:"75%", display:"flex", flexDirection:"column", alignItems: isMe ? "flex-end" : "flex-start"}}>
+              {!isMe && (
+                <div style={{fontSize:11,color:"var(--text-sub)",marginBottom:3,paddingLeft:4}}>{m.sender_name}</div>
+              )}
+              <div className={"msg " + (isMe ? "msg-out" : "msg-in")}>{m.content}</div>
+              <div className={"msg-time" + (isMe ? " msg-time-right" : "")}>{formatTime(m.timestamp)}</div>
+            </div>
+          );
+        })}
+        <div ref={bottomRef} />
+      </div>
+
+      <div className="chat-input-bar">
+        <textarea
+          ref={inputRef}
+          className="chat-input"
+          placeholder="メッセージを入力..."
+          rows={1}
+          value={input}
+          onChange={e => setInput(e.target.value)}
+          onCompositionStart={() => { composingRef.current = true; }}
+          onCompositionEnd={() => { composingRef.current = false; }}
+          onKeyDown={onKey}
+        />
+        <button className="send-btn" onClick={send} disabled={!input.trim() || sending}>
+          {sending ? <span className="spinner" style={{width:16,height:16,borderWidth:2}} /> : "↑"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ─── 設定画面 ───
+function SettingsScreen({ onToast }) {
+  const saved = JSON.parse(localStorage.getItem("notifySettings") || '{"start":7,"end":23}');
+  const [start, setStart] = useState(saved.start);
+  const [end, setEnd] = useState(saved.end);
+
+  const hours = Array.from({length: 24}, (_, i) => i);
+
+  function save() {
+    localStorage.setItem("notifySettings", JSON.stringify({ start, end }));
+    gasPost("saveSettings", { notify_start: start, notify_end: end });
+    onToast("通知設定を保存しました");
+  }
+
+  return (
+    <div>
+      <div className="header">
+        <div>
+          <div className="header-title">設定</div>
+          <div className="header-sub">通知・アカウント設定</div>
+        </div>
+        <div className="avatar">⚙️</div>
+      </div>
+      <div style={{padding:"20px 16px"}}>
+        <div className="card" style={{marginBottom:16}}>
+          <div style={{fontWeight:700,fontSize:15,marginBottom:16}}>LINE通知時間</div>
+          <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:16}}>
+            <div style={{flex:1}}>
+              <div style={{fontSize:12,color:"var(--text-sub)",marginBottom:6}}>開始時間</div>
+              <select value={start} onChange={e => setStart(Number(e.target.value))}
+                style={{width:"100%",padding:"10px 12px",borderRadius:10,border:"1.5px solid var(--border)",fontSize:15,background:"var(--bg)"}}>
+                {hours.map(h => <option key={h} value={h}>{String(h).padStart(2,"0")}:00</option>)}
+              </select>
+            </div>
+            <div style={{fontSize:18,marginTop:20}}>〜</div>
+            <div style={{flex:1}}>
+              <div style={{fontSize:12,color:"var(--text-sub)",marginBottom:6}}>終了時間</div>
+              <select value={end} onChange={e => setEnd(Number(e.target.value))}
+                style={{width:"100%",padding:"10px 12px",borderRadius:10,border:"1.5px solid var(--border)",fontSize:15,background:"var(--bg)"}}>
+                {hours.map(h => <option key={h} value={h}>{String(h).padStart(2,"0")}:00</option>)}
+              </select>
+            </div>
+          </div>
+          <div style={{fontSize:12,color:"var(--text-sub)",marginBottom:16}}>
+            設定した時間帯に毎時ログ入力のリマインドが届きます
+          </div>
+          <button className="btn-primary" style={{width:"100%"}} onClick={save}>保存する</button>
+        </div>
+
+        <div className="card">
+          <div style={{fontWeight:700,fontSize:15,marginBottom:12}}>アカウント情報</div>
+          <div style={{display:"flex",flexDirection:"column",gap:8}}>
+            <div style={{display:"flex",justifyContent:"space-between",fontSize:14}}>
+              <span style={{color:"var(--text-sub)"}}>名前</span>
+              <span>{CURRENT_USER.name}</span>
+            </div>
+            <div style={{display:"flex",justifyContent:"space-between",fontSize:14}}>
+              <span style={{color:"var(--text-sub)"}}>メール</span>
+              <span style={{fontSize:12}}>{CURRENT_USER.email}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── ナビゲーション ───
+const TABS = [
+  { id: "home",   label: "ホーム",   icon: "🏠" },
+  { id: "log",    label: "ログ",     icon: "⏱" },
+  { id: "report", label: "レポート", icon: "📊" },
+  { id: "chat",   label: "チャット", icon: "💬" },
+  { id: "settings", label: "設定",  icon: "⚙️" },
+];
+
+// ─── APP ───
+function App() {
+  const [tab, setTab] = useState("home");
+  const [toast, setToast] = useState(null);
+
+  const showToast = (msg) => setToast(msg);
+
+  return (
+    <div style={{height:"100%",position:"relative"}}>
+      <div className="screen">
+        {tab === "home"   && <HomeScreen />}
+        {tab === "log"    && <LogScreen onToast={showToast} />}
+        {tab === "report" && <ReportScreen />}
+        {tab === "chat"   && <ChatScreen onToast={showToast} />}
+        {tab === "settings" && <SettingsScreen onToast={showToast} />}
+      </div>
+
+      <nav className="nav">
+        {TABS.map(t => (
+          <button key={t.id} className={"nav-item" + (tab === t.id ? " active" : "")} onClick={() => setTab(t.id)}>
+            <span className="nav-icon">{t.icon}</span>
+            <span className="nav-label" style={tab === t.id ? {color:"var(--primary)"} : {}}>{t.label}</span>
+          </button>
+        ))}
+      </nav>
+
+      {toast && <Toast msg={toast} onDone={() => setToast(null)} />}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>
