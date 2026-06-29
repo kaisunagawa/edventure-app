@@ -581,12 +581,12 @@ function Toast({ msg, onDone }) {
 function HomeScreen() {
   const [report, setReport] = useState(null);
   const [schedule, setSchedule] = useState([]);
-  const [streak, setStreak] = useState(0);
+  const [game, setGame] = useState(null);
 
   useEffect(() => {
     gasApi("getReport").then(r => r.ok && setReport(r.data));
     gasApi("getSchedule").then(r => r.ok && setSchedule(r.data));
-    gasApi("getStreak").then(r => r.ok && setStreak(r.data));
+    gasApi("getGameStatus").then(r => r.ok && setGame(r.data));
   }, []);
 
   const today = new Date().toLocaleDateString("ja-JP", { month: "long", day: "numeric", weekday: "short" });
@@ -608,19 +608,38 @@ function HomeScreen() {
         </div>
       )}
 
-      {/* ストリーク */}
-      {streak > 0 && (
-        <div className="card" style={{background:"linear-gradient(135deg,#FF6B35,#FF8C42)",color:"#fff"}}>
-          <div style={{display:"flex",alignItems:"center",gap:12}}>
-            <div style={{fontSize:40}}>🔥</div>
-            <div>
-              <div style={{fontSize:28,fontWeight:800,lineHeight:1}}>{streak}</div>
-              <div style={{fontSize:13,opacity:.9}}>日連続記録中！</div>
+      {/* ゲームステータス */}
+      {game && (
+        <div className="card" style={{background:"linear-gradient(135deg,#534AB7,#7B74D4)",color:"#fff"}}>
+          <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:10}}>
+            <div style={{fontSize:36}}>⭐</div>
+            <div style={{flex:1}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline"}}>
+                <div style={{fontSize:18,fontWeight:800}}>Lv.{game.level}</div>
+                <div style={{fontSize:12,opacity:.8}}>{game.xp} XP</div>
+              </div>
+              <div style={{background:"rgba(255,255,255,0.3)",borderRadius:99,height:6,marginTop:4}}>
+                <div style={{background:"#fff",borderRadius:99,height:6,width:game.xpInLevel+"%",transition:"width .5s"}} />
+              </div>
+              <div style={{fontSize:11,opacity:.7,marginTop:2}}>次のレベルまで {100 - game.xpInLevel} XP</div>
             </div>
-            <div style={{marginLeft:"auto",fontSize:13,opacity:.8}}>
-              {streak >= 7 ? "🏆 週間達成！" : streak >= 3 ? "⭐ いい調子！" : "続けよう！"}
-            </div>
+            {game.streak > 0 && (
+              <div style={{textAlign:"center"}}>
+                <div style={{fontSize:24}}>🔥</div>
+                <div style={{fontSize:16,fontWeight:800,lineHeight:1}}>{game.streak}</div>
+                <div style={{fontSize:10,opacity:.8}}>連続</div>
+              </div>
+            )}
           </div>
+          {game.badges.length > 0 && (
+            <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
+              {game.badges.map(b => (
+                <div key={b.id} style={{background:"rgba(255,255,255,0.2)",borderRadius:20,padding:"3px 10px",fontSize:12}}>
+                  {b.label}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
@@ -714,10 +733,22 @@ function LogScreen({ onToast }) {
   const save = async () => {
     if (!task.trim()) return;
     setSaving(true);
-    await gasPost("saveLog", { time_block: block, task: task.trim(), focus_level: focus, memo: memo.trim() });
+    const url = new URL(GAS_URL);
+    url.searchParams.set("action", "saveLog");
+    url.searchParams.set("studentEmail", CURRENT_USER.email);
+    url.searchParams.set("time_block", block);
+    url.searchParams.set("task", task.trim());
+    url.searchParams.set("focus_level", focus);
+    url.searchParams.set("memo", memo.trim());
+    const result = await fetch(url).then(r => r.json()).catch(() => ({}));
     setTask(""); setMemo("");
-    onToast("✅ 保存しました！");
-    const r = await gasApi("getLogs");
+    if (result.xp_gained) {
+      const levelUpMsg = result.level_up ? ` 🎉 レベルアップ！Lv.${result.level}` : "";
+      onToast(`✅ 保存！ +${result.xp_gained} XP${levelUpMsg}`);
+    } else {
+      onToast("✅ 保存しました！");
+    }
+    const r = await gasApi("getLogs", { date: selectedDate });
     if (r.ok) setLogs(r.data);
     setSaving(false);
   };
