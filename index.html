@@ -581,10 +581,12 @@ function Toast({ msg, onDone }) {
 function HomeScreen() {
   const [report, setReport] = useState(null);
   const [schedule, setSchedule] = useState([]);
+  const [streak, setStreak] = useState(0);
 
   useEffect(() => {
     gasApi("getReport").then(r => r.ok && setReport(r.data));
     gasApi("getSchedule").then(r => r.ok && setSchedule(r.data));
+    gasApi("getStreak").then(r => r.ok && setStreak(r.data));
   }, []);
 
   const today = new Date().toLocaleDateString("ja-JP", { month: "long", day: "numeric", weekday: "short" });
@@ -603,6 +605,22 @@ function HomeScreen() {
         <div className="notice">
           <strong>⚙️ 設定が必要です</strong><br />
           index.html の <code>GAS_URL</code> にGASのWebアプリURLを設定すると実データが表示されます。現在はデモデータを表示中。
+        </div>
+      )}
+
+      {/* ストリーク */}
+      {streak > 0 && (
+        <div className="card" style={{background:"linear-gradient(135deg,#FF6B35,#FF8C42)",color:"#fff"}}>
+          <div style={{display:"flex",alignItems:"center",gap:12}}>
+            <div style={{fontSize:40}}>🔥</div>
+            <div>
+              <div style={{fontSize:28,fontWeight:800,lineHeight:1}}>{streak}</div>
+              <div style={{fontSize:13,opacity:.9}}>日連続記録中！</div>
+            </div>
+            <div style={{marginLeft:"auto",fontSize:13,opacity:.8}}>
+              {streak >= 7 ? "🏆 週間達成！" : streak >= 3 ? "⭐ いい調子！" : "続けよう！"}
+            </div>
+          </div>
         </div>
       )}
 
@@ -717,7 +735,11 @@ function LogScreen({ onToast }) {
         </div>
       </div>
 
-      {/* 時間ブロック選択（今日のみ入力可） */}
+      {!isToday(selectedDate) && logs.length === 0 && (
+        <div style={{textAlign:"center",color:"var(--text-sub)",padding:32}}>この日の記録はありません</div>
+      )}
+
+      {isToday(selectedDate) && <>
       <div ref={timeRef} className="time-selector">
         {TIME_BLOCKS.map(t => (
           <button key={t} className={"time-chip" + (block === t ? " selected" : "")} onClick={() => setBlock(t)}>
@@ -725,12 +747,7 @@ function LogScreen({ onToast }) {
           </button>
         ))}
       </div>
-
-      {!isToday(selectedDate) && logs.length === 0 && (
-        <div style={{textAlign:"center",color:"var(--text-sub)",padding:32}}>この日の記録はありません</div>
-      )}
-
-      {isToday(selectedDate) && <div className="form-body">
+      <div className="form-body">
         <div className="form-group">
           <label className="form-label">何をしましたか？ *</label>
           <input
@@ -765,7 +782,8 @@ function LogScreen({ onToast }) {
         <button className="btn-primary" onClick={save} disabled={!task.trim() || saving}>
           {saving ? <span className="spinner" /> : "保存する"}
         </button>
-      </div>}
+      </div>
+      </>}
 
       {logs.length > 0 && (
         <div className="card" style={{marginBottom: 24}}>
