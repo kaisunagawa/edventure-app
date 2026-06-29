@@ -1,6 +1,6 @@
 {
-  "name": "EdVenture",
-  "short_name": "EdVenture",
+  "name": "JIROKU",
+  "short_name": "JIROKU",
   "description": "時間管理で目標を達成しよう",
   "start_url": "/edventure-app/",
   "display": "standalone",
