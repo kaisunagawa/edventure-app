@@ -691,8 +691,7 @@ const TIME_BLOCKS = [
   "12:00-13:00","13:00-14:00","14:00-15:00","15:00-16:00","16:00-17:00","17:00-18:00",
   "18:00-19:00","19:00-20:00","20:00-21:00","21:00-22:00","22:00-23:00","23:00-24:00",
 ];
-const FOCUS_OPTS = ["高","中","低"];
-const FOCUS_EMOJI = { "高": "🔥", "中": "😐", "低": "😴" };
+const FOCUS_OPTS = ["⭐⭐⭐⭐⭐ 完璧だった", "⭐⭐⭐⭐ よくできた", "⭐⭐⭐ まあまあ", "⭐⭐ もう少し", "⭐ 全然だめだった"];
 
 function formatDateStr(d) {
   return d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0");
@@ -714,7 +713,7 @@ function LogScreen({ onToast }) {
   const [selectedDate, setSelectedDate] = useState(todayStr);
   const [block, setBlock] = useState(defaultBlock);
   const [task, setTask] = useState("");
-  const [focus, setFocus] = useState("高");
+  const [focus, setFocus] = useState(FOCUS_OPTS[0]);
   const [memo, setMemo] = useState("");
   const [saving, setSaving] = useState(false);
   const [logs, setLogs] = useState([]);
@@ -790,11 +789,11 @@ function LogScreen({ onToast }) {
         </div>
 
         <div className="form-group">
-          <label className="form-label">集中度</label>
-          <div className="focus-row">
+          <label className="form-label">自己評価</label>
+          <div style={{display:"flex",flexDirection:"column",gap:8}}>
             {FOCUS_OPTS.map(f => (
-              <button key={f} className={"focus-btn" + (focus === f ? " selected" : "")} onClick={() => setFocus(f)}>
-                {FOCUS_EMOJI[f]} {f}
+              <button key={f} className={"focus-btn" + (focus === f ? " selected" : "")} onClick={() => setFocus(f)} style={{textAlign:"left",padding:"10px 14px",borderRadius:10,fontSize:14}}>
+                {f}
               </button>
             ))}
           </div>
@@ -825,8 +824,7 @@ function LogScreen({ onToast }) {
               <div>
                 <div className="log-task">{l.task}</div>
                 <div className="log-meta">
-                  <span className="focus-dot" style={{background: l.focus_level === "高" ? "var(--success)" : l.focus_level === "中" ? "var(--warning)" : "#E57373"}} />
-                  集中度：{l.focus_level}
+                  {l.focus_level}
                   {l.memo ? ` · ${l.memo}` : ""}
                 </div>
               </div>
