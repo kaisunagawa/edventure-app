@@ -439,8 +439,11 @@ function HomeScreen({goalData, onGoalSaved}) {
             )}
           </div>
           {goalData.deadline && (
-            <div style={{marginTop:8,fontSize:11,color:"var(--sub)"}}>
-              期限：{new Date(goalData.deadline).toLocaleDateString("ja-JP",{year:"numeric",month:"long",day:"numeric"})}
+            <div style={{marginTop:10,display:"flex",alignItems:"center",gap:6}}>
+              <div style={{width:3,height:3,borderRadius:"50%",background:"var(--sub)"}}/>
+              <span style={{fontSize:12,fontWeight:600,color:"var(--text)"}}>
+                {new Date(goalData.deadline).toLocaleDateString("ja-JP",{year:"numeric",month:"long",day:"numeric"})}まで
+              </span>
             </div>
           )}
         </div>
