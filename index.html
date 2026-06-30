@@ -6,9 +6,11 @@
   <title>JIROKU</title>
   <link rel="manifest" href="manifest.json" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
   <meta name="apple-mobile-web-app-title" content="JIROKU" />
-  <meta name="theme-color" content="#0C0C0F" />
+  <meta name="theme-color" content="#FAFAF9" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
   <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -16,398 +18,278 @@
     * { box-sizing: border-box; margin: 0; padding: 0; }
 
     :root {
-      --bg:        #0C0C0F;
-      --bg-card:   #16161D;
-      --bg-raised: #1E1E28;
-      --border:    #2A2A38;
-      --text:      #F0F0F5;
-      --text-sub:  #6B6B80;
-      --accent:    #7C6FF7;
-      --accent2:   #A78BFA;
-      --glow:      rgba(124,111,247,.25);
-      --green:     #34D399;
-      --amber:     #FBBF24;
-      --red:       #F87171;
-      --nav-h:     60px;
+      --bg:       #FAFAF9;
+      --card:     #FFFFFF;
+      --border:   #EFEFEF;
+      --text:     #1A1825;
+      --sub:      #A8A4B8;
+      --accent:   #7B6FE8;
+      --accent-l: #EDE9FF;
+      --glow:     rgba(123,111,232,.18);
+      --green:    #46C98B;
+      --green-l:  #E6F9F1;
+      --amber:    #F5A84B;
+      --amber-l:  #FEF3E2;
+      --red:      #EF7070;
+      --red-l:    #FEF0F0;
+      --nav-h:    64px;
       --safe-bottom: env(safe-area-inset-bottom, 0px);
+      --r:        14px;
     }
 
     html, body {
-      height: 100%;
-      background: var(--bg);
-      font-family: -apple-system, BlinkMacSystemFont, 'Hiragino Sans', 'Yu Gothic UI', sans-serif;
-      color: var(--text);
-      -webkit-font-smoothing: antialiased;
+      height: 100%; background: var(--bg);
+      font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, 'Hiragino Sans', sans-serif;
+      color: var(--text); -webkit-font-smoothing: antialiased;
     }
-
-    #root {
-      height: 100%;
-      width: 100%;
-      position: relative;
-      background: var(--bg);
-      overflow: hidden;
-    }
+    #root { height: 100%; width: 100%; position: relative; background: var(--bg); overflow: hidden; }
 
     .screen {
-      position: absolute;
-      inset: 0;
+      position: absolute; inset: 0;
       bottom: calc(var(--nav-h) + var(--safe-bottom));
-      overflow-y: auto;
-      -webkit-overflow-scrolling: touch;
+      overflow-y: auto; -webkit-overflow-scrolling: touch;
     }
 
     /* ── Nav ── */
     .nav {
-      position: absolute;
-      bottom: 0; left: 0; right: 0;
+      position: absolute; bottom: 0; left: 0; right: 0;
       height: calc(var(--nav-h) + var(--safe-bottom));
-      background: rgba(12,12,15,.85);
-      backdrop-filter: blur(20px);
-      -webkit-backdrop-filter: blur(20px);
+      background: rgba(250,250,249,.92);
+      backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
       border-top: 1px solid var(--border);
-      display: flex;
-      padding-bottom: var(--safe-bottom);
+      display: flex; padding-bottom: var(--safe-bottom);
     }
-    .nav-item {
+    .nav-btn {
       flex: 1; display: flex; flex-direction: column;
-      align-items: center; justify-content: center;
-      gap: 4px; cursor: pointer; border: none; background: none;
-      color: var(--text-sub);
-      -webkit-tap-highlight-color: transparent;
+      align-items: center; justify-content: center; gap: 4px;
+      border: none; background: none; cursor: pointer;
+      color: var(--sub); -webkit-tap-highlight-color: transparent;
       transition: color .2s;
     }
-    .nav-item.active { color: var(--accent); }
-    .nav-label { font-size: 10px; font-weight: 500; letter-spacing: .3px; }
+    .nav-btn.on { color: var(--accent); }
+    .nav-lbl { font-size: 10px; font-weight: 600; letter-spacing: .2px; }
 
-    /* ── Header ── */
-    .header {
-      padding: 20px 20px 16px;
-      background: var(--bg);
+    /* ── Page header ── */
+    .ph {
+      padding: 24px 20px 16px; background: var(--bg);
     }
-    .header-title { font-size: 22px; font-weight: 800; color: var(--text); letter-spacing: -.3px; }
-    .header-sub { font-size: 12px; color: var(--text-sub); margin-top: 3px; }
+    .ph-eyebrow { font-size: 11px; font-weight: 600; letter-spacing: 1px; text-transform: uppercase; color: var(--sub); margin-bottom: 4px; }
+    .ph-title { font-size: 24px; font-weight: 800; color: var(--text); letter-spacing: -.4px; }
+    .ph-sub { font-size: 13px; color: var(--sub); margin-top: 2px; }
 
-    /* ── Card ── */
+    /* ── Cards ── */
     .card {
-      background: var(--bg-card);
-      border-radius: 16px;
-      padding: 16px;
-      margin: 0 16px 12px;
-      border: 1px solid var(--border);
+      background: var(--card); border-radius: var(--r);
+      padding: 18px; margin: 0 16px 12px;
+      box-shadow: 0 1px 3px rgba(0,0,0,.04), 0 4px 16px rgba(0,0,0,.04);
     }
     .card-label {
       font-size: 10px; font-weight: 700; letter-spacing: 1px;
-      text-transform: uppercase; color: var(--text-sub);
-      margin-bottom: 12px;
+      text-transform: uppercase; color: var(--sub); margin-bottom: 14px;
     }
 
-    /* ── Stat row ── */
+    /* ── Stat tiles ── */
     .stat-row { display: flex; gap: 10px; margin: 0 16px 12px; }
-    .stat-box {
-      flex: 1; background: var(--bg-card); border: 1px solid var(--border);
-      border-radius: 14px; padding: 14px 12px; text-align: center;
+    .stat-tile {
+      flex: 1; background: var(--card); border-radius: 12px;
+      padding: 14px 12px; text-align: center;
+      box-shadow: 0 1px 3px rgba(0,0,0,.04), 0 4px 16px rgba(0,0,0,.04);
     }
-    .stat-val { font-size: 24px; font-weight: 800; color: var(--text); line-height: 1; }
-    .stat-lbl { font-size: 10px; color: var(--text-sub); margin-top: 4px; letter-spacing: .3px; }
-
-    /* ── Streak glow ── */
-    .streak-box {
-      background: linear-gradient(135deg, #1a1000, #221500);
-      border-color: #3D2D00;
+    .stat-v { font-size: 26px; font-weight: 800; line-height: 1; color: var(--text); }
+    .stat-l { font-size: 10px; color: var(--sub); margin-top: 4px; font-weight: 600; letter-spacing: .3px; }
+    .streak-tile { background: linear-gradient(135deg, #FFF8EE, #FFF3E0); }
+    .streak-tile .stat-v { color: var(--amber); }
+    .level-v {
+      background: linear-gradient(135deg, var(--accent), #B8A9F5);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
     }
-    .streak-box .stat-val { color: var(--amber); }
 
     /* ── XP bar ── */
-    .xp-track {
-      height: 4px; background: var(--border); border-radius: 99px;
-      overflow: hidden; margin-top: 10px;
-    }
+    .xp-wrap { margin: 0 16px 16px; }
+    .xp-top { display: flex; justify-content: space-between; font-size: 11px; color: var(--sub); font-weight: 600; margin-bottom: 6px; }
+    .xp-track { height: 6px; background: var(--border); border-radius: 99px; overflow: hidden; }
     .xp-fill {
-      height: 4px; border-radius: 99px;
-      background: linear-gradient(90deg, var(--accent), var(--accent2));
-      transition: width .6s cubic-bezier(.4,0,.2,1);
+      height: 6px; border-radius: 99px;
+      background: linear-gradient(90deg, var(--accent), #B8A9F5);
+      transition: width .7s cubic-bezier(.4,0,.2,1);
     }
 
-    /* ── Schedule ── */
-    .sched-row {
-      display: flex; align-items: flex-start; gap: 12px;
-      padding: 10px 0; border-bottom: 1px solid var(--border);
+    /* ── Badge pills ── */
+    .badge-row { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 16px 14px; }
+    .badge-pill {
+      font-size: 11px; font-weight: 600; padding: 4px 10px; border-radius: 20px;
+      background: var(--accent-l); color: var(--accent); letter-spacing: .1px;
     }
-    .sched-row:last-child { border-bottom: none; }
-    .sched-time { font-size: 11px; font-weight: 700; color: var(--accent2); min-width: 40px; padding-top: 1px; }
-    .sched-title { font-size: 14px; font-weight: 500; }
-    .sched-sub { font-size: 11px; color: var(--text-sub); margin-top: 2px; }
 
     /* ── Score ring ── */
     .ring-wrap { display: flex; align-items: center; gap: 16px; }
     .ring {
-      width: 68px; height: 68px; flex-shrink: 0;
-      border-radius: 50%;
+      width: 72px; height: 72px; flex-shrink: 0; border-radius: 50%;
       background: conic-gradient(var(--accent) calc(var(--pct)*1%), var(--border) 0);
       display: flex; align-items: center; justify-content: center;
     }
-    .ring-inner {
-      width: 52px; height: 52px; border-radius: 50%;
-      background: var(--bg-card);
-      display: flex; align-items: center; justify-content: center; flex-direction: column;
-    }
-    .ring-num { font-size: 18px; font-weight: 800; color: var(--text); line-height: 1; }
-    .ring-unit { font-size: 9px; color: var(--text-sub); }
+    .ring-inner { width: 56px; height: 56px; border-radius: 50%; background: var(--card); display: flex; align-items: center; justify-content: center; flex-direction: column; }
+    .ring-num { font-size: 20px; font-weight: 800; color: var(--text); line-height: 1; }
+    .ring-unit { font-size: 9px; color: var(--sub); }
 
-    /* ── Section sub-header ── */
-    .section-top {
-      padding: 20px 20px 8px;
-      background: var(--bg);
-    }
-    .section-top h2 { font-size: 17px; font-weight: 700; color: var(--text); }
+    /* ── Schedule ── */
+    .sched-row { display: flex; align-items: flex-start; gap: 14px; padding: 11px 0; border-bottom: 1px solid var(--border); }
+    .sched-row:last-child { border-bottom: none; }
+    .sched-time { font-size: 11px; font-weight: 700; color: var(--accent); min-width: 40px; padding-top: 1px; }
+    .sched-title { font-size: 14px; font-weight: 500; }
+    .sched-sub { font-size: 11px; color: var(--sub); margin-top: 2px; }
 
-    /* ── Time chips ── */
+    /* ── Section header (page inner) ── */
+    .sec-head { padding: 18px 20px 8px; }
+    .sec-head h2 { font-size: 18px; font-weight: 800; letter-spacing: -.3px; }
+
+    /* ── Time bar ── */
     .time-bar {
-      display: flex; gap: 6px; overflow-x: auto; padding: 12px 16px;
-      scrollbar-width: none; background: var(--bg);
-      border-bottom: 1px solid var(--border);
+      display: flex; gap: 6px; overflow-x: auto; padding: 12px 16px 10px;
+      scrollbar-width: none; border-bottom: 1px solid var(--border);
     }
     .time-bar::-webkit-scrollbar { display: none; }
     .chip {
-      flex-shrink: 0; padding: 6px 11px; border-radius: 8px;
-      font-size: 12px; font-weight: 500; cursor: pointer;
-      border: 1px solid var(--border); background: var(--bg-card);
-      color: var(--text-sub); transition: all .15s;
-      -webkit-tap-highlight-color: transparent;
+      flex-shrink: 0; padding: 7px 12px; border-radius: 8px;
+      font-size: 12px; font-weight: 600; cursor: pointer;
+      border: 1.5px solid var(--border); background: var(--card);
+      color: var(--sub); transition: all .15s; -webkit-tap-highlight-color: transparent;
+      letter-spacing: .1px;
     }
-    .chip.sel {
-      background: var(--accent); border-color: var(--accent); color: #fff;
-      box-shadow: 0 0 12px var(--glow);
-    }
+    .chip.on { background: var(--accent); border-color: var(--accent); color: #fff; box-shadow: 0 4px 12px var(--glow); }
 
     /* ── Form ── */
-    .form-wrap { padding: 16px; }
-    .form-group { margin-bottom: 16px; }
-    .form-lbl { font-size: 11px; font-weight: 700; color: var(--text-sub); letter-spacing: .5px; text-transform: uppercase; margin-bottom: 8px; display: block; }
-    .input, .textarea {
-      width: 100%; padding: 12px 14px;
-      border: 1px solid var(--border); border-radius: 10px;
-      font-size: 15px; font-family: inherit;
-      background: var(--bg-raised); color: var(--text); outline: none;
-      transition: border-color .15s;
+    .form-wrap { padding: 18px 16px; }
+    .form-grp { margin-bottom: 18px; }
+    .form-lbl { font-size: 11px; font-weight: 700; color: var(--sub); letter-spacing: .8px; text-transform: uppercase; margin-bottom: 8px; display: block; }
+    .inp, .txa {
+      width: 100%; padding: 12px 14px; border: 1.5px solid var(--border);
+      border-radius: 10px; font-size: 15px; font-family: inherit;
+      background: var(--card); color: var(--text); outline: none; transition: border-color .15s;
     }
-    .input:focus, .textarea:focus { border-color: var(--accent); }
-    .textarea { resize: none; height: 80px; line-height: 1.5; }
+    .inp:focus, .txa:focus { border-color: var(--accent); }
+    .txa { resize: none; height: 84px; line-height: 1.6; }
 
-    /* ── Focus buttons ── */
+    /* ── Eval buttons ── */
     .eval-btn {
-      width: 100%; padding: 12px 14px; margin-bottom: 6px;
-      border-radius: 10px; border: 1px solid var(--border);
-      background: var(--bg-raised); font-size: 14px; font-weight: 400;
-      cursor: pointer; text-align: left; color: var(--text-sub);
-      transition: all .15s; font-family: inherit;
+      width: 100%; padding: 12px 14px; margin-bottom: 7px; border-radius: 10px;
+      border: 1.5px solid var(--border); background: var(--card);
+      font-size: 14px; font-weight: 500; cursor: pointer; text-align: left;
+      color: var(--sub); transition: all .15s; font-family: inherit;
       -webkit-tap-highlight-color: transparent;
     }
     .eval-btn:last-child { margin-bottom: 0; }
-    .eval-btn.sel-5 { background: rgba(52,211,153,.12); border-color: var(--green); color: var(--green); }
-    .eval-btn.sel-4 { background: rgba(124,111,247,.12); border-color: var(--accent); color: var(--accent2); }
-    .eval-btn.sel-3 { background: rgba(251,191,36,.08); border-color: var(--amber); color: var(--amber); }
-    .eval-btn.sel-2 { background: rgba(248,113,113,.08); border-color: var(--red); color: var(--red); }
-    .eval-btn.sel-1 { background: rgba(248,113,113,.12); border-color: var(--red); color: var(--red); }
+    .e5 { background: var(--green-l); border-color: var(--green); color: #1D6B4A; }
+    .e4 { background: var(--accent-l); border-color: var(--accent); color: #4035A8; }
+    .e3 { background: var(--amber-l); border-color: var(--amber); color: #914F0A; }
+    .e2 { background: var(--red-l); border-color: var(--red); color: #9B2C2C; }
+    .e1 { background: var(--red-l); border-color: var(--red); color: #9B2C2C; }
 
-    /* ── CTA Button ── */
+    /* ── Primary button ── */
     .btn {
-      width: 100%; padding: 15px;
-      background: linear-gradient(135deg, var(--accent), var(--accent2));
-      color: #fff; border: none; border-radius: 12px;
-      font-size: 15px; font-weight: 700; cursor: pointer;
+      width: 100%; padding: 15px; border: none; border-radius: 12px;
+      background: linear-gradient(135deg, var(--accent) 0%, #B8A9F5 100%);
+      color: #fff; font-size: 15px; font-weight: 700; cursor: pointer;
       font-family: inherit; letter-spacing: .2px;
-      box-shadow: 0 4px 20px var(--glow);
-      transition: opacity .15s, transform .1s;
-      -webkit-tap-highlight-color: transparent;
+      box-shadow: 0 6px 20px var(--glow);
+      transition: opacity .15s, transform .1s; -webkit-tap-highlight-color: transparent;
     }
-    .btn:active { opacity: .85; transform: scale(.98); }
-    .btn:disabled { background: var(--bg-raised); color: var(--text-sub); box-shadow: none; cursor: default; }
+    .btn:active { opacity: .88; transform: scale(.98); }
+    .btn:disabled { background: var(--border); color: var(--sub); box-shadow: none; cursor: default; }
+
+    /* ── Ghost button ── */
+    .btn-g {
+      width: 100%; padding: 13px; border-radius: 10px;
+      border: 1.5px solid var(--border); background: transparent;
+      color: var(--red); font-size: 14px; font-weight: 600;
+      cursor: pointer; font-family: inherit;
+    }
 
     /* ── Toast ── */
     .toast {
-      position: fixed;
-      bottom: calc(var(--nav-h) + var(--safe-bottom) + 16px);
+      position: fixed; bottom: calc(var(--nav-h) + var(--safe-bottom) + 16px);
       left: 50%; transform: translateX(-50%);
-      background: var(--bg-card);
-      border: 1px solid var(--border);
-      color: var(--text);
-      padding: 10px 18px; border-radius: 10px;
-      font-size: 13px; font-weight: 600; z-index: 999;
-      white-space: nowrap; box-shadow: 0 8px 32px rgba(0,0,0,.4);
-      animation: fadeUp .25s ease;
+      background: var(--text); color: #fff;
+      padding: 10px 18px; border-radius: 10px; font-size: 13px; font-weight: 600;
+      z-index: 999; white-space: nowrap; box-shadow: 0 8px 24px rgba(0,0,0,.18);
+      animation: up .25s ease;
     }
-    @keyframes fadeUp {
-      from { opacity: 0; transform: translateX(-50%) translateY(8px); }
-      to   { opacity: 1; transform: translateX(-50%) translateY(0); }
-    }
+    @keyframes up { from { opacity:0; transform: translateX(-50%) translateY(8px); } to { opacity:1; transform: translateX(-50%) translateY(0); } }
 
     /* ── Report ── */
-    .report-hero {
-      padding: 28px 20px 20px;
-      text-align: center;
-      background: var(--bg);
-    }
-    .report-date { font-size: 12px; color: var(--text-sub); margin-bottom: 10px; letter-spacing: .5px; }
-    .report-score { font-size: 72px; font-weight: 900; line-height: 1; letter-spacing: -3px;
-      background: linear-gradient(135deg, var(--text) 40%, var(--accent2));
+    .report-hero { padding: 28px 20px 20px; text-align: center; background: var(--bg); }
+    .report-date { font-size: 11px; font-weight: 600; letter-spacing: .8px; text-transform: uppercase; color: var(--sub); margin-bottom: 10px; }
+    .report-score {
+      font-size: 80px; font-weight: 900; line-height: 1; letter-spacing: -4px;
+      background: linear-gradient(135deg, var(--text) 30%, var(--accent));
       -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
     }
-    .report-pts { font-size: 14px; color: var(--text-sub); margin-top: 4px; }
+    .report-pts { font-size: 13px; color: var(--sub); margin-top: 4px; font-weight: 500; }
 
     /* ── Tag ── */
-    .tag {
-      display: inline-block; padding: 3px 8px; border-radius: 5px;
-      font-size: 11px; font-weight: 700; letter-spacing: .3px;
-    }
-    .tag-pos { background: rgba(52,211,153,.12); color: var(--green); }
-    .tag-neg { background: rgba(251,191,36,.1); color: var(--amber); }
+    .tag { display: inline-block; padding: 3px 9px; border-radius: 6px; font-size: 11px; font-weight: 700; }
+    .t-g { background: var(--green-l); color: #1D6B4A; }
+    .t-a { background: var(--amber-l); color: #914F0A; }
 
     /* ── Log rows ── */
-    .log-row {
-      display: flex; align-items: flex-start; gap: 12px;
-      padding: 10px 0; border-bottom: 1px solid var(--border);
-    }
+    .log-row { display: flex; align-items: flex-start; gap: 12px; padding: 11px 0; border-bottom: 1px solid var(--border); }
     .log-row:last-child { border-bottom: none; }
-    .log-time { font-size: 11px; font-weight: 700; color: var(--text-sub); min-width: 44px; padding-top: 2px; }
-    .log-task { font-size: 14px; font-weight: 500; color: var(--text); }
-    .log-meta { font-size: 12px; color: var(--text-sub); margin-top: 2px; }
-    .dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; margin-right: 5px; vertical-align: middle; }
+    .log-time { font-size: 11px; font-weight: 700; color: var(--sub); min-width: 44px; padding-top: 2px; }
+    .log-task { font-size: 14px; font-weight: 600; color: var(--text); }
+    .log-meta { font-size: 12px; color: var(--sub); margin-top: 2px; display: flex; align-items: center; gap: 4px; }
+    .dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
 
     /* ── Chat ── */
-    .chat-head {
-      padding: 14px 20px; background: var(--bg-card);
-      border-bottom: 1px solid var(--border);
-      display: flex; align-items: center; gap: 12px;
-    }
-    .chat-av {
-      width: 36px; height: 36px; border-radius: 50%;
-      background: var(--bg-raised); border: 1px solid var(--border);
-      display: flex; align-items: center; justify-content: center;
-      font-size: 13px; font-weight: 700; color: var(--text-sub); flex-shrink: 0;
-    }
+    .chat-head { padding: 14px 20px; background: var(--card); border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 12px; }
+    .chat-av { width: 36px; height: 36px; border-radius: 50%; background: var(--accent-l); display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 800; color: var(--accent); flex-shrink: 0; }
     .chat-name { font-size: 14px; font-weight: 700; }
-    .chat-status { font-size: 11px; color: var(--text-sub); }
+    .chat-status { font-size: 11px; color: var(--sub); }
 
     .msgs { padding: 16px; display: flex; flex-direction: column; gap: 10px; min-height: 100%; }
-    .bubble {
-      max-width: 74%; padding: 10px 13px; font-size: 14px;
-      line-height: 1.5; word-break: break-word; white-space: pre-wrap; border-radius: 14px;
-    }
-    .bubble-in {
-      background: var(--bg-card); border: 1px solid var(--border);
-      border-bottom-left-radius: 4px; align-self: flex-start;
-    }
-    .bubble-out {
-      background: var(--accent); color: #fff;
-      border-bottom-right-radius: 4px; align-self: flex-end;
-    }
-    .btime { font-size: 10px; color: var(--text-sub); margin-top: 3px; }
-    .btime-r { text-align: right; color: rgba(255,255,255,.6); }
+    .bubble { max-width: 74%; padding: 10px 14px; font-size: 14px; line-height: 1.55; word-break: break-word; white-space: pre-wrap; border-radius: 16px; }
+    .b-in { background: var(--card); box-shadow: 0 1px 4px rgba(0,0,0,.06); border-bottom-left-radius: 4px; align-self: flex-start; }
+    .b-out { background: var(--accent); color: #fff; border-bottom-right-radius: 4px; align-self: flex-end; }
+    .btime { font-size: 10px; color: var(--sub); margin-top: 3px; }
+    .btime-r { text-align: right; color: rgba(255,255,255,.65); }
 
-    .chat-bar {
-      padding: 10px 16px; background: var(--bg-card);
-      border-top: 1px solid var(--border);
-      display: flex; gap: 10px; align-items: flex-end;
-    }
-    .chat-inp {
-      flex: 1; padding: 10px 13px; border: 1px solid var(--border);
-      border-radius: 10px; font-size: 15px; font-family: inherit;
-      outline: none; resize: none; max-height: 100px; line-height: 1.4;
-      background: var(--bg-raised); color: var(--text);
-    }
+    .chat-bar { padding: 10px 14px; background: var(--card); border-top: 1px solid var(--border); display: flex; gap: 10px; align-items: flex-end; }
+    .chat-inp { flex: 1; padding: 10px 13px; border: 1.5px solid var(--border); border-radius: 10px; font-size: 15px; font-family: inherit; outline: none; resize: none; max-height: 100px; line-height: 1.4; background: var(--bg); color: var(--text); }
     .chat-inp:focus { border-color: var(--accent); }
-    .send {
-      width: 40px; height: 40px; border-radius: 10px;
-      background: var(--accent); border: none; color: #fff;
-      cursor: pointer; display: flex; align-items: center; justify-content: center;
-      flex-shrink: 0; -webkit-tap-highlight-color: transparent;
-      box-shadow: 0 2px 12px var(--glow); transition: opacity .15s;
-    }
-    .send:disabled { background: var(--bg-raised); color: var(--text-sub); box-shadow: none; cursor: default; }
+    .send { width: 40px; height: 40px; border-radius: 10px; background: var(--accent); border: none; color: #fff; cursor: pointer; display: flex; align-items: center; justify-content: center; flex-shrink: 0; -webkit-tap-highlight-color: transparent; box-shadow: 0 4px 12px var(--glow); }
+    .send:disabled { background: var(--border); color: var(--sub); box-shadow: none; cursor: default; }
 
     /* ── Settings ── */
-    .settings-row {
-      display: flex; justify-content: space-between; align-items: center;
-      padding: 12px 0; border-bottom: 1px solid var(--border); font-size: 14px;
-    }
-    .settings-row:last-child { border-bottom: none; }
-    .settings-key { color: var(--text-sub); }
-    .settings-val { font-weight: 500; color: var(--text); }
-
-    select {
-      width: 100%; padding: 10px 12px; border-radius: 10px;
-      border: 1px solid var(--border); font-size: 14px;
-      background: var(--bg-raised); color: var(--text); font-family: inherit; outline: none;
-    }
+    .s-row { display: flex; justify-content: space-between; align-items: center; padding: 13px 0; border-bottom: 1px solid var(--border); font-size: 14px; }
+    .s-row:last-child { border-bottom: none; }
+    .s-k { color: var(--sub); font-weight: 500; }
+    .s-v { font-weight: 600; color: var(--text); }
+    select { width: 100%; padding: 11px 12px; border-radius: 10px; border: 1.5px solid var(--border); font-size: 14px; background: var(--card); color: var(--text); font-family: inherit; outline: none; }
     select:focus { border-color: var(--accent); }
 
-    .btn-ghost {
-      width: 100%; padding: 13px; border-radius: 10px;
-      border: 1px solid var(--border); background: transparent;
-      color: var(--red); font-size: 14px; font-weight: 500;
-      cursor: pointer; font-family: inherit; transition: background .15s;
-    }
-    .btn-ghost:active { background: rgba(248,113,113,.08); }
+    /* ── Date nav ── */
+    .date-nav { display: flex; align-items: center; gap: 14px; margin-top: 6px; }
+    .date-nav button { background: none; border: none; font-size: 22px; cursor: pointer; color: var(--sub); padding: 0 4px; line-height: 1; }
+    .date-nav button:disabled { color: var(--border); cursor: default; }
+    .date-nav span { font-size: 13px; font-weight: 700; color: var(--text); }
 
     /* ── Spinner ── */
-    .spin {
-      width: 18px; height: 18px;
-      border: 2px solid rgba(255,255,255,.2); border-top-color: #fff;
-      border-radius: 50%; animation: rot .6s linear infinite; display: inline-block;
-    }
+    .spin { width: 18px; height: 18px; border: 2px solid rgba(255,255,255,.3); border-top-color: #fff; border-radius: 50%; animation: rot .6s linear infinite; display: inline-block; }
     @keyframes rot { to { transform: rotate(360deg); } }
 
-    /* ── Empty state ── */
-    .empty { padding: 48px 20px; text-align: center; color: var(--text-sub); }
-    .empty-icon { font-size: 36px; opacity: .3; margin-bottom: 12px; }
-    .empty-title { font-size: 15px; font-weight: 600; color: var(--text); margin-bottom: 6px; }
-    .empty-body { font-size: 13px; line-height: 1.6; }
-
-    /* ── Date nav ── */
-    .date-nav {
-      display: flex; align-items: center; gap: 16px; margin-top: 8px;
-    }
-    .date-nav button {
-      background: none; border: none; font-size: 20px; cursor: pointer;
-      color: var(--text-sub); padding: 2px 6px; line-height: 1;
-      transition: color .15s;
-    }
-    .date-nav button:disabled { color: var(--border); cursor: default; }
-    .date-nav span { font-size: 13px; font-weight: 600; color: var(--text); }
+    /* ── Empty ── */
+    .empty { padding: 48px 24px; text-align: center; }
+    .empty-title { font-size: 16px; font-weight: 700; color: var(--text); margin-bottom: 6px; }
+    .empty-body { font-size: 13px; color: var(--sub); line-height: 1.7; }
 
     /* ── Login ── */
-    .login-wrap {
-      height: 100%; display: flex; flex-direction: column;
-      align-items: center; justify-content: center; padding: 32px 24px;
-      background: var(--bg);
-    }
-    .login-logo {
-      width: 56px; height: 56px; border-radius: 16px;
-      background: linear-gradient(135deg, var(--accent), var(--accent2));
-      display: flex; align-items: center; justify-content: center;
-      margin: 0 auto 20px;
-      box-shadow: 0 8px 32px var(--glow);
-    }
-    .login-title { font-size: 26px; font-weight: 900; letter-spacing: -.5px; margin-bottom: 6px; }
-    .login-sub { font-size: 13px; color: var(--text-sub); margin-bottom: 40px; }
+    .login-wrap { height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 32px 24px; background: var(--bg); }
+    .login-logo { width: 60px; height: 60px; border-radius: 18px; background: linear-gradient(135deg, var(--accent), #B8A9F5); display: flex; align-items: center; justify-content: center; margin: 0 auto 20px; box-shadow: 0 8px 28px var(--glow); }
+    .login-title { font-size: 28px; font-weight: 900; letter-spacing: -.6px; text-align: center; }
+    .login-sub { font-size: 13px; color: var(--sub); text-align: center; margin: 6px 0 36px; }
     .login-box { width: 100%; max-width: 320px; }
-    .login-input {
-      width: 100%; padding: 13px 15px; border-radius: 10px;
-      border: 1px solid var(--border); font-size: 15px;
-      background: var(--bg-card); color: var(--text);
-      margin-bottom: 10px; outline: none; font-family: inherit;
-      transition: border-color .15s;
-    }
-    .login-input:focus { border-color: var(--accent); }
-    .login-err { font-size: 12px; color: var(--red); margin-bottom: 10px; }
-
-    /* ── Badge pills ── */
-    .badge-pill {
-      display: inline-block; padding: 3px 9px; border-radius: 6px; font-size: 11px;
-      font-weight: 600; background: var(--bg-raised); border: 1px solid var(--border);
-      color: var(--text-sub);
-    }
+    .login-inp { width: 100%; padding: 13px 15px; border-radius: 10px; border: 1.5px solid var(--border); font-size: 15px; background: var(--card); color: var(--text); margin-bottom: 10px; outline: none; font-family: inherit; transition: border-color .15s; }
+    .login-inp:focus { border-color: var(--accent); }
+    .login-err { font-size: 12px; color: var(--red); margin-bottom: 10px; font-weight: 500; }
   </style>
 </head>
 <body>
@@ -423,163 +305,133 @@ async function gasApi(action, params = {}) {
   const url = new URL(GAS_URL);
   url.searchParams.set("action", action);
   url.searchParams.set("studentEmail", CURRENT_USER.email);
-  Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v));
-  try { const res = await fetch(url.toString(), { redirect: "follow" }); return await res.json(); }
-  catch { return { ok: true, data: [] }; }
+  Object.entries(params).forEach(([k,v]) => url.searchParams.set(k,v));
+  try { const r = await fetch(url.toString(), { redirect:"follow" }); return await r.json(); }
+  catch { return { ok:true, data:[] }; }
 }
-
 async function gasPost(action, body = {}) {
   if (!GAS_URL) return mockPost(action, body);
   const url = new URL(GAS_URL);
   url.searchParams.set("action", action);
   url.searchParams.set("studentEmail", CURRENT_USER.email);
-  Object.entries(body).forEach(([k, v]) => { if (v !== undefined && v !== null) url.searchParams.set(k, String(v)); });
-  try { await fetch(url.toString(), { mode: "no-cors" }); } catch {}
-  return { ok: true };
+  Object.entries(body).forEach(([k,v]) => { if (v != null) url.searchParams.set(k, String(v)); });
+  try { await fetch(url.toString(), { mode:"no-cors" }); } catch {}
+  return { ok:true };
 }
 
-// Mock data
 const MOCK_LOGS = [
-  { time_block: "07:00", task: "朝の読書", focus_level: "5 — 完璧にできた", memo: "集中できた" },
-  { time_block: "09:00", task: "英語リスニング", focus_level: "3 — まあまあだった", memo: "" },
-  { time_block: "11:00", task: "プログラミング学習", focus_level: "5 — 完璧にできた", memo: "楽しかった" },
+  { time_block:"07:00", task:"朝の読書", focus_level:"5 — 完璧にできた", memo:"集中できた" },
+  { time_block:"09:00", task:"英語リスニング", focus_level:"3 — まあまあだった", memo:"" },
+  { time_block:"11:00", task:"プログラミング", focus_level:"5 — 完璧にできた", memo:"楽しかった" },
 ];
-const MOCK_REPORT = { score: 82, feedback: "全体的に集中力が高く、午前中のパフォーマンスが際立っています。", action: "明日はポモドーロ技法を試してみましょう。", highlights: "プログラミングへの高い集中", improvement: "休憩時間の管理" };
+const MOCK_REPORT = { score:82, feedback:"全体的に集中力が高く、午前中のパフォーマンスが際立っています。", action:"明日はポモドーロ技法を試してみましょう。", highlights:"プログラミングへの高い集中", improvement:"休憩時間の管理" };
 const MOCK_MESSAGES = [
-  { message_id: "1", content: "今日もよく頑張りました！", sender_name: "コーチ", sender_role: "coach", timestamp: "2026-06-27 09:30" },
-  { message_id: "2", content: "ありがとうございます！", sender_name: "生徒", sender_role: "student", timestamp: "2026-06-27 10:15" },
+  { message_id:"1", content:"今日もよく頑張りました！", sender_name:"コーチ", sender_role:"coach", timestamp:"2026-06-27 09:30" },
+  { message_id:"2", content:"ありがとうございます！", sender_name:"生徒", sender_role:"student", timestamp:"2026-06-27 10:15" },
 ];
 const MOCK_SCHEDULE = [
-  { time: "09:00", title: "朝のホームルーム", sub: "Zoom" },
-  { time: "13:00", title: "英語ディスカッション", sub: "グループ" },
+  { time:"09:00", title:"朝のホームルーム", sub:"Zoom" },
+  { time:"13:00", title:"英語ディスカッション", sub:"グループ" },
 ];
-let mockMsgs = [...MOCK_MESSAGES];
-let mockLogs = [...MOCK_LOGS];
-function mockApi(action) {
-  if (action === "getReport") return Promise.resolve({ ok: true, data: MOCK_REPORT });
-  if (action === "getLogs") return Promise.resolve({ ok: true, data: mockLogs });
-  if (action === "getMessages") return Promise.resolve({ ok: true, data: mockMsgs });
-  if (action === "getSchedule") return Promise.resolve({ ok: true, data: MOCK_SCHEDULE });
-  return Promise.resolve({ ok: false });
-}
-function mockPost(action, body) {
-  if (action === "saveLog") { mockLogs = [...mockLogs, { time_block: body.time_block, task: body.task, focus_level: body.focus_level, memo: body.memo }]; return Promise.resolve({ ok: true }); }
-  if (action === "sendMessage") { mockMsgs = [...mockMsgs, { message_id: String(Date.now()), content: body.content, sender_name: CURRENT_USER.name, sender_role: "student", timestamp: new Date().toLocaleString("ja") }]; return Promise.resolve({ ok: true }); }
-  return Promise.resolve({ ok: true });
-}
+let mockMsgs=[...MOCK_MESSAGES], mockLogs=[...MOCK_LOGS];
+function mockApi(a){ if(a==="getReport") return Promise.resolve({ok:true,data:MOCK_REPORT}); if(a==="getLogs") return Promise.resolve({ok:true,data:mockLogs}); if(a==="getMessages") return Promise.resolve({ok:true,data:mockMsgs}); if(a==="getSchedule") return Promise.resolve({ok:true,data:MOCK_SCHEDULE}); return Promise.resolve({ok:false}); }
+function mockPost(a,b){ if(a==="saveLog"){mockLogs=[...mockLogs,{time_block:b.time_block,task:b.task,focus_level:b.focus_level,memo:b.memo}];return Promise.resolve({ok:true});} if(a==="sendMessage"){mockMsgs=[...mockMsgs,{message_id:String(Date.now()),content:b.content,sender_name:CURRENT_USER.name,sender_role:"student",timestamp:new Date().toLocaleString("ja")}];return Promise.resolve({ok:true});}return Promise.resolve({ok:true});}
 
-// SVG Icons
-const Icon = ({ name, size = 22 }) => {
-  const s = { width: size, height: size, fill: "none", stroke: "currentColor", strokeWidth: 1.8, strokeLinecap: "round", strokeLinejoin: "round" };
-  if (name === "home")   return <svg viewBox="0 0 24 24" style={s}><path d="M3 9.5L12 3l9 6.5V20a1 1 0 01-1 1H4a1 1 0 01-1-1V9.5z"/><path d="M9 21V12h6v9"/></svg>;
-  if (name === "clock")  return <svg viewBox="0 0 24 24" style={s}><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>;
-  if (name === "chart")  return <svg viewBox="0 0 24 24" style={s}><rect x="3" y="12" width="4" height="9"/><rect x="10" y="7" width="4" height="14"/><rect x="17" y="3" width="4" height="18"/></svg>;
-  if (name === "chat")   return <svg viewBox="0 0 24 24" style={s}><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>;
-  if (name === "gear")   return <svg viewBox="0 0 24 24" style={s}><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>;
-  if (name === "up")     return <svg viewBox="0 0 24 24" style={s}><path d="M12 19V5M5 12l7-7 7 7"/></svg>;
+const S = (p) => { const s={width:p.s||22,height:p.s||22,fill:"none",stroke:"currentColor",strokeWidth:1.8,strokeLinecap:"round",strokeLinejoin:"round"};
+  if(p.n==="home")   return <svg viewBox="0 0 24 24" style={s}><path d="M3 9.5L12 3l9 6.5V20a1 1 0 01-1 1H4a1 1 0 01-1-1V9.5z"/><path d="M9 21V12h6v9"/></svg>;
+  if(p.n==="clock")  return <svg viewBox="0 0 24 24" style={s}><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>;
+  if(p.n==="chart")  return <svg viewBox="0 0 24 24" style={s}><rect x="3" y="12" width="4" height="9"/><rect x="10" y="7" width="4" height="14"/><rect x="17" y="3" width="4" height="18"/></svg>;
+  if(p.n==="chat")   return <svg viewBox="0 0 24 24" style={s}><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>;
+  if(p.n==="gear")   return <svg viewBox="0 0 24 24" style={s}><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>;
+  if(p.n==="up")     return <svg viewBox="0 0 24 24" style={s}><path d="M12 19V5M5 12l7-7 7 7"/></svg>;
   return null;
 };
 
-function Toast({ msg, onDone }) {
-  useEffect(() => { const t = setTimeout(onDone, 2500); return () => clearTimeout(t); }, []);
+function Toast({msg, onDone}) {
+  useEffect(()=>{ const t=setTimeout(onDone,2500); return ()=>clearTimeout(t); },[]);
   return <div className="toast">{msg}</div>;
 }
+function formatDateStr(d){ return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); }
+function addDays(s,n){ const d=new Date(s+"T00:00:00"); d.setDate(d.getDate()+n); return formatDateStr(d); }
+function isToday(s){ return s===formatDateStr(new Date()); }
 
-function formatDateStr(d) {
-  return d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0");
-}
-function addDays(dateStr, n) {
-  const d = new Date(dateStr + "T00:00:00");
-  d.setDate(d.getDate() + n);
-  return formatDateStr(d);
-}
-function isToday(dateStr) { return dateStr === formatDateStr(new Date()); }
+const DOT = {"5":"#46C98B","4":"#7B6FE8","3":"#F5A84B","2":"#EF7070","1":"#EF7070"};
+const EVALS = [
+  {l:"5 — 完璧にできた", c:"e5"},{l:"4 — よくできた", c:"e4"},
+  {l:"3 — まあまあだった", c:"e3"},{l:"2 — もう少しだった", c:"e2"},{l:"1 — 全然だめだった", c:"e1"},
+];
+const TIME_BLOCKS = ["06:00-07:00","07:00-08:00","08:00-09:00","09:00-10:00","10:00-11:00","11:00-12:00","12:00-13:00","13:00-14:00","14:00-15:00","15:00-16:00","16:00-17:00","17:00-18:00","18:00-19:00","19:00-20:00","20:00-21:00","21:00-22:00","22:00-23:00","23:00-24:00"];
 
-// ─── ホーム ───
+// ── Home ──
 function HomeScreen() {
   const [report, setReport] = useState(null);
   const [schedule, setSchedule] = useState([]);
   const [game, setGame] = useState(null);
-
-  useEffect(() => {
-    gasApi("getReport").then(r => r.ok && setReport(r.data));
-    gasApi("getSchedule").then(r => r.ok && setSchedule(r.data));
-    gasApi("getGameStatus").then(r => r.ok && setGame(r.data));
-  }, []);
-
-  const today = new Date().toLocaleDateString("ja-JP", { month: "long", day: "numeric", weekday: "short" });
-
+  useEffect(()=>{
+    gasApi("getReport").then(r=>r.ok&&setReport(r.data));
+    gasApi("getSchedule").then(r=>r.ok&&setSchedule(r.data));
+    gasApi("getGameStatus").then(r=>r.ok&&setGame(r.data));
+  },[]);
+  const today = new Date().toLocaleDateString("ja-JP",{month:"long",day:"numeric",weekday:"short"});
   return (
-    <div style={{paddingBottom: 8}}>
-      <div className="header">
-        <div className="header-sub">{today}</div>
-        <div className="header-title">{CURRENT_USER.name}</div>
+    <div style={{paddingBottom:8}}>
+      <div className="ph">
+        <div className="ph-eyebrow">{today}</div>
+        <div className="ph-title">{CURRENT_USER.name}</div>
       </div>
 
-      {/* Stats */}
-      {game && (
-        <>
-          <div className="stat-row">
-            <div className="stat-box">
-              <div className="stat-val" style={{background:"linear-gradient(135deg,#7C6FF7,#A78BFA)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",backgroundClip:"text"}}>Lv.{game.level}</div>
-              <div className="stat-lbl">レベル</div>
-            </div>
-            <div className="stat-box">
-              <div className="stat-val">{game.xp}</div>
-              <div className="stat-lbl">XP</div>
-            </div>
-            <div className={"stat-box" + (game.streak > 0 ? " streak-box" : "")}>
-              <div className="stat-val">{game.streak}</div>
-              <div className="stat-lbl">連続日数</div>
-            </div>
+      {game && <>
+        <div className="stat-row">
+          <div className="stat-tile">
+            <div className={"stat-v level-v"}>Lv.{game.level}</div>
+            <div className="stat-l">レベル</div>
           </div>
-
-          <div style={{margin:"0 16px 12px"}}>
-            <div className="xp-track">
-              <div className="xp-fill" style={{width: game.xpInLevel + "%"}} />
-            </div>
-            <div style={{fontSize:10,color:"var(--text-sub)",marginTop:4}}>次のレベルまで {100 - game.xpInLevel} XP</div>
+          <div className="stat-tile">
+            <div className="stat-v">{game.xp}</div>
+            <div className="stat-l">XP</div>
           </div>
+          <div className={"stat-tile" + (game.streak>0?" streak-tile":"")}>
+            <div className="stat-v">{game.streak}</div>
+            <div className="stat-l">連続日数</div>
+          </div>
+        </div>
+        <div className="xp-wrap">
+          <div className="xp-top"><span>XP</span><span>次のレベルまで {100-game.xpInLevel} XP</span></div>
+          <div className="xp-track"><div className="xp-fill" style={{width:game.xpInLevel+"%"}} /></div>
+        </div>
+        {game.badges.length>0 && (
+          <div className="badge-row">
+            {game.badges.map(b=><span key={b.id} className="badge-pill">{b.label.replace(/^[^\s]+\s/,"")}</span>)}
+          </div>
+        )}
+      </>}
 
-          {game.badges.length > 0 && (
-            <div style={{display:"flex",flexWrap:"wrap",gap:6,margin:"0 16px 12px"}}>
-              {game.badges.map(b => <span key={b.id} className="badge-pill">{b.label.replace(/^[^\s]+\s/,"")}</span>)}
-            </div>
-          )}
-        </>
-      )}
-
-      {/* 前日のスコア */}
       {report && (
         <div className="card">
           <div className="card-label">前日のレポート</div>
           <div className="ring-wrap">
-            <div className="ring" style={{"--pct": report.score}}>
+            <div className="ring" style={{"--pct":report.score}}>
               <div className="ring-inner">
                 <div className="ring-num">{report.score}</div>
                 <div className="ring-unit">点</div>
               </div>
             </div>
             <div style={{flex:1}}>
-              <div style={{fontSize:13,fontWeight:600,marginBottom:4}}>{report.highlights}</div>
-              <div style={{fontSize:12,color:"var(--text-sub)",lineHeight:1.6}}>{report.feedback?.slice(0,60)}…</div>
+              <div style={{fontSize:13,fontWeight:700,marginBottom:4}}>{report.highlights}</div>
+              <div style={{fontSize:12,color:"var(--sub)",lineHeight:1.6}}>{report.feedback?.slice(0,60)}…</div>
             </div>
           </div>
         </div>
       )}
 
-      {/* 予定 */}
       <div className="card" style={{marginBottom:24}}>
         <div className="card-label">今日の予定</div>
-        {schedule.length === 0
-          ? <div style={{color:"var(--text-sub)",fontSize:13}}>取得中...</div>
-          : schedule.map((ev, i) => (
+        {schedule.length===0
+          ? <div style={{color:"var(--sub)",fontSize:13}}>取得中...</div>
+          : schedule.map((ev,i)=>(
             <div key={i} className="sched-row">
               <div className="sched-time">{ev.time}</div>
-              <div>
-                <div className="sched-title">{ev.title}</div>
-                {ev.sub && <div className="sched-sub">{ev.sub}</div>}
-              </div>
+              <div><div className="sched-title">{ev.title}</div>{ev.sub&&<div className="sched-sub">{ev.sub}</div>}</div>
             </div>
           ))
         }
@@ -588,131 +440,84 @@ function HomeScreen() {
   );
 }
 
-// ─── ログ ───
-const TIME_BLOCKS = [
-  "06:00-07:00","07:00-08:00","08:00-09:00","09:00-10:00","10:00-11:00","11:00-12:00",
-  "12:00-13:00","13:00-14:00","14:00-15:00","15:00-16:00","16:00-17:00","17:00-18:00",
-  "18:00-19:00","19:00-20:00","20:00-21:00","21:00-22:00","22:00-23:00","23:00-24:00",
-];
-const FOCUS_OPTS = [
-  { label: "5 — 完璧にできた", cls: "sel-5" },
-  { label: "4 — よくできた",   cls: "sel-4" },
-  { label: "3 — まあまあだった", cls: "sel-3" },
-  { label: "2 — もう少しだった", cls: "sel-2" },
-  { label: "1 — 全然だめだった", cls: "sel-1" },
-];
-const DOT_COLOR = { "5":  "#34D399", "4": "#7C6FF7", "3": "#FBBF24", "2": "#F87171", "1": "#F87171" };
-
-function LogScreen({ onToast }) {
+// ── Log ──
+function LogScreen({onToast}) {
   const nowH = new Date().getHours();
-  const defaultBlock = TIME_BLOCKS.find(t => parseInt(t) === nowH) || "09:00-10:00";
+  const defBlock = TIME_BLOCKS.find(t=>parseInt(t)===nowH)||"09:00-10:00";
   const todayStr = formatDateStr(new Date());
-
-  const [selectedDate, setSelectedDate] = useState(todayStr);
-  const [block, setBlock] = useState(defaultBlock);
+  const [date, setDate] = useState(todayStr);
+  const [block, setBlock] = useState(defBlock);
   const [task, setTask] = useState("");
-  const [focus, setFocus] = useState(FOCUS_OPTS[0].label);
+  const [focus, setFocus] = useState(EVALS[0].l);
   const [memo, setMemo] = useState("");
   const [saving, setSaving] = useState(false);
   const [logs, setLogs] = useState([]);
   const timeRef = useRef(null);
 
-  useEffect(() => {
-    gasApi("getLogs", { date: selectedDate }).then(r => r.ok && setLogs(r.data));
-    if (isToday(selectedDate)) {
-      setTimeout(() => {
-        const el = timeRef.current?.querySelector(".chip.sel");
-        if (el) el.scrollIntoView({ inline: "center", behavior: "smooth" });
-      }, 100);
-    }
-  }, [selectedDate]);
+  useEffect(()=>{
+    gasApi("getLogs",{date}).then(r=>r.ok&&setLogs(r.data));
+    if(isToday(date)) setTimeout(()=>{ const el=timeRef.current?.querySelector(".chip.on"); if(el) el.scrollIntoView({inline:"center",behavior:"smooth"}); },100);
+  },[date]);
 
-  const save = async () => {
-    if (!task.trim()) return;
+  const save = async ()=>{
+    if(!task.trim()) return;
     setSaving(true);
-    const url = new URL(GAS_URL);
-    url.searchParams.set("action", "saveLog");
-    url.searchParams.set("studentEmail", CURRENT_USER.email);
-    url.searchParams.set("time_block", block);
-    url.searchParams.set("task", task.trim());
-    url.searchParams.set("focus_level", focus);
-    url.searchParams.set("memo", memo.trim());
-    const result = await fetch(url).then(r => r.json()).catch(() => ({}));
+    const url=new URL(GAS_URL);
+    url.searchParams.set("action","saveLog"); url.searchParams.set("studentEmail",CURRENT_USER.email);
+    url.searchParams.set("time_block",block); url.searchParams.set("task",task.trim());
+    url.searchParams.set("focus_level",focus); url.searchParams.set("memo",memo.trim());
+    const res=await fetch(url).then(r=>r.json()).catch(()=>({}));
     setTask(""); setMemo("");
-    if (result.xp_gained) {
-      const lvUp = result.level_up ? `  →  Lv.${result.level} へ！` : "";
-      onToast(`+${result.xp_gained} XP 獲得${lvUp}`);
-    } else {
-      onToast("保存しました");
-    }
-    const r = await gasApi("getLogs", { date: selectedDate });
-    if (r.ok) setLogs(r.data);
+    if(res.xp_gained){ const lv=res.level_up?`  →  Lv.${res.level} へ！`:""; onToast(`+${res.xp_gained} XP 獲得${lv}`); }
+    else onToast("保存しました");
+    const r=await gasApi("getLogs",{date}); if(r.ok) setLogs(r.data);
     setSaving(false);
   };
 
   return (
     <div>
-      <div className="header">
-        <div className="header-title">記録を入力</div>
+      <div className="ph">
+        <div className="ph-title">記録を入力</div>
         <div className="date-nav">
-          <button onClick={() => setSelectedDate(addDays(selectedDate,-1))}>‹</button>
-          <span>{isToday(selectedDate) ? "今日" : selectedDate}</span>
-          <button onClick={() => setSelectedDate(addDays(selectedDate,1))} disabled={isToday(selectedDate)}>›</button>
+          <button onClick={()=>setDate(addDays(date,-1))}>‹</button>
+          <span>{isToday(date)?"今日":date}</span>
+          <button onClick={()=>setDate(addDays(date,1))} disabled={isToday(date)}>›</button>
         </div>
       </div>
 
-      {!isToday(selectedDate) && logs.length === 0 && (
-        <div className="empty"><div className="empty-title">記録なし</div></div>
-      )}
+      {!isToday(date)&&logs.length===0&&<div className="empty"><div className="empty-title">記録なし</div><div className="empty-body">この日の記録はありません</div></div>}
 
-      {isToday(selectedDate) && (
-        <>
-          <div ref={timeRef} className="time-bar">
-            {TIME_BLOCKS.map(t => (
-              <button key={t} className={"chip" + (block === t ? " sel" : "")} onClick={() => setBlock(t)}>{t}</button>
-            ))}
+      {isToday(date)&&<>
+        <div ref={timeRef} className="time-bar">
+          {TIME_BLOCKS.map(t=><button key={t} className={"chip"+(block===t?" on":"")} onClick={()=>setBlock(t)}>{t}</button>)}
+        </div>
+        <div className="form-wrap">
+          <div className="form-grp">
+            <label className="form-lbl">何をしましたか？</label>
+            <input className="inp" placeholder="例：数学の問題演習" value={task} onChange={e=>setTask(e.target.value)} />
           </div>
-          <div className="form-wrap">
-            <div className="form-group">
-              <label className="form-lbl">何をしましたか？</label>
-              <input className="input" placeholder="例：数学の演習" value={task} onChange={e => setTask(e.target.value)} />
-            </div>
-            <div className="form-group">
-              <label className="form-lbl">自己評価</label>
-              {FOCUS_OPTS.map(f => (
-                <button key={f.label} className={"eval-btn" + (focus === f.label ? " " + f.cls : "")} onClick={() => setFocus(f.label)}>{f.label}</button>
-              ))}
-            </div>
-            <div className="form-group">
-              <label className="form-lbl">メモ（任意）</label>
-              <textarea className="textarea" placeholder="気づいたことや振り返り..." value={memo} onChange={e => setMemo(e.target.value)} />
-            </div>
-            <button className="btn" onClick={save} disabled={!task.trim() || saving}>
-              {saving ? <span className="spin" /> : "保存する"}
-            </button>
+          <div className="form-grp">
+            <label className="form-lbl">自己評価</label>
+            {EVALS.map(f=><button key={f.l} className={"eval-btn"+(focus===f.l?" "+f.c:"")} onClick={()=>setFocus(f.l)}>{f.l}</button>)}
           </div>
-        </>
-      )}
+          <div className="form-grp">
+            <label className="form-lbl">メモ（任意）</label>
+            <textarea className="txa" placeholder="気づいたことや振り返り..." value={memo} onChange={e=>setMemo(e.target.value)} />
+          </div>
+          <button className="btn" onClick={save} disabled={!task.trim()||saving}>{saving?<span className="spin"/>:"保存する"}</button>
+        </div>
+      </>}
 
-      {logs.length > 0 && (
+      {logs.length>0&&(
         <div className="card" style={{marginBottom:24}}>
-          <div className="card-label">{isToday(selectedDate) ? "本日の記録" : selectedDate + " の記録"}</div>
-          {logs.map((l, i) => {
-            const num = l.focus_level?.charAt(0);
-            const dotColor = DOT_COLOR[num] || "var(--text-sub)";
-            return (
-              <div key={i} className="log-row">
-                <div className="log-time">{l.time_block}</div>
-                <div>
-                  <div className="log-task">{l.task}</div>
-                  <div className="log-meta">
-                    <span className="dot" style={{background: dotColor}} />
-                    {l.focus_level}
-                    {l.memo ? `  ·  ${l.memo}` : ""}
-                  </div>
-                </div>
-              </div>
-            );
+          <div className="card-label">{isToday(date)?"本日の記録":date+" の記録"}</div>
+          {logs.map((l,i)=>{
+            const num=l.focus_level?.charAt(0);
+            return <div key={i} className="log-row">
+              <div className="log-time">{l.time_block}</div>
+              <div><div className="log-task">{l.task}</div>
+              <div className="log-meta"><span className="dot" style={{background:DOT[num]||"var(--sub)"}}/>{l.focus_level}{l.memo?` · ${l.memo}`:""}</div></div>
+            </div>;
           })}
         </div>
       )}
@@ -720,56 +525,41 @@ function LogScreen({ onToast }) {
   );
 }
 
-// ─── レポート ───
+// ── Report ──
 function ReportScreen() {
-  const todayStr = formatDateStr(new Date());
-  const [selectedDate, setSelectedDate] = useState(todayStr);
-  const [report, setReport] = useState(null);
-  const [logs, setLogs] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const todayStr=formatDateStr(new Date());
+  const [date, setDate]=useState(todayStr);
+  const [report, setReport]=useState(null);
+  const [logs, setLogs]=useState([]);
+  const [loading, setLoading]=useState(true);
 
-  useEffect(() => {
+  useEffect(()=>{
     setLoading(true);
-    Promise.all([gasApi("getReport", { date: selectedDate }), gasApi("getLogs", { date: selectedDate })]).then(([r, l]) => {
-      setReport(r.ok ? r.data : null);
-      if (l.ok) setLogs(l.data);
-      setLoading(false);
+    Promise.all([gasApi("getReport",{date}),gasApi("getLogs",{date})]).then(([r,l])=>{
+      setReport(r.ok?r.data:null); if(l.ok) setLogs(l.data); setLoading(false);
     });
-  }, [selectedDate]);
+  },[date]);
 
-  const DateNav = () => (
+  const Nav=()=>(
     <div className="date-nav">
-      <button onClick={() => setSelectedDate(addDays(selectedDate,-1))}>‹</button>
-      <span>{isToday(selectedDate) ? "今日" : selectedDate}</span>
-      <button onClick={() => setSelectedDate(addDays(selectedDate,1))} disabled={isToday(selectedDate)}>›</button>
+      <button onClick={()=>setDate(addDays(date,-1))}>‹</button>
+      <span>{isToday(date)?"今日":date}</span>
+      <button onClick={()=>setDate(addDays(date,1))} disabled={isToday(date)}>›</button>
     </div>
   );
 
-  if (loading) return (
-    <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:300}}>
-      <div className="spin" style={{borderColor:"var(--border)",borderTopColor:"var(--accent)",width:28,height:28,borderWidth:2}} />
-    </div>
-  );
+  if(loading) return <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:300}}><div className="spin" style={{borderColor:"var(--border)",borderTopColor:"var(--accent)",width:28,height:28,borderWidth:2}}/></div>;
 
-  if (!report) return (
-    <div>
-      <div className="header"><div className="header-title">レポート</div><DateNav /></div>
-      <div className="empty">
-        <div className="empty-icon" style={{fontSize:40,opacity:.15}}>—</div>
-        <div className="empty-title">レポートはまだありません</div>
-        <div className="empty-body">ログを入力すると毎晩21時に<br />AIがレポートを生成します</div>
-      </div>
-    </div>
-  );
+  if(!report) return <div><div className="ph"><div className="ph-title">レポート</div><Nav/></div><div className="empty"><div style={{fontSize:32,color:"var(--border)",marginBottom:16}}>○</div><div className="empty-title">レポートはまだありません</div><div className="empty-body">ログを入力すると<br/>毎晩21時にAIがレポートを生成します</div></div></div>;
 
   return (
     <div>
       <div className="report-hero">
-        <div className="report-date">{isToday(selectedDate) ? "今日" : selectedDate}</div>
-        <div className="date-nav" style={{justifyContent:"center",marginBottom:12}}>
-          <button onClick={() => setSelectedDate(addDays(selectedDate,-1))}>‹</button>
+        <div className="report-date">{isToday(date)?"TODAY":date}</div>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:12}}>
+          <button onClick={()=>setDate(addDays(date,-1))} style={{background:"none",border:"none",fontSize:22,cursor:"pointer",color:"var(--sub)",padding:"0 4px"}}>‹</button>
           <div className="report-score">{report.score}</div>
-          <button onClick={() => setSelectedDate(addDays(selectedDate,1))} disabled={isToday(selectedDate)}>›</button>
+          <button onClick={()=>setDate(addDays(date,1))} disabled={isToday(date)} style={{background:"none",border:"none",fontSize:22,cursor:"pointer",color:isToday(date)?"var(--border)":"var(--sub)",padding:"0 4px"}}>›</button>
         </div>
         <div className="report-pts">/ 100点</div>
       </div>
@@ -778,47 +568,20 @@ function ReportScreen() {
         <div className="card-label">フィードバック</div>
         <p style={{fontSize:14,lineHeight:1.8,color:"var(--text)"}}>{report.feedback}</p>
       </div>
-
       <div className="card">
-        {report.highlights && (
-          <div style={{marginBottom:12}}>
-            <span className="tag tag-pos">良かった点</span>
-            <p style={{fontSize:13,color:"var(--text-sub)",marginTop:6,lineHeight:1.6}}>{report.highlights}</p>
-          </div>
-        )}
-        {report.improvement && (
-          <div>
-            <span className="tag tag-neg">改善点</span>
-            <p style={{fontSize:13,color:"var(--text-sub)",marginTop:6,lineHeight:1.6}}>{report.improvement}</p>
-          </div>
-        )}
+        {report.highlights&&<div style={{marginBottom:12}}><span className="tag t-g">良かった点</span><p style={{fontSize:13,color:"var(--sub)",marginTop:7,lineHeight:1.6}}>{report.highlights}</p></div>}
+        {report.improvement&&<div><span className="tag t-a">改善点</span><p style={{fontSize:13,color:"var(--sub)",marginTop:7,lineHeight:1.6}}>{report.improvement}</p></div>}
       </div>
-
-      {report.action && (
-        <div className="card">
-          <div className="card-label">明日のアクション</div>
-          <p style={{fontSize:14,lineHeight:1.8,color:"var(--text)"}}>{report.action}</p>
-        </div>
-      )}
-
-      {logs.length > 0 && (
+      {report.action&&<div className="card"><div className="card-label">明日のアクション</div><p style={{fontSize:14,lineHeight:1.8,color:"var(--text)"}}>{report.action}</p></div>}
+      {logs.length>0&&(
         <div className="card" style={{marginBottom:24}}>
           <div className="card-label">時間ログ</div>
-          {logs.map((l, i) => {
-            const num = l.focus_level?.charAt(0);
-            const dotColor = DOT_COLOR[num] || "var(--text-sub)";
-            return (
-              <div key={i} className="log-row">
-                <div className="log-time">{l.time_block}</div>
-                <div>
-                  <div className="log-task">{l.task}</div>
-                  <div className="log-meta">
-                    <span className="dot" style={{background: dotColor}} />
-                    {l.focus_level}{l.memo ? `  ·  ${l.memo}` : ""}
-                  </div>
-                </div>
-              </div>
-            );
+          {logs.map((l,i)=>{
+            const num=l.focus_level?.charAt(0);
+            return <div key={i} className="log-row">
+              <div className="log-time">{l.time_block}</div>
+              <div><div className="log-task">{l.task}</div><div className="log-meta"><span className="dot" style={{background:DOT[num]||"var(--sub)"}}/>{l.focus_level}{l.memo?` · ${l.memo}`:""}</div></div>
+            </div>;
           })}
         </div>
       )}
@@ -826,224 +589,151 @@ function ReportScreen() {
   );
 }
 
-// ─── チャット ───
-function ChatScreen({ onToast }) {
-  const [messages, setMessages] = useState([]);
-  const [input, setInput] = useState("");
-  const [sending, setSending] = useState(false);
-  const bottomRef = useRef(null);
-  const inputRef = useRef(null);
-  const composingRef = useRef(false);
-
-  const load = useCallback(async () => {
-    const r = await gasApi("getMessages");
-    if (r.ok) setMessages(r.data);
-  }, []);
-
-  useEffect(() => { load(); }, []);
-  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages]);
-
-  const send = async () => {
-    const content = input.trim();
-    if (!content || sending) return;
-    setSending(true);
-    setInput("");
-    const temp = { message_id: "t" + Date.now(), content, sender_role: "student", sender_name: CURRENT_USER.name, timestamp: new Date().toLocaleString("ja-JP") };
-    setMessages(prev => [...prev, temp]);
-    gasPost("sendMessage", { content, sender_role: "student", sender_name: CURRENT_USER.name });
-    setSending(false);
-    inputRef.current?.focus();
-    setTimeout(load, 3000);
+// ── Chat ──
+function ChatScreen({onToast}) {
+  const [msgs, setMsgs]=useState([]);
+  const [input, setInput]=useState("");
+  const [sending, setSending]=useState(false);
+  const bottomRef=useRef(null);
+  const inputRef=useRef(null);
+  const compRef=useRef(false);
+  const load=useCallback(async()=>{ const r=await gasApi("getMessages"); if(r.ok) setMsgs(r.data); },[]);
+  useEffect(()=>{ load(); },[]);
+  useEffect(()=>{ bottomRef.current?.scrollIntoView({behavior:"smooth"}); },[msgs]);
+  const send=async()=>{
+    const content=input.trim(); if(!content||sending) return;
+    setSending(true); setInput("");
+    const temp={message_id:"t"+Date.now(),content,sender_role:"student",sender_name:CURRENT_USER.name,timestamp:new Date().toLocaleString("ja-JP")};
+    setMsgs(p=>[...p,temp]);
+    gasPost("sendMessage",{content,sender_role:"student",sender_name:CURRENT_USER.name});
+    setSending(false); inputRef.current?.focus(); setTimeout(load,3000);
   };
-
-  const onKey = (e) => {
-    if (e.key === "Enter" && !e.shiftKey && !composingRef.current) { e.preventDefault(); send(); }
-  };
-
-  const fmtTime = (ts) => {
-    try { const d = new Date(ts.replace(" ","T")); return isNaN(d) ? ts : d.toLocaleTimeString("ja-JP",{hour:"2-digit",minute:"2-digit"}); } catch { return ts; }
-  };
-
+  const onKey=e=>{ if(e.key==="Enter"&&!e.shiftKey&&!compRef.current){e.preventDefault();send();} };
+  const fmtT=ts=>{ try{const d=new Date(ts.replace(" ","T"));return isNaN(d)?ts:d.toLocaleTimeString("ja-JP",{hour:"2-digit",minute:"2-digit"});}catch{return ts;} };
   return (
     <div style={{display:"flex",flexDirection:"column",height:"100%"}}>
       <div className="chat-head">
         <div className="chat-av">{(CURRENT_USER.coachName||"?").charAt(0)}</div>
-        <div>
-          <div className="chat-name">{CURRENT_USER.coachName}</div>
-          <div className="chat-status">コーチ</div>
-        </div>
+        <div><div className="chat-name">{CURRENT_USER.coachName}</div><div className="chat-status">コーチ</div></div>
       </div>
       <div className="msgs" style={{flex:1,overflowY:"auto"}}>
-        {messages.length === 0 && <div style={{textAlign:"center",color:"var(--text-sub)",fontSize:13,marginTop:40}}>メッセージはまだありません</div>}
-        {messages.map(m => {
-          const isMe = m.sender_role === "student";
-          return (
-            <div key={m.message_id} style={{alignSelf: isMe ? "flex-end" : "flex-start", maxWidth:"75%", display:"flex", flexDirection:"column", alignItems: isMe ? "flex-end" : "flex-start"}}>
-              {!isMe && <div style={{fontSize:11,color:"var(--text-sub)",marginBottom:3,paddingLeft:2}}>{m.sender_name}</div>}
-              <div className={"bubble " + (isMe ? "bubble-out" : "bubble-in")}>{m.content}</div>
-              <div className={"btime" + (isMe ? " btime-r" : "")}>{fmtTime(m.timestamp)}</div>
-            </div>
-          );
+        {msgs.length===0&&<div style={{textAlign:"center",color:"var(--sub)",fontSize:13,marginTop:40}}>メッセージはまだありません</div>}
+        {msgs.map(m=>{
+          const me=m.sender_role==="student";
+          return <div key={m.message_id} style={{alignSelf:me?"flex-end":"flex-start",maxWidth:"75%",display:"flex",flexDirection:"column",alignItems:me?"flex-end":"flex-start"}}>
+            {!me&&<div style={{fontSize:11,color:"var(--sub)",marginBottom:3,paddingLeft:2}}>{m.sender_name}</div>}
+            <div className={"bubble "+(me?"b-out":"b-in")}>{m.content}</div>
+            <div className={"btime"+(me?" btime-r":"")}>{fmtT(m.timestamp)}</div>
+          </div>;
         })}
-        <div ref={bottomRef} />
+        <div ref={bottomRef}/>
       </div>
       <div className="chat-bar">
-        <textarea ref={inputRef} className="chat-inp" placeholder="メッセージを入力..." rows={1} value={input} onChange={e => setInput(e.target.value)}
-          onCompositionStart={() => { composingRef.current = true; }}
-          onCompositionEnd={() => { composingRef.current = false; }}
-          onKeyDown={onKey} />
-        <button className="send" onClick={send} disabled={!input.trim() || sending}>
-          {sending ? <span className="spin" style={{width:14,height:14,borderWidth:2}} /> : <Icon name="up" size={17} />}
+        <textarea ref={inputRef} className="chat-inp" placeholder="メッセージを入力..." rows={1} value={input}
+          onChange={e=>setInput(e.target.value)}
+          onCompositionStart={()=>{compRef.current=true;}}
+          onCompositionEnd={()=>{compRef.current=false;}}
+          onKeyDown={onKey}/>
+        <button className="send" onClick={send} disabled={!input.trim()||sending}>
+          {sending?<span className="spin" style={{width:14,height:14,borderWidth:2}}/>:<S n="up" s={17}/>}
         </button>
       </div>
     </div>
   );
 }
 
-// ─── 設定 ───
-function SettingsScreen({ onToast, onLogout }) {
-  const saved = JSON.parse(localStorage.getItem("notifySettings") || '{"start":7,"end":23}');
-  const [start, setStart] = useState(saved.start);
-  const [end, setEnd] = useState(saved.end);
-  const hours = Array.from({length:24},(_,i) => i);
-
-  function save() {
-    localStorage.setItem("notifySettings", JSON.stringify({start,end}));
-    gasPost("saveSettings", { notify_start: start, notify_end: end });
-    onToast("保存しました");
-  }
-
+// ── Settings ──
+function SettingsScreen({onToast,onLogout}) {
+  const saved=JSON.parse(localStorage.getItem("notifySettings")||'{"start":7,"end":23}');
+  const [start,setStart]=useState(saved.start);
+  const [end,setEnd]=useState(saved.end);
+  const hours=Array.from({length:24},(_,i)=>i);
+  const save=()=>{ localStorage.setItem("notifySettings",JSON.stringify({start,end})); gasPost("saveSettings",{notify_start:start,notify_end:end}); onToast("保存しました"); };
   return (
     <div>
-      <div className="header"><div className="header-title">設定</div></div>
+      <div className="ph"><div className="ph-title">設定</div></div>
       <div style={{padding:"0 16px"}}>
         <div className="card">
           <div className="card-label">LINE通知時間</div>
           <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:14}}>
-            <div style={{flex:1}}>
-              <div style={{fontSize:11,color:"var(--text-sub)",marginBottom:6}}>開始</div>
-              <select value={start} onChange={e => setStart(Number(e.target.value))}>
-                {hours.map(h => <option key={h} value={h}>{String(h).padStart(2,"0")}:00</option>)}
-              </select>
-            </div>
-            <div style={{color:"var(--text-sub)",marginTop:20,fontSize:13}}>〜</div>
-            <div style={{flex:1}}>
-              <div style={{fontSize:11,color:"var(--text-sub)",marginBottom:6}}>終了</div>
-              <select value={end} onChange={e => setEnd(Number(e.target.value))}>
-                {hours.map(h => <option key={h} value={h}>{String(h).padStart(2,"0")}:00</option>)}
-              </select>
-            </div>
+            <div style={{flex:1}}><div style={{fontSize:11,color:"var(--sub)",marginBottom:6,fontWeight:600}}>開始</div><select value={start} onChange={e=>setStart(Number(e.target.value))}>{hours.map(h=><option key={h} value={h}>{String(h).padStart(2,"0")}:00</option>)}</select></div>
+            <div style={{color:"var(--sub)",marginTop:18,fontSize:14}}>〜</div>
+            <div style={{flex:1}}><div style={{fontSize:11,color:"var(--sub)",marginBottom:6,fontWeight:600}}>終了</div><select value={end} onChange={e=>setEnd(Number(e.target.value))}>{hours.map(h=><option key={h} value={h}>{String(h).padStart(2,"0")}:00</option>)}</select></div>
           </div>
-          <div style={{fontSize:11,color:"var(--text-sub)",marginBottom:14,lineHeight:1.6}}>設定した時間帯に毎時リマインドが届きます</div>
+          <div style={{fontSize:11,color:"var(--sub)",marginBottom:14,lineHeight:1.7}}>設定した時間帯に毎時リマインドが届きます</div>
           <button className="btn" onClick={save}>保存する</button>
         </div>
-
         <div className="card" style={{marginTop:12}}>
           <div className="card-label">アカウント</div>
-          <div className="settings-row"><span className="settings-key">名前</span><span className="settings-val">{CURRENT_USER.name}</span></div>
-          <div className="settings-row"><span className="settings-key">メール</span><span style={{fontSize:12,color:"var(--text-sub)"}}>{CURRENT_USER.email}</span></div>
+          <div className="s-row"><span className="s-k">名前</span><span className="s-v">{CURRENT_USER.name}</span></div>
+          <div className="s-row"><span className="s-k">メール</span><span style={{fontSize:12,color:"var(--sub)"}}>{CURRENT_USER.email}</span></div>
         </div>
-
-        <div style={{marginTop:12,marginBottom:32}}>
-          <button className="btn-ghost" onClick={onLogout}>ログアウト</button>
-        </div>
+        <div style={{marginTop:12,marginBottom:32}}><button className="btn-g" onClick={onLogout}>ログアウト</button></div>
       </div>
     </div>
   );
 }
 
-// ─── Nav ───
-const TABS = [
-  { id: "home",     label: "ホーム",   icon: "home" },
-  { id: "log",      label: "記録",     icon: "clock" },
-  { id: "report",   label: "レポート", icon: "chart" },
-  { id: "chat",     label: "チャット", icon: "chat" },
-  { id: "settings", label: "設定",     icon: "gear" },
-];
+const TABS=[{id:"home",l:"ホーム",n:"home"},{id:"log",l:"記録",n:"clock"},{id:"report",l:"レポート",n:"chart"},{id:"chat",l:"チャット",n:"chat"},{id:"settings",l:"設定",n:"gear"}];
 
-// ─── Login ───
-function LoginScreen({ onLogin }) {
-  const [email, setEmail] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
-
-  const login = async () => {
-    const e = email.trim().toLowerCase();
-    if (!e || !e.includes("@")) { setError("正しいメールアドレスを入力してください"); return; }
-    setLoading(true); setError("");
-    const url = new URL(GAS_URL);
-    url.searchParams.set("action", "getUser");
-    url.searchParams.set("studentEmail", e);
-    try {
-      const r = await fetch(url).then(res => res.json());
-      if (r.ok && r.data) {
-        const user = { email: e, name: r.data.name, coachName: r.data.coachName || "コーチ", coachEmail: r.data.coach_email || "" };
-        localStorage.setItem("edventure_user", JSON.stringify(user));
-        CURRENT_USER = user;
-        onLogin(user);
-      } else {
-        setError("このメールアドレスは登録されていません");
-      }
-    } catch { setError("接続エラーが発生しました"); }
+function LoginScreen({onLogin}) {
+  const [email,setEmail]=useState("");
+  const [loading,setLoading]=useState(false);
+  const [error,setError]=useState("");
+  const login=async()=>{
+    const e=email.trim().toLowerCase();
+    if(!e||!e.includes("@")){setError("正しいメールアドレスを入力してください");return;}
+    setLoading(true);setError("");
+    const url=new URL(GAS_URL); url.searchParams.set("action","getUser"); url.searchParams.set("studentEmail",e);
+    try{
+      const r=await fetch(url).then(res=>res.json());
+      if(r.ok&&r.data){const u={email:e,name:r.data.name,coachName:r.data.coachName||"コーチ",coachEmail:r.data.coach_email||""}; localStorage.setItem("edventure_user",JSON.stringify(u)); CURRENT_USER=u; onLogin(u);}
+      else setError("このメールアドレスは登録されていません");
+    }catch{setError("接続エラーが発生しました");}
     setLoading(false);
   };
-
   return (
     <div className="login-wrap">
-      <div style={{textAlign:"center",marginBottom:0}}>
-        <div className="login-logo">
-          <Icon name="clock" size={26} />
-        </div>
-        <div className="login-title">JIROKU</div>
-        <div className="login-sub">時間を記録し、目標を達成する</div>
-      </div>
+      <div className="login-logo"><S n="clock" s={26}/></div>
+      <div className="login-title">JIROKU</div>
+      <div className="login-sub">時間を記録し、目標を達成する</div>
       <div className="login-box">
-        <input type="email" className="login-input" placeholder="メールアドレス"
-          value={email} onChange={e => setEmail(e.target.value)}
-          onKeyDown={e => e.key === "Enter" && login()} />
-        {error && <div className="login-err">{error}</div>}
-        <button className="btn" onClick={login} disabled={loading}>
-          {loading ? "確認中..." : "ログイン"}
-        </button>
+        <input type="email" className="login-inp" placeholder="メールアドレス" value={email} onChange={e=>setEmail(e.target.value)} onKeyDown={e=>e.key==="Enter"&&login()}/>
+        {error&&<div className="login-err">{error}</div>}
+        <button className="btn" onClick={login} disabled={loading}>{loading?"確認中...":"ログイン"}</button>
       </div>
     </div>
   );
 }
 
-// ─── App ───
 function App() {
-  const [user, setUser] = useState(CURRENT_USER);
-  const [tab, setTab] = useState("home");
-  const [toast, setToast] = useState(null);
-
-  const logout = () => { localStorage.removeItem("edventure_user"); CURRENT_USER = null; setUser(null); };
-
-  if (!user) return <LoginScreen onLogin={setUser} />;
-
+  const [user,setUser]=useState(CURRENT_USER);
+  const [tab,setTab]=useState("home");
+  const [toast,setToast]=useState(null);
+  const logout=()=>{localStorage.removeItem("edventure_user");CURRENT_USER=null;setUser(null);};
+  if(!user) return <LoginScreen onLogin={setUser}/>;
   return (
     <div style={{height:"100%",position:"relative"}}>
       <div className="screen">
-        {tab === "home"     && <HomeScreen />}
-        {tab === "log"      && <LogScreen onToast={setToast} />}
-        {tab === "report"   && <ReportScreen />}
-        {tab === "chat"     && <ChatScreen onToast={setToast} />}
-        {tab === "settings" && <SettingsScreen onToast={setToast} onLogout={logout} />}
+        {tab==="home"&&<HomeScreen/>}
+        {tab==="log"&&<LogScreen onToast={setToast}/>}
+        {tab==="report"&&<ReportScreen/>}
+        {tab==="chat"&&<ChatScreen onToast={setToast}/>}
+        {tab==="settings"&&<SettingsScreen onToast={setToast} onLogout={logout}/>}
       </div>
       <nav className="nav">
-        {TABS.map(t => (
-          <button key={t.id} className={"nav-item" + (tab === t.id ? " active" : "")} onClick={() => setTab(t.id)}>
-            <Icon name={t.icon} size={20} />
-            <span className="nav-label">{t.label}</span>
+        {TABS.map(t=>(
+          <button key={t.id} className={"nav-btn"+(tab===t.id?" on":"")} onClick={()=>setTab(t.id)}>
+            <S n={t.n} s={20}/><span className="nav-lbl">{t.l}</span>
           </button>
         ))}
       </nav>
-      {toast && <Toast msg={toast} onDone={() => setToast(null)} />}
+      {toast&&<Toast msg={toast} onDone={()=>setToast(null)}/>}
     </div>
   );
 }
-
-ReactDOM.createRoot(document.getElementById("root")).render(<App />);
-if ('serviceWorker' in navigator) { navigator.serviceWorker.register('sw.js'); }
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+if('serviceWorker' in navigator){navigator.serviceWorker.register('sw.js');}
 </script>
 </body>
 </html>
