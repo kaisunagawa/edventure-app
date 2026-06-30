@@ -11,6 +11,7 @@
   <meta name="theme-color" content="#FAFAF9" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
   <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
   <script crossorigin src="https://unpkg.com/htm/dist/htm.js"></script>
@@ -875,62 +876,80 @@ function SettingsScreen({onToast,onLogout,onGoalSaved}) {
 
 const TABS=[{id:"home",l:"ホーム",n:"home"},{id:"log",l:"記録",n:"clock"},{id:"report",l:"レポート",n:"chart"},{id:"chat",l:"チャット",n:"chat"},{id:"settings",l:"設定",n:"gear"}];
 
+const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
+
+function parseJwt(token) {
+  try { return JSON.parse(atob(token.split(".")[1].replace(/-/g,"+").replace(/_/g,"/"))); } catch { return null; }
+}
+
 function LoginScreen({onLogin}) {
-  const [step,setStep]=useState("email"); // "email" | "register" | "line"
-  const [email,setEmail]=useState("");
-  const [name,setName]=useState("");
+  const [step,setStep]=useState("top"); // "top" | "goal" | "line"
   const [goal,setGoal]=useState("");
   const [deadline,setDeadline]=useState("");
   const [loading,setLoading]=useState(false);
   const [error,setError]=useState("");
   const [pendingUser,setPendingUser]=useState(null);
+  const btnRef=useRef(null);
 
-  const checkEmail=async()=>{
-    const e=email.trim().toLowerCase();
-    if(!e||!e.includes("@")){setError("正しいメールアドレスを入力してください");return;}
-    setLoading(true);setError("");
+  useEffect(()=>{
+    if(step!=="top") return;
+    const init=()=>{
+      if(!window.google) return setTimeout(init,200);
+      google.accounts.id.initialize({
+        client_id: GOOGLE_CLIENT_ID,
+        callback: handleGoogleLogin,
+        ux_mode: "popup",
+      });
+      google.accounts.id.renderButton(btnRef.current, {
+        theme:"outline", size:"large", text:"signin_with", locale:"ja", width:280
+      });
+    };
+    init();
+  },[step]);
+
+  const handleGoogleLogin=async(res)=>{
+    const payload=parseJwt(res.credential);
+    if(!payload) { setError("ログインに失敗しました"); return; }
+    const email=payload.email;
+    const name=payload.name||payload.given_name||"";
+    setLoading(true); setError("");
     try{
-      const url=new URL(GAS_URL); url.searchParams.set("action","getUser"); url.searchParams.set("studentEmail",e);
+      // 既存ユーザー確認
+      const url=new URL(GAS_URL); url.searchParams.set("action","getUser"); url.searchParams.set("studentEmail",email);
       const r=await fetch(url).then(res=>res.json());
       if(r.ok&&r.data){
-        const u={email:e,name:r.data.name,coachName:r.data.coachName||"コーチ",coachEmail:r.data.coach_email||""};
+        // 既存ユーザー → ログイン
+        const u={email,name:r.data.name||name,coachName:r.data.coachName||"コーチ",coachEmail:r.data.coach_email||""};
         localStorage.setItem("edventure_user",JSON.stringify(u));
-        // LINE促進画面をまだ見ていない場合は表示
-        if(!localStorage.getItem("line_prompted")){
-          setPendingUser(u);
-          setStep("line");
-        } else {
-          CURRENT_USER=u; onLogin(u);
-        }
+        if(!localStorage.getItem("line_prompted")){ setPendingUser(u); setStep("line"); }
+        else { CURRENT_USER=u; onLogin(u); }
       } else {
-        setStep("register");
+        // 新規ユーザー → 目標入力へ
+        setPendingUser({email, name});
+        setStep("goal");
       }
-    }catch{setError("接続エラーが発生しました");}
+    }catch{ setError("接続エラーが発生しました"); }
     setLoading(false);
   };
 
   const register=async()=>{
-    if(!name.trim()){setError("名前を入力してください");return;}
-    setLoading(true);setError("");
+    setLoading(true); setError("");
     try{
-      const e=email.trim().toLowerCase();
+      const {email,name}=pendingUser;
       const url=new URL(GAS_URL);
       url.searchParams.set("action","registerUser");
-      url.searchParams.set("studentEmail",e);
-      url.searchParams.set("name",name.trim());
+      url.searchParams.set("studentEmail",email);
+      url.searchParams.set("name",name);
       url.searchParams.set("goal",goal.trim());
       url.searchParams.set("goal_deadline",deadline);
       const r=await fetch(url).then(res=>res.json());
-      if(r.ok){
-        const u={email:e,name:name.trim(),coachName:"コーチ",coachEmail:""};
+      if(r.ok||r.error==="already_registered"){
+        const u={email,name,coachName:"コーチ",coachEmail:""};
         if(goal.trim()) localStorage.setItem("jiroku_goal",JSON.stringify({goal:goal.trim(),deadline}));
         localStorage.setItem("edventure_user",JSON.stringify(u));
-        setPendingUser(u);
-        setStep("line"); // 登録完了 → LINE追加画面へ
-      } else {
-        setError(r.error==="already_registered"?"このメールはすでに登録されています":"登録に失敗しました");
-      }
-    }catch{setError("接続エラーが発生しました");}
+        setPendingUser(u); setStep("line");
+      } else { setError("登録に失敗しました"); }
+    }catch{ setError("接続エラーが発生しました"); }
     setLoading(false);
   };
 
@@ -947,7 +966,9 @@ function LoginScreen({onLogin}) {
 
   if(step==="line") return html`
     <div class="login-wrap" style=${{justifyContent:"flex-start",paddingTop:48}}>
-      <div class="login-logo" style=${{background:"#06C755"}}><${S} n="message-circle" s=${26} color="#fff"/></div>
+      <div class="login-logo" style=${{background:"#06C755"}}>
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="white"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/></svg>
+      </div>
       <div class="login-title">登録完了！🎉</div>
       <div class="login-sub" style=${{marginBottom:28}}>最後にLINE通知を設定しましょう</div>
       <div class="login-box">
@@ -966,27 +987,22 @@ function LoginScreen({onLogin}) {
     </div>
   `;
 
-  if(step==="register") return html`
+  if(step==="goal") return html`
     <div class="login-wrap" style=${{justifyContent:"flex-start",paddingTop:48}}>
       <div class="login-logo"><${S} n="clock" s=${26}/></div>
-      <div class="login-title">はじめまして</div>
-      <div class="login-sub" style=${{marginBottom:24}}>プロフィールを入力してください</div>
+      <div class="login-title">はじめまして 👋</div>
+      <div class="login-sub" style=${{marginBottom:24}}>${pendingUser?.name}さん、目標を教えてください</div>
       <div class="login-box">
         <div>
-          <div style=${{fontSize:11,color:"var(--sub)",marginBottom:5}}>名前 *</div>
-          <input class="login-inp" placeholder="例：山田 花子" value=${name} onChange=${e=>setName(e.target.value)}/>
+          <div style=${{fontSize:11,color:"var(--sub)",marginBottom:5}}>今一番達成したい目標（任意）</div>
+          <textarea class="txa" placeholder="例：英検2級に合格する" value=${goal} onChange=${e=>setGoal(e.target.value)} style=${{height:80}}/>
         </div>
         <div>
-          <div style=${{fontSize:11,color:"var(--sub)",marginBottom:5}}>目標（任意）</div>
-          <textarea class="txa" placeholder="例：英検2級に合格する" value=${goal} onChange=${e=>setGoal(e.target.value)} style=${{height:68}}/>
-        </div>
-        <div>
-          <div style=${{fontSize:11,color:"var(--sub)",marginBottom:5}}>目標の期限（任意）</div>
+          <div style=${{fontSize:11,color:"var(--sub)",marginBottom:5}}>達成期限（任意）</div>
           <input type="date" class="login-inp" value=${deadline} onChange=${e=>setDeadline(e.target.value)}/>
         </div>
         ${error&&html`<div class="login-err">${error}</div>`}
-        <button class="btn" onClick=${register} disabled=${loading||!name.trim()}>${loading?"登録中...":"登録してはじめる"}</button>
-        <button style=${{background:"none",border:"none",color:"var(--sub)",fontSize:13,cursor:"pointer",marginTop:4}} onClick=${()=>{setStep("email");setError("");}}>← メールアドレスに戻る</button>
+        <button class="btn" onClick=${register} disabled=${loading}>${loading?"登録中...":"JIROKUをはじめる"}</button>
       </div>
     </div>
   `;
@@ -996,10 +1012,12 @@ function LoginScreen({onLogin}) {
       <div class="login-logo"><${S} n="clock" s=${26}/></div>
       <div class="login-title">JIROKU</div>
       <div class="login-sub">時間を記録し、目標を達成する</div>
-      <div class="login-box">
-        <input type="email" class="login-inp" placeholder="メールアドレス" value=${email} onChange=${e=>setEmail(e.target.value)} onKeyDown=${e=>e.key==="Enter"&&checkEmail()}/>
+      <div class="login-box" style=${{alignItems:"center"}}>
+        ${loading
+          ? html`<div style=${{color:"var(--sub)",fontSize:14}}>確認中...</div>`
+          : html`<div ref=${btnRef}/>`
+        }
         ${error&&html`<div class="login-err">${error}</div>`}
-        <button class="btn" onClick=${checkEmail} disabled=${loading}>${loading?"確認中...":"次へ"}</button>
       </div>
     </div>
   `;
