@@ -894,7 +894,14 @@ function LoginScreen({onLogin}) {
       const r=await fetch(url).then(res=>res.json());
       if(r.ok&&r.data){
         const u={email:e,name:r.data.name,coachName:r.data.coachName||"コーチ",coachEmail:r.data.coach_email||""};
-        localStorage.setItem("edventure_user",JSON.stringify(u)); CURRENT_USER=u; onLogin(u);
+        localStorage.setItem("edventure_user",JSON.stringify(u));
+        // LINE促進画面をまだ見ていない場合は表示
+        if(!localStorage.getItem("line_prompted")){
+          setPendingUser(u);
+          setStep("line");
+        } else {
+          CURRENT_USER=u; onLogin(u);
+        }
       } else {
         setStep("register");
       }
@@ -928,10 +935,13 @@ function LoginScreen({onLogin}) {
   };
 
   const finishWithLine=()=>{
+    localStorage.setItem("line_prompted","1");
     window.open("https://lin.ee/5pElLYY","_blank");
+    CURRENT_USER=pendingUser; onLogin(pendingUser);
   };
 
   const skipLine=()=>{
+    localStorage.setItem("line_prompted","1");
     CURRENT_USER=pendingUser; onLogin(pendingUser);
   };
 
