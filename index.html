@@ -570,64 +570,107 @@ function LogScreen({onToast}) {
 }
 
 // ── Report ──
+const SCORE_COLOR = s => s >= 80 ? "var(--green)" : s >= 60 ? "var(--amber)" : "var(--red)";
+
 function ReportScreen() {
   const todayStr=formatDateStr(new Date());
-  const [date, setDate]=useState(todayStr);
+  const [date, setDate]=useState(null); // null = list view
   const [report, setReport]=useState(null);
   const [logs, setLogs]=useState([]);
-  const [loading, setLoading]=useState(true);
+  const [loading, setLoading]=useState(false);
+  const [reportList, setReportList]=useState([]);
+  const [listLoading, setListLoading]=useState(true);
 
   useEffect(()=>{
+    gasApi("getReportList").then(r=>{ if(r.ok){ setReportList(r.data); } setListLoading(false); });
+  },[]);
+
+  useEffect(()=>{
+    if(!date) return;
     setLoading(true);
     Promise.all([gasApi("getReport",{date}),gasApi("getLogs",{date})]).then(([r,l])=>{
       setReport(r.ok?r.data:null); if(l.ok) setLogs(l.data); setLoading(false);
     });
   },[date]);
 
-  const Nav=()=>html`
-    <div class="date-nav">
-      <button onClick=${()=>setDate(addDays(date,-1))}>‹</button>
-      <span>${isToday(date)?"今日":date}</span>
-      <button onClick=${()=>setDate(addDays(date,1))} disabled=${isToday(date)}>›</button>
+  const fmtDate = d => {
+    const dt = new Date(d+"T00:00:00");
+    return dt.toLocaleDateString("ja-JP",{month:"long",day:"numeric",weekday:"short"});
+  };
+
+  // ── 一覧表示 ──
+  if(!date) return html`<div>
+    <div class="ph"><div class="ph-title">レポート</div></div>
+    ${listLoading
+      ? html`<div style=${{display:"flex",justifyContent:"center",padding:40}}><div class="spin" style=${{borderColor:"var(--border)",borderTopColor:"var(--accent)",width:24,height:24,borderWidth:2}}/></div>`
+      : reportList.length === 0
+        ? html`<div class="empty">
+            <div class="empty-title">レポートはまだありません</div>
+            <div class="empty-body">記録を入力すると<br/>毎晩21時にAIがレポートを生成します</div>
+          </div>`
+        : html`<div class="card" style=${{marginBottom:24}}>
+            ${reportList.map((r,i)=>html`
+              <button key=${r.date} onClick=${()=>setDate(r.date)}
+                style=${{display:"flex",alignItems:"center",justifyContent:"space-between",width:"100%",background:"none",border:"none",padding:"13px 0",borderBottom:i<reportList.length-1?"1px solid var(--border)":"none",cursor:"pointer",fontFamily:"inherit",textAlign:"left"}}>
+                <div>
+                  <div style=${{fontSize:14,fontWeight:500,color:"var(--text)"}}>${fmtDate(r.date)}</div>
+                  <div style=${{fontSize:11,color:"var(--sub)",marginTop:2}}>${isToday(r.date)?"今日":r.date}</div>
+                </div>
+                <div style=${{display:"flex",alignItems:"center",gap:10}}>
+                  <div style=${{fontSize:22,fontWeight:700,color:SCORE_COLOR(r.score)}}>${r.score}</div>
+                  <div style=${{color:"var(--sub)",fontSize:16}}>›</div>
+                </div>
+              </button>
+            `)}
+          </div>`
+    }
+  </div>`;
+
+  // ── 詳細表示 ──
+  if(loading) return html`<div>
+    <div class="ph">
+      <button onClick=${()=>setDate(null)} style=${{background:"none",border:"none",color:"var(--accent)",fontSize:14,cursor:"pointer",padding:0,fontFamily:"inherit",marginBottom:4}}>← 一覧に戻る</button>
+      <div class="ph-title">${fmtDate(date)}</div>
     </div>
-  `;
-
-  if(loading) return html`<div style=${{display:"flex",alignItems:"center",justifyContent:"center",height:300}}><div class="spin" style=${{borderColor:"var(--border)",borderTopColor:"var(--accent)",width:28,height:28,borderWidth:2}}/></div>`;
-
-  if(!report) return html`<div><div class="ph"><div class="ph-title">レポート</div><${Nav}/></div><div class="empty"><div style=${{fontSize:32,color:"var(--border)",marginBottom:16}}>○</div><div class="empty-title">レポートはまだありません</div><div class="empty-body">ログを入力すると<br/>毎晩21時にAIがレポートを生成します</div></div></div>`;
+    <div style=${{display:"flex",justifyContent:"center",padding:40}}><div class="spin" style=${{borderColor:"var(--border)",borderTopColor:"var(--accent)",width:24,height:24,borderWidth:2}}/></div>
+  </div>`;
 
   return html`<div>
-    <div class="report-hero">
-      <div class="report-date">${isToday(date)?"TODAY":date}</div>
-      <div style=${{display:"flex",alignItems:"center",justifyContent:"center",gap:12}}>
-        <button onClick=${()=>setDate(addDays(date,-1))} style=${{background:"none",border:"none",fontSize:22,cursor:"pointer",color:"var(--sub)",padding:"0 4px"}}>‹</button>
-        <div class="report-score">${report.score}</div>
-        <button onClick=${()=>setDate(addDays(date,1))} disabled=${isToday(date)} style=${{background:"none",border:"none",fontSize:22,cursor:"pointer",color:isToday(date)?"var(--border)":"var(--sub)",padding:"0 4px"}}>›</button>
-      </div>
-      <div class="report-pts">/ 100点</div>
+    <div class="ph">
+      <button onClick=${()=>setDate(null)} style=${{background:"none",border:"none",color:"var(--accent)",fontSize:14,cursor:"pointer",padding:0,fontFamily:"inherit",marginBottom:4}}>← 一覧に戻る</button>
+      <div class="ph-title">${fmtDate(date)}</div>
     </div>
 
-    <div class="card">
-      <div class="card-label">フィードバック</div>
-      <p style=${{fontSize:14,lineHeight:1.8,color:"var(--text)"}}>${report.feedback}</p>
-    </div>
-    <div class="card">
-      ${report.highlights&&html`<div style=${{marginBottom:12}}><span class="tag t-g">良かった点</span><p style=${{fontSize:13,color:"var(--sub)",marginTop:7,lineHeight:1.6}}>${report.highlights}</p></div>`}
-      ${report.improvement&&html`<div><span class="tag t-a">改善点</span><p style=${{fontSize:13,color:"var(--sub)",marginTop:7,lineHeight:1.6}}>${report.improvement}</p></div>`}
-    </div>
-    ${report.action&&html`<div class="card"><div class="card-label">明日のアクション</div><p style=${{fontSize:14,lineHeight:1.8,color:"var(--text)"}}>${report.action}</p></div>`}
-    ${logs.length>0&&html`
-      <div class="card" style=${{marginBottom:24}}>
-        <div class="card-label">時間ログ</div>
-        ${logs.map((l,i)=>{
-          const num=l.focus_level?.charAt(0);
-          return html`<div key=${i} class="log-row">
-            <div class="log-time">${l.time_block}</div>
-            <div><div class="log-task">${l.task}</div><div class="log-meta"><span class="dot" style=${{background:DOT[num]||"var(--sub)"}}/>${l.focus_level}${l.memo?` · ${l.memo}`:""}</div></div>
-          </div>`;
-        })}
-      </div>
-    `}
+    ${!report
+      ? html`<div class="empty"><div class="empty-title">この日のレポートはありません</div></div>`
+      : html`<div>
+          <div class="report-hero" style=${{paddingTop:8}}>
+            <div class="report-score">${report.score}</div>
+            <div class="report-pts">/ 100点</div>
+          </div>
+          <div class="card">
+            <div class="card-label">フィードバック</div>
+            <p style=${{fontSize:14,lineHeight:1.8,color:"var(--text)"}}>${report.feedback}</p>
+          </div>
+          <div class="card">
+            ${report.highlights&&html`<div style=${{marginBottom:12}}><span class="tag t-g">良かった点</span><p style=${{fontSize:13,color:"var(--sub)",marginTop:7,lineHeight:1.6}}>${report.highlights}</p></div>`}
+            ${report.improvement&&html`<div><span class="tag t-a">改善点</span><p style=${{fontSize:13,color:"var(--sub)",marginTop:7,lineHeight:1.6}}>${report.improvement}</p></div>`}
+          </div>
+          ${report.action&&html`<div class="card"><div class="card-label">明日のアクション</div><p style=${{fontSize:14,lineHeight:1.8,color:"var(--text)"}}>${report.action}</p></div>`}
+          ${logs.length>0&&html`
+            <div class="card" style=${{marginBottom:24}}>
+              <div class="card-label">時間ログ</div>
+              ${logs.map((l,i)=>{
+                const num=l.focus_level?.charAt(0);
+                return html`<div key=${i} class="log-row">
+                  <div class="log-time">${l.time_block}</div>
+                  <div><div class="log-task">${l.task}</div><div class="log-meta"><span class="dot" style=${{background:DOT[num]||"var(--sub)"}}/>${l.focus_level}${l.memo?` · ${l.memo}`:""}</div></div>
+                </div>`;
+              })}
+            </div>
+          `}
+        </div>`
+    }
   </div>`;
 }
 

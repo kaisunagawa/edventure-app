@@ -33,6 +33,7 @@ function doGet(e) {
       case "getStreak":    result = getStreak(studentEmail); break;
       case "getGameStatus": result = getGameStatus(studentEmail); break;
       case "getReport":    result = getReport(studentEmail, e.parameter); break;
+      case "getReportList": result = getReportList(studentEmail); break;
       case "getLogs":      result = getLogs(studentEmail, e.parameter); break;
       case "getMessages":  result = getMessages(studentEmail); break;
       case "getSchedule":  result = getSchedule(studentEmail); break;
@@ -135,6 +136,15 @@ function getUser(studentEmail) {
   if (!user) return { ok: false, error: "User not found" };
   const coach = sheetToObjects(getSheet("Coaches")).find(c => c.coach_email === user.coach_email);
   return { ok: true, data: { name: user.name, coach_email: user.coach_email, coachName: coach ? coach.name : "コーチ" } };
+}
+
+function getReportList(studentEmail) {
+  const rows = sheetToObjects(getSheet("Reports"));
+  const list = rows
+    .filter(r => r.student_email === studentEmail)
+    .sort((a, b) => b.date > a.date ? 1 : -1)
+    .map(r => ({ date: r.date, score: Number(r.score) }));
+  return { ok: true, data: list };
 }
 
 function getReport(studentEmail, body) {
