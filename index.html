@@ -383,7 +383,7 @@ function HomeScreen({goalData, onGoalSaved}) {
     });
     // 日付が変わったらチェック状態リセット
     const today = formatDateStr(new Date());
-    const saved = JSON.parse(localStorage.getItem("today_actions_date")||"null");
+    const saved = localStorage.getItem("today_actions_date");
     if(saved !== today){ localStorage.removeItem("today_actions"); localStorage.setItem("today_actions_date", today); setChecked({}); }
   },[]);
 
