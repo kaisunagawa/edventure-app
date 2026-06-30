@@ -13,7 +13,7 @@
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
   <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://unpkg.com/htm/dist/htm.js"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -275,8 +275,9 @@
   </div>
   <style>#splash{animation:none}@keyframes sp{to{transform:rotate(360deg)}}</style>
 </div>
-<script type="text/babel">
+<script>
 const { useState, useEffect, useRef, useCallback } = React;
+const html = htm.bind(React.createElement);
 
 const GAS_URL = "https://script.google.com/macros/s/AKfycbzJ-QEpPVnmp-LFU5Jxww4VFP1qaseMtwCrzKxAA6ZULr1y3h_UeKzVdhHnl5ze57U/exec";
 let CURRENT_USER = JSON.parse(localStorage.getItem("edventure_user") || "null");
@@ -319,18 +320,18 @@ function mockApi(a){ if(a==="getReport") return Promise.resolve({ok:true,data:MO
 function mockPost(a,b){ if(a==="saveLog"){mockLogs=[...mockLogs,{time_block:b.time_block,task:b.task,focus_level:b.focus_level,memo:b.memo}];return Promise.resolve({ok:true});} if(a==="sendMessage"){mockMsgs=[...mockMsgs,{message_id:String(Date.now()),content:b.content,sender_name:CURRENT_USER.name,sender_role:"student",timestamp:new Date().toLocaleString("ja")}];return Promise.resolve({ok:true});}return Promise.resolve({ok:true});}
 
 const S = (p) => { const s={width:p.s||22,height:p.s||22,fill:"none",stroke:"currentColor",strokeWidth:1.8,strokeLinecap:"round",strokeLinejoin:"round"};
-  if(p.n==="home")   return <svg viewBox="0 0 24 24" style={s}><path d="M3 9.5L12 3l9 6.5V20a1 1 0 01-1 1H4a1 1 0 01-1-1V9.5z"/><path d="M9 21V12h6v9"/></svg>;
-  if(p.n==="clock")  return <svg viewBox="0 0 24 24" style={s}><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>;
-  if(p.n==="chart")  return <svg viewBox="0 0 24 24" style={s}><rect x="3" y="12" width="4" height="9"/><rect x="10" y="7" width="4" height="14"/><rect x="17" y="3" width="4" height="18"/></svg>;
-  if(p.n==="chat")   return <svg viewBox="0 0 24 24" style={s}><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>;
-  if(p.n==="gear")   return <svg viewBox="0 0 24 24" style={s}><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>;
-  if(p.n==="up")     return <svg viewBox="0 0 24 24" style={s}><path d="M12 19V5M5 12l7-7 7 7"/></svg>;
+  if(p.n==="home")   return html`<svg viewBox="0 0 24 24" style=${s}><path d="M3 9.5L12 3l9 6.5V20a1 1 0 01-1 1H4a1 1 0 01-1-1V9.5z"/><path d="M9 21V12h6v9"/></svg>`;
+  if(p.n==="clock")  return html`<svg viewBox="0 0 24 24" style=${s}><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>`;
+  if(p.n==="chart")  return html`<svg viewBox="0 0 24 24" style=${s}><rect x="3" y="12" width="4" height="9"/><rect x="10" y="7" width="4" height="14"/><rect x="17" y="3" width="4" height="18"/></svg>`;
+  if(p.n==="chat")   return html`<svg viewBox="0 0 24 24" style=${s}><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>`;
+  if(p.n==="gear")   return html`<svg viewBox="0 0 24 24" style=${s}><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>`;
+  if(p.n==="up")     return html`<svg viewBox="0 0 24 24" style=${s}><path d="M12 19V5M5 12l7-7 7 7"/></svg>`;
   return null;
 };
 
 function Toast({msg, onDone}) {
   useEffect(()=>{ const t=setTimeout(onDone,2500); return ()=>clearTimeout(t); },[]);
-  return <div className="toast">{msg}</div>;
+  return html`<div class="toast">${msg}</div>`;
 }
 function formatDateStr(d){ return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); }
 function addDays(s,n){ const d=new Date(s+"T00:00:00"); d.setDate(d.getDate()+n); return formatDateStr(d); }
@@ -340,12 +341,12 @@ const DOT = {"5":"#46C98B","4":"#7B6FE8","3":"#F5A84B","2":"#EF7070","1":"#EF707
 
 // ── 階級定義 ──
 const RANKS = [
-  { minLv:1,  maxLv:1,  name:"芽吹き", en:"Seedling",   color:"#52C987", bg:"#E8F9F0", icon: (s=32)=><svg width={s} height={s} viewBox="0 0 32 32" fill="none"><circle cx="16" cy="16" r="14" fill="#E8F9F0"/><path d="M16 24V14" stroke="#52C987" strokeWidth="2" strokeLinecap="round"/><path d="M16 18c0-4 4-7 4-7s0 5-4 7z" fill="#52C987"/><path d="M16 20c0-4-4-6-4-6s0 4 4 6z" fill="#87DBA8"/><ellipse cx="16" cy="25" rx="4" ry="1.5" fill="#52C987" opacity=".3"/></svg> },
-  { minLv:2,  maxLv:3,  name:"成長",   en:"Growing",    color:"#3BAF6E", bg:"#DFF5EB", icon: (s=32)=><svg width={s} height={s} viewBox="0 0 32 32" fill="none"><circle cx="16" cy="16" r="14" fill="#DFF5EB"/><path d="M16 25V12" stroke="#3BAF6E" strokeWidth="2" strokeLinecap="round"/><path d="M16 16c0-5 5-8 5-8s1 6-5 8z" fill="#3BAF6E"/><path d="M16 20c0-4-5-7-5-7s-1 5 5 7z" fill="#52C987"/><path d="M16 22c0-3 4-5 4-5s0 4-4 5z" fill="#87DBA8"/></svg> },
-  { minLv:4,  maxLv:6,  name:"開花",   en:"Blooming",   color:"#E0609A", bg:"#FDEDF5", icon: (s=32)=><svg width={s} height={s} viewBox="0 0 32 32" fill="none"><circle cx="16" cy="16" r="14" fill="#FDEDF5"/><circle cx="16" cy="13" r="3" fill="#E0609A"/><circle cx="11" cy="16" r="2.5" fill="#F48BBB"/><circle cx="21" cy="16" r="2.5" fill="#F48BBB"/><circle cx="13" cy="11" r="2.5" fill="#F48BBB"/><circle cx="19" cy="11" r="2.5" fill="#F48BBB"/><circle cx="16" cy="13" r="2" fill="#FFF0F8"/><path d="M16 16v8" stroke="#52C987" strokeWidth="1.8" strokeLinecap="round"/></svg> },
-  { minLv:7,  maxLv:10, name:"輝き",   en:"Shining",    color:"#E09A2A", bg:"#FEF5E0", icon: (s=32)=><svg width={s} height={s} viewBox="0 0 32 32" fill="none"><circle cx="16" cy="16" r="14" fill="#FEF5E0"/><polygon points="16,6 18.5,13.5 26,13.5 20,18.5 22.5,26 16,21.5 9.5,26 12,18.5 6,13.5 13.5,13.5" fill="#F5C842" stroke="#E09A2A" strokeWidth=".5"/></svg> },
-  { minLv:11, maxLv:15, name:"飛翔",   en:"Soaring",    color:"#6B58E8", bg:"#EDEAFF", icon: (s=32)=><svg width={s} height={s} viewBox="0 0 32 32" fill="none"><circle cx="16" cy="16" r="14" fill="#EDEAFF"/><path d="M16 22L6 15c3-1 6-1 8 1V8l2 8c2-2 5-2 8-1L16 22z" fill="#7B6FE8"/><path d="M16 22L6 15c3-1 6-1 8 1" fill="#B8A9F5" opacity=".7"/></svg> },
-  { minLv:16, maxLv:999,name:"覚醒",   en:"Awakened",   color:"#C044E0", bg:"linear-gradient(135deg,#FDE9FF,#E9EDFF)", icon: (s=32)=><svg width={s} height={s} viewBox="0 0 32 32" fill="none"><defs><linearGradient id="rg" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stopColor="#C044E0"/><stop offset="100%" stopColor="#6B58E8"/></linearGradient></defs><circle cx="16" cy="16" r="14" fill="url(#rg)" opacity=".15"/><polygon points="16,5 18,13 26,13 19.5,18 22,26 16,21 10,26 12.5,18 6,13 14,13" fill="url(#rg)"/><circle cx="16" cy="14.5" r="3" fill="white" opacity=".6"/></svg> },
+  { minLv:1,  maxLv:1,  name:"芽吹き", en:"Seedling",   color:"#52C987", bg:"#E8F9F0", icon: (s=32)=>html`<svg width=${s} height=${s} viewBox="0 0 32 32" fill="none"><circle cx="16" cy="16" r="14" fill="#E8F9F0"/><path d="M16 24V14" stroke="#52C987" stroke-width="2" stroke-linecap="round"/><path d="M16 18c0-4 4-7 4-7s0 5-4 7z" fill="#52C987"/><path d="M16 20c0-4-4-6-4-6s0 4 4 6z" fill="#87DBA8"/><ellipse cx="16" cy="25" rx="4" ry="1.5" fill="#52C987" opacity=".3"/></svg>` },
+  { minLv:2,  maxLv:3,  name:"成長",   en:"Growing",    color:"#3BAF6E", bg:"#DFF5EB", icon: (s=32)=>html`<svg width=${s} height=${s} viewBox="0 0 32 32" fill="none"><circle cx="16" cy="16" r="14" fill="#DFF5EB"/><path d="M16 25V12" stroke="#3BAF6E" stroke-width="2" stroke-linecap="round"/><path d="M16 16c0-5 5-8 5-8s1 6-5 8z" fill="#3BAF6E"/><path d="M16 20c0-4-5-7-5-7s-1 5 5 7z" fill="#52C987"/><path d="M16 22c0-3 4-5 4-5s0 4-4 5z" fill="#87DBA8"/></svg>` },
+  { minLv:4,  maxLv:6,  name:"開花",   en:"Blooming",   color:"#E0609A", bg:"#FDEDF5", icon: (s=32)=>html`<svg width=${s} height=${s} viewBox="0 0 32 32" fill="none"><circle cx="16" cy="16" r="14" fill="#FDEDF5"/><circle cx="16" cy="13" r="3" fill="#E0609A"/><circle cx="11" cy="16" r="2.5" fill="#F48BBB"/><circle cx="21" cy="16" r="2.5" fill="#F48BBB"/><circle cx="13" cy="11" r="2.5" fill="#F48BBB"/><circle cx="19" cy="11" r="2.5" fill="#F48BBB"/><circle cx="16" cy="13" r="2" fill="#FFF0F8"/><path d="M16 16v8" stroke="#52C987" stroke-width="1.8" stroke-linecap="round"/></svg>` },
+  { minLv:7,  maxLv:10, name:"輝き",   en:"Shining",    color:"#E09A2A", bg:"#FEF5E0", icon: (s=32)=>html`<svg width=${s} height=${s} viewBox="0 0 32 32" fill="none"><circle cx="16" cy="16" r="14" fill="#FEF5E0"/><polygon points="16,6 18.5,13.5 26,13.5 20,18.5 22.5,26 16,21.5 9.5,26 12,18.5 6,13.5 13.5,13.5" fill="#F5C842" stroke="#E09A2A" stroke-width=".5"/></svg>` },
+  { minLv:11, maxLv:15, name:"飛翔",   en:"Soaring",    color:"#6B58E8", bg:"#EDEAFF", icon: (s=32)=>html`<svg width=${s} height=${s} viewBox="0 0 32 32" fill="none"><circle cx="16" cy="16" r="14" fill="#EDEAFF"/><path d="M16 22L6 15c3-1 6-1 8 1V8l2 8c2-2 5-2 8-1L16 22z" fill="#7B6FE8"/><path d="M16 22L6 15c3-1 6-1 8 1" fill="#B8A9F5" opacity=".7"/></svg>` },
+  { minLv:16, maxLv:999,name:"覚醒",   en:"Awakened",   color:"#C044E0", bg:"#F3E8FF", icon: (s=32)=>html`<svg width=${s} height=${s} viewBox="0 0 32 32" fill="none"><circle cx="16" cy="16" r="14" fill="#F3E8FF"/><polygon points="16,5 18,13 26,13 19.5,18 22,26 16,21 10,26 12.5,18 6,13 14,13" fill="#C044E0"/><circle cx="16" cy="14.5" r="3" fill="white" opacity=".6"/></svg>` },
 ];
 function getRank(level) {
   return RANKS.find(r => level >= r.minLv && level <= r.maxLv) || RANKS[0];
@@ -405,101 +406,84 @@ function HomeScreen({goalData, onGoalSaved}) {
 
   const today = new Date().toLocaleDateString("ja-JP",{month:"long",day:"numeric",weekday:"short"});
 
-  return (
-    <div style={{paddingBottom:32}}>
-      {/* ヘッダー */}
-      <div style={{padding:"28px 20px 20px"}}>
-        <div style={{fontSize:13,color:"var(--sub)",marginBottom:4}}>{today}</div>
-        <div style={{fontSize:26,fontWeight:800,color:"var(--text)",letterSpacing:"-.5px"}}>{CURRENT_USER.name}</div>
-      </div>
+  return html`<div style=${{paddingBottom:32}}>
+    <div style=${{padding:"28px 20px 20px"}}>
+      <div style=${{fontSize:13,color:"var(--sub)",marginBottom:4}}>${today}</div>
+      <div style=${{fontSize:26,fontWeight:800,color:"var(--text)",letterSpacing:"-.5px"}}>${CURRENT_USER.name}</div>
+    </div>
 
-      {/* 今月の目標 */}
-      {goalData?.goal && (
-        <div style={{margin:"0 16px 10px",padding:"16px",background:"var(--card)",borderRadius:12,border:"1px solid var(--border)"}}>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
-            <div style={{flex:1}}>
-              <div style={{fontSize:11,fontWeight:600,color:"var(--sub)",marginBottom:6,letterSpacing:".3px"}}>今月の目標</div>
-              <div style={{fontSize:15,fontWeight:600,color:"var(--text)",lineHeight:1.55}}>{goalData.goal}</div>
-              {goalData.deadline && (
-                <div style={{marginTop:8,fontSize:12,color:"var(--sub)"}}>
-                  期限：{new Date(goalData.deadline).toLocaleDateString("ja-JP",{year:"numeric",month:"long",day:"numeric"})}
-                </div>
-              )}
+    ${goalData?.goal && html`
+      <div style=${{margin:"0 16px 10px",padding:"16px",background:"var(--card)",borderRadius:12,border:"1px solid var(--border)"}}>
+        <div style=${{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
+          <div style=${{flex:1}}>
+            <div style=${{fontSize:11,fontWeight:600,color:"var(--sub)",marginBottom:6}}>今月の目標</div>
+            <div style=${{fontSize:15,fontWeight:600,color:"var(--text)",lineHeight:1.55}}>${goalData.goal}</div>
+            ${goalData.deadline && html`<div style=${{marginTop:8,fontSize:12,color:"var(--sub)"}}>期限：${new Date(goalData.deadline).toLocaleDateString("ja-JP",{year:"numeric",month:"long",day:"numeric"})}</div>`}
+          </div>
+          ${daysLeft !== null && html`
+            <div style=${{flexShrink:0,textAlign:"center",minWidth:52}}>
+              <div style=${{fontSize:24,fontWeight:800,lineHeight:1,color:daysLeft<=7?"var(--red)":daysLeft<=14?"var(--amber)":"var(--accent)"}}>${daysLeft<0?0:daysLeft}</div>
+              <div style=${{fontSize:11,color:"var(--sub)",marginTop:2}}>${daysLeft<0?"期限切れ":"残り日"}</div>
             </div>
-            {daysLeft !== null && (
-              <div style={{flexShrink:0,textAlign:"center",minWidth:52}}>
-                <div style={{fontSize:24,fontWeight:800,lineHeight:1,color:daysLeft<=7?"var(--red)":daysLeft<=14?"var(--amber)":"var(--accent)"}}>{daysLeft<0?0:daysLeft}</div>
-                <div style={{fontSize:11,color:"var(--sub)",marginTop:2}}>残り{daysLeft<0?"":""}{daysLeft<0?"期限切れ":"日"}</div>
-              </div>
-            )}
+          `}
+        </div>
+      </div>
+    `}
+
+    <div style=${{margin:"0 16px 10px",padding:"16px",background:"var(--card)",borderRadius:12,border:"1px solid var(--border)"}}>
+      <div style=${{fontSize:11,fontWeight:600,color:"var(--sub)",marginBottom:12}}>今日のアクション</div>
+      ${actionItems.length > 0 ? actionItems.map((item,i)=>html`
+        <button key=${i} onClick=${()=>toggleCheck(i)}
+          style=${{display:"flex",alignItems:"flex-start",gap:10,width:"100%",background:"none",border:"none",padding:"8px 0",cursor:"pointer",borderBottom:i<actionItems.length-1?"1px solid var(--border)":"none",textAlign:"left",fontFamily:"inherit"}}>
+          <div style=${{width:18,height:18,borderRadius:5,border:`1.5px solid ${checked[i]?"var(--accent)":"var(--border)"}`,background:checked[i]?"var(--accent)":"transparent",flexShrink:0,marginTop:1,display:"flex",alignItems:"center",justifyContent:"center",transition:"all .15s"}}>
+            ${checked[i]&&html`<svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M2 5l2.5 2.5L8 3" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`}
+          </div>
+          <span style=${{fontSize:14,color:checked[i]?"var(--sub)":"var(--text)",textDecoration:checked[i]?"line-through":"none",lineHeight:1.5,transition:"color .15s"}}>${item}</span>
+        </button>
+      `) : html`<div style=${{fontSize:13,color:"var(--sub)",lineHeight:1.7}}>${report?"アクション項目を取得中...":"記録を入力すると毎晩AIがアクションを提案します"}</div>`}
+    </div>
+
+    ${game && (()=>{
+      const rank = getRank(game.level);
+      return html`
+        <div style=${{margin:"0 16px 10px",padding:"16px",background:"var(--card)",borderRadius:12,border:"1px solid var(--border)"}}>
+          <div style=${{fontSize:11,fontWeight:600,color:"var(--sub)",marginBottom:12}}>成長ステータス</div>
+          <div style=${{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10}}>
+            <div style=${{display:"flex",alignItems:"baseline",gap:8}}>
+              <span style=${{fontSize:16,fontWeight:700,color:"var(--accent)"}}>Lv.${game.level}</span>
+              <span style=${{fontSize:13,color:"var(--sub)"}}>${rank.name}</span>
+            </div>
+            <span style=${{fontSize:13,fontWeight:600,color:"var(--text)"}}>${game.xp} XP</span>
+          </div>
+          <div style=${{height:4,background:"var(--border)",borderRadius:99,overflow:"hidden",marginBottom:6}}>
+            <div style=${{height:4,borderRadius:99,background:"var(--accent)",width:game.xpInLevel+"%",transition:"width .7s cubic-bezier(.4,0,.2,1)"}}/>
+          </div>
+          <div style=${{display:"flex",justifyContent:"space-between",fontSize:11,color:"var(--sub)"}}>
+            <span>${game.streak>0?`${game.streak}日連続記録中`:"記録を続けてXPを貯めよう"}</span>
+            <span>次のレベルまで ${100-game.xpInLevel} XP</span>
           </div>
         </div>
-      )}
+      `;
+    })()}
 
-      {/* 今日のアクション */}
-      <div style={{margin:"0 16px 10px",padding:"16px",background:"var(--card)",borderRadius:12,border:"1px solid var(--border)"}}>
-        <div style={{fontSize:11,fontWeight:600,color:"var(--sub)",marginBottom:12,letterSpacing:".3px"}}>今日のアクション</div>
-        {actionItems.length > 0 ? actionItems.map((item,i)=>(
-          <button key={i} onClick={()=>toggleCheck(i)}
-            style={{display:"flex",alignItems:"flex-start",gap:10,width:"100%",background:"none",border:"none",padding:"8px 0",cursor:"pointer",borderBottom:i<actionItems.length-1?"1px solid var(--border)":"none",textAlign:"left",fontFamily:"inherit"}}>
-            <div style={{width:18,height:18,borderRadius:5,border:`1.5px solid ${checked[i]?"var(--accent)":"var(--border)"}`,background:checked[i]?"var(--accent)":"transparent",flexShrink:0,marginTop:1,display:"flex",alignItems:"center",justifyContent:"center",transition:"all .15s"}}>
-              {checked[i]&&<svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M2 5l2.5 2.5L8 3" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+    <div style=${{margin:"0 16px 10px",padding:"16px",background:"var(--card)",borderRadius:12,border:"1px solid var(--border)"}}>
+      <div style=${{fontSize:11,fontWeight:600,color:"var(--sub)",marginBottom:12}}>今日の予定</div>
+      ${schedule.length===0
+        ? html`<div style=${{fontSize:13,color:"var(--sub)"}}>予定を取得中...</div>`
+        : schedule.map((ev,i)=>{
+          const hasZoom=isZoom(ev.sub||"");
+          return html`<div key=${i} style=${{display:"flex",gap:12,padding:"9px 0",borderBottom:i<schedule.length-1?"1px solid var(--border)":"none"}}>
+            <div style=${{fontSize:12,fontWeight:600,color:"var(--accent)",minWidth:38,paddingTop:1,flexShrink:0}}>${ev.time}</div>
+            <div>
+              <div style=${{fontSize:14,color:"var(--text)",fontWeight:500}}>${ev.title}</div>
+              ${hasZoom&&html`<div style=${{fontSize:11,color:"var(--sub)",marginTop:2}}>Zoomリンクあり</div>`}
+              ${ev.sub&&!hasZoom&&html`<div style=${{fontSize:11,color:"var(--sub)",marginTop:2}}>${ev.sub}</div>`}
             </div>
-            <span style={{fontSize:14,color:checked[i]?"var(--sub)":"var(--text)",textDecoration:checked[i]?"line-through":"none",lineHeight:1.5,transition:"color .15s"}}>{item}</span>
-          </button>
-        )) : (
-          <div style={{fontSize:13,color:"var(--sub)",lineHeight:1.7}}>
-            {report ? "アクション項目を取得中..." : "記録を入力すると毎晩AIがアクションを提案します"}
-          </div>
-        )}
-      </div>
-
-      {/* 成長ステータス */}
-      {game && (()=>{
-        const rank = getRank(game.level);
-        return (
-          <div style={{margin:"0 16px 10px",padding:"16px",background:"var(--card)",borderRadius:12,border:"1px solid var(--border)"}}>
-            <div style={{fontSize:11,fontWeight:600,color:"var(--sub)",marginBottom:12,letterSpacing:".3px"}}>成長ステータス</div>
-            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10}}>
-              <div style={{display:"flex",alignItems:"baseline",gap:8}}>
-                <span style={{fontSize:16,fontWeight:700,color:"var(--accent)"}}>Lv.{game.level}</span>
-                <span style={{fontSize:13,fontWeight:500,color:"var(--sub)"}}>{rank.name}</span>
-              </div>
-              <span style={{fontSize:13,fontWeight:600,color:"var(--text)"}}>{game.xp} XP</span>
-            </div>
-            <div style={{height:4,background:"var(--border)",borderRadius:99,overflow:"hidden",marginBottom:6}}>
-              <div style={{height:4,borderRadius:99,background:"var(--accent)",width:game.xpInLevel+"%",transition:"width .7s cubic-bezier(.4,0,.2,1)"}}/>
-            </div>
-            <div style={{display:"flex",justifyContent:"space-between",fontSize:11,color:"var(--sub)"}}>
-              <span>{game.streak > 0 ? `${game.streak}日連続記録中` : "記録を続けてXPを貯めよう"}</span>
-              <span>次のレベルまで {100-game.xpInLevel} XP</span>
-            </div>
-          </div>
-        );
-      })()}
-
-      {/* 今日の予定 */}
-      <div style={{margin:"0 16px 10px",padding:"16px",background:"var(--card)",borderRadius:12,border:"1px solid var(--border)"}}>
-        <div style={{fontSize:11,fontWeight:600,color:"var(--sub)",marginBottom:12,letterSpacing:".3px"}}>今日の予定</div>
-        {schedule.length === 0
-          ? <div style={{fontSize:13,color:"var(--sub)"}}>予定を取得中...</div>
-          : schedule.map((ev,i)=>{
-            const hasZoom = isZoom(ev.sub||"");
-            return (
-              <div key={i} style={{display:"flex",gap:12,padding:"9px 0",borderBottom:i<schedule.length-1?"1px solid var(--border)":"none"}}>
-                <div style={{fontSize:12,fontWeight:600,color:"var(--accent)",minWidth:38,paddingTop:1,flexShrink:0}}>{ev.time}</div>
-                <div>
-                  <div style={{fontSize:14,color:"var(--text)",fontWeight:500}}>{ev.title}</div>
-                  {hasZoom && <div style={{fontSize:11,color:"var(--sub)",marginTop:2}}>Zoomリンクあり</div>}
-                  {ev.sub && !hasZoom && <div style={{fontSize:11,color:"var(--sub)",marginTop:2}}>{ev.sub}</div>}
-                </div>
-              </div>
-            );
-          })
-        }
-      </div>
+          </div>`;
+        })
+      }
     </div>
-  );
+  </div>`;
 }
 
 // ── Log ──
@@ -536,56 +520,53 @@ function LogScreen({onToast}) {
     setSaving(false);
   };
 
-  return (
-    <div>
-      <div className="ph">
-        <div className="ph-label"><span className="ph-label-dot"/>{isToday(date)?"今日の記録":date}</div>
-        <div className="ph-title-accent">記録を入力</div>
-        <div className="date-nav">
-          <button onClick={()=>setDate(addDays(date,-1))}>‹</button>
-          <span>{isToday(date)?"今日":date}</span>
-          <button onClick={()=>setDate(addDays(date,1))} disabled={isToday(date)}>›</button>
-        </div>
+  return html`<div>
+    <div class="ph">
+      <div class="ph-title-accent">記録を入力</div>
+      <div class="date-nav">
+        <button onClick=${()=>setDate(addDays(date,-1))}>‹</button>
+        <span>${isToday(date)?"今日":date}</span>
+        <button onClick=${()=>setDate(addDays(date,1))} disabled=${isToday(date)}>›</button>
       </div>
-
-      {!isToday(date)&&logs.length===0&&<div className="empty"><div className="empty-title">記録なし</div><div className="empty-body">この日の記録はありません</div></div>}
-
-      {isToday(date)&&<>
-        <div ref={timeRef} className="time-bar">
-          {TIME_BLOCKS.map(t=><button key={t} className={"chip"+(block===t?" on":"")} onClick={()=>setBlock(t)}>{t}</button>)}
-        </div>
-        <div className="form-wrap">
-          <div className="form-grp">
-            <label className="form-lbl">何をしましたか？</label>
-            <input className="inp" placeholder="例：数学の問題演習" value={task} onChange={e=>setTask(e.target.value)} />
-          </div>
-          <div className="form-grp">
-            <label className="form-lbl">自己評価</label>
-            {EVALS.map(f=><button key={f.l} className={"eval-btn"+(focus===f.l?" "+f.c:"")} onClick={()=>setFocus(f.l)}>{f.l}</button>)}
-          </div>
-          <div className="form-grp">
-            <label className="form-lbl">メモ（任意）</label>
-            <textarea className="txa" placeholder="気づいたことや振り返り..." value={memo} onChange={e=>setMemo(e.target.value)} />
-          </div>
-          <button className="btn" onClick={save} disabled={!task.trim()||saving}>{saving?<span className="spin"/>:"保存する"}</button>
-        </div>
-      </>}
-
-      {logs.length>0&&(
-        <div className="card" style={{marginBottom:24}}>
-          <div className="card-label">{isToday(date)?"本日の記録":date+" の記録"}</div>
-          {logs.map((l,i)=>{
-            const num=l.focus_level?.charAt(0);
-            return <div key={i} className="log-row">
-              <div className="log-time">{l.time_block}</div>
-              <div><div className="log-task">{l.task}</div>
-              <div className="log-meta"><span className="dot" style={{background:DOT[num]||"var(--sub)"}}/>{l.focus_level}{l.memo?` · ${l.memo}`:""}</div></div>
-            </div>;
-          })}
-        </div>
-      )}
     </div>
-  );
+
+    ${!isToday(date)&&logs.length===0&&html`<div class="empty"><div class="empty-title">記録なし</div><div class="empty-body">この日の記録はありません</div></div>`}
+
+    ${isToday(date)&&html`<div>
+      <div ref=${timeRef} class="time-bar">
+        ${TIME_BLOCKS.map(t=>html`<button key=${t} class=${"chip"+(block===t?" on":"")} onClick=${()=>setBlock(t)}>${t}</button>`)}
+      </div>
+      <div class="form-wrap">
+        <div class="form-grp">
+          <label class="form-lbl">何をしましたか？</label>
+          <input class="inp" placeholder="例：数学の問題演習" value=${task} onChange=${e=>setTask(e.target.value)} />
+        </div>
+        <div class="form-grp">
+          <label class="form-lbl">自己評価</label>
+          ${EVALS.map(f=>html`<button key=${f.l} class=${"eval-btn"+(focus===f.l?" "+f.c:"")} onClick=${()=>setFocus(f.l)}>${f.l}</button>`)}
+        </div>
+        <div class="form-grp">
+          <label class="form-lbl">メモ（任意）</label>
+          <textarea class="txa" placeholder="気づいたことや振り返り..." value=${memo} onChange=${e=>setMemo(e.target.value)} />
+        </div>
+        <button class="btn" onClick=${save} disabled=${!task.trim()||saving}>${saving?html`<span class="spin"/>`:  "保存する"}</button>
+      </div>
+    </div>`}
+
+    ${logs.length>0&&html`
+      <div class="card" style=${{marginBottom:24}}>
+        <div class="card-label">${isToday(date)?"本日の記録":date+" の記録"}</div>
+        ${logs.map((l,i)=>{
+          const num=l.focus_level?.charAt(0);
+          return html`<div key=${i} class="log-row">
+            <div class="log-time">${l.time_block}</div>
+            <div><div class="log-task">${l.task}</div>
+            <div class="log-meta"><span class="dot" style=${{background:DOT[num]||"var(--sub)"}}/>${l.focus_level}${l.memo?` · ${l.memo}`:""}</div></div>
+          </div>`;
+        })}
+      </div>
+    `}
+  </div>`;
 }
 
 // ── Report ──
@@ -603,53 +584,51 @@ function ReportScreen() {
     });
   },[date]);
 
-  const Nav=()=>(
-    <div className="date-nav">
-      <button onClick={()=>setDate(addDays(date,-1))}>‹</button>
-      <span>{isToday(date)?"今日":date}</span>
-      <button onClick={()=>setDate(addDays(date,1))} disabled={isToday(date)}>›</button>
+  const Nav=()=>html`
+    <div class="date-nav">
+      <button onClick=${()=>setDate(addDays(date,-1))}>‹</button>
+      <span>${isToday(date)?"今日":date}</span>
+      <button onClick=${()=>setDate(addDays(date,1))} disabled=${isToday(date)}>›</button>
     </div>
-  );
+  `;
 
-  if(loading) return <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:300}}><div className="spin" style={{borderColor:"var(--border)",borderTopColor:"var(--accent)",width:28,height:28,borderWidth:2}}/></div>;
+  if(loading) return html`<div style=${{display:"flex",alignItems:"center",justifyContent:"center",height:300}}><div class="spin" style=${{borderColor:"var(--border)",borderTopColor:"var(--accent)",width:28,height:28,borderWidth:2}}/></div>`;
 
-  if(!report) return <div><div className="ph"><div className="ph-title">レポート</div><Nav/></div><div className="empty"><div style={{fontSize:32,color:"var(--border)",marginBottom:16}}>○</div><div className="empty-title">レポートはまだありません</div><div className="empty-body">ログを入力すると<br/>毎晩21時にAIがレポートを生成します</div></div></div>;
+  if(!report) return html`<div><div class="ph"><div class="ph-title">レポート</div><${Nav}/></div><div class="empty"><div style=${{fontSize:32,color:"var(--border)",marginBottom:16}}>○</div><div class="empty-title">レポートはまだありません</div><div class="empty-body">ログを入力すると<br/>毎晩21時にAIがレポートを生成します</div></div></div>`;
 
-  return (
-    <div>
-      <div className="report-hero">
-        <div className="report-date">{isToday(date)?"TODAY":date}</div>
-        <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:12}}>
-          <button onClick={()=>setDate(addDays(date,-1))} style={{background:"none",border:"none",fontSize:22,cursor:"pointer",color:"var(--sub)",padding:"0 4px"}}>‹</button>
-          <div className="report-score">{report.score}</div>
-          <button onClick={()=>setDate(addDays(date,1))} disabled={isToday(date)} style={{background:"none",border:"none",fontSize:22,cursor:"pointer",color:isToday(date)?"var(--border)":"var(--sub)",padding:"0 4px"}}>›</button>
-        </div>
-        <div className="report-pts">/ 100点</div>
+  return html`<div>
+    <div class="report-hero">
+      <div class="report-date">${isToday(date)?"TODAY":date}</div>
+      <div style=${{display:"flex",alignItems:"center",justifyContent:"center",gap:12}}>
+        <button onClick=${()=>setDate(addDays(date,-1))} style=${{background:"none",border:"none",fontSize:22,cursor:"pointer",color:"var(--sub)",padding:"0 4px"}}>‹</button>
+        <div class="report-score">${report.score}</div>
+        <button onClick=${()=>setDate(addDays(date,1))} disabled=${isToday(date)} style=${{background:"none",border:"none",fontSize:22,cursor:"pointer",color:isToday(date)?"var(--border)":"var(--sub)",padding:"0 4px"}}>›</button>
       </div>
-
-      <div className="card">
-        <div className="card-label">フィードバック</div>
-        <p style={{fontSize:14,lineHeight:1.8,color:"var(--text)"}}>{report.feedback}</p>
-      </div>
-      <div className="card">
-        {report.highlights&&<div style={{marginBottom:12}}><span className="tag t-g">良かった点</span><p style={{fontSize:13,color:"var(--sub)",marginTop:7,lineHeight:1.6}}>{report.highlights}</p></div>}
-        {report.improvement&&<div><span className="tag t-a">改善点</span><p style={{fontSize:13,color:"var(--sub)",marginTop:7,lineHeight:1.6}}>{report.improvement}</p></div>}
-      </div>
-      {report.action&&<div className="card"><div className="card-label">明日のアクション</div><p style={{fontSize:14,lineHeight:1.8,color:"var(--text)"}}>{report.action}</p></div>}
-      {logs.length>0&&(
-        <div className="card" style={{marginBottom:24}}>
-          <div className="card-label">時間ログ</div>
-          {logs.map((l,i)=>{
-            const num=l.focus_level?.charAt(0);
-            return <div key={i} className="log-row">
-              <div className="log-time">{l.time_block}</div>
-              <div><div className="log-task">{l.task}</div><div className="log-meta"><span className="dot" style={{background:DOT[num]||"var(--sub)"}}/>{l.focus_level}{l.memo?` · ${l.memo}`:""}</div></div>
-            </div>;
-          })}
-        </div>
-      )}
+      <div class="report-pts">/ 100点</div>
     </div>
-  );
+
+    <div class="card">
+      <div class="card-label">フィードバック</div>
+      <p style=${{fontSize:14,lineHeight:1.8,color:"var(--text)"}}>${report.feedback}</p>
+    </div>
+    <div class="card">
+      ${report.highlights&&html`<div style=${{marginBottom:12}}><span class="tag t-g">良かった点</span><p style=${{fontSize:13,color:"var(--sub)",marginTop:7,lineHeight:1.6}}>${report.highlights}</p></div>`}
+      ${report.improvement&&html`<div><span class="tag t-a">改善点</span><p style=${{fontSize:13,color:"var(--sub)",marginTop:7,lineHeight:1.6}}>${report.improvement}</p></div>`}
+    </div>
+    ${report.action&&html`<div class="card"><div class="card-label">明日のアクション</div><p style=${{fontSize:14,lineHeight:1.8,color:"var(--text)"}}>${report.action}</p></div>`}
+    ${logs.length>0&&html`
+      <div class="card" style=${{marginBottom:24}}>
+        <div class="card-label">時間ログ</div>
+        ${logs.map((l,i)=>{
+          const num=l.focus_level?.charAt(0);
+          return html`<div key=${i} class="log-row">
+            <div class="log-time">${l.time_block}</div>
+            <div><div class="log-task">${l.task}</div><div class="log-meta"><span class="dot" style=${{background:DOT[num]||"var(--sub)"}}/>${l.focus_level}${l.memo?` · ${l.memo}`:""}</div></div>
+          </div>`;
+        })}
+      </div>
+    `}
+  </div>`;
 }
 
 // ── Chat ──
@@ -673,36 +652,36 @@ function ChatScreen({onToast}) {
   };
   const onKey=e=>{ if(e.key==="Enter"&&!e.shiftKey&&!compRef.current){e.preventDefault();send();} };
   const fmtT=ts=>{ try{const d=new Date(ts.replace(" ","T"));return isNaN(d)?ts:d.toLocaleTimeString("ja-JP",{hour:"2-digit",minute:"2-digit"});}catch{return ts;} };
-  return (
-    <div style={{display:"flex",flexDirection:"column",height:"100%"}}>
-      <div className="chat-head">
-        <div className="chat-av">{(CURRENT_USER.coachName||"?").charAt(0)}</div>
-        <div><div className="chat-name">{CURRENT_USER.coachName}</div><div className="chat-status">コーチ</div></div>
+  return html`
+    <div style=${{display:"flex",flexDirection:"column",height:"100%"}}>
+      <div class="chat-head">
+        <div class="chat-av">${(CURRENT_USER.coachName||"?").charAt(0)}</div>
+        <div><div class="chat-name">${CURRENT_USER.coachName}</div><div class="chat-status">コーチ</div></div>
       </div>
-      <div className="msgs" style={{flex:1,overflowY:"auto"}}>
-        {msgs.length===0&&<div style={{textAlign:"center",color:"var(--sub)",fontSize:13,marginTop:40}}>メッセージはまだありません</div>}
-        {msgs.map(m=>{
+      <div class="msgs" style=${{flex:1,overflowY:"auto"}}>
+        ${msgs.length===0&&html`<div style=${{textAlign:"center",color:"var(--sub)",fontSize:13,marginTop:40}}>メッセージはまだありません</div>`}
+        ${msgs.map(m=>{
           const me=m.sender_role==="student";
-          return <div key={m.message_id} style={{alignSelf:me?"flex-end":"flex-start",maxWidth:"75%",display:"flex",flexDirection:"column",alignItems:me?"flex-end":"flex-start"}}>
-            {!me&&<div style={{fontSize:11,color:"var(--sub)",marginBottom:3,paddingLeft:2}}>{m.sender_name}</div>}
-            <div className={"bubble "+(me?"b-out":"b-in")}>{m.content}</div>
-            <div className={"btime"+(me?" btime-r":"")}>{fmtT(m.timestamp)}</div>
-          </div>;
+          return html`<div key=${m.message_id} style=${{alignSelf:me?"flex-end":"flex-start",maxWidth:"75%",display:"flex",flexDirection:"column",alignItems:me?"flex-end":"flex-start"}}>
+            ${!me&&html`<div style=${{fontSize:11,color:"var(--sub)",marginBottom:3,paddingLeft:2}}>${m.sender_name}</div>`}
+            <div class=${"bubble "+(me?"b-out":"b-in")}>${m.content}</div>
+            <div class=${"btime"+(me?" btime-r":"")}>${fmtT(m.timestamp)}</div>
+          </div>`;
         })}
-        <div ref={bottomRef}/>
+        <div ref=${bottomRef}/>
       </div>
-      <div className="chat-bar">
-        <textarea ref={inputRef} className="chat-inp" placeholder="メッセージを入力..." rows={1} value={input}
-          onChange={e=>setInput(e.target.value)}
-          onCompositionStart={()=>{compRef.current=true;}}
-          onCompositionEnd={()=>{compRef.current=false;}}
-          onKeyDown={onKey}/>
-        <button className="send" onClick={send} disabled={!input.trim()||sending}>
-          {sending?<span className="spin" style={{width:14,height:14,borderWidth:2}}/>:<S n="up" s={17}/>}
+      <div class="chat-bar">
+        <textarea ref=${inputRef} class="chat-inp" placeholder="メッセージを入力..." rows="1" value=${input}
+          onChange=${e=>setInput(e.target.value)}
+          onCompositionStart=${()=>{compRef.current=true;}}
+          onCompositionEnd=${()=>{compRef.current=false;}}
+          onKeyDown=${onKey}/>
+        <button class="send" onClick=${send} disabled=${!input.trim()||sending}>
+          ${sending?html`<span class="spin" style=${{width:14,height:14,borderWidth:2}}/>`:html`<${S} n="up" s=${17}/>`}
         </button>
       </div>
     </div>
-  );
+  `;
 }
 
 // ── Settings ──
@@ -737,69 +716,63 @@ function SettingsScreen({onToast,onLogout,onGoalSaved}) {
     {rank:"覚醒",lv:"Lv.16+",color:"#C044E0"},
   ];
 
-  return (
-    <div>
-      <div className="ph"><div className="ph-title-accent">設定</div></div>
-      <div style={{padding:"0 16px"}}>
+  return html`<div>
+    <div class="ph"><div class="ph-title-accent">設定</div></div>
+    <div style=${{padding:"0 16px"}}>
 
-        {/* 目標設定 */}
-        <div className="card">
-          <div className="card-label">目標・期限</div>
-          <div className="form-grp" style={{marginBottom:12}}>
-            <label className="form-lbl">目標</label>
-            <textarea className="txa" placeholder="例：英検2級に合格する" value={goal} onChange={e=>setGoal(e.target.value)} style={{height:72}}/>
-          </div>
-          <div className="form-grp" style={{marginBottom:14}}>
-            <label className="form-lbl">達成期限</label>
-            <input type="date" className="inp" value={deadline} onChange={e=>setDeadline(e.target.value)}/>
-          </div>
-          <button className="btn" onClick={saveGoal}>目標を保存する</button>
+      <div class="card">
+        <div class="card-label">目標・期限</div>
+        <div class="form-grp" style=${{marginBottom:12}}>
+          <label class="form-lbl">目標</label>
+          <textarea class="txa" placeholder="例：英検2級に合格する" value=${goal} onChange=${e=>setGoal(e.target.value)} style=${{height:72}}/>
         </div>
-
-        {/* 階級・XPルール */}
-        <div className="card" style={{marginTop:12}}>
-          <div className="card-label">階級システム</div>
-          <p style={{fontSize:12,color:"var(--sub)",lineHeight:1.7,marginBottom:14}}>
-            記録を積み重ねるとXPが貯まりレベルアップ。<br/>
-            記録した日は <b style={{color:"var(--accent)"}}>+10〜25 XP</b>、メモを書くと +5 XP 追加。<br/>
-            <b style={{color:"var(--red)"}}>記録なしの日は −15 XP</b>、2日連続で −30 XP。<br/>
-            ストリーク（連続記録）で XP 増加ボーナスあり。
-          </p>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6}}>
-            {RANK_RULES.map(r=>(
-              <div key={r.rank} style={{display:"flex",alignItems:"center",gap:7,padding:"7px 10px",borderRadius:8,background:r.color+"18",border:`1px solid ${r.color}30`}}>
-                <div style={{width:7,height:7,borderRadius:"50%",background:r.color,flexShrink:0}}/>
-                <div>
-                  <div style={{fontSize:12,fontWeight:700,color:r.color}}>{r.rank}</div>
-                  <div style={{fontSize:10,color:"var(--sub)"}}>{r.lv}</div>
-                </div>
-              </div>
-            ))}
-          </div>
+        <div class="form-grp" style=${{marginBottom:14}}>
+          <label class="form-lbl">達成期限</label>
+          <input type="date" class="inp" value=${deadline} onChange=${e=>setDeadline(e.target.value)}/>
         </div>
-
-        {/* LINE通知 */}
-        <div className="card" style={{marginTop:12}}>
-          <div className="card-label">LINE通知時間</div>
-          <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:14}}>
-            <div style={{flex:1}}><div style={{fontSize:11,color:"var(--sub)",marginBottom:6,fontWeight:600}}>開始</div><select value={start} onChange={e=>setStart(Number(e.target.value))}>{hours.map(h=><option key={h} value={h}>{String(h).padStart(2,"0")}:00</option>)}</select></div>
-            <div style={{color:"var(--sub)",marginTop:18,fontSize:14}}>〜</div>
-            <div style={{flex:1}}><div style={{fontSize:11,color:"var(--sub)",marginBottom:6,fontWeight:600}}>終了</div><select value={end} onChange={e=>setEnd(Number(e.target.value))}>{hours.map(h=><option key={h} value={h}>{String(h).padStart(2,"0")}:00</option>)}</select></div>
-          </div>
-          <div style={{fontSize:11,color:"var(--sub)",marginBottom:14,lineHeight:1.7}}>設定した時間帯に毎時リマインドが届きます</div>
-          <button className="btn" onClick={saveNotify}>保存する</button>
-        </div>
-
-        {/* アカウント */}
-        <div className="card" style={{marginTop:12}}>
-          <div className="card-label">アカウント</div>
-          <div className="s-row"><span className="s-k">名前</span><span className="s-v">{CURRENT_USER.name}</span></div>
-          <div className="s-row"><span className="s-k">メール</span><span style={{fontSize:12,color:"var(--sub)"}}>{CURRENT_USER.email}</span></div>
-        </div>
-        <div style={{marginTop:12,marginBottom:32}}><button className="btn-g" onClick={onLogout}>ログアウト</button></div>
+        <button class="btn" onClick=${saveGoal}>目標を保存する</button>
       </div>
+
+      <div class="card" style=${{marginTop:12}}>
+        <div class="card-label">階級システム</div>
+        <p style=${{fontSize:12,color:"var(--sub)",lineHeight:1.7,marginBottom:14}}>
+          記録を積み重ねるとXPが貯まりレベルアップ。<br/>
+          記録した日は <b style=${{color:"var(--accent)"}}>+10〜25 XP</b>、メモを書くと +5 XP 追加。<br/>
+          <b style=${{color:"var(--red)"}}>記録なしの日は −15 XP</b>、2日連続で −30 XP。<br/>
+          ストリーク（連続記録）で XP 増加ボーナスあり。
+        </p>
+        <div style=${{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6}}>
+          ${RANK_RULES.map(r=>html`
+            <div key=${r.rank} style=${{display:"flex",alignItems:"center",gap:7,padding:"7px 10px",borderRadius:8,background:r.color+"18",border:`1px solid ${r.color}30`}}>
+              <div style=${{width:7,height:7,borderRadius:"50%",background:r.color,flexShrink:0}}/>
+              <div>
+                <div style=${{fontSize:12,fontWeight:700,color:r.color}}>${r.rank}</div>
+                <div style=${{fontSize:10,color:"var(--sub)"}}>${r.lv}</div>
+              </div>
+            </div>
+          `)}
+        </div>
+      </div>
+
+      <div class="card" style=${{marginTop:12}}>
+        <div class="card-label">LINE通知時間</div>
+        <div style=${{display:"flex",alignItems:"center",gap:12,marginBottom:14}}>
+          <div style=${{flex:1}}><div style=${{fontSize:11,color:"var(--sub)",marginBottom:6}}>開始</div><select value=${start} onChange=${e=>setStart(Number(e.target.value))}>${hours.map(h=>html`<option key=${h} value=${h}>${String(h).padStart(2,"0")}:00</option>`)}</select></div>
+          <div style=${{color:"var(--sub)",marginTop:18,fontSize:14}}>〜</div>
+          <div style=${{flex:1}}><div style=${{fontSize:11,color:"var(--sub)",marginBottom:6}}>終了</div><select value=${end} onChange=${e=>setEnd(Number(e.target.value))}>${hours.map(h=>html`<option key=${h} value=${h}>${String(h).padStart(2,"0")}:00</option>`)}</select></div>
+        </div>
+        <div style=${{fontSize:11,color:"var(--sub)",marginBottom:14,lineHeight:1.7}}>設定した時間帯に毎時リマインドが届きます</div>
+        <button class="btn" onClick=${saveNotify}>保存する</button>
+      </div>
+
+      <div class="card" style=${{marginTop:12}}>
+        <div class="card-label">アカウント</div>
+        <div class="s-row"><span class="s-k">名前</span><span class="s-v">${CURRENT_USER.name}</span></div>
+        <div class="s-row"><span class="s-k">メール</span><span style=${{fontSize:12,color:"var(--sub)"}}>${CURRENT_USER.email}</span></div>
+      </div>
+      <div style=${{marginTop:12,marginBottom:32}}><button class="btn-g" onClick=${onLogout}>ログアウト</button></div>
     </div>
-  );
+  </div>`;
 }
 
 const TABS=[{id:"home",l:"ホーム",n:"home"},{id:"log",l:"記録",n:"clock"},{id:"report",l:"レポート",n:"chart"},{id:"chat",l:"チャット",n:"chat"},{id:"settings",l:"設定",n:"gear"}];
@@ -853,43 +826,43 @@ function LoginScreen({onLogin}) {
     setLoading(false);
   };
 
-  if(step==="register") return (
-    <div className="login-wrap" style={{justifyContent:"flex-start",paddingTop:48}}>
-      <div className="login-logo"><S n="clock" s={26}/></div>
-      <div className="login-title">はじめまして</div>
-      <div className="login-sub" style={{marginBottom:24}}>プロフィールを入力してください</div>
-      <div className="login-box" style={{gap:10}}>
+  if(step==="register") return html`
+    <div class="login-wrap" style=${{justifyContent:"flex-start",paddingTop:48}}>
+      <div class="login-logo"><${S} n="clock" s=${26}/></div>
+      <div class="login-title">はじめまして</div>
+      <div class="login-sub" style=${{marginBottom:24}}>プロフィールを入力してください</div>
+      <div class="login-box">
         <div>
-          <div style={{fontSize:11,fontWeight:600,color:"var(--sub)",marginBottom:5}}>名前 *</div>
-          <input className="login-inp" placeholder="例：山田 花子" value={name} onChange={e=>setName(e.target.value)}/>
+          <div style=${{fontSize:11,color:"var(--sub)",marginBottom:5}}>名前 *</div>
+          <input class="login-inp" placeholder="例：山田 花子" value=${name} onChange=${e=>setName(e.target.value)}/>
         </div>
         <div>
-          <div style={{fontSize:11,fontWeight:600,color:"var(--sub)",marginBottom:5}}>目標（任意）</div>
-          <textarea className="txa" placeholder="例：英検2級に合格する" value={goal} onChange={e=>setGoal(e.target.value)} style={{height:68}}/>
+          <div style=${{fontSize:11,color:"var(--sub)",marginBottom:5}}>目標（任意）</div>
+          <textarea class="txa" placeholder="例：英検2級に合格する" value=${goal} onChange=${e=>setGoal(e.target.value)} style=${{height:68}}/>
         </div>
         <div>
-          <div style={{fontSize:11,fontWeight:600,color:"var(--sub)",marginBottom:5}}>目標の期限（任意）</div>
-          <input type="date" className="login-inp" value={deadline} onChange={e=>setDeadline(e.target.value)}/>
+          <div style=${{fontSize:11,color:"var(--sub)",marginBottom:5}}>目標の期限（任意）</div>
+          <input type="date" class="login-inp" value=${deadline} onChange=${e=>setDeadline(e.target.value)}/>
         </div>
-        {error&&<div className="login-err">{error}</div>}
-        <button className="btn" onClick={register} disabled={loading||!name.trim()}>{loading?"登録中...":"登録してはじめる"}</button>
-        <button style={{background:"none",border:"none",color:"var(--sub)",fontSize:13,cursor:"pointer",marginTop:4}} onClick={()=>{setStep("email");setError("");}}>← メールアドレスに戻る</button>
+        ${error&&html`<div class="login-err">${error}</div>`}
+        <button class="btn" onClick=${register} disabled=${loading||!name.trim()}>${loading?"登録中...":"登録してはじめる"}</button>
+        <button style=${{background:"none",border:"none",color:"var(--sub)",fontSize:13,cursor:"pointer",marginTop:4}} onClick=${()=>{setStep("email");setError("");}}>← メールアドレスに戻る</button>
       </div>
     </div>
-  );
+  `;
 
-  return (
-    <div className="login-wrap">
-      <div className="login-logo"><S n="clock" s={26}/></div>
-      <div className="login-title">JIROKU</div>
-      <div className="login-sub">時間を記録し、目標を達成する</div>
-      <div className="login-box">
-        <input type="email" className="login-inp" placeholder="メールアドレス" value={email} onChange={e=>setEmail(e.target.value)} onKeyDown={e=>e.key==="Enter"&&checkEmail()}/>
-        {error&&<div className="login-err">{error}</div>}
-        <button className="btn" onClick={checkEmail} disabled={loading}>{loading?"確認中...":"次へ"}</button>
+  return html`
+    <div class="login-wrap">
+      <div class="login-logo"><${S} n="clock" s=${26}/></div>
+      <div class="login-title">JIROKU</div>
+      <div class="login-sub">時間を記録し、目標を達成する</div>
+      <div class="login-box">
+        <input type="email" class="login-inp" placeholder="メールアドレス" value=${email} onChange=${e=>setEmail(e.target.value)} onKeyDown=${e=>e.key==="Enter"&&checkEmail()}/>
+        ${error&&html`<div class="login-err">${error}</div>`}
+        <button class="btn" onClick=${checkEmail} disabled=${loading}>${loading?"確認中...":"次へ"}</button>
       </div>
     </div>
-  );
+  `;
 }
 
 function App() {
@@ -898,28 +871,28 @@ function App() {
   const [toast,setToast]=useState(null);
   const [goalData,setGoalData]=useState(()=>JSON.parse(localStorage.getItem("jiroku_goal")||'{"goal":"","deadline":""}'));
   const logout=()=>{localStorage.removeItem("edventure_user");CURRENT_USER=null;setUser(null);};
-  if(!user) return <LoginScreen onLogin={setUser}/>;
-  return (
-    <div style={{height:"100%",position:"relative"}}>
-      <div className="screen">
-        {tab==="home"&&<HomeScreen goalData={goalData} onGoalSaved={setGoalData}/>}
-        {tab==="log"&&<LogScreen onToast={setToast}/>}
-        {tab==="report"&&<ReportScreen/>}
-        {tab==="chat"&&<ChatScreen onToast={setToast}/>}
-        {tab==="settings"&&<SettingsScreen onToast={setToast} onLogout={logout} onGoalSaved={setGoalData}/>}
+  if(!user) return html`<${LoginScreen} onLogin=${setUser}/>`;
+  return html`
+    <div style=${{height:"100%",position:"relative"}}>
+      <div class="screen">
+        ${tab==="home"&&html`<${HomeScreen} goalData=${goalData} onGoalSaved=${setGoalData}/>`}
+        ${tab==="log"&&html`<${LogScreen} onToast=${setToast}/>`}
+        ${tab==="report"&&html`<${ReportScreen}/>`}
+        ${tab==="chat"&&html`<${ChatScreen} onToast=${setToast}/>`}
+        ${tab==="settings"&&html`<${SettingsScreen} onToast=${setToast} onLogout=${logout} onGoalSaved=${setGoalData}/>`}
       </div>
-      <nav className="nav">
-        {TABS.map(t=>(
-          <button key={t.id} className={"nav-btn"+(tab===t.id?" on":"")} onClick={()=>setTab(t.id)}>
-            <S n={t.n} s={20}/><span className="nav-lbl">{t.l}</span>
+      <nav class="nav">
+        ${TABS.map(t=>html`
+          <button key=${t.id} class=${"nav-btn"+(tab===t.id?" on":"")} onClick=${()=>setTab(t.id)}>
+            <${S} n=${t.n} s=${20}/><span class="nav-lbl">${t.l}</span>
           </button>
-        ))}
+        `)}
       </nav>
-      {toast&&<Toast msg={toast} onDone={()=>setToast(null)}/>}
+      ${toast&&html`<${Toast} msg=${toast} onDone=${()=>setToast(null)}/>`}
     </div>
-  );
+  `;
 }
-ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+ReactDOM.createRoot(document.getElementById("root")).render(html`<${App}/>`);
 if('serviceWorker' in navigator){navigator.serviceWorker.register('sw.js');}
 </script>
 </body>
