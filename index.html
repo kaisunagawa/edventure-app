@@ -6,9 +6,9 @@
   <title>JIROKU</title>
   <link rel="manifest" href="manifest.json" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
-  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="apple-mobile-web-app-title" content="JIROKU" />
-  <meta name="theme-color" content="#111827" />
+  <meta name="theme-color" content="#0C0C0F" />
   <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -16,17 +16,19 @@
     * { box-sizing: border-box; margin: 0; padding: 0; }
 
     :root {
-      --primary: #111827;
-      --primary-dark: #000000;
-      --bg: #F9FAFB;
-      --bg-card: #FFFFFF;
-      --text: #111827;
-      --text-sub: #9CA3AF;
-      --border: #E5E7EB;
-      --success: #374151;
-      --warning: #6B7280;
-      --danger: #374151;
-      --nav-h: 60px;
+      --bg:        #0C0C0F;
+      --bg-card:   #16161D;
+      --bg-raised: #1E1E28;
+      --border:    #2A2A38;
+      --text:      #F0F0F5;
+      --text-sub:  #6B6B80;
+      --accent:    #7C6FF7;
+      --accent2:   #A78BFA;
+      --glow:      rgba(124,111,247,.25);
+      --green:     #34D399;
+      --amber:     #FBBF24;
+      --red:       #F87171;
+      --nav-h:     60px;
       --safe-bottom: env(safe-area-inset-bottom, 0px);
     }
 
@@ -41,8 +43,6 @@
     #root {
       height: 100%;
       width: 100%;
-      max-width: 100%;
-      margin: 0 auto;
       position: relative;
       background: var(--bg);
       overflow: hidden;
@@ -56,384 +56,362 @@
       -webkit-overflow-scrolling: touch;
     }
 
-    /* ─── Nav ─── */
+    /* ── Nav ── */
     .nav {
       position: absolute;
-      bottom: 0;
-      left: 0; right: 0;
+      bottom: 0; left: 0; right: 0;
       height: calc(var(--nav-h) + var(--safe-bottom));
-      background: #fff;
+      background: rgba(12,12,15,.85);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
       border-top: 1px solid var(--border);
       display: flex;
       padding-bottom: var(--safe-bottom);
     }
     .nav-item {
-      flex: 1;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      gap: 3px;
-      cursor: pointer;
-      border: none;
-      background: none;
-      padding: 8px 0 4px;
-      -webkit-tap-highlight-color: transparent;
-      transition: opacity .15s;
+      flex: 1; display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      gap: 4px; cursor: pointer; border: none; background: none;
       color: var(--text-sub);
+      -webkit-tap-highlight-color: transparent;
+      transition: color .2s;
     }
-    .nav-item:active { opacity: .6; }
-    .nav-item.active { color: var(--primary); }
-    .nav-label { font-size: 10px; font-weight: 500; }
+    .nav-item.active { color: var(--accent); }
+    .nav-label { font-size: 10px; font-weight: 500; letter-spacing: .3px; }
 
-    /* ─── Header ─── */
+    /* ── Header ── */
     .header {
-      background: #fff;
-      border-bottom: 1px solid var(--border);
-      padding: 16px 20px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
+      padding: 20px 20px 16px;
+      background: var(--bg);
     }
-    .header-title { font-size: 17px; font-weight: 700; color: var(--text); }
-    .header-sub { font-size: 12px; color: var(--text-sub); margin-top: 2px; }
+    .header-title { font-size: 22px; font-weight: 800; color: var(--text); letter-spacing: -.3px; }
+    .header-sub { font-size: 12px; color: var(--text-sub); margin-top: 3px; }
 
-    /* ─── Cards ─── */
+    /* ── Card ── */
     .card {
       background: var(--bg-card);
-      border-radius: 12px;
+      border-radius: 16px;
       padding: 16px;
-      margin: 12px 16px 0;
+      margin: 0 16px 12px;
       border: 1px solid var(--border);
     }
-    .card-title {
-      font-size: 11px;
-      font-weight: 600;
-      color: var(--text-sub);
-      text-transform: uppercase;
-      letter-spacing: .6px;
+    .card-label {
+      font-size: 10px; font-weight: 700; letter-spacing: 1px;
+      text-transform: uppercase; color: var(--text-sub);
       margin-bottom: 12px;
     }
 
-    /* ─── Score Circle ─── */
-    .score-wrap { display: flex; align-items: center; gap: 16px; }
-    .score-circle {
-      width: 72px; height: 72px;
+    /* ── Stat row ── */
+    .stat-row { display: flex; gap: 10px; margin: 0 16px 12px; }
+    .stat-box {
+      flex: 1; background: var(--bg-card); border: 1px solid var(--border);
+      border-radius: 14px; padding: 14px 12px; text-align: center;
+    }
+    .stat-val { font-size: 24px; font-weight: 800; color: var(--text); line-height: 1; }
+    .stat-lbl { font-size: 10px; color: var(--text-sub); margin-top: 4px; letter-spacing: .3px; }
+
+    /* ── Streak glow ── */
+    .streak-box {
+      background: linear-gradient(135deg, #1a1000, #221500);
+      border-color: #3D2D00;
+    }
+    .streak-box .stat-val { color: var(--amber); }
+
+    /* ── XP bar ── */
+    .xp-track {
+      height: 4px; background: var(--border); border-radius: 99px;
+      overflow: hidden; margin-top: 10px;
+    }
+    .xp-fill {
+      height: 4px; border-radius: 99px;
+      background: linear-gradient(90deg, var(--accent), var(--accent2));
+      transition: width .6s cubic-bezier(.4,0,.2,1);
+    }
+
+    /* ── Schedule ── */
+    .sched-row {
+      display: flex; align-items: flex-start; gap: 12px;
+      padding: 10px 0; border-bottom: 1px solid var(--border);
+    }
+    .sched-row:last-child { border-bottom: none; }
+    .sched-time { font-size: 11px; font-weight: 700; color: var(--accent2); min-width: 40px; padding-top: 1px; }
+    .sched-title { font-size: 14px; font-weight: 500; }
+    .sched-sub { font-size: 11px; color: var(--text-sub); margin-top: 2px; }
+
+    /* ── Score ring ── */
+    .ring-wrap { display: flex; align-items: center; gap: 16px; }
+    .ring {
+      width: 68px; height: 68px; flex-shrink: 0;
       border-radius: 50%;
-      background: conic-gradient(var(--primary) calc(var(--pct) * 1%), var(--border) 0);
+      background: conic-gradient(var(--accent) calc(var(--pct)*1%), var(--border) 0);
       display: flex; align-items: center; justify-content: center;
-      flex-shrink: 0;
     }
-    .score-inner {
-      width: 56px; height: 56px;
-      border-radius: 50%;
-      background: #fff;
-      display: flex; align-items: center; justify-content: center;
-      flex-direction: column;
+    .ring-inner {
+      width: 52px; height: 52px; border-radius: 50%;
+      background: var(--bg-card);
+      display: flex; align-items: center; justify-content: center; flex-direction: column;
     }
-    .score-num { font-size: 20px; font-weight: 800; color: var(--text); line-height: 1; }
-    .score-unit { font-size: 9px; color: var(--text-sub); }
-    .score-text { flex: 1; }
-    .score-label { font-size: 14px; font-weight: 700; margin-bottom: 4px; }
-    .score-comment { font-size: 13px; color: var(--text-sub); line-height: 1.5; }
+    .ring-num { font-size: 18px; font-weight: 800; color: var(--text); line-height: 1; }
+    .ring-unit { font-size: 9px; color: var(--text-sub); }
 
-    /* ─── Schedule list ─── */
-    .schedule-item {
-      display: flex;
-      align-items: flex-start;
-      gap: 12px;
-      padding: 10px 0;
+    /* ── Section sub-header ── */
+    .section-top {
+      padding: 20px 20px 8px;
+      background: var(--bg);
+    }
+    .section-top h2 { font-size: 17px; font-weight: 700; color: var(--text); }
+
+    /* ── Time chips ── */
+    .time-bar {
+      display: flex; gap: 6px; overflow-x: auto; padding: 12px 16px;
+      scrollbar-width: none; background: var(--bg);
       border-bottom: 1px solid var(--border);
     }
-    .schedule-item:last-child { border-bottom: none; }
-    .schedule-time { font-size: 12px; font-weight: 600; color: var(--primary); min-width: 44px; padding-top: 1px; }
-    .schedule-ev { font-size: 14px; font-weight: 500; }
-    .schedule-ev-sub { font-size: 12px; color: var(--text-sub); margin-top: 2px; }
-
-    /* ─── Log Form ─── */
-    .form-header {
-      background: #fff;
-      border-bottom: 1px solid var(--border);
-      padding: 16px 20px;
-    }
-    .form-header h2 { font-size: 17px; font-weight: 700; color: var(--text); }
-    .form-header p { font-size: 12px; color: var(--text-sub); margin-top: 4px; }
-
-    .time-selector {
-      display: flex;
-      gap: 8px;
-      overflow-x: auto;
-      padding: 12px 16px 4px;
-      -webkit-overflow-scrolling: touch;
-      scrollbar-width: none;
-      background: #fff;
-      border-bottom: 1px solid var(--border);
-    }
-    .time-selector::-webkit-scrollbar { display: none; }
-    .time-chip {
-      flex-shrink: 0;
-      padding: 6px 12px;
-      border-radius: 6px;
-      font-size: 12px;
-      font-weight: 500;
-      cursor: pointer;
-      border: 1px solid var(--border);
-      background: #fff;
-      color: var(--text-sub);
-      transition: all .12s;
+    .time-bar::-webkit-scrollbar { display: none; }
+    .chip {
+      flex-shrink: 0; padding: 6px 11px; border-radius: 8px;
+      font-size: 12px; font-weight: 500; cursor: pointer;
+      border: 1px solid var(--border); background: var(--bg-card);
+      color: var(--text-sub); transition: all .15s;
       -webkit-tap-highlight-color: transparent;
     }
-    .time-chip.selected {
-      background: var(--primary);
-      border-color: var(--primary);
-      color: #fff;
+    .chip.sel {
+      background: var(--accent); border-color: var(--accent); color: #fff;
+      box-shadow: 0 0 12px var(--glow);
     }
 
-    .form-body { padding: 16px; }
+    /* ── Form ── */
+    .form-wrap { padding: 16px; }
     .form-group { margin-bottom: 16px; }
-    .form-label {
-      font-size: 12px; font-weight: 600;
-      color: var(--text-sub);
-      margin-bottom: 6px;
-      display: block;
+    .form-lbl { font-size: 11px; font-weight: 700; color: var(--text-sub); letter-spacing: .5px; text-transform: uppercase; margin-bottom: 8px; display: block; }
+    .input, .textarea {
+      width: 100%; padding: 12px 14px;
+      border: 1px solid var(--border); border-radius: 10px;
+      font-size: 15px; font-family: inherit;
+      background: var(--bg-raised); color: var(--text); outline: none;
+      transition: border-color .15s;
     }
-    .form-input, .form-textarea {
-      width: 100%;
-      padding: 11px 14px;
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      font-size: 15px;
-      font-family: inherit;
-      background: #fff;
-      color: var(--text);
-      outline: none;
-      transition: border-color .12s;
-    }
-    .form-input:focus, .form-textarea:focus { border-color: var(--primary); }
-    .form-textarea { resize: none; height: 80px; line-height: 1.5; }
+    .input:focus, .textarea:focus { border-color: var(--accent); }
+    .textarea { resize: none; height: 80px; line-height: 1.5; }
 
-    .focus-btn {
-      width: 100%;
-      padding: 11px 14px;
-      border-radius: 8px;
-      border: 1px solid var(--border);
-      background: #fff;
-      font-size: 14px;
-      font-weight: 400;
-      cursor: pointer;
-      text-align: left;
-      color: var(--text);
-      transition: all .12s;
+    /* ── Focus buttons ── */
+    .eval-btn {
+      width: 100%; padding: 12px 14px; margin-bottom: 6px;
+      border-radius: 10px; border: 1px solid var(--border);
+      background: var(--bg-raised); font-size: 14px; font-weight: 400;
+      cursor: pointer; text-align: left; color: var(--text-sub);
+      transition: all .15s; font-family: inherit;
       -webkit-tap-highlight-color: transparent;
-      margin-bottom: 6px;
-      font-family: inherit;
     }
-    .focus-btn:last-child { margin-bottom: 0; }
-    .focus-btn.selected { background: var(--primary); border-color: var(--primary); color: #fff; }
+    .eval-btn:last-child { margin-bottom: 0; }
+    .eval-btn.sel-5 { background: rgba(52,211,153,.12); border-color: var(--green); color: var(--green); }
+    .eval-btn.sel-4 { background: rgba(124,111,247,.12); border-color: var(--accent); color: var(--accent2); }
+    .eval-btn.sel-3 { background: rgba(251,191,36,.08); border-color: var(--amber); color: var(--amber); }
+    .eval-btn.sel-2 { background: rgba(248,113,113,.08); border-color: var(--red); color: var(--red); }
+    .eval-btn.sel-1 { background: rgba(248,113,113,.12); border-color: var(--red); color: var(--red); }
 
-    .btn-primary {
-      width: 100%;
-      padding: 14px;
-      background: var(--primary);
-      color: #fff;
-      border: none;
-      border-radius: 8px;
-      font-size: 15px;
-      font-weight: 600;
-      cursor: pointer;
-      font-family: inherit;
-      transition: background .12s;
+    /* ── CTA Button ── */
+    .btn {
+      width: 100%; padding: 15px;
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      color: #fff; border: none; border-radius: 12px;
+      font-size: 15px; font-weight: 700; cursor: pointer;
+      font-family: inherit; letter-spacing: .2px;
+      box-shadow: 0 4px 20px var(--glow);
+      transition: opacity .15s, transform .1s;
       -webkit-tap-highlight-color: transparent;
-      letter-spacing: .2px;
     }
-    .btn-primary:active { background: var(--primary-dark); }
-    .btn-primary:disabled { background: #9BB0E8; cursor: default; }
+    .btn:active { opacity: .85; transform: scale(.98); }
+    .btn:disabled { background: var(--bg-raised); color: var(--text-sub); box-shadow: none; cursor: default; }
 
-    /* ─── Toast ─── */
+    /* ── Toast ── */
     .toast {
       position: fixed;
       bottom: calc(var(--nav-h) + var(--safe-bottom) + 16px);
       left: 50%; transform: translateX(-50%);
-      background: var(--text);
-      color: #fff;
-      padding: 10px 18px;
-      border-radius: 8px;
-      font-size: 13px;
-      font-weight: 500;
-      z-index: 999;
-      white-space: nowrap;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 10px 18px; border-radius: 10px;
+      font-size: 13px; font-weight: 600; z-index: 999;
+      white-space: nowrap; box-shadow: 0 8px 32px rgba(0,0,0,.4);
       animation: fadeUp .25s ease;
     }
     @keyframes fadeUp {
-      from { opacity: 0; transform: translateX(-50%) translateY(6px); }
+      from { opacity: 0; transform: translateX(-50%) translateY(8px); }
       to   { opacity: 1; transform: translateX(-50%) translateY(0); }
     }
 
-    /* ─── Report ─── */
-    .report-header {
-      background: #fff;
-      border-bottom: 1px solid var(--border);
-      padding: 20px;
+    /* ── Report ── */
+    .report-hero {
+      padding: 28px 20px 20px;
       text-align: center;
+      background: var(--bg);
     }
-    .report-date { font-size: 12px; color: var(--text-sub); margin-bottom: 8px; }
-    .report-score-big { font-size: 56px; font-weight: 800; color: var(--text); line-height: 1; margin-bottom: 2px; }
-    .report-score-label { font-size: 13px; color: var(--text-sub); }
+    .report-date { font-size: 12px; color: var(--text-sub); margin-bottom: 10px; letter-spacing: .5px; }
+    .report-score { font-size: 72px; font-weight: 900; line-height: 1; letter-spacing: -3px;
+      background: linear-gradient(135deg, var(--text) 40%, var(--accent2));
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+    }
+    .report-pts { font-size: 14px; color: var(--text-sub); margin-top: 4px; }
 
+    /* ── Tag ── */
     .tag {
-      display: inline-block;
-      padding: 3px 8px;
-      border-radius: 4px;
-      font-size: 11px;
-      font-weight: 600;
-      letter-spacing: .2px;
+      display: inline-block; padding: 3px 8px; border-radius: 5px;
+      font-size: 11px; font-weight: 700; letter-spacing: .3px;
     }
-    .tag-success { background: #F3F4F6; color: #374151; }
-    .tag-warn { background: #F3F4F6; color: #374151; }
+    .tag-pos { background: rgba(52,211,153,.12); color: var(--green); }
+    .tag-neg { background: rgba(251,191,36,.1); color: var(--amber); }
 
-    .log-item {
-      display: flex;
-      align-items: flex-start;
-      gap: 12px;
-      padding: 10px 0;
-      border-bottom: 1px solid var(--border);
+    /* ── Log rows ── */
+    .log-row {
+      display: flex; align-items: flex-start; gap: 12px;
+      padding: 10px 0; border-bottom: 1px solid var(--border);
     }
-    .log-item:last-child { border-bottom: none; }
+    .log-row:last-child { border-bottom: none; }
     .log-time { font-size: 11px; font-weight: 700; color: var(--text-sub); min-width: 44px; padding-top: 2px; }
-    .log-task { font-size: 14px; font-weight: 500; }
-    .log-meta { font-size: 12px; color: var(--text-sub); margin-top: 3px; }
+    .log-task { font-size: 14px; font-weight: 500; color: var(--text); }
+    .log-meta { font-size: 12px; color: var(--text-sub); margin-top: 2px; }
+    .dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; margin-right: 5px; vertical-align: middle; }
 
-    /* ─── Chat ─── */
-    .chat-header {
-      background: #fff;
+    /* ── Chat ── */
+    .chat-head {
+      padding: 14px 20px; background: var(--bg-card);
       border-bottom: 1px solid var(--border);
-      padding: 14px 20px;
-      display: flex;
-      align-items: center;
-      gap: 12px;
+      display: flex; align-items: center; gap: 12px;
     }
-    .chat-avatar {
-      width: 36px; height: 36px;
-      border-radius: 50%;
-      background: var(--border);
+    .chat-av {
+      width: 36px; height: 36px; border-radius: 50%;
+      background: var(--bg-raised); border: 1px solid var(--border);
       display: flex; align-items: center; justify-content: center;
-      font-size: 14px;
-      font-weight: 700;
-      color: var(--text-sub);
-      flex-shrink: 0;
+      font-size: 13px; font-weight: 700; color: var(--text-sub); flex-shrink: 0;
     }
-    .chat-name { font-size: 15px; font-weight: 700; }
+    .chat-name { font-size: 14px; font-weight: 700; }
     .chat-status { font-size: 11px; color: var(--text-sub); }
 
-    .messages {
-      padding: 16px;
-      display: flex;
-      flex-direction: column;
-      gap: 10px;
-      min-height: 100%;
+    .msgs { padding: 16px; display: flex; flex-direction: column; gap: 10px; min-height: 100%; }
+    .bubble {
+      max-width: 74%; padding: 10px 13px; font-size: 14px;
+      line-height: 1.5; word-break: break-word; white-space: pre-wrap; border-radius: 14px;
     }
-    .msg {
-      max-width: 72%;
-      padding: 10px 13px;
-      border-radius: 12px;
-      font-size: 14px;
-      line-height: 1.5;
-      word-break: break-word;
-      white-space: pre-wrap;
+    .bubble-in {
+      background: var(--bg-card); border: 1px solid var(--border);
+      border-bottom-left-radius: 4px; align-self: flex-start;
     }
-    .msg-in {
-      background: #fff;
-      border: 1px solid var(--border);
-      border-bottom-left-radius: 4px;
-      align-self: flex-start;
+    .bubble-out {
+      background: var(--accent); color: #fff;
+      border-bottom-right-radius: 4px; align-self: flex-end;
     }
-    .msg-out {
-      background: var(--primary);
-      color: #fff;
-      border-bottom-right-radius: 4px;
-      align-self: flex-end;
-    }
-    .msg-time { font-size: 10px; color: var(--text-sub); margin-top: 3px; }
-    .msg-time-right { text-align: right; color: rgba(255,255,255,.65); }
+    .btime { font-size: 10px; color: var(--text-sub); margin-top: 3px; }
+    .btime-r { text-align: right; color: rgba(255,255,255,.6); }
 
-    .chat-input-bar {
-      padding: 10px 16px;
-      background: #fff;
+    .chat-bar {
+      padding: 10px 16px; background: var(--bg-card);
       border-top: 1px solid var(--border);
-      display: flex;
-      gap: 10px;
-      align-items: flex-end;
+      display: flex; gap: 10px; align-items: flex-end;
     }
-    .chat-input {
-      flex: 1;
-      padding: 10px 13px;
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      font-size: 15px;
-      font-family: inherit;
-      outline: none;
-      resize: none;
-      max-height: 100px;
-      line-height: 1.4;
+    .chat-inp {
+      flex: 1; padding: 10px 13px; border: 1px solid var(--border);
+      border-radius: 10px; font-size: 15px; font-family: inherit;
+      outline: none; resize: none; max-height: 100px; line-height: 1.4;
+      background: var(--bg-raised); color: var(--text);
     }
-    .chat-input:focus { border-color: var(--primary); }
-    .send-btn {
-      width: 40px; height: 40px;
-      border-radius: 8px;
-      background: var(--primary);
-      border: none;
-      color: #fff;
-      font-size: 16px;
-      cursor: pointer;
-      display: flex; align-items: center; justify-content: center;
-      flex-shrink: 0;
-      -webkit-tap-highlight-color: transparent;
-      font-weight: 700;
+    .chat-inp:focus { border-color: var(--accent); }
+    .send {
+      width: 40px; height: 40px; border-radius: 10px;
+      background: var(--accent); border: none; color: #fff;
+      cursor: pointer; display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0; -webkit-tap-highlight-color: transparent;
+      box-shadow: 0 2px 12px var(--glow); transition: opacity .15s;
     }
-    .send-btn:disabled { background: #9BB0E8; cursor: default; }
+    .send:disabled { background: var(--bg-raised); color: var(--text-sub); box-shadow: none; cursor: default; }
 
-    /* ─── Spinner ─── */
-    .spinner {
+    /* ── Settings ── */
+    .settings-row {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 12px 0; border-bottom: 1px solid var(--border); font-size: 14px;
+    }
+    .settings-row:last-child { border-bottom: none; }
+    .settings-key { color: var(--text-sub); }
+    .settings-val { font-weight: 500; color: var(--text); }
+
+    select {
+      width: 100%; padding: 10px 12px; border-radius: 10px;
+      border: 1px solid var(--border); font-size: 14px;
+      background: var(--bg-raised); color: var(--text); font-family: inherit; outline: none;
+    }
+    select:focus { border-color: var(--accent); }
+
+    .btn-ghost {
+      width: 100%; padding: 13px; border-radius: 10px;
+      border: 1px solid var(--border); background: transparent;
+      color: var(--red); font-size: 14px; font-weight: 500;
+      cursor: pointer; font-family: inherit; transition: background .15s;
+    }
+    .btn-ghost:active { background: rgba(248,113,113,.08); }
+
+    /* ── Spinner ── */
+    .spin {
       width: 18px; height: 18px;
-      border: 2px solid rgba(255,255,255,.3);
-      border-top-color: #fff;
-      border-radius: 50%;
-      animation: spin .6s linear infinite;
-      display: inline-block;
+      border: 2px solid rgba(255,255,255,.2); border-top-color: #fff;
+      border-radius: 50%; animation: rot .6s linear infinite; display: inline-block;
     }
-    @keyframes spin { to { transform: rotate(360deg); } }
+    @keyframes rot { to { transform: rotate(360deg); } }
 
-    .section-header {
-      padding: 16px 16px 4px;
-      font-size: 11px;
-      font-weight: 700;
+    /* ── Empty state ── */
+    .empty { padding: 48px 20px; text-align: center; color: var(--text-sub); }
+    .empty-icon { font-size: 36px; opacity: .3; margin-bottom: 12px; }
+    .empty-title { font-size: 15px; font-weight: 600; color: var(--text); margin-bottom: 6px; }
+    .empty-body { font-size: 13px; line-height: 1.6; }
+
+    /* ── Date nav ── */
+    .date-nav {
+      display: flex; align-items: center; gap: 16px; margin-top: 8px;
+    }
+    .date-nav button {
+      background: none; border: none; font-size: 20px; cursor: pointer;
+      color: var(--text-sub); padding: 2px 6px; line-height: 1;
+      transition: color .15s;
+    }
+    .date-nav button:disabled { color: var(--border); cursor: default; }
+    .date-nav span { font-size: 13px; font-weight: 600; color: var(--text); }
+
+    /* ── Login ── */
+    .login-wrap {
+      height: 100%; display: flex; flex-direction: column;
+      align-items: center; justify-content: center; padding: 32px 24px;
+      background: var(--bg);
+    }
+    .login-logo {
+      width: 56px; height: 56px; border-radius: 16px;
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      display: flex; align-items: center; justify-content: center;
+      margin: 0 auto 20px;
+      box-shadow: 0 8px 32px var(--glow);
+    }
+    .login-title { font-size: 26px; font-weight: 900; letter-spacing: -.5px; margin-bottom: 6px; }
+    .login-sub { font-size: 13px; color: var(--text-sub); margin-bottom: 40px; }
+    .login-box { width: 100%; max-width: 320px; }
+    .login-input {
+      width: 100%; padding: 13px 15px; border-radius: 10px;
+      border: 1px solid var(--border); font-size: 15px;
+      background: var(--bg-card); color: var(--text);
+      margin-bottom: 10px; outline: none; font-family: inherit;
+      transition: border-color .15s;
+    }
+    .login-input:focus { border-color: var(--accent); }
+    .login-err { font-size: 12px; color: var(--red); margin-bottom: 10px; }
+
+    /* ── Badge pills ── */
+    .badge-pill {
+      display: inline-block; padding: 3px 9px; border-radius: 6px; font-size: 11px;
+      font-weight: 600; background: var(--bg-raised); border: 1px solid var(--border);
       color: var(--text-sub);
-      text-transform: uppercase;
-      letter-spacing: .6px;
     }
-
-    /* ─── Metric strip ─── */
-    .metric-strip {
-      display: flex;
-      gap: 1px;
-      background: var(--border);
-      border-radius: 8px;
-      overflow: hidden;
-      margin-bottom: 12px;
-    }
-    .metric-cell {
-      flex: 1;
-      background: #fff;
-      padding: 10px 8px;
-      text-align: center;
-    }
-    .metric-val { font-size: 18px; font-weight: 800; color: var(--text); }
-    .metric-lbl { font-size: 10px; color: var(--text-sub); margin-top: 2px; }
   </style>
 </head>
 <body>
 <div id="root"></div>
-
 <script type="text/babel">
 const { useState, useEffect, useRef, useCallback } = React;
 
@@ -446,12 +424,8 @@ async function gasApi(action, params = {}) {
   url.searchParams.set("action", action);
   url.searchParams.set("studentEmail", CURRENT_USER.email);
   Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v));
-  try {
-    const res = await fetch(url.toString(), { redirect: "follow" });
-    return await res.json();
-  } catch (e) {
-    return { ok: true, data: [] };
-  }
+  try { const res = await fetch(url.toString(), { redirect: "follow" }); return await res.json(); }
+  catch { return { ok: true, data: [] }; }
 }
 
 async function gasPost(action, body = {}) {
@@ -459,46 +433,28 @@ async function gasPost(action, body = {}) {
   const url = new URL(GAS_URL);
   url.searchParams.set("action", action);
   url.searchParams.set("studentEmail", CURRENT_USER.email);
-  Object.entries(body).forEach(([k, v]) => {
-    if (v !== undefined && v !== null) url.searchParams.set(k, String(v));
-  });
-  try {
-    await fetch(url.toString(), { mode: "no-cors" });
-  } catch (e) {}
+  Object.entries(body).forEach(([k, v]) => { if (v !== undefined && v !== null) url.searchParams.set(k, String(v)); });
+  try { await fetch(url.toString(), { mode: "no-cors" }); } catch {}
   return { ok: true };
 }
 
-// ━━━━━━━ モックデータ ━━━━━━━
+// Mock data
 const MOCK_LOGS = [
-  { time_block: "07:00", task: "朝の読書", focus_level: "高", memo: "集中できた" },
-  { time_block: "08:00", task: "数学の演習", focus_level: "高", memo: "難しい問題に挑戦" },
-  { time_block: "09:00", task: "英語リスニング", focus_level: "中", memo: "" },
-  { time_block: "10:00", task: "休憩・SNS", focus_level: "低", memo: "長くなりすぎた" },
-  { time_block: "11:00", task: "プログラミング学習", focus_level: "高", memo: "React楽しい！" },
+  { time_block: "07:00", task: "朝の読書", focus_level: "5 — 完璧にできた", memo: "集中できた" },
+  { time_block: "09:00", task: "英語リスニング", focus_level: "3 — まあまあだった", memo: "" },
+  { time_block: "11:00", task: "プログラミング学習", focus_level: "5 — 完璧にできた", memo: "楽しかった" },
 ];
-
-const MOCK_REPORT = {
-  score: 82,
-  feedback: "今日は全体的に集中力が高く、特に午前中のパフォーマンスが素晴らしかった。",
-  action: "明日は休憩にタイマーをセットし、25分勉強→5分休憩のリズムを試してみよう。",
-  highlights: "数学・プログラミングへの高集中",
-  improvement: "SNS・娯楽時間の管理",
-};
-
+const MOCK_REPORT = { score: 82, feedback: "全体的に集中力が高く、午前中のパフォーマンスが際立っています。", action: "明日はポモドーロ技法を試してみましょう。", highlights: "プログラミングへの高い集中", improvement: "休憩時間の管理" };
 const MOCK_MESSAGES = [
-  { message_id: "1", content: "今日のレポートを確認しました。数学の演習、よく頑張りましたね！", sender_name: "コーチ", sender_role: "coach", timestamp: "2026-06-27 09:30" },
-  { message_id: "2", content: "ありがとうございます！難しかったですが最後まで解けました。", sender_name: "生徒", sender_role: "student", timestamp: "2026-06-27 10:15" },
+  { message_id: "1", content: "今日もよく頑張りました！", sender_name: "コーチ", sender_role: "coach", timestamp: "2026-06-27 09:30" },
+  { message_id: "2", content: "ありがとうございます！", sender_name: "生徒", sender_role: "student", timestamp: "2026-06-27 10:15" },
 ];
-
 const MOCK_SCHEDULE = [
   { time: "09:00", title: "朝のホームルーム", sub: "Zoom" },
-  { time: "10:00", title: "数学 演習", sub: "自主学習" },
   { time: "13:00", title: "英語ディスカッション", sub: "グループ" },
 ];
-
 let mockMsgs = [...MOCK_MESSAGES];
 let mockLogs = [...MOCK_LOGS];
-
 function mockApi(action) {
   if (action === "getReport") return Promise.resolve({ ok: true, data: MOCK_REPORT });
   if (action === "getLogs") return Promise.resolve({ ok: true, data: mockLogs });
@@ -506,145 +462,28 @@ function mockApi(action) {
   if (action === "getSchedule") return Promise.resolve({ ok: true, data: MOCK_SCHEDULE });
   return Promise.resolve({ ok: false });
 }
-
 function mockPost(action, body) {
-  if (action === "saveLog") {
-    mockLogs = [...mockLogs, { time_block: body.time_block, task: body.task, focus_level: body.focus_level, memo: body.memo }];
-    return Promise.resolve({ ok: true });
-  }
-  if (action === "sendMessage") {
-    mockMsgs = [...mockMsgs, { message_id: String(Date.now()), content: body.content, sender_name: CURRENT_USER.name, sender_role: "student", timestamp: new Date().toLocaleString("ja") }];
-    return Promise.resolve({ ok: true });
-  }
+  if (action === "saveLog") { mockLogs = [...mockLogs, { time_block: body.time_block, task: body.task, focus_level: body.focus_level, memo: body.memo }]; return Promise.resolve({ ok: true }); }
+  if (action === "sendMessage") { mockMsgs = [...mockMsgs, { message_id: String(Date.now()), content: body.content, sender_name: CURRENT_USER.name, sender_role: "student", timestamp: new Date().toLocaleString("ja") }]; return Promise.resolve({ ok: true }); }
   return Promise.resolve({ ok: true });
 }
 
-// ━━━━━━━ SVGアイコン ━━━━━━━
+// SVG Icons
 const Icon = ({ name, size = 22 }) => {
   const s = { width: size, height: size, fill: "none", stroke: "currentColor", strokeWidth: 1.8, strokeLinecap: "round", strokeLinejoin: "round" };
-  if (name === "home") return <svg viewBox="0 0 24 24" style={s}><path d="M3 9.5L12 3l9 6.5V20a1 1 0 01-1 1H4a1 1 0 01-1-1V9.5z"/><path d="M9 21V12h6v9"/></svg>;
-  if (name === "clock") return <svg viewBox="0 0 24 24" style={s}><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>;
-  if (name === "chart") return <svg viewBox="0 0 24 24" style={s}><rect x="3" y="12" width="4" height="9"/><rect x="10" y="7" width="4" height="14"/><rect x="17" y="3" width="4" height="18"/></svg>;
-  if (name === "chat") return <svg viewBox="0 0 24 24" style={s}><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>;
-  if (name === "settings") return <svg viewBox="0 0 24 24" style={s}><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>;
-  if (name === "arrow-up") return <svg viewBox="0 0 24 24" style={s}><path d="M12 19V5M5 12l7-7 7 7"/></svg>;
+  if (name === "home")   return <svg viewBox="0 0 24 24" style={s}><path d="M3 9.5L12 3l9 6.5V20a1 1 0 01-1 1H4a1 1 0 01-1-1V9.5z"/><path d="M9 21V12h6v9"/></svg>;
+  if (name === "clock")  return <svg viewBox="0 0 24 24" style={s}><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>;
+  if (name === "chart")  return <svg viewBox="0 0 24 24" style={s}><rect x="3" y="12" width="4" height="9"/><rect x="10" y="7" width="4" height="14"/><rect x="17" y="3" width="4" height="18"/></svg>;
+  if (name === "chat")   return <svg viewBox="0 0 24 24" style={s}><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>;
+  if (name === "gear")   return <svg viewBox="0 0 24 24" style={s}><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>;
+  if (name === "up")     return <svg viewBox="0 0 24 24" style={s}><path d="M12 19V5M5 12l7-7 7 7"/></svg>;
   return null;
 };
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// COMPONENTS
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 function Toast({ msg, onDone }) {
-  useEffect(() => {
-    const t = setTimeout(onDone, 2500);
-    return () => clearTimeout(t);
-  }, []);
+  useEffect(() => { const t = setTimeout(onDone, 2500); return () => clearTimeout(t); }, []);
   return <div className="toast">{msg}</div>;
 }
-
-// ─── ホーム画面 ───
-function HomeScreen() {
-  const [report, setReport] = useState(null);
-  const [schedule, setSchedule] = useState([]);
-  const [game, setGame] = useState(null);
-
-  useEffect(() => {
-    gasApi("getReport").then(r => r.ok && setReport(r.data));
-    gasApi("getSchedule").then(r => r.ok && setSchedule(r.data));
-    gasApi("getGameStatus").then(r => r.ok && setGame(r.data));
-  }, []);
-
-  const today = new Date().toLocaleDateString("ja-JP", { year: "numeric", month: "long", day: "numeric", weekday: "short" });
-
-  return (
-    <div>
-      <div className="header">
-        <div>
-          <div className="header-title">{CURRENT_USER.name}</div>
-          <div className="header-sub">{today}</div>
-        </div>
-      </div>
-
-      {/* 活動サマリー */}
-      {game && (
-        <div className="card">
-          <div className="card-title">活動サマリー</div>
-          <div className="metric-strip">
-            <div className="metric-cell">
-              <div className="metric-val">Lv.{game.level}</div>
-              <div className="metric-lbl">レベル</div>
-            </div>
-            <div className="metric-cell">
-              <div className="metric-val">{game.xp}</div>
-              <div className="metric-lbl">XP</div>
-            </div>
-            <div className="metric-cell">
-              <div className="metric-val">{game.streak}</div>
-              <div className="metric-lbl">連続日数</div>
-            </div>
-          </div>
-          <div style={{background:"var(--border)",borderRadius:99,height:4}}>
-            <div style={{background:"var(--primary)",borderRadius:99,height:4,width:game.xpInLevel+"%",transition:"width .4s"}} />
-          </div>
-          <div style={{fontSize:11,color:"var(--text-sub)",marginTop:4}}>次のレベルまで {100 - game.xpInLevel} XP</div>
-          {game.badges.length > 0 && (
-            <div style={{display:"flex",flexWrap:"wrap",gap:6,marginTop:10}}>
-              {game.badges.map(b => (
-                <span key={b.id} style={{fontSize:11,color:"var(--text-sub)",background:"var(--bg)",padding:"3px 8px",borderRadius:4,border:"1px solid var(--border)"}}>{b.label.replace(/^[^\s]+\s/,"")}</span>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* 昨日のスコア */}
-      {report && (
-        <div className="card">
-          <div className="card-title">前日のレポート</div>
-          <div className="score-wrap">
-            <div className="score-circle" style={{"--pct": report.score}}>
-              <div className="score-inner">
-                <div className="score-num">{report.score}</div>
-                <div className="score-unit">点</div>
-              </div>
-            </div>
-            <div className="score-text">
-              <div className="score-label" style={{fontSize:13,fontWeight:600}}>{report.highlights}</div>
-              <div style={{fontSize:12,color:"var(--text-sub)",marginTop:4,lineHeight:1.5}}>{report.feedback?.slice(0,60)}...</div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* 今日の予定 */}
-      <div className="card">
-        <div className="card-title">今日の予定</div>
-        {schedule.length === 0 ? (
-          <div style={{color:"var(--text-sub)",fontSize:13,padding:"4px 0"}}>予定を取得中...</div>
-        ) : schedule.map((ev, i) => (
-          <div key={i} className="schedule-item">
-            <div className="schedule-time">{ev.time}</div>
-            <div>
-              <div className="schedule-ev">{ev.title}</div>
-              {ev.sub && <div className="schedule-ev-sub">{ev.sub}</div>}
-            </div>
-          </div>
-        ))}
-      </div>
-
-      <div style={{height:24}} />
-    </div>
-  );
-}
-
-// ─── ログ入力 ───
-const TIME_BLOCKS = [
-  "06:00-07:00","07:00-08:00","08:00-09:00","09:00-10:00","10:00-11:00","11:00-12:00",
-  "12:00-13:00","13:00-14:00","14:00-15:00","15:00-16:00","16:00-17:00","17:00-18:00",
-  "18:00-19:00","19:00-20:00","20:00-21:00","21:00-22:00","22:00-23:00","23:00-24:00",
-];
-const FOCUS_OPTS = ["5 — 完璧にできた", "4 — よくできた", "3 — まあまあだった", "2 — もう少しだった", "1 — 全然だめだった"];
 
 function formatDateStr(d) {
   return d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0");
@@ -656,6 +495,114 @@ function addDays(dateStr, n) {
 }
 function isToday(dateStr) { return dateStr === formatDateStr(new Date()); }
 
+// ─── ホーム ───
+function HomeScreen() {
+  const [report, setReport] = useState(null);
+  const [schedule, setSchedule] = useState([]);
+  const [game, setGame] = useState(null);
+
+  useEffect(() => {
+    gasApi("getReport").then(r => r.ok && setReport(r.data));
+    gasApi("getSchedule").then(r => r.ok && setSchedule(r.data));
+    gasApi("getGameStatus").then(r => r.ok && setGame(r.data));
+  }, []);
+
+  const today = new Date().toLocaleDateString("ja-JP", { month: "long", day: "numeric", weekday: "short" });
+
+  return (
+    <div style={{paddingBottom: 8}}>
+      <div className="header">
+        <div className="header-sub">{today}</div>
+        <div className="header-title">{CURRENT_USER.name}</div>
+      </div>
+
+      {/* Stats */}
+      {game && (
+        <>
+          <div className="stat-row">
+            <div className="stat-box">
+              <div className="stat-val" style={{background:"linear-gradient(135deg,#7C6FF7,#A78BFA)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",backgroundClip:"text"}}>Lv.{game.level}</div>
+              <div className="stat-lbl">レベル</div>
+            </div>
+            <div className="stat-box">
+              <div className="stat-val">{game.xp}</div>
+              <div className="stat-lbl">XP</div>
+            </div>
+            <div className={"stat-box" + (game.streak > 0 ? " streak-box" : "")}>
+              <div className="stat-val">{game.streak}</div>
+              <div className="stat-lbl">連続日数</div>
+            </div>
+          </div>
+
+          <div style={{margin:"0 16px 12px"}}>
+            <div className="xp-track">
+              <div className="xp-fill" style={{width: game.xpInLevel + "%"}} />
+            </div>
+            <div style={{fontSize:10,color:"var(--text-sub)",marginTop:4}}>次のレベルまで {100 - game.xpInLevel} XP</div>
+          </div>
+
+          {game.badges.length > 0 && (
+            <div style={{display:"flex",flexWrap:"wrap",gap:6,margin:"0 16px 12px"}}>
+              {game.badges.map(b => <span key={b.id} className="badge-pill">{b.label.replace(/^[^\s]+\s/,"")}</span>)}
+            </div>
+          )}
+        </>
+      )}
+
+      {/* 前日のスコア */}
+      {report && (
+        <div className="card">
+          <div className="card-label">前日のレポート</div>
+          <div className="ring-wrap">
+            <div className="ring" style={{"--pct": report.score}}>
+              <div className="ring-inner">
+                <div className="ring-num">{report.score}</div>
+                <div className="ring-unit">点</div>
+              </div>
+            </div>
+            <div style={{flex:1}}>
+              <div style={{fontSize:13,fontWeight:600,marginBottom:4}}>{report.highlights}</div>
+              <div style={{fontSize:12,color:"var(--text-sub)",lineHeight:1.6}}>{report.feedback?.slice(0,60)}…</div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 予定 */}
+      <div className="card" style={{marginBottom:24}}>
+        <div className="card-label">今日の予定</div>
+        {schedule.length === 0
+          ? <div style={{color:"var(--text-sub)",fontSize:13}}>取得中...</div>
+          : schedule.map((ev, i) => (
+            <div key={i} className="sched-row">
+              <div className="sched-time">{ev.time}</div>
+              <div>
+                <div className="sched-title">{ev.title}</div>
+                {ev.sub && <div className="sched-sub">{ev.sub}</div>}
+              </div>
+            </div>
+          ))
+        }
+      </div>
+    </div>
+  );
+}
+
+// ─── ログ ───
+const TIME_BLOCKS = [
+  "06:00-07:00","07:00-08:00","08:00-09:00","09:00-10:00","10:00-11:00","11:00-12:00",
+  "12:00-13:00","13:00-14:00","14:00-15:00","15:00-16:00","16:00-17:00","17:00-18:00",
+  "18:00-19:00","19:00-20:00","20:00-21:00","21:00-22:00","22:00-23:00","23:00-24:00",
+];
+const FOCUS_OPTS = [
+  { label: "5 — 完璧にできた", cls: "sel-5" },
+  { label: "4 — よくできた",   cls: "sel-4" },
+  { label: "3 — まあまあだった", cls: "sel-3" },
+  { label: "2 — もう少しだった", cls: "sel-2" },
+  { label: "1 — 全然だめだった", cls: "sel-1" },
+];
+const DOT_COLOR = { "5":  "#34D399", "4": "#7C6FF7", "3": "#FBBF24", "2": "#F87171", "1": "#F87171" };
+
 function LogScreen({ onToast }) {
   const nowH = new Date().getHours();
   const defaultBlock = TIME_BLOCKS.find(t => parseInt(t) === nowH) || "09:00-10:00";
@@ -664,7 +611,7 @@ function LogScreen({ onToast }) {
   const [selectedDate, setSelectedDate] = useState(todayStr);
   const [block, setBlock] = useState(defaultBlock);
   const [task, setTask] = useState("");
-  const [focus, setFocus] = useState(FOCUS_OPTS[0]);
+  const [focus, setFocus] = useState(FOCUS_OPTS[0].label);
   const [memo, setMemo] = useState("");
   const [saving, setSaving] = useState(false);
   const [logs, setLogs] = useState([]);
@@ -674,7 +621,7 @@ function LogScreen({ onToast }) {
     gasApi("getLogs", { date: selectedDate }).then(r => r.ok && setLogs(r.data));
     if (isToday(selectedDate)) {
       setTimeout(() => {
-        const el = timeRef.current?.querySelector(".time-chip.selected");
+        const el = timeRef.current?.querySelector(".chip.sel");
         if (el) el.scrollIntoView({ inline: "center", behavior: "smooth" });
       }, 100);
     }
@@ -693,8 +640,8 @@ function LogScreen({ onToast }) {
     const result = await fetch(url).then(r => r.json()).catch(() => ({}));
     setTask(""); setMemo("");
     if (result.xp_gained) {
-      const levelUpMsg = result.level_up ? `  レベルアップ Lv.${result.level}` : "";
-      onToast(`保存しました  +${result.xp_gained} XP${levelUpMsg}`);
+      const lvUp = result.level_up ? `  →  Lv.${result.level} へ！` : "";
+      onToast(`+${result.xp_gained} XP 獲得${lvUp}`);
     } else {
       onToast("保存しました");
     }
@@ -705,89 +652,75 @@ function LogScreen({ onToast }) {
 
   return (
     <div>
-      <div className="form-header">
-        <h2>記録を入力</h2>
-        <div style={{display:"flex",alignItems:"center",gap:16,marginTop:8}}>
-          <button onClick={() => setSelectedDate(addDays(selectedDate,-1))} style={{background:"none",border:"none",fontSize:18,cursor:"pointer",color:"var(--text-sub)",padding:"2px 6px"}}>‹</button>
-          <span style={{fontSize:13,color:"var(--text)",fontWeight:600}}>
-            {isToday(selectedDate) ? "今日" : selectedDate}
-          </span>
-          <button onClick={() => setSelectedDate(addDays(selectedDate,1))} disabled={isToday(selectedDate)} style={{background:"none",border:"none",fontSize:18,cursor:"pointer",color: isToday(selectedDate) ? "var(--border)" : "var(--text-sub)",padding:"2px 6px"}}>›</button>
+      <div className="header">
+        <div className="header-title">記録を入力</div>
+        <div className="date-nav">
+          <button onClick={() => setSelectedDate(addDays(selectedDate,-1))}>‹</button>
+          <span>{isToday(selectedDate) ? "今日" : selectedDate}</span>
+          <button onClick={() => setSelectedDate(addDays(selectedDate,1))} disabled={isToday(selectedDate)}>›</button>
         </div>
       </div>
 
       {!isToday(selectedDate) && logs.length === 0 && (
-        <div style={{textAlign:"center",color:"var(--text-sub)",padding:40,fontSize:13}}>この日の記録はありません</div>
+        <div className="empty"><div className="empty-title">記録なし</div></div>
       )}
 
-      {isToday(selectedDate) && <>
-      <div ref={timeRef} className="time-selector">
-        {TIME_BLOCKS.map(t => (
-          <button key={t} className={"time-chip" + (block === t ? " selected" : "")} onClick={() => setBlock(t)}>
-            {t}
-          </button>
-        ))}
-      </div>
-      <div className="form-body">
-        <div className="form-group">
-          <label className="form-label">何をしましたか？</label>
-          <input
-            className="form-input"
-            placeholder="例：数学の問題演習"
-            value={task}
-            onChange={e => setTask(e.target.value)}
-          />
-        </div>
-
-        <div className="form-group">
-          <label className="form-label">自己評価</label>
-          <div>
-            {FOCUS_OPTS.map(f => (
-              <button key={f} className={"focus-btn" + (focus === f ? " selected" : "")} onClick={() => setFocus(f)}>
-                {f}
-              </button>
+      {isToday(selectedDate) && (
+        <>
+          <div ref={timeRef} className="time-bar">
+            {TIME_BLOCKS.map(t => (
+              <button key={t} className={"chip" + (block === t ? " sel" : "")} onClick={() => setBlock(t)}>{t}</button>
             ))}
           </div>
-        </div>
-
-        <div className="form-group">
-          <label className="form-label">メモ（任意）</label>
-          <textarea
-            className="form-textarea"
-            placeholder="気づいたことや振り返り..."
-            value={memo}
-            onChange={e => setMemo(e.target.value)}
-          />
-        </div>
-
-        <button className="btn-primary" onClick={save} disabled={!task.trim() || saving}>
-          {saving ? <span className="spinner" /> : "保存する"}
-        </button>
-      </div>
-      </>}
+          <div className="form-wrap">
+            <div className="form-group">
+              <label className="form-lbl">何をしましたか？</label>
+              <input className="input" placeholder="例：数学の演習" value={task} onChange={e => setTask(e.target.value)} />
+            </div>
+            <div className="form-group">
+              <label className="form-lbl">自己評価</label>
+              {FOCUS_OPTS.map(f => (
+                <button key={f.label} className={"eval-btn" + (focus === f.label ? " " + f.cls : "")} onClick={() => setFocus(f.label)}>{f.label}</button>
+              ))}
+            </div>
+            <div className="form-group">
+              <label className="form-lbl">メモ（任意）</label>
+              <textarea className="textarea" placeholder="気づいたことや振り返り..." value={memo} onChange={e => setMemo(e.target.value)} />
+            </div>
+            <button className="btn" onClick={save} disabled={!task.trim() || saving}>
+              {saving ? <span className="spin" /> : "保存する"}
+            </button>
+          </div>
+        </>
+      )}
 
       {logs.length > 0 && (
         <div className="card" style={{marginBottom:24}}>
-          <div className="card-title">{isToday(selectedDate) ? "本日の記録" : selectedDate + " の記録"}</div>
-          {logs.map((l, i) => (
-            <div key={i} className="log-item">
-              <div className="log-time">{l.time_block}</div>
-              <div>
-                <div className="log-task">{l.task}</div>
-                <div className="log-meta">
-                  {l.focus_level}
-                  {l.memo ? `  ·  ${l.memo}` : ""}
+          <div className="card-label">{isToday(selectedDate) ? "本日の記録" : selectedDate + " の記録"}</div>
+          {logs.map((l, i) => {
+            const num = l.focus_level?.charAt(0);
+            const dotColor = DOT_COLOR[num] || "var(--text-sub)";
+            return (
+              <div key={i} className="log-row">
+                <div className="log-time">{l.time_block}</div>
+                <div>
+                  <div className="log-task">{l.task}</div>
+                  <div className="log-meta">
+                    <span className="dot" style={{background: dotColor}} />
+                    {l.focus_level}
+                    {l.memo ? `  ·  ${l.memo}` : ""}
+                  </div>
                 </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>
   );
 }
 
-// ─── 日次レポート ───
+// ─── レポート ───
 function ReportScreen() {
   const todayStr = formatDateStr(new Date());
   const [selectedDate, setSelectedDate] = useState(todayStr);
@@ -798,64 +731,64 @@ function ReportScreen() {
   useEffect(() => {
     setLoading(true);
     Promise.all([gasApi("getReport", { date: selectedDate }), gasApi("getLogs", { date: selectedDate })]).then(([r, l]) => {
-      if (r.ok) setReport(r.data);
-      else setReport(null);
+      setReport(r.ok ? r.data : null);
       if (l.ok) setLogs(l.data);
       setLoading(false);
     });
   }, [selectedDate]);
 
+  const DateNav = () => (
+    <div className="date-nav">
+      <button onClick={() => setSelectedDate(addDays(selectedDate,-1))}>‹</button>
+      <span>{isToday(selectedDate) ? "今日" : selectedDate}</span>
+      <button onClick={() => setSelectedDate(addDays(selectedDate,1))} disabled={isToday(selectedDate)}>›</button>
+    </div>
+  );
+
   if (loading) return (
     <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:300}}>
-      <div className="spinner" style={{borderColor:"var(--border)",borderTopColor:"var(--primary)",width:28,height:28,borderWidth:2}} />
+      <div className="spin" style={{borderColor:"var(--border)",borderTopColor:"var(--accent)",width:28,height:28,borderWidth:2}} />
     </div>
   );
 
   if (!report) return (
     <div>
-      <div className="form-header">
-        <h2>レポート</h2>
-        <div style={{display:"flex",alignItems:"center",gap:16,marginTop:8}}>
-          <button onClick={() => setSelectedDate(addDays(selectedDate,-1))} style={{background:"none",border:"none",fontSize:18,cursor:"pointer",color:"var(--text-sub)",padding:"2px 6px"}}>‹</button>
-          <span style={{fontSize:13,fontWeight:600}}>{isToday(selectedDate) ? "今日" : selectedDate}</span>
-          <button onClick={() => setSelectedDate(addDays(selectedDate,1))} disabled={isToday(selectedDate)} style={{background:"none",border:"none",fontSize:18,cursor:"pointer",color: isToday(selectedDate) ? "var(--border)" : "var(--text-sub)",padding:"2px 6px"}}>›</button>
-        </div>
-      </div>
-      <div style={{padding:40,textAlign:"center",color:"var(--text-sub)",fontSize:13}}>
-        <div style={{fontSize:32,marginBottom:12,opacity:.3}}>—</div>
-        <div style={{fontWeight:600,marginBottom:6}}>レポートはまだありません</div>
-        <div>ログを入力すると毎晩21時にレポートが生成されます</div>
+      <div className="header"><div className="header-title">レポート</div><DateNav /></div>
+      <div className="empty">
+        <div className="empty-icon" style={{fontSize:40,opacity:.15}}>—</div>
+        <div className="empty-title">レポートはまだありません</div>
+        <div className="empty-body">ログを入力すると毎晩21時に<br />AIがレポートを生成します</div>
       </div>
     </div>
   );
 
   return (
     <div>
-      <div className="report-header">
-        <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:16,marginBottom:8}}>
-          <button onClick={() => setSelectedDate(addDays(selectedDate,-1))} style={{background:"none",border:"none",fontSize:18,cursor:"pointer",color:"var(--text-sub)",padding:"2px 6px"}}>‹</button>
-          <div className="report-date">{isToday(selectedDate) ? "今日" : selectedDate}</div>
-          <button onClick={() => setSelectedDate(addDays(selectedDate,1))} disabled={isToday(selectedDate)} style={{background:"none",border:"none",fontSize:18,cursor:"pointer",color: isToday(selectedDate) ? "var(--border)" : "var(--text-sub)",padding:"2px 6px"}}>›</button>
+      <div className="report-hero">
+        <div className="report-date">{isToday(selectedDate) ? "今日" : selectedDate}</div>
+        <div className="date-nav" style={{justifyContent:"center",marginBottom:12}}>
+          <button onClick={() => setSelectedDate(addDays(selectedDate,-1))}>‹</button>
+          <div className="report-score">{report.score}</div>
+          <button onClick={() => setSelectedDate(addDays(selectedDate,1))} disabled={isToday(selectedDate)}>›</button>
         </div>
-        <div className="report-score-big">{report.score}</div>
-        <div className="report-score-label">/ 100</div>
+        <div className="report-pts">/ 100点</div>
       </div>
 
       <div className="card">
-        <div className="card-title">フィードバック</div>
+        <div className="card-label">フィードバック</div>
         <p style={{fontSize:14,lineHeight:1.8,color:"var(--text)"}}>{report.feedback}</p>
       </div>
 
       <div className="card">
         {report.highlights && (
           <div style={{marginBottom:12}}>
-            <span className="tag tag-success">良かった点</span>
+            <span className="tag tag-pos">良かった点</span>
             <p style={{fontSize:13,color:"var(--text-sub)",marginTop:6,lineHeight:1.6}}>{report.highlights}</p>
           </div>
         )}
         {report.improvement && (
           <div>
-            <span className="tag tag-warn">改善点</span>
+            <span className="tag tag-neg">改善点</span>
             <p style={{fontSize:13,color:"var(--text-sub)",marginTop:6,lineHeight:1.6}}>{report.improvement}</p>
           </div>
         )}
@@ -863,23 +796,30 @@ function ReportScreen() {
 
       {report.action && (
         <div className="card">
-          <div className="card-title">明日のアクション</div>
+          <div className="card-label">明日のアクション</div>
           <p style={{fontSize:14,lineHeight:1.8,color:"var(--text)"}}>{report.action}</p>
         </div>
       )}
 
       {logs.length > 0 && (
         <div className="card" style={{marginBottom:24}}>
-          <div className="card-title">時間ログ</div>
-          {logs.map((l, i) => (
-            <div key={i} className="log-item">
-              <div className="log-time">{l.time_block}</div>
-              <div>
-                <div className="log-task">{l.task}</div>
-                <div className="log-meta">{l.focus_level}{l.memo ? `  ·  ${l.memo}` : ""}</div>
+          <div className="card-label">時間ログ</div>
+          {logs.map((l, i) => {
+            const num = l.focus_level?.charAt(0);
+            const dotColor = DOT_COLOR[num] || "var(--text-sub)";
+            return (
+              <div key={i} className="log-row">
+                <div className="log-time">{l.time_block}</div>
+                <div>
+                  <div className="log-task">{l.task}</div>
+                  <div className="log-meta">
+                    <span className="dot" style={{background: dotColor}} />
+                    {l.focus_level}{l.memo ? `  ·  ${l.memo}` : ""}
+                  </div>
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>
@@ -895,12 +835,12 @@ function ChatScreen({ onToast }) {
   const inputRef = useRef(null);
   const composingRef = useRef(false);
 
-  const loadMessages = useCallback(async () => {
+  const load = useCallback(async () => {
     const r = await gasApi("getMessages");
     if (r.ok) setMessages(r.data);
   }, []);
 
-  useEffect(() => { loadMessages(); }, []);
+  useEffect(() => { load(); }, []);
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages]);
 
   const send = async () => {
@@ -908,156 +848,120 @@ function ChatScreen({ onToast }) {
     if (!content || sending) return;
     setSending(true);
     setInput("");
-    const tempMsg = { message_id: "temp_" + Date.now(), content, sender_role: "student", sender_name: CURRENT_USER.name, timestamp: new Date().toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" }) };
-    setMessages(prev => [...prev, tempMsg]);
+    const temp = { message_id: "t" + Date.now(), content, sender_role: "student", sender_name: CURRENT_USER.name, timestamp: new Date().toLocaleString("ja-JP") };
+    setMessages(prev => [...prev, temp]);
     gasPost("sendMessage", { content, sender_role: "student", sender_name: CURRENT_USER.name });
     setSending(false);
     inputRef.current?.focus();
-    setTimeout(() => loadMessages(), 3000);
+    setTimeout(load, 3000);
   };
 
   const onKey = (e) => {
-    if (e.key === "Enter" && !e.shiftKey && !composingRef.current) {
-      e.preventDefault();
-      send();
-    }
+    if (e.key === "Enter" && !e.shiftKey && !composingRef.current) { e.preventDefault(); send(); }
   };
 
-  const formatTime = (ts) => {
-    try {
-      const d = new Date(ts.replace(" ", "T"));
-      return isNaN(d) ? ts : d.toLocaleTimeString("ja-JP", { hour:"2-digit", minute:"2-digit" });
-    } catch { return ts; }
+  const fmtTime = (ts) => {
+    try { const d = new Date(ts.replace(" ","T")); return isNaN(d) ? ts : d.toLocaleTimeString("ja-JP",{hour:"2-digit",minute:"2-digit"}); } catch { return ts; }
   };
-
-  const initials = (name) => name ? name.charAt(0) : "?";
 
   return (
     <div style={{display:"flex",flexDirection:"column",height:"100%"}}>
-      <div className="chat-header">
-        <div className="chat-avatar">{initials(CURRENT_USER.coachName)}</div>
+      <div className="chat-head">
+        <div className="chat-av">{(CURRENT_USER.coachName||"?").charAt(0)}</div>
         <div>
           <div className="chat-name">{CURRENT_USER.coachName}</div>
           <div className="chat-status">コーチ</div>
         </div>
       </div>
-
-      <div className="messages" style={{flex:1,overflowY:"auto"}}>
-        {messages.length === 0 && (
-          <div style={{textAlign:"center",color:"var(--text-sub)",fontSize:13,marginTop:40}}>メッセージはまだありません</div>
-        )}
-        {messages.map((m) => {
+      <div className="msgs" style={{flex:1,overflowY:"auto"}}>
+        {messages.length === 0 && <div style={{textAlign:"center",color:"var(--text-sub)",fontSize:13,marginTop:40}}>メッセージはまだありません</div>}
+        {messages.map(m => {
           const isMe = m.sender_role === "student";
           return (
             <div key={m.message_id} style={{alignSelf: isMe ? "flex-end" : "flex-start", maxWidth:"75%", display:"flex", flexDirection:"column", alignItems: isMe ? "flex-end" : "flex-start"}}>
               {!isMe && <div style={{fontSize:11,color:"var(--text-sub)",marginBottom:3,paddingLeft:2}}>{m.sender_name}</div>}
-              <div className={"msg " + (isMe ? "msg-out" : "msg-in")}>{m.content}</div>
-              <div className={"msg-time" + (isMe ? " msg-time-right" : "")}>{formatTime(m.timestamp)}</div>
+              <div className={"bubble " + (isMe ? "bubble-out" : "bubble-in")}>{m.content}</div>
+              <div className={"btime" + (isMe ? " btime-r" : "")}>{fmtTime(m.timestamp)}</div>
             </div>
           );
         })}
         <div ref={bottomRef} />
       </div>
-
-      <div className="chat-input-bar">
-        <textarea
-          ref={inputRef}
-          className="chat-input"
-          placeholder="メッセージを入力..."
-          rows={1}
-          value={input}
-          onChange={e => setInput(e.target.value)}
+      <div className="chat-bar">
+        <textarea ref={inputRef} className="chat-inp" placeholder="メッセージを入力..." rows={1} value={input} onChange={e => setInput(e.target.value)}
           onCompositionStart={() => { composingRef.current = true; }}
           onCompositionEnd={() => { composingRef.current = false; }}
-          onKeyDown={onKey}
-        />
-        <button className="send-btn" onClick={send} disabled={!input.trim() || sending}>
-          {sending ? <span className="spinner" style={{width:14,height:14,borderWidth:2}} /> : <Icon name="arrow-up" size={18} />}
+          onKeyDown={onKey} />
+        <button className="send" onClick={send} disabled={!input.trim() || sending}>
+          {sending ? <span className="spin" style={{width:14,height:14,borderWidth:2}} /> : <Icon name="up" size={17} />}
         </button>
       </div>
     </div>
   );
 }
 
-// ─── 設定画面 ───
+// ─── 設定 ───
 function SettingsScreen({ onToast, onLogout }) {
   const saved = JSON.parse(localStorage.getItem("notifySettings") || '{"start":7,"end":23}');
   const [start, setStart] = useState(saved.start);
   const [end, setEnd] = useState(saved.end);
-  const hours = Array.from({length: 24}, (_, i) => i);
+  const hours = Array.from({length:24},(_,i) => i);
 
   function save() {
-    localStorage.setItem("notifySettings", JSON.stringify({ start, end }));
+    localStorage.setItem("notifySettings", JSON.stringify({start,end}));
     gasPost("saveSettings", { notify_start: start, notify_end: end });
     onToast("保存しました");
   }
 
   return (
     <div>
-      <div className="header">
-        <div>
-          <div className="header-title">設定</div>
-          <div className="header-sub">通知・アカウント</div>
-        </div>
-      </div>
-      <div style={{padding:"12px 0"}}>
+      <div className="header"><div className="header-title">設定</div></div>
+      <div style={{padding:"0 16px"}}>
         <div className="card">
-          <div className="card-title">LINE通知時間</div>
+          <div className="card-label">LINE通知時間</div>
           <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:14}}>
             <div style={{flex:1}}>
-              <div style={{fontSize:11,color:"var(--text-sub)",marginBottom:5}}>開始</div>
-              <select value={start} onChange={e => setStart(Number(e.target.value))}
-                style={{width:"100%",padding:"10px 12px",borderRadius:8,border:"1px solid var(--border)",fontSize:14,background:"#fff",fontFamily:"inherit"}}>
+              <div style={{fontSize:11,color:"var(--text-sub)",marginBottom:6}}>開始</div>
+              <select value={start} onChange={e => setStart(Number(e.target.value))}>
                 {hours.map(h => <option key={h} value={h}>{String(h).padStart(2,"0")}:00</option>)}
               </select>
             </div>
-            <div style={{fontSize:14,color:"var(--text-sub)",marginTop:18}}>〜</div>
+            <div style={{color:"var(--text-sub)",marginTop:20,fontSize:13}}>〜</div>
             <div style={{flex:1}}>
-              <div style={{fontSize:11,color:"var(--text-sub)",marginBottom:5}}>終了</div>
-              <select value={end} onChange={e => setEnd(Number(e.target.value))}
-                style={{width:"100%",padding:"10px 12px",borderRadius:8,border:"1px solid var(--border)",fontSize:14,background:"#fff",fontFamily:"inherit"}}>
+              <div style={{fontSize:11,color:"var(--text-sub)",marginBottom:6}}>終了</div>
+              <select value={end} onChange={e => setEnd(Number(e.target.value))}>
                 {hours.map(h => <option key={h} value={h}>{String(h).padStart(2,"0")}:00</option>)}
               </select>
             </div>
           </div>
           <div style={{fontSize:11,color:"var(--text-sub)",marginBottom:14,lineHeight:1.6}}>設定した時間帯に毎時リマインドが届きます</div>
-          <button className="btn-primary" onClick={save}>保存する</button>
+          <button className="btn" onClick={save}>保存する</button>
         </div>
 
         <div className="card" style={{marginTop:12}}>
-          <div className="card-title">アカウント</div>
-          <div style={{display:"flex",flexDirection:"column",gap:10}}>
-            <div style={{display:"flex",justifyContent:"space-between",fontSize:14}}>
-              <span style={{color:"var(--text-sub)"}}>名前</span>
-              <span style={{fontWeight:500}}>{CURRENT_USER.name}</span>
-            </div>
-            <div style={{display:"flex",justifyContent:"space-between",fontSize:14}}>
-              <span style={{color:"var(--text-sub)"}}>メール</span>
-              <span style={{fontSize:12,color:"var(--text-sub)"}}>{CURRENT_USER.email}</span>
-            </div>
-          </div>
+          <div className="card-label">アカウント</div>
+          <div className="settings-row"><span className="settings-key">名前</span><span className="settings-val">{CURRENT_USER.name}</span></div>
+          <div className="settings-row"><span className="settings-key">メール</span><span style={{fontSize:12,color:"var(--text-sub)"}}>{CURRENT_USER.email}</span></div>
         </div>
 
-        <div style={{padding:"0 16px",marginTop:12}}>
-          <button onClick={onLogout} style={{width:"100%",padding:"12px",borderRadius:8,border:"1px solid var(--border)",background:"#fff",color:"var(--danger)",fontSize:14,fontWeight:500,cursor:"pointer",fontFamily:"inherit"}}>
-            ログアウト
-          </button>
+        <div style={{marginTop:12,marginBottom:32}}>
+          <button className="btn-ghost" onClick={onLogout}>ログアウト</button>
         </div>
       </div>
     </div>
   );
 }
 
-// ─── ナビゲーション ───
+// ─── Nav ───
 const TABS = [
   { id: "home",     label: "ホーム",   icon: "home" },
   { id: "log",      label: "記録",     icon: "clock" },
   { id: "report",   label: "レポート", icon: "chart" },
   { id: "chat",     label: "チャット", icon: "chat" },
-  { id: "settings", label: "設定",     icon: "settings" },
+  { id: "settings", label: "設定",     icon: "gear" },
 ];
 
-// ─── ログイン ───
+// ─── Login ───
 function LoginScreen({ onLogin }) {
   const [email, setEmail] = useState("");
   const [loading, setLoading] = useState(false);
@@ -1066,8 +970,7 @@ function LoginScreen({ onLogin }) {
   const login = async () => {
     const e = email.trim().toLowerCase();
     if (!e || !e.includes("@")) { setError("正しいメールアドレスを入力してください"); return; }
-    setLoading(true);
-    setError("");
+    setLoading(true); setError("");
     const url = new URL(GAS_URL);
     url.searchParams.set("action", "getUser");
     url.searchParams.set("studentEmail", e);
@@ -1081,32 +984,25 @@ function LoginScreen({ onLogin }) {
       } else {
         setError("このメールアドレスは登録されていません");
       }
-    } catch {
-      setError("接続エラーが発生しました");
-    }
+    } catch { setError("接続エラーが発生しました"); }
     setLoading(false);
   };
 
   return (
-    <div style={{height:"100%",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"32px 24px",background:"#fff"}}>
-      <div style={{marginBottom:32,textAlign:"center"}}>
-        <div style={{width:48,height:48,background:"var(--primary)",borderRadius:12,display:"flex",alignItems:"center",justifyContent:"center",margin:"0 auto 16px"}}>
-          <svg width="24" height="24" fill="none" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>
+    <div className="login-wrap">
+      <div style={{textAlign:"center",marginBottom:0}}>
+        <div className="login-logo">
+          <Icon name="clock" size={26} />
         </div>
-        <h1 style={{fontSize:22,fontWeight:800,color:"var(--text)",letterSpacing:".5px"}}>JIROKU</h1>
-        <p style={{color:"var(--text-sub)",fontSize:13,marginTop:6}}>時間を記録し、目標を達成する</p>
+        <div className="login-title">JIROKU</div>
+        <div className="login-sub">時間を記録し、目標を達成する</div>
       </div>
-      <div style={{width:"100%",maxWidth:320}}>
-        <input
-          type="email"
-          placeholder="メールアドレス"
-          value={email}
-          onChange={e => setEmail(e.target.value)}
-          onKeyDown={e => e.key === "Enter" && login()}
-          style={{width:"100%",padding:"12px 14px",borderRadius:8,border:"1px solid var(--border)",fontSize:15,background:"#fff",marginBottom:10,outline:"none",fontFamily:"inherit"}}
-        />
-        {error && <p style={{color:"var(--danger)",fontSize:12,marginBottom:10}}>{error}</p>}
-        <button className="btn-primary" onClick={login} disabled={loading}>
+      <div className="login-box">
+        <input type="email" className="login-input" placeholder="メールアドレス"
+          value={email} onChange={e => setEmail(e.target.value)}
+          onKeyDown={e => e.key === "Enter" && login()} />
+        {error && <div className="login-err">{error}</div>}
+        <button className="btn" onClick={login} disabled={loading}>
           {loading ? "確認中..." : "ログイン"}
         </button>
       </div>
@@ -1114,17 +1010,13 @@ function LoginScreen({ onLogin }) {
   );
 }
 
+// ─── App ───
 function App() {
   const [user, setUser] = useState(CURRENT_USER);
   const [tab, setTab] = useState("home");
   const [toast, setToast] = useState(null);
 
-  const showToast = (msg) => setToast(msg);
-  const logout = () => {
-    localStorage.removeItem("edventure_user");
-    CURRENT_USER = null;
-    setUser(null);
-  };
+  const logout = () => { localStorage.removeItem("edventure_user"); CURRENT_USER = null; setUser(null); };
 
   if (!user) return <LoginScreen onLogin={setUser} />;
 
@@ -1132,12 +1024,11 @@ function App() {
     <div style={{height:"100%",position:"relative"}}>
       <div className="screen">
         {tab === "home"     && <HomeScreen />}
-        {tab === "log"      && <LogScreen onToast={showToast} />}
+        {tab === "log"      && <LogScreen onToast={setToast} />}
         {tab === "report"   && <ReportScreen />}
-        {tab === "chat"     && <ChatScreen onToast={showToast} />}
-        {tab === "settings" && <SettingsScreen onToast={showToast} onLogout={logout} />}
+        {tab === "chat"     && <ChatScreen onToast={setToast} />}
+        {tab === "settings" && <SettingsScreen onToast={setToast} onLogout={logout} />}
       </div>
-
       <nav className="nav">
         {TABS.map(t => (
           <button key={t.id} className={"nav-item" + (tab === t.id ? " active" : "")} onClick={() => setTab(t.id)}>
@@ -1146,16 +1037,13 @@ function App() {
           </button>
         ))}
       </nav>
-
       {toast && <Toast msg={toast} onDone={() => setToast(null)} />}
     </div>
   );
 }
 
 ReactDOM.createRoot(document.getElementById("root")).render(<App />);
-if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('sw.js');
-}
+if ('serviceWorker' in navigator) { navigator.serviceWorker.register('sw.js'); }
 </script>
 </body>
 </html>
