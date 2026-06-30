@@ -75,7 +75,19 @@
     }
     .ph-eyebrow { font-size: 11px; font-weight: 600; letter-spacing: 1px; text-transform: uppercase; color: var(--sub); margin-bottom: 4px; }
     .ph-title { font-size: 24px; font-weight: 800; color: var(--text); letter-spacing: -.4px; }
+    .ph-title-accent {
+      font-size: 24px; font-weight: 800; letter-spacing: -.4px;
+      background: linear-gradient(135deg, var(--accent) 0%, #B8A9F5 100%);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+    }
     .ph-sub { font-size: 13px; color: var(--sub); margin-top: 2px; }
+    .ph-label {
+      display: inline-flex; align-items: center; gap: 5px;
+      background: var(--accent-l); color: var(--accent);
+      font-size: 12px; font-weight: 700; padding: 4px 10px; border-radius: 20px;
+      letter-spacing: .1px; margin-bottom: 8px;
+    }
+    .ph-label-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--accent); }
 
     /* ── Cards ── */
     .card {
@@ -377,7 +389,7 @@ function HomeScreen() {
     <div style={{paddingBottom:8}}>
       <div className="ph">
         <div className="ph-eyebrow">{today}</div>
-        <div className="ph-title">{CURRENT_USER.name}</div>
+        <div className="ph-title-accent">{CURRENT_USER.name}</div>
       </div>
 
       {game && <>
@@ -477,7 +489,8 @@ function LogScreen({onToast}) {
   return (
     <div>
       <div className="ph">
-        <div className="ph-title">記録を入力</div>
+        <div className="ph-label"><span className="ph-label-dot"/>{isToday(date)?"今日の記録":date}</div>
+        <div className="ph-title-accent">記録を入力</div>
         <div className="date-nav">
           <button onClick={()=>setDate(addDays(date,-1))}>‹</button>
           <span>{isToday(date)?"今日":date}</span>
