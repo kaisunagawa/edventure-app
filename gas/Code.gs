@@ -29,6 +29,7 @@ function doGet(e) {
     let result;
     switch (action) {
       case "getUser":      result = getUser(studentEmail); break;
+      case "registerUser": result = registerUser(studentEmail, e.parameter); break;
       case "getStreak":    result = getStreak(studentEmail); break;
       case "getGameStatus": result = getGameStatus(studentEmail); break;
       case "getReport":    result = getReport(studentEmail, e.parameter); break;
@@ -88,6 +89,40 @@ function doPost(e) {
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // 各アクション
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+function registerUser(studentEmail, body) {
+  const sheet = getSheet("Users");
+  const rows = sheetToObjects(sheet);
+
+  // すでに登録済みならエラー
+  if (rows.find(r => r.student_email === studentEmail)) {
+    return { ok: false, error: "already_registered" };
+  }
+
+  const today = formatDate(new Date());
+  sheet.appendRow([
+    studentEmail,
+    body.name || "",
+    "",            // line_user_id
+    "",            // coach_email（後でコーチが設定）
+    "",            // coach_line_id
+    "",            // google_calendar_id
+    "",            // chatwork_room
+    "TRUE",        // is_active
+    today,         // joined_at
+    7,             // notify_start
+    23,            // notify_end
+    body.goal || "",
+    body.goal_deadline || "",
+  ]);
+
+  // ヘッダーにgoal/goal_deadline列がなければ追加
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  if (!headers.includes("goal")) sheet.getRange(1, headers.length + 1).setValue("goal");
+  if (!headers.includes("goal_deadline")) sheet.getRange(1, headers.length + 2).setValue("goal_deadline");
+
+  return { ok: true, data: { name: body.name, coachName: "コーチ", coach_email: "" } };
+}
 
 function getStreak(studentEmail) {
   const user = sheetToObjects(getSheet("Users")).find(u => u.student_email === studentEmail);
