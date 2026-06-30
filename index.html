@@ -18,20 +18,20 @@
     * { box-sizing: border-box; margin: 0; padding: 0; }
 
     :root {
-      --bg:       #FAFAF9;
+      --bg:       #F8F8FA;
       --card:     #FFFFFF;
-      --border:   #EFEFEF;
-      --text:     #1A1825;
-      --sub:      #A8A4B8;
-      --accent:   #7B6FE8;
-      --accent-l: #EDE9FF;
-      --glow:     rgba(123,111,232,.18);
-      --green:    #46C98B;
-      --green-l:  #E6F9F1;
-      --amber:    #F5A84B;
-      --amber-l:  #FEF3E2;
-      --red:      #EF7070;
-      --red-l:    #FEF0F0;
+      --border:   #E5E7EB;
+      --text:     #1F2937;
+      --sub:      #9CA3AF;
+      --accent:   #4F46E5;
+      --accent-l: #EEF2FF;
+      --glow:     rgba(79,70,229,.12);
+      --green:    #22C55E;
+      --green-l:  #F0FDF4;
+      --amber:    #F59E0B;
+      --amber-l:  #FFFBEB;
+      --red:      #EF4444;
+      --red-l:    #FEF2F2;
       --nav-h:    64px;
       --safe-bottom: env(safe-area-inset-bottom, 0px);
       --r:        14px;
@@ -398,133 +398,135 @@ function HomeScreen({goalData, onGoalSaved}) {
   const [report, setReport] = useState(null);
   const [schedule, setSchedule] = useState([]);
   const [game, setGame] = useState(null);
+  const [checked, setChecked] = useState(()=>JSON.parse(localStorage.getItem("today_actions")||"{}"));
   useEffect(()=>{
     gasApi("getReport").then(r=>r.ok&&setReport(r.data));
     gasApi("getSchedule").then(r=>r.ok&&setSchedule(r.data));
     gasApi("getGameStatus").then(r=>{
       if(!r.ok) return;
       setGame(r.data);
-      // スプシにgoalがあればlocalStorageと同期
       if(r.data.goal){
         const synced={goal:r.data.goal, deadline:r.data.goal_deadline||""};
         localStorage.setItem("jiroku_goal", JSON.stringify(synced));
         onGoalSaved(synced);
       }
     });
+    // 日付が変わったらチェック状態リセット
+    const today = formatDateStr(new Date());
+    const saved = JSON.parse(localStorage.getItem("today_actions_date")||"null");
+    if(saved !== today){ localStorage.removeItem("today_actions"); localStorage.setItem("today_actions_date", today); setChecked({}); }
   },[]);
-  const today = new Date().toLocaleDateString("ja-JP",{month:"long",day:"numeric",weekday:"short"});
 
   const daysLeft = goalData?.deadline
     ? Math.ceil((new Date(goalData.deadline) - new Date()) / 86400000)
     : null;
+
+  // actionテキストを行に分割
+  const actionItems = report?.action
+    ? report.action.split(/[。\n・]/).map(s=>s.trim()).filter(s=>s.length>2)
+    : [];
+
+  const toggleCheck = (key) => {
+    const next = {...checked, [key]: !checked[key]};
+    setChecked(next);
+    localStorage.setItem("today_actions", JSON.stringify(next));
+  };
+
+  const isZoom = (s="") => /zoom\.us|meet\.google|teams\.microsoft/i.test(s);
+
+  const today = new Date().toLocaleDateString("ja-JP",{month:"long",day:"numeric",weekday:"short"});
+
   return (
-    <div style={{paddingBottom:8}}>
-      <div className="ph">
-        <div className="ph-eyebrow">{today}</div>
-        <div className="ph-title-accent">{CURRENT_USER.name}</div>
+    <div style={{paddingBottom:32}}>
+      {/* ヘッダー */}
+      <div style={{padding:"28px 20px 20px"}}>
+        <div style={{fontSize:13,color:"var(--sub)",marginBottom:4}}>{today}</div>
+        <div style={{fontSize:26,fontWeight:800,color:"var(--text)",letterSpacing:"-.5px"}}>{CURRENT_USER.name}</div>
       </div>
 
+      {/* 今月の目標 */}
       {goalData?.goal && (
-        <div className="card" style={{background:"linear-gradient(135deg,#F5F3FF,#FFF0F8)",border:"1px solid #EDE9FF",marginBottom:10}}>
+        <div style={{margin:"0 16px 10px",padding:"16px",background:"var(--card)",borderRadius:12,border:"1px solid var(--border)"}}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
             <div style={{flex:1}}>
-              <div style={{fontSize:10,fontWeight:700,letterSpacing:1,textTransform:"uppercase",color:"var(--accent)",marginBottom:5}}>MY GOAL</div>
-              <div style={{fontSize:15,fontWeight:700,color:"var(--text)",lineHeight:1.5}}>{goalData.goal}</div>
+              <div style={{fontSize:11,fontWeight:600,color:"var(--sub)",marginBottom:6,letterSpacing:".3px"}}>今月の目標</div>
+              <div style={{fontSize:15,fontWeight:600,color:"var(--text)",lineHeight:1.55}}>{goalData.goal}</div>
+              {goalData.deadline && (
+                <div style={{marginTop:8,fontSize:12,color:"var(--sub)"}}>
+                  期限：{new Date(goalData.deadline).toLocaleDateString("ja-JP",{year:"numeric",month:"long",day:"numeric"})}
+                </div>
+              )}
             </div>
             {daysLeft !== null && (
-              <div style={{textAlign:"center",flexShrink:0,background:"white",borderRadius:10,padding:"8px 12px",boxShadow:"0 1px 4px rgba(0,0,0,.06)"}}>
-                <div style={{fontSize:22,fontWeight:900,color:daysLeft<=7?"var(--red)":daysLeft<=30?"var(--amber)":"var(--accent)",lineHeight:1}}>{daysLeft<0?0:daysLeft}</div>
-                <div style={{fontSize:9,color:"var(--sub)",fontWeight:600,marginTop:2}}>{daysLeft<0?"期限切れ":"日後"}</div>
+              <div style={{flexShrink:0,textAlign:"center",minWidth:52}}>
+                <div style={{fontSize:24,fontWeight:800,lineHeight:1,color:daysLeft<=7?"var(--red)":daysLeft<=14?"var(--amber)":"var(--accent)"}}>{daysLeft<0?0:daysLeft}</div>
+                <div style={{fontSize:11,color:"var(--sub)",marginTop:2}}>残り{daysLeft<0?"":""}{daysLeft<0?"期限切れ":"日"}</div>
               </div>
             )}
           </div>
-          {goalData.deadline && (
-            <div style={{marginTop:10,display:"flex",alignItems:"center",gap:6}}>
-              <div style={{width:3,height:3,borderRadius:"50%",background:"var(--sub)"}}/>
-              <span style={{fontSize:12,fontWeight:600,color:"var(--text)"}}>
-                {new Date(goalData.deadline).toLocaleDateString("ja-JP",{year:"numeric",month:"long",day:"numeric"})}まで
-              </span>
-            </div>
-          )}
         </div>
       )}
 
+      {/* 今日のアクション */}
+      <div style={{margin:"0 16px 10px",padding:"16px",background:"var(--card)",borderRadius:12,border:"1px solid var(--border)"}}>
+        <div style={{fontSize:11,fontWeight:600,color:"var(--sub)",marginBottom:12,letterSpacing:".3px"}}>今日のアクション</div>
+        {actionItems.length > 0 ? actionItems.map((item,i)=>(
+          <button key={i} onClick={()=>toggleCheck(i)}
+            style={{display:"flex",alignItems:"flex-start",gap:10,width:"100%",background:"none",border:"none",padding:"8px 0",cursor:"pointer",borderBottom:i<actionItems.length-1?"1px solid var(--border)":"none",textAlign:"left",fontFamily:"inherit"}}>
+            <div style={{width:18,height:18,borderRadius:5,border:`1.5px solid ${checked[i]?"var(--accent)":"var(--border)"}`,background:checked[i]?"var(--accent)":"transparent",flexShrink:0,marginTop:1,display:"flex",alignItems:"center",justifyContent:"center",transition:"all .15s"}}>
+              {checked[i]&&<svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M2 5l2.5 2.5L8 3" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+            </div>
+            <span style={{fontSize:14,color:checked[i]?"var(--sub)":"var(--text)",textDecoration:checked[i]?"line-through":"none",lineHeight:1.5,transition:"color .15s"}}>{item}</span>
+          </button>
+        )) : (
+          <div style={{fontSize:13,color:"var(--sub)",lineHeight:1.7}}>
+            {report ? "アクション項目を取得中..." : "記録を入力すると毎晩AIがアクションを提案します"}
+          </div>
+        )}
+      </div>
+
+      {/* 成長ステータス */}
       {game && (()=>{
         const rank = getRank(game.level);
-        const nextRank = RANKS.find(r => r.minLv > game.level);
-        const lvToNext = nextRank ? nextRank.minLv - game.level : 0;
-        return <>
-          {/* 階級カード */}
-          <div className="card rank-card" style={{background: rank.bg.includes("gradient") ? rank.bg : rank.bg, marginBottom:10}}>
-            <div style={{display:"flex",alignItems:"center",gap:14}}>
-              <RankBadge level={game.level} size={52}/>
-              <div style={{flex:1}}>
-                <div style={{fontSize:11,fontWeight:700,letterSpacing:1,textTransform:"uppercase",color:rank.color,marginBottom:2}}>{rank.en}</div>
-                <div style={{fontSize:22,fontWeight:900,color:"var(--text)",letterSpacing:"-.5px"}}>{rank.name}</div>
-                {nextRank
-                  ? <div style={{fontSize:11,color:"var(--sub)",marginTop:2}}>次の階級まで <b style={{color:rank.color}}>Lv.{nextRank.minLv}</b>（あと{lvToNext}レベル）</div>
-                  : <div style={{fontSize:11,color:rank.color,marginTop:2,fontWeight:700}}>最高階級に到達！</div>
-                }
+        return (
+          <div style={{margin:"0 16px 10px",padding:"16px",background:"var(--card)",borderRadius:12,border:"1px solid var(--border)"}}>
+            <div style={{fontSize:11,fontWeight:600,color:"var(--sub)",marginBottom:12,letterSpacing:".3px"}}>成長ステータス</div>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10}}>
+              <div style={{display:"flex",alignItems:"baseline",gap:8}}>
+                <span style={{fontSize:16,fontWeight:700,color:"var(--accent)"}}>Lv.{game.level}</span>
+                <span style={{fontSize:13,fontWeight:500,color:"var(--sub)"}}>{rank.name}</span>
               </div>
-              <div style={{textAlign:"right"}}>
-                <div style={{fontSize:26,fontWeight:900,color:rank.color,lineHeight:1}}>Lv.{game.level}</div>
-                <div style={{fontSize:10,color:"var(--sub)",marginTop:2,fontWeight:600}}>{game.xp} XP</div>
-              </div>
+              <span style={{fontSize:13,fontWeight:600,color:"var(--text)"}}>{game.xp} XP</span>
             </div>
-            <div style={{marginTop:14}}>
-              <div style={{display:"flex",justifyContent:"space-between",fontSize:10,color:"var(--sub)",fontWeight:600,marginBottom:5}}>
-                <span>XP</span><span>次のレベルまで {100-game.xpInLevel} XP</span>
-              </div>
-              <div style={{height:5,background:"rgba(0,0,0,.08)",borderRadius:99,overflow:"hidden"}}>
-                <div style={{height:5,borderRadius:99,background:rank.color,width:game.xpInLevel+"%",transition:"width .7s cubic-bezier(.4,0,.2,1)"}}/>
-              </div>
+            <div style={{height:4,background:"var(--border)",borderRadius:99,overflow:"hidden",marginBottom:6}}>
+              <div style={{height:4,borderRadius:99,background:"var(--accent)",width:game.xpInLevel+"%",transition:"width .7s cubic-bezier(.4,0,.2,1)"}}/>
+            </div>
+            <div style={{display:"flex",justifyContent:"space-between",fontSize:11,color:"var(--sub)"}}>
+              <span>{game.streak > 0 ? `${game.streak}日連続記録中` : "記録を続けてXPを貯めよう"}</span>
+              <span>次のレベルまで {100-game.xpInLevel} XP</span>
             </div>
           </div>
-
-          {/* ストリーク + バッジ */}
-          <div className="stat-row">
-            <div className={"stat-tile"+(game.streak>0?" streak-tile":"")}>
-              <div className="stat-v">{game.streak}</div>
-              <div className="stat-l">連続日数</div>
-            </div>
-            {game.badges.slice(0,2).map(b=>(
-              <div key={b.id} className="stat-tile" style={{background:"var(--accent-l)"}}>
-                <div style={{fontSize:18,fontWeight:800,color:"var(--accent)"}}>{b.label.replace(/^[^\s]+\s/,"").slice(0,4)}</div>
-                <div className="stat-l" style={{color:"var(--accent)"}}>バッジ</div>
-              </div>
-            ))}
-          </div>
-        </>;
+        );
       })()}
 
-      {report && (
-        <div className="card">
-          <div className="card-label">前日のレポート</div>
-          <div className="ring-wrap">
-            <div className="ring" style={{"--pct":report.score}}>
-              <div className="ring-inner">
-                <div className="ring-num">{report.score}</div>
-                <div className="ring-unit">点</div>
+      {/* 今日の予定 */}
+      <div style={{margin:"0 16px 10px",padding:"16px",background:"var(--card)",borderRadius:12,border:"1px solid var(--border)"}}>
+        <div style={{fontSize:11,fontWeight:600,color:"var(--sub)",marginBottom:12,letterSpacing:".3px"}}>今日の予定</div>
+        {schedule.length === 0
+          ? <div style={{fontSize:13,color:"var(--sub)"}}>予定を取得中...</div>
+          : schedule.map((ev,i)=>{
+            const hasZoom = isZoom(ev.sub||"");
+            return (
+              <div key={i} style={{display:"flex",gap:12,padding:"9px 0",borderBottom:i<schedule.length-1?"1px solid var(--border)":"none"}}>
+                <div style={{fontSize:12,fontWeight:600,color:"var(--accent)",minWidth:38,paddingTop:1,flexShrink:0}}>{ev.time}</div>
+                <div>
+                  <div style={{fontSize:14,color:"var(--text)",fontWeight:500}}>{ev.title}</div>
+                  {hasZoom && <div style={{fontSize:11,color:"var(--sub)",marginTop:2}}>Zoomリンクあり</div>}
+                  {ev.sub && !hasZoom && <div style={{fontSize:11,color:"var(--sub)",marginTop:2}}>{ev.sub}</div>}
+                </div>
               </div>
-            </div>
-            <div style={{flex:1}}>
-              <div style={{fontSize:13,fontWeight:700,marginBottom:4}}>{report.highlights}</div>
-              <div style={{fontSize:12,color:"var(--sub)",lineHeight:1.6}}>{report.feedback?.slice(0,60)}…</div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      <div className="card" style={{marginBottom:24}}>
-        <div className="card-label">今日の予定</div>
-        {schedule.length===0
-          ? <div style={{color:"var(--sub)",fontSize:13}}>取得中...</div>
-          : schedule.map((ev,i)=>(
-            <div key={i} className="sched-row">
-              <div className="sched-time">{ev.time}</div>
-              <div><div className="sched-title">{ev.title}</div>{ev.sub&&<div className="sched-sub">{ev.sub}</div>}</div>
-            </div>
-          ))
+            );
+          })
         }
       </div>
     </div>
