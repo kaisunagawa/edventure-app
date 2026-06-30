@@ -11,8 +11,8 @@
   <meta name="theme-color" content="#FAFAF9" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
-  <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
-  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -305,7 +305,16 @@
   </style>
 </head>
 <body>
-<div id="root"></div>
+<div id="root">
+  <div id="splash" style="height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;background:#F8F8FA;gap:16px">
+    <div style="width:56px;height:56px;border-radius:16px;background:linear-gradient(135deg,#7B7AE8,#A78BF5);display:flex;align-items:center;justify-content:center">
+      <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>
+    </div>
+    <div style="font-family:-apple-system,sans-serif;font-size:20px;font-weight:800;color:#1F2937;letter-spacing:-.3px">JIROKU</div>
+    <div style="width:24px;height:24px;border:2.5px solid #E5E7EB;border-top-color:#4F46E5;border-radius:50%;animation:sp 0.7s linear infinite"></div>
+  </div>
+  <style>#splash{animation:none}@keyframes sp{to{transform:rotate(360deg)}}</style>
+</div>
 <script type="text/babel">
 const { useState, useEffect, useRef, useCallback } = React;
 
