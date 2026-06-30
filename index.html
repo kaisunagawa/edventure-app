@@ -134,6 +134,8 @@
       color: var(--sub); transition: all .12s; -webkit-tap-highlight-color: transparent;
     }
     .chip.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+    .chip.done { border-color: var(--accent); color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+    .chip.on.done { background: var(--accent); color: #fff; }
 
     /* ── Form ── */
     .form-wrap { padding: 16px; }
@@ -499,20 +501,56 @@ function HomeScreen({goalData, onGoalSaved}) {
 // ── Log ──
 function LogScreen({onToast}) {
   const nowH = new Date().getHours();
-  const defBlock = TIME_BLOCKS.find(t=>parseInt(t)===nowH)||"09:00-10:00";
   const todayStr = formatDateStr(new Date());
   const [date, setDate] = useState(todayStr);
-  const [block, setBlock] = useState(defBlock);
+  const [logs, setLogs] = useState([]);
+  const [saving, setSaving] = useState(false);
+  const timeRef = useRef(null);
+
+  // 現在時刻のブロック（まだ未記録のもの）を自動選択
+  const getDefaultBlock = (currentLogs) => {
+    const recorded = new Set(currentLogs.map(l => l.time_block));
+    // 現在時刻から過去に向かって未記録のブロックを探す
+    for (let h = nowH; h >= 6; h--) {
+      const b = TIME_BLOCKS.find(t => parseInt(t) === h);
+      if (b && !recorded.has(b)) return b;
+    }
+    return TIME_BLOCKS.find(t => parseInt(t) === nowH) || "09:00-10:00";
+  };
+
+  const [block, setBlock] = useState(TIME_BLOCKS.find(t=>parseInt(t)===nowH)||"09:00-10:00");
   const [task, setTask] = useState("");
   const [focus, setFocus] = useState(EVALS[0].l);
   const [memo, setMemo] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [logs, setLogs] = useState([]);
-  const timeRef = useRef(null);
+
+  // ブロック切替時に既存ログを読み込んでフォームに反映
+  const loadBlockData = (b, currentLogs) => {
+    const existing = currentLogs.find(l => l.time_block === b);
+    if (existing) {
+      setTask(existing.task || "");
+      setFocus(existing.focus_level || EVALS[0].l);
+      setMemo(existing.memo || "");
+    } else {
+      setTask(""); setFocus(EVALS[0].l); setMemo("");
+    }
+  };
+
+  const handleBlockSelect = (b) => {
+    setBlock(b);
+    loadBlockData(b, logs);
+  };
 
   useEffect(()=>{
-    gasApi("getLogs",{date}).then(r=>r.ok&&setLogs(r.data));
-    if(isToday(date)) setTimeout(()=>{ const el=timeRef.current?.querySelector(".chip.on"); if(el) el.scrollIntoView({inline:"center",behavior:"smooth"}); },100);
+    gasApi("getLogs",{date}).then(r=>{
+      const data = r.ok ? r.data : [];
+      setLogs(data);
+      if (isToday(date)) {
+        const def = getDefaultBlock(data);
+        setBlock(def);
+        loadBlockData(def, data);
+        setTimeout(()=>{ const el=timeRef.current?.querySelector(".chip.on"); if(el) el.scrollIntoView({inline:"center",behavior:"smooth"}); },100);
+      }
+    });
   },[date]);
 
   const save = async ()=>{
@@ -523,12 +561,14 @@ function LogScreen({onToast}) {
     url.searchParams.set("time_block",block); url.searchParams.set("task",task.trim());
     url.searchParams.set("focus_level",focus); url.searchParams.set("memo",memo.trim());
     const res=await fetch(url).then(r=>r.json()).catch(()=>({}));
-    setTask(""); setMemo("");
     if(res.xp_gained){ const lv=res.level_up?`  →  Lv.${res.level} へ！`:""; onToast(`+${res.xp_gained} XP 獲得${lv}`); }
     else onToast("保存しました");
-    const r=await gasApi("getLogs",{date}); if(r.ok) setLogs(r.data);
+    const r=await gasApi("getLogs",{date});
+    if(r.ok) setLogs(r.data);
     setSaving(false);
   };
+
+  const recorded = new Set(logs.map(l => l.time_block));
 
   return html`<div>
     <div class="ph">
@@ -544,12 +584,17 @@ function LogScreen({onToast}) {
 
     ${isToday(date)&&html`<div>
       <div ref=${timeRef} class="time-bar">
-        ${TIME_BLOCKS.map(t=>html`<button key=${t} class=${"chip"+(block===t?" on":"")} onClick=${()=>setBlock(t)}>${t}</button>`)}
+        ${TIME_BLOCKS.map(t=>html`<button key=${t}
+          class=${"chip"+(block===t?" on":"")+(recorded.has(t)?" done":"")}
+          onClick=${()=>handleBlockSelect(t)}>${t}</button>`)}
       </div>
       <div class="form-wrap">
+        <div style=${{fontSize:12,color:"var(--sub)",marginBottom:8}}>
+          ${recorded.has(block) ? "✏️ 記録済み（編集できます）" : "📝 未記録"}
+        </div>
         <div class="form-grp">
           <label class="form-lbl">何をしましたか？</label>
-          <input class="inp" placeholder="例：数学の問題演習" value=${task} onChange=${e=>setTask(e.target.value)} />
+          <input class="inp" placeholder="例：数学の問題演習" value=${task} onInput=${e=>setTask(e.target.value)} />
         </div>
         <div class="form-grp">
           <label class="form-lbl">自己評価</label>
@@ -557,9 +602,9 @@ function LogScreen({onToast}) {
         </div>
         <div class="form-grp">
           <label class="form-lbl">メモ（任意）</label>
-          <textarea class="txa" placeholder="気づいたことや振り返り..." value=${memo} onChange=${e=>setMemo(e.target.value)} />
+          <textarea class="txa" placeholder="気づいたことや振り返り..." value=${memo} onInput=${e=>setMemo(e.target.value)} />
         </div>
-        <button class="btn" onClick=${save} disabled=${!task.trim()||saving}>${saving?html`<span class="spin"/>`:  "保存する"}</button>
+        <button class="btn" onClick=${save} disabled=${!task.trim()||saving}>${saving?html`<span class="spin"/>`:recorded.has(block)?"更新する":"保存する"}</button>
       </div>
     </div>`}
 
@@ -568,7 +613,7 @@ function LogScreen({onToast}) {
         <div class="card-label">${isToday(date)?"本日の記録":date+" の記録"}</div>
         ${logs.map((l,i)=>{
           const num=l.focus_level?.charAt(0);
-          return html`<div key=${i} class="log-row">
+          return html`<div key=${i} class="log-row" style=${{cursor:isToday(date)?"pointer":"default"}} onClick=${()=>isToday(date)&&handleBlockSelect(l.time_block)}>
             <div class="log-time">${l.time_block}</div>
             <div><div class="log-task">${l.task}</div>
             <div class="log-meta"><span class="dot" style=${{background:DOT[num]||"var(--sub)"}}/>${l.focus_level}${l.memo?` · ${l.memo}`:""}</div></div>
@@ -831,13 +876,14 @@ function SettingsScreen({onToast,onLogout,onGoalSaved}) {
 const TABS=[{id:"home",l:"ホーム",n:"home"},{id:"log",l:"記録",n:"clock"},{id:"report",l:"レポート",n:"chart"},{id:"chat",l:"チャット",n:"chat"},{id:"settings",l:"設定",n:"gear"}];
 
 function LoginScreen({onLogin}) {
-  const [step,setStep]=useState("email"); // "email" | "register"
+  const [step,setStep]=useState("email"); // "email" | "register" | "line"
   const [email,setEmail]=useState("");
   const [name,setName]=useState("");
   const [goal,setGoal]=useState("");
   const [deadline,setDeadline]=useState("");
   const [loading,setLoading]=useState(false);
   const [error,setError]=useState("");
+  const [pendingUser,setPendingUser]=useState(null);
 
   const checkEmail=async()=>{
     const e=email.trim().toLowerCase();
@@ -850,7 +896,7 @@ function LoginScreen({onLogin}) {
         const u={email:e,name:r.data.name,coachName:r.data.coachName||"コーチ",coachEmail:r.data.coach_email||""};
         localStorage.setItem("edventure_user",JSON.stringify(u)); CURRENT_USER=u; onLogin(u);
       } else {
-        setStep("register"); // 未登録 → 新規登録フォームへ
+        setStep("register");
       }
     }catch{setError("接続エラーが発生しました");}
     setLoading(false);
@@ -871,13 +917,44 @@ function LoginScreen({onLogin}) {
       if(r.ok){
         const u={email:e,name:name.trim(),coachName:"コーチ",coachEmail:""};
         if(goal.trim()) localStorage.setItem("jiroku_goal",JSON.stringify({goal:goal.trim(),deadline}));
-        localStorage.setItem("edventure_user",JSON.stringify(u)); CURRENT_USER=u; onLogin(u);
+        localStorage.setItem("edventure_user",JSON.stringify(u));
+        setPendingUser(u);
+        setStep("line"); // 登録完了 → LINE追加画面へ
       } else {
         setError(r.error==="already_registered"?"このメールはすでに登録されています":"登録に失敗しました");
       }
     }catch{setError("接続エラーが発生しました");}
     setLoading(false);
   };
+
+  const finishWithLine=()=>{
+    window.open("https://lin.ee/5pElLYY","_blank");
+  };
+
+  const skipLine=()=>{
+    CURRENT_USER=pendingUser; onLogin(pendingUser);
+  };
+
+  if(step==="line") return html`
+    <div class="login-wrap" style=${{justifyContent:"flex-start",paddingTop:48}}>
+      <div class="login-logo" style=${{background:"#06C755"}}><${S} n="message-circle" s=${26} color="#fff"/></div>
+      <div class="login-title">登録完了！🎉</div>
+      <div class="login-sub" style=${{marginBottom:28}}>最後にLINE通知を設定しましょう</div>
+      <div class="login-box">
+        <div style=${{background:"var(--card)",borderRadius:14,padding:"20px 18px",border:"1px solid var(--border)"}}>
+          <div style=${{fontWeight:700,fontSize:15,marginBottom:8}}>📩 公式LINEを友達追加</div>
+          <div style=${{fontSize:13,color:"var(--sub)",lineHeight:1.7,marginBottom:16}}>
+            友達追加すると<br/>
+            ✅ 毎時間の記録リマインダー<br/>
+            ✅ 毎晩のAIレポート<br/>
+            がLINEに届きます！
+          </div>
+          <button class="btn" style=${{background:"#06C755",fontSize:15}} onClick=${finishWithLine}>LINEで友達追加する</button>
+        </div>
+        <button style=${{background:"none",border:"none",color:"var(--sub)",fontSize:13,cursor:"pointer",marginTop:8}} onClick=${skipLine}>あとで設定する →</button>
+      </div>
+    </div>
+  `;
 
   if(step==="register") return html`
     <div class="login-wrap" style=${{justifyContent:"flex-start",paddingTop:48}}>
