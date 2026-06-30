@@ -217,7 +217,7 @@ function checkBadges(studentEmail, currentBadges, xp, streak) {
 
 function getGameStatus(studentEmail) {
   const user = sheetToObjects(getSheet("Users")).find(u => u.student_email === studentEmail);
-  if (!user) return { ok: true, data: { xp: 0, level: 1, streak: 0, badges: [] } };
+  if (!user) return { ok: true, data: { xp: 0, level: 1, streak: 0, badges: [], goal: "", goal_deadline: "" } };
   const xp = Number(user.xp || 0);
   const level = Math.floor(xp / 100) + 1;
   const xpInLevel = xp % 100;
@@ -225,7 +225,7 @@ function getGameStatus(studentEmail) {
   const badgeIds = user.badges ? user.badges.split(",").filter(Boolean) : [];
   const badgeMap = { first:"🌱 はじめての記録", streak3:"🔥 3日連続達成", streak7:"⚡ 7日連続達成", memo10:"📝 メモ名人", xp500:"🌟 XP500達成" };
   const badges = badgeIds.map(id => ({ id, label: badgeMap[id] || id }));
-  return { ok: true, data: { xp, level, xpInLevel, streak, badges } };
+  return { ok: true, data: { xp, level, xpInLevel, streak, badges, goal: user.goal || "", goal_deadline: user.goal_deadline || "" } };
 }
 
 function getMessages(studentEmail) {
