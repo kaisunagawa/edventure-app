@@ -370,17 +370,27 @@ function HomeScreen({goalData, onGoalSaved}) {
   const [game, setGame] = useState(null);
   const [checked, setChecked] = useState(()=>JSON.parse(localStorage.getItem("today_actions")||"{}"));
   useEffect(()=>{
-    gasApi("getReport").then(r=>r.ok&&setReport(r.data));
-    gasApi("getSchedule").then(r=>r.ok&&setSchedule(r.data));
-    gasApi("getGameStatus").then(r=>{
-      if(!r.ok) return;
-      setGame(r.data);
-      if(r.data.goal){
-        const synced={goal:r.data.goal, deadline:r.data.goal_deadline||""};
-        localStorage.setItem("jiroku_goal", JSON.stringify(synced));
-        onGoalSaved(synced);
+    // キャッシュで即時表示
+    const cachedGame = localStorage.getItem("cache_gameStatus");
+    const cachedReport = localStorage.getItem("cache_report");
+    if(cachedGame) { try { const g=JSON.parse(cachedGame); setGame(g); if(g.goal) onGoalSaved({goal:g.goal,deadline:g.goal_deadline||""}); } catch(e){} }
+    if(cachedReport) { try { setReport(JSON.parse(cachedReport)); } catch(e){} }
+
+    // 並列フェッチ
+    Promise.all([
+      gasApi("getReport"),
+      gasApi("getGameStatus"),
+      gasApi("getSchedule"),
+    ]).then(([rep, game, sched])=>{
+      if(rep.ok){ setReport(rep.data); localStorage.setItem("cache_report", JSON.stringify(rep.data)); }
+      if(game.ok){
+        setGame(game.data);
+        localStorage.setItem("cache_gameStatus", JSON.stringify(game.data));
+        if(game.data.goal){ const synced={goal:game.data.goal,deadline:game.data.goal_deadline||""}; localStorage.setItem("jiroku_goal",JSON.stringify(synced)); onGoalSaved(synced); }
       }
+      if(sched.ok) setSchedule(sched.data);
     });
+
     // 日付が変わったらチェック状態リセット
     const today = formatDateStr(new Date());
     const saved = localStorage.getItem("today_actions_date");

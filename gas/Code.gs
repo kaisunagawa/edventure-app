@@ -298,48 +298,33 @@ function autoReplyFromClaude(studentEmail, studentMessage) {
     const apiKey = PropertiesService.getScriptProperties().getProperty("CLAUDE_API_KEY");
     if (!apiKey) return;
 
-    // 生徒情報を取得
     const user = sheetToObjects(getSheet("Users")).find(u => u.student_email === studentEmail);
     if (!user) return;
 
-    // 今日のログを取得
     const today = formatDate(new Date());
     const logs = sheetToObjects(getSheet("DailyLog")).filter(l => l.student_email === studentEmail && l.date === today);
     const logSummary = logs.length > 0
       ? logs.map(l => l.time_block + ": " + l.task + "（集中度" + l.focus_level + "）").join("\n")
       : "まだ記録なし";
 
-    // 直近のチャット履歴（最新10件）
     const recentMessages = sheetToObjects(getSheet("Messages"))
       .filter(m => m.student_email === studentEmail)
       .slice(-10)
       .map(m => ({ role: m.sender_role === "student" ? "user" : "assistant", content: m.content }));
 
-    const systemPrompt = `あなたは教育コーチです。以下の生徒の情報をもとに、温かく具体的なフィードバックを日本語で返してください。返信は2〜4文で簡潔にまとめてください。
+    const systemPrompt = `あなたは教育コーチです。温かく具体的なフィードバックを日本語で返してください。返信は2〜4文で簡潔にまとめてください。
 
 【生徒名】${user.name}
 【目標】${user.goal || "未設定"}
 【今日のログ】
 ${logSummary}`;
 
-    const messages = [
-      ...recentMessages,
-      { role: "user", content: studentMessage }
-    ];
+    const messages = [...recentMessages, { role: "user", content: studentMessage }];
 
     const response = UrlFetchApp.fetch("https://api.anthropic.com/v1/messages", {
-      method: "post",
-      headers: {
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
-        "content-type": "application/json"
-      },
-      payload: JSON.stringify({
-        model: "claude-haiku-4-5-20251001",
-        max_tokens: 300,
-        system: systemPrompt,
-        messages: messages
-      }),
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
+      payload: JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: 300, system: systemPrompt, messages }),
       muteHttpExceptions: true
     });
 
@@ -541,44 +526,79 @@ function applyXPDecay(studentEmail) {
 }
 
 function generateReportWithClaude(studentEmail, studentName, logs) {
+  const apiKey = PropertiesService.getScriptProperties().getProperty("CLAUDE_API_KEY");
+  if (!apiKey) { Logger.log("CLAUDE_API_KEY が未設定"); return null; }
+
   const user = sheetToObjects(getSheet("Users")).find(u => u.student_email === studentEmail);
   const goal = user ? (user.goal || "未設定") : "未設定";
   const totalBlocks = logs.length;
   const withMemo = logs.filter(l => l.memo && l.memo.trim()).length;
-  const focusLevels = logs.map(l => l.focus_level);
-  const focusVariety = new Set(focusLevels).size;
+  const focusVariety = new Set(logs.map(l => l.focus_level)).size;
+
+  // 過去30日分のレポート履歴を取得
+  const pastReports = sheetToObjects(getSheet("Reports"))
+    .filter(r => r.student_email === studentEmail)
+    .sort((a, b) => b.date > a.date ? 1 : -1)
+    .slice(0, 30);
+
+  // 過去7日分のログ統計
+  const allLogs = sheetToObjects(getSheet("DailyLog")).filter(l => l.student_email === studentEmail);
+  const sevenDaysAgo = formatDate(new Date(Date.now() - 7 * 86400000));
+  const recentLogs = allLogs.filter(l => l.date >= sevenDaysAgo);
+  const avgFocusRecent = recentLogs.length > 0
+    ? (recentLogs.filter(l => l.focus_level === "高").length / recentLogs.length * 100).toFixed(0) + "%"
+    : "データなし";
+
+  const historyText = pastReports.length > 0
+    ? pastReports.slice(0, 7).map(r => r.date + ": スコア" + r.score + "点 / " + r.feedback).join("\n")
+    : "なし（初回レポート）";
 
   const logsText = logs.map(l => l.time_block + " - " + l.task + "（集中度：" + l.focus_level + (l.memo ? "、メモ：" + l.memo : "") + "）").join("\n");
-  const prompt = `あなたは生徒の振り返りをサポートする教育コーチです。
-以下は${studentName}さんの今日の時間ログです。
 
+  const prompt = `あなたは生徒の成長を長期的に支援する教育コーチです。
+過去のデータと今日のログをもとに、深い分析と具体的なフィードバックを日本語で返してください。
+
+【生徒名】${studentName}
 【目標】${goal}
-【ログ】
+【過去7日の高集中率】${avgFocusRecent}
+【過去レポート履歴（直近7日）】
+${historyText}
+
+【今日のログ（${totalBlocks}ブロック、メモ${withMemo}個、集中度${focusVariety}種類使用）】
 ${logsText}
 
 【採点基準】
-- 記録したブロック数（${totalBlocks}ブロック）: 多いほど良い（最大40点）
-- メモを書いた割合（${totalBlocks}中${withMemo}個）: 振り返りの質（最大30点）
-- 集中度の正直さ（${focusVariety}種類使用）: 全部「高」でなく正直につけているか（最大30点）
-- 目標との関連性: ログが目標に沿っているか加点
+- 記録ブロック数: 多いほど良い（最大40点）
+- メモの質・量: 振り返りの深さ（最大30点）
+- 集中度の正直さ: 全部「高」でなく正直につけているか（最大30点）
+- 過去との比較: 成長・改善が見られれば加点
 
-以下のJSON形式でレポートを生成してください（必ずJSONのみ返すこと）：
+以下のJSON形式のみで返してください（説明文不要）：
 {
   "score": <0-100の整数>,
-  "feedback": "<2-3文の振り返りフィードバック。記録できたこと自体を褒めて>",
-  "highlights": "<良かった点を1文で>",
-  "improvement": "<改善点を1文で>",
-  "action": "<明日の具体的なアクションを1-2文で>"
+  "feedback": "<過去との比較を含む2-3文のフィードバック>",
+  "highlights": "<今日の良かった点を1文で>",
+  "improvement": "<改善点または継続すべき点を1文で>",
+  "action": "<明日の具体的なアクションを1-2文で>",
+  "trend": "<過去データからわかる成長トレンドを1文で>"
 }`;
+
   const res = UrlFetchApp.fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
-    headers: { "Content-Type": "application/json", "x-api-key": CLAUDE_API_KEY, "anthropic-version": "2023-06-01" },
+    headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
     payload: JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: 512, messages: [{ role: "user", content: prompt }] }),
     muteHttpExceptions: true
   });
+
   const result = JSON.parse(res.getContentText());
-  if (!result.content || !result.content[0]) return null;
-  try { const m = result.content[0].text.trim().match(/\{[\s\S]*\}/); return m ? JSON.parse(m[0]) : null; } catch (e) { return null; }
+  if (!result.content || !result.content[0]) {
+    Logger.log("Claude エラー: " + res.getContentText());
+    return null;
+  }
+  try {
+    const m = result.content[0].text.trim().match(/\{[\s\S]*\}/);
+    return m ? JSON.parse(m[0]) : null;
+  } catch (e) { return null; }
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -669,6 +689,42 @@ function setupTriggers() {
 // テスト用
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+function generateReportForDate(targetDate) {
+  const users = sheetToObjects(getSheet("Users")).filter(u => u.is_active.toUpperCase() === "TRUE");
+  users.forEach(user => {
+    try {
+      const allLogs = sheetToObjects(getSheet("DailyLog"));
+      const logs = allLogs
+        .filter(r => r.student_email === user.student_email && r.date === targetDate)
+        .sort((a, b) => a.time_block > b.time_block ? 1 : -1)
+        .map(r => ({ time_block: r.time_block, task: r.task, focus_level: r.focus_level, memo: r.memo }));
+
+      if (logs.length === 0) {
+        Logger.log(user.student_email + ": " + targetDate + " のログなし");
+        return;
+      }
+
+      // 既存レポートがあればスキップ
+      const existing = sheetToObjects(getSheet("Reports")).find(r => r.student_email === user.student_email && r.date === targetDate);
+      if (existing) {
+        Logger.log(user.student_email + ": " + targetDate + " のレポートは既に存在します");
+        return;
+      }
+
+      const report = generateReportWithClaude(user.student_email, user.name, logs);
+      if (!report) { Logger.log("レポート生成失敗"); return; }
+      getSheet("Reports").appendRow([targetDate, user.student_email, report.score, report.feedback, report.action, report.highlights, report.improvement, new Date().toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" })]);
+      Logger.log(user.student_email + ": " + targetDate + " レポート生成完了 スコア=" + report.score);
+    } catch(err) { Logger.log(err); }
+  });
+}
+
+function generateYesterdayReport() {
+  const yesterday = formatDate(new Date(Date.now() - 86400000));
+  Logger.log("昨日: " + yesterday);
+  generateReportForDate(yesterday);
+}
+
 function testSaveLog() {
   const result = saveLog("work.sunagawa@gmail.com", { time_block: "10:00", task: "テスト", focus_level: "高", memo: "動作確認" });
   console.log(JSON.stringify(result));
@@ -699,27 +755,14 @@ function testLine() {
 
 function testAutoReply() {
   const apiKey = PropertiesService.getScriptProperties().getProperty("CLAUDE_API_KEY");
-  Logger.log("APIキー取得: " + (apiKey ? "OK (長さ:" + apiKey.length + ")" : "なし"));
-
-  const user = sheetToObjects(getSheet("Users")).find(u => u.student_email === "work.sunagawa@gmail.com");
-  Logger.log("ユーザー: " + JSON.stringify(user));
-
+  Logger.log("CLAUDE_API_KEY: " + (apiKey ? "OK" : "なし"));
   const response = UrlFetchApp.fetch("https://api.anthropic.com/v1/messages", {
-    method: "post",
-    headers: {
-      "x-api-key": apiKey,
-      "anthropic-version": "2023-06-01",
-      "content-type": "application/json"
-    },
-    payload: JSON.stringify({
-      model: "claude-haiku-4-5-20251001",
-      max_tokens: 100,
-      messages: [{ role: "user", content: "こんにちは" }]
-    }),
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
+    payload: JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: 100, messages: [{ role: "user", content: "こんにちは" }] }),
     muteHttpExceptions: true
   });
-  Logger.log("ステータス: " + response.getResponseCode());
-  Logger.log("レスポンス: " + response.getContentText());
+  Logger.log(response.getResponseCode() + ": " + response.getContentText());
 }
 
 function testGetUser() {
