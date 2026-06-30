@@ -845,30 +845,88 @@ function SettingsScreen({onToast,onLogout,onGoalSaved}) {
 const TABS=[{id:"home",l:"ホーム",n:"home"},{id:"log",l:"記録",n:"clock"},{id:"report",l:"レポート",n:"chart"},{id:"chat",l:"チャット",n:"chat"},{id:"settings",l:"設定",n:"gear"}];
 
 function LoginScreen({onLogin}) {
+  const [step,setStep]=useState("email"); // "email" | "register"
   const [email,setEmail]=useState("");
+  const [name,setName]=useState("");
+  const [goal,setGoal]=useState("");
+  const [deadline,setDeadline]=useState("");
   const [loading,setLoading]=useState(false);
   const [error,setError]=useState("");
-  const login=async()=>{
+
+  const checkEmail=async()=>{
     const e=email.trim().toLowerCase();
     if(!e||!e.includes("@")){setError("正しいメールアドレスを入力してください");return;}
     setLoading(true);setError("");
-    const url=new URL(GAS_URL); url.searchParams.set("action","getUser"); url.searchParams.set("studentEmail",e);
     try{
+      const url=new URL(GAS_URL); url.searchParams.set("action","getUser"); url.searchParams.set("studentEmail",e);
       const r=await fetch(url).then(res=>res.json());
-      if(r.ok&&r.data){const u={email:e,name:r.data.name,coachName:r.data.coachName||"コーチ",coachEmail:r.data.coach_email||""}; localStorage.setItem("edventure_user",JSON.stringify(u)); CURRENT_USER=u; onLogin(u);}
-      else setError("このメールアドレスは登録されていません");
+      if(r.ok&&r.data){
+        const u={email:e,name:r.data.name,coachName:r.data.coachName||"コーチ",coachEmail:r.data.coach_email||""};
+        localStorage.setItem("edventure_user",JSON.stringify(u)); CURRENT_USER=u; onLogin(u);
+      } else {
+        setStep("register"); // 未登録 → 新規登録フォームへ
+      }
     }catch{setError("接続エラーが発生しました");}
     setLoading(false);
   };
+
+  const register=async()=>{
+    if(!name.trim()){setError("名前を入力してください");return;}
+    setLoading(true);setError("");
+    try{
+      const e=email.trim().toLowerCase();
+      const url=new URL(GAS_URL);
+      url.searchParams.set("action","registerUser");
+      url.searchParams.set("studentEmail",e);
+      url.searchParams.set("name",name.trim());
+      url.searchParams.set("goal",goal.trim());
+      url.searchParams.set("goal_deadline",deadline);
+      const r=await fetch(url).then(res=>res.json());
+      if(r.ok){
+        const u={email:e,name:name.trim(),coachName:"コーチ",coachEmail:""};
+        if(goal.trim()) localStorage.setItem("jiroku_goal",JSON.stringify({goal:goal.trim(),deadline}));
+        localStorage.setItem("edventure_user",JSON.stringify(u)); CURRENT_USER=u; onLogin(u);
+      } else {
+        setError(r.error==="already_registered"?"このメールはすでに登録されています":"登録に失敗しました");
+      }
+    }catch{setError("接続エラーが発生しました");}
+    setLoading(false);
+  };
+
+  if(step==="register") return (
+    <div className="login-wrap" style={{justifyContent:"flex-start",paddingTop:48}}>
+      <div className="login-logo"><S n="clock" s={26}/></div>
+      <div className="login-title">はじめまして</div>
+      <div className="login-sub" style={{marginBottom:24}}>プロフィールを入力してください</div>
+      <div className="login-box" style={{gap:10}}>
+        <div>
+          <div style={{fontSize:11,fontWeight:600,color:"var(--sub)",marginBottom:5}}>名前 *</div>
+          <input className="login-inp" placeholder="例：山田 花子" value={name} onChange={e=>setName(e.target.value)}/>
+        </div>
+        <div>
+          <div style={{fontSize:11,fontWeight:600,color:"var(--sub)",marginBottom:5}}>目標（任意）</div>
+          <textarea className="txa" placeholder="例：英検2級に合格する" value={goal} onChange={e=>setGoal(e.target.value)} style={{height:68}}/>
+        </div>
+        <div>
+          <div style={{fontSize:11,fontWeight:600,color:"var(--sub)",marginBottom:5}}>目標の期限（任意）</div>
+          <input type="date" className="login-inp" value={deadline} onChange={e=>setDeadline(e.target.value)}/>
+        </div>
+        {error&&<div className="login-err">{error}</div>}
+        <button className="btn" onClick={register} disabled={loading||!name.trim()}>{loading?"登録中...":"登録してはじめる"}</button>
+        <button style={{background:"none",border:"none",color:"var(--sub)",fontSize:13,cursor:"pointer",marginTop:4}} onClick={()=>{setStep("email");setError("");}}>← メールアドレスに戻る</button>
+      </div>
+    </div>
+  );
+
   return (
     <div className="login-wrap">
       <div className="login-logo"><S n="clock" s={26}/></div>
       <div className="login-title">JIROKU</div>
       <div className="login-sub">時間を記録し、目標を達成する</div>
       <div className="login-box">
-        <input type="email" className="login-inp" placeholder="メールアドレス" value={email} onChange={e=>setEmail(e.target.value)} onKeyDown={e=>e.key==="Enter"&&login()}/>
+        <input type="email" className="login-inp" placeholder="メールアドレス" value={email} onChange={e=>setEmail(e.target.value)} onKeyDown={e=>e.key==="Enter"&&checkEmail()}/>
         {error&&<div className="login-err">{error}</div>}
-        <button className="btn" onClick={login} disabled={loading}>{loading?"確認中...":"ログイン"}</button>
+        <button className="btn" onClick={checkEmail} disabled={loading}>{loading?"確認中...":"次へ"}</button>
       </div>
     </div>
   );
