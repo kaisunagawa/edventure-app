@@ -353,22 +353,25 @@ function saveSettings(studentEmail, body) {
   const headers = data[0];
   const emailIdx = headers.indexOf("student_email");
 
-  // notify_start / notify_end 列がなければ追加
-  let startIdx = headers.indexOf("notify_start");
-  let endIdx = headers.indexOf("notify_end");
-  if (startIdx === -1) {
-    startIdx = headers.length;
-    endIdx = headers.length + 1;
-    sheet.getRange(1, startIdx + 1).setValue("notify_start");
-    sheet.getRange(1, endIdx + 1).setValue("notify_end");
+  // 列がなければ追加するヘルパー
+  function ensureCol(name) {
+    let idx = headers.indexOf(name);
+    if (idx === -1) { idx = headers.length; sheet.getRange(1, idx + 1).setValue(name); headers.push(name); }
+    return idx;
   }
 
+  const startIdx = ensureCol("notify_start");
+  const endIdx   = ensureCol("notify_end");
+  const goalIdx  = ensureCol("goal");
+  const deadlineIdx = ensureCol("goal_deadline");
+
   for (let i = 1; i < data.length; i++) {
-    if (String(data[i][emailIdx]) === studentEmail) {
-      sheet.getRange(i + 1, startIdx + 1).setValue(Number(body.notify_start) || 7);
-      sheet.getRange(i + 1, endIdx + 1).setValue(Number(body.notify_end) || 23);
-      break;
-    }
+    if (String(data[i][emailIdx]) !== studentEmail) continue;
+    if (body.notify_start !== undefined) sheet.getRange(i + 1, startIdx + 1).setValue(Number(body.notify_start) || 7);
+    if (body.notify_end   !== undefined) sheet.getRange(i + 1, endIdx   + 1).setValue(Number(body.notify_end)   || 23);
+    if (body.goal         !== undefined) sheet.getRange(i + 1, goalIdx  + 1).setValue(body.goal);
+    if (body.goal_deadline !== undefined) sheet.getRange(i + 1, deadlineIdx + 1).setValue(body.goal_deadline);
+    break;
   }
   return { ok: true };
 }

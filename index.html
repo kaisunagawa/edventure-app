@@ -394,7 +394,7 @@ const EVALS = [
 const TIME_BLOCKS = ["06:00-07:00","07:00-08:00","08:00-09:00","09:00-10:00","10:00-11:00","11:00-12:00","12:00-13:00","13:00-14:00","14:00-15:00","15:00-16:00","16:00-17:00","17:00-18:00","18:00-19:00","19:00-20:00","20:00-21:00","21:00-22:00","22:00-23:00","23:00-24:00"];
 
 // ── Home ──
-function HomeScreen() {
+function HomeScreen({goalData}) {
   const [report, setReport] = useState(null);
   const [schedule, setSchedule] = useState([]);
   const [game, setGame] = useState(null);
@@ -404,12 +404,38 @@ function HomeScreen() {
     gasApi("getGameStatus").then(r=>r.ok&&setGame(r.data));
   },[]);
   const today = new Date().toLocaleDateString("ja-JP",{month:"long",day:"numeric",weekday:"short"});
+
+  const daysLeft = goalData?.deadline
+    ? Math.ceil((new Date(goalData.deadline) - new Date()) / 86400000)
+    : null;
   return (
     <div style={{paddingBottom:8}}>
       <div className="ph">
         <div className="ph-eyebrow">{today}</div>
         <div className="ph-title-accent">{CURRENT_USER.name}</div>
       </div>
+
+      {goalData?.goal && (
+        <div className="card" style={{background:"linear-gradient(135deg,#F5F3FF,#FFF0F8)",border:"1px solid #EDE9FF",marginBottom:10}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
+            <div style={{flex:1}}>
+              <div style={{fontSize:10,fontWeight:700,letterSpacing:1,textTransform:"uppercase",color:"var(--accent)",marginBottom:5}}>MY GOAL</div>
+              <div style={{fontSize:15,fontWeight:700,color:"var(--text)",lineHeight:1.5}}>{goalData.goal}</div>
+            </div>
+            {daysLeft !== null && (
+              <div style={{textAlign:"center",flexShrink:0,background:"white",borderRadius:10,padding:"8px 12px",boxShadow:"0 1px 4px rgba(0,0,0,.06)"}}>
+                <div style={{fontSize:22,fontWeight:900,color:daysLeft<=7?"var(--red)":daysLeft<=30?"var(--amber)":"var(--accent)",lineHeight:1}}>{daysLeft<0?0:daysLeft}</div>
+                <div style={{fontSize:9,color:"var(--sub)",fontWeight:600,marginTop:2}}>{daysLeft<0?"期限切れ":"日後"}</div>
+              </div>
+            )}
+          </div>
+          {goalData.deadline && (
+            <div style={{marginTop:8,fontSize:11,color:"var(--sub)"}}>
+              期限：{new Date(goalData.deadline).toLocaleDateString("ja-JP",{year:"numeric",month:"long",day:"numeric"})}
+            </div>
+          )}
+        </div>
+      )}
 
       {game && (()=>{
         const rank = getRank(game.level);
@@ -697,17 +723,80 @@ function ChatScreen({onToast}) {
 }
 
 // ── Settings ──
-function SettingsScreen({onToast,onLogout}) {
+function SettingsScreen({onToast,onLogout,onGoalSaved}) {
   const saved=JSON.parse(localStorage.getItem("notifySettings")||'{"start":7,"end":23}');
+  const savedGoal=JSON.parse(localStorage.getItem("jiroku_goal")||'{"goal":"","deadline":""}');
   const [start,setStart]=useState(saved.start);
   const [end,setEnd]=useState(saved.end);
+  const [goal,setGoal]=useState(savedGoal.goal);
+  const [deadline,setDeadline]=useState(savedGoal.deadline);
   const hours=Array.from({length:24},(_,i)=>i);
-  const save=()=>{ localStorage.setItem("notifySettings",JSON.stringify({start,end})); gasPost("saveSettings",{notify_start:start,notify_end:end}); onToast("保存しました"); };
+
+  const saveNotify=()=>{
+    localStorage.setItem("notifySettings",JSON.stringify({start,end}));
+    gasPost("saveSettings",{notify_start:start,notify_end:end});
+    onToast("通知設定を保存しました");
+  };
+  const saveGoal=()=>{
+    if(!goal.trim()){onToast("目標を入力してください");return;}
+    localStorage.setItem("jiroku_goal",JSON.stringify({goal:goal.trim(),deadline}));
+    gasPost("saveSettings",{goal:goal.trim(),goal_deadline:deadline});
+    onGoalSaved({goal:goal.trim(),deadline});
+    onToast("目標を保存しました");
+  };
+
+  const RANK_RULES=[
+    {rank:"芽吹き",lv:"Lv.1",color:"#52C987"},
+    {rank:"成長",lv:"Lv.2–3",color:"#3BAF6E"},
+    {rank:"開花",lv:"Lv.4–6",color:"#E0609A"},
+    {rank:"輝き",lv:"Lv.7–10",color:"#E09A2A"},
+    {rank:"飛翔",lv:"Lv.11–15",color:"#6B58E8"},
+    {rank:"覚醒",lv:"Lv.16+",color:"#C044E0"},
+  ];
+
   return (
     <div>
-      <div className="ph"><div className="ph-title">設定</div></div>
+      <div className="ph"><div className="ph-title-accent">設定</div></div>
       <div style={{padding:"0 16px"}}>
+
+        {/* 目標設定 */}
         <div className="card">
+          <div className="card-label">目標・期限</div>
+          <div className="form-grp" style={{marginBottom:12}}>
+            <label className="form-lbl">目標</label>
+            <textarea className="txa" placeholder="例：英検2級に合格する" value={goal} onChange={e=>setGoal(e.target.value)} style={{height:72}}/>
+          </div>
+          <div className="form-grp" style={{marginBottom:14}}>
+            <label className="form-lbl">達成期限</label>
+            <input type="date" className="inp" value={deadline} onChange={e=>setDeadline(e.target.value)}/>
+          </div>
+          <button className="btn" onClick={saveGoal}>目標を保存する</button>
+        </div>
+
+        {/* 階級・XPルール */}
+        <div className="card" style={{marginTop:12}}>
+          <div className="card-label">階級システム</div>
+          <p style={{fontSize:12,color:"var(--sub)",lineHeight:1.7,marginBottom:14}}>
+            記録を積み重ねるとXPが貯まりレベルアップ。<br/>
+            記録した日は <b style={{color:"var(--accent)"}}>+10〜25 XP</b>、メモを書くと +5 XP 追加。<br/>
+            <b style={{color:"var(--red)"}}>記録なしの日は −15 XP</b>、2日連続で −30 XP。<br/>
+            ストリーク（連続記録）で XP 増加ボーナスあり。
+          </p>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6}}>
+            {RANK_RULES.map(r=>(
+              <div key={r.rank} style={{display:"flex",alignItems:"center",gap:7,padding:"7px 10px",borderRadius:8,background:r.color+"18",border:`1px solid ${r.color}30`}}>
+                <div style={{width:7,height:7,borderRadius:"50%",background:r.color,flexShrink:0}}/>
+                <div>
+                  <div style={{fontSize:12,fontWeight:700,color:r.color}}>{r.rank}</div>
+                  <div style={{fontSize:10,color:"var(--sub)"}}>{r.lv}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* LINE通知 */}
+        <div className="card" style={{marginTop:12}}>
           <div className="card-label">LINE通知時間</div>
           <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:14}}>
             <div style={{flex:1}}><div style={{fontSize:11,color:"var(--sub)",marginBottom:6,fontWeight:600}}>開始</div><select value={start} onChange={e=>setStart(Number(e.target.value))}>{hours.map(h=><option key={h} value={h}>{String(h).padStart(2,"0")}:00</option>)}</select></div>
@@ -715,8 +804,10 @@ function SettingsScreen({onToast,onLogout}) {
             <div style={{flex:1}}><div style={{fontSize:11,color:"var(--sub)",marginBottom:6,fontWeight:600}}>終了</div><select value={end} onChange={e=>setEnd(Number(e.target.value))}>{hours.map(h=><option key={h} value={h}>{String(h).padStart(2,"0")}:00</option>)}</select></div>
           </div>
           <div style={{fontSize:11,color:"var(--sub)",marginBottom:14,lineHeight:1.7}}>設定した時間帯に毎時リマインドが届きます</div>
-          <button className="btn" onClick={save}>保存する</button>
+          <button className="btn" onClick={saveNotify}>保存する</button>
         </div>
+
+        {/* アカウント */}
         <div className="card" style={{marginTop:12}}>
           <div className="card-label">アカウント</div>
           <div className="s-row"><span className="s-k">名前</span><span className="s-v">{CURRENT_USER.name}</span></div>
@@ -764,16 +855,17 @@ function App() {
   const [user,setUser]=useState(CURRENT_USER);
   const [tab,setTab]=useState("home");
   const [toast,setToast]=useState(null);
+  const [goalData,setGoalData]=useState(()=>JSON.parse(localStorage.getItem("jiroku_goal")||'{"goal":"","deadline":""}'));
   const logout=()=>{localStorage.removeItem("edventure_user");CURRENT_USER=null;setUser(null);};
   if(!user) return <LoginScreen onLogin={setUser}/>;
   return (
     <div style={{height:"100%",position:"relative"}}>
       <div className="screen">
-        {tab==="home"&&<HomeScreen/>}
+        {tab==="home"&&<HomeScreen goalData={goalData}/>}
         {tab==="log"&&<LogScreen onToast={setToast}/>}
         {tab==="report"&&<ReportScreen/>}
         {tab==="chat"&&<ChatScreen onToast={setToast}/>}
-        {tab==="settings"&&<SettingsScreen onToast={setToast} onLogout={logout}/>}
+        {tab==="settings"&&<SettingsScreen onToast={setToast} onLogout={logout} onGoalSaved={setGoalData}/>}
       </div>
       <nav className="nav">
         {TABS.map(t=>(
