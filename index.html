@@ -394,14 +394,23 @@ const EVALS = [
 const TIME_BLOCKS = ["06:00-07:00","07:00-08:00","08:00-09:00","09:00-10:00","10:00-11:00","11:00-12:00","12:00-13:00","13:00-14:00","14:00-15:00","15:00-16:00","16:00-17:00","17:00-18:00","18:00-19:00","19:00-20:00","20:00-21:00","21:00-22:00","22:00-23:00","23:00-24:00"];
 
 // ── Home ──
-function HomeScreen({goalData}) {
+function HomeScreen({goalData, onGoalSaved}) {
   const [report, setReport] = useState(null);
   const [schedule, setSchedule] = useState([]);
   const [game, setGame] = useState(null);
   useEffect(()=>{
     gasApi("getReport").then(r=>r.ok&&setReport(r.data));
     gasApi("getSchedule").then(r=>r.ok&&setSchedule(r.data));
-    gasApi("getGameStatus").then(r=>r.ok&&setGame(r.data));
+    gasApi("getGameStatus").then(r=>{
+      if(!r.ok) return;
+      setGame(r.data);
+      // スプシにgoalがあればlocalStorageと同期
+      if(r.data.goal){
+        const synced={goal:r.data.goal, deadline:r.data.goal_deadline||""};
+        localStorage.setItem("jiroku_goal", JSON.stringify(synced));
+        onGoalSaved(synced);
+      }
+    });
   },[]);
   const today = new Date().toLocaleDateString("ja-JP",{month:"long",day:"numeric",weekday:"short"});
 
@@ -861,7 +870,7 @@ function App() {
   return (
     <div style={{height:"100%",position:"relative"}}>
       <div className="screen">
-        {tab==="home"&&<HomeScreen goalData={goalData}/>}
+        {tab==="home"&&<HomeScreen goalData={goalData} onGoalSaved={setGoalData}/>}
         {tab==="log"&&<LogScreen onToast={setToast}/>}
         {tab==="report"&&<ReportScreen/>}
         {tab==="chat"&&<ChatScreen onToast={setToast}/>}
