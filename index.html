@@ -328,7 +328,7 @@ const S = (p) => { const s={width:p.s||22,height:p.s||22,fill:"none",stroke:"cur
   if(p.n==="home")   return html`<svg viewBox="0 0 24 24" style=${s}><path d="M3 9.5L12 3l9 6.5V20a1 1 0 01-1 1H4a1 1 0 01-1-1V9.5z"/><path d="M9 21V12h6v9"/></svg>`;
   if(p.n==="clock")  return html`<svg viewBox="0 0 24 24" style=${s}><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>`;
   if(p.n==="chart")  return html`<svg viewBox="0 0 24 24" style=${s}><rect x="3" y="12" width="4" height="9"/><rect x="10" y="7" width="4" height="14"/><rect x="17" y="3" width="4" height="18"/></svg>`;
-  if(p.n==="chat")   return html`<svg viewBox="0 0 24 24" style=${s}><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>`;
+  if(p.n==="timer")  return html`<svg viewBox="0 0 24 24" style=${s}><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2.5"/><path d="M9.5 2.5h5M12 2.5V5"/></svg>`;
   if(p.n==="gear")   return html`<svg viewBox="0 0 24 24" style=${s}><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>`;
   if(p.n==="up")     return html`<svg viewBox="0 0 24 24" style=${s}><path d="M12 19V5M5 12l7-7 7 7"/></svg>`;
   return null;
@@ -780,56 +780,173 @@ function ReportScreen() {
 }
 
 // ── Chat ──
-function ChatScreen({onToast}) {
-  const [msgs, setMsgs]=useState([]);
-  const [input, setInput]=useState("");
-  const [sending, setSending]=useState(false);
-  const bottomRef=useRef(null);
-  const inputRef=useRef(null);
-  const compRef=useRef(false);
-  const load=useCallback(async()=>{ const r=await gasApi("getMessages"); if(r.ok) setMsgs(r.data); },[]);
-  useEffect(()=>{ load(); const t=setInterval(load,10000); return ()=>clearInterval(t); },[]);
-  useEffect(()=>{ bottomRef.current?.scrollIntoView({behavior:"smooth"}); },[msgs]);
-  const send=async()=>{
-    const content=input.trim(); if(!content||sending) return;
-    setSending(true); setInput("");
-    const temp={message_id:"t"+Date.now(),content,sender_role:"student",sender_name:CURRENT_USER.name,timestamp:new Date().toLocaleString("ja-JP")};
-    setMsgs(p=>[...p,temp]);
-    gasPost("sendMessage",{content,sender_role:"student",sender_name:CURRENT_USER.name});
-    setSending(false); inputRef.current?.focus(); setTimeout(load,3000);
+function TimerScreen({onToast}) {
+  const getPresets = () => JSON.parse(localStorage.getItem("timer_presets")||"[25,45,60]");
+  const getBreak   = () => Number(localStorage.getItem("timer_break")||"5");
+
+  const [presets]        = useState(getPresets);
+  const [breakMin]       = useState(getBreak);
+  const [selectedMin, setSelectedMin] = useState(getPresets()[0]);
+  const [timeLeft, setTimeLeft]       = useState(getPresets()[0]*60);
+  const [isRunning, setIsRunning]     = useState(false);
+  const [mode, setMode]               = useState("focus");
+  const [sessionCount, setSessionCount] = useState(0);
+  const [task, setTask]               = useState("");
+  const [startTime, setStartTime]     = useState(null);
+  const [showModal, setShowModal]     = useState(false);
+  const [logFocus, setLogFocus]       = useState(EVALS[0].l);
+  const [logMemo, setLogMemo]         = useState("");
+  const [saving, setSaving]           = useState(false);
+
+  const playBeep = () => {
+    try {
+      const ctx = new (window.AudioContext||window.webkitAudioContext)();
+      [0,0.3,0.6].forEach(t=>{
+        const o=ctx.createOscillator(), g=ctx.createGain();
+        o.connect(g); g.connect(ctx.destination);
+        o.frequency.value=880; g.gain.setValueAtTime(0.25,ctx.currentTime+t);
+        g.gain.exponentialRampToValueAtTime(0.001,ctx.currentTime+t+0.25);
+        o.start(ctx.currentTime+t); o.stop(ctx.currentTime+t+0.25);
+      });
+    } catch(e){}
   };
-  const onKey=e=>{ if(e.key==="Enter"&&!e.shiftKey&&!compRef.current){e.preventDefault();send();} };
-  const fmtT=ts=>{ try{ if(!ts) return "--:--"; const iso=ts.replace(/(\d{4})\/(\d{1,2})\/(\d{1,2})/,(_,y,m,d)=>y+"-"+m.padStart(2,"0")+"-"+d.padStart(2,"0")).replace(" ","T"); const dt=new Date(iso); if(!isNaN(dt)) return dt.toLocaleTimeString("ja-JP",{hour:"2-digit",minute:"2-digit",timeZone:"Asia/Tokyo"}); return "--:--"; }catch{return "--:--";} };
-  return html`
-    <div style=${{display:"flex",flexDirection:"column",height:"100%"}}>
-      <div class="chat-head">
-        <div class="chat-av">${(CURRENT_USER.coachName||"?").charAt(0)}</div>
-        <div><div class="chat-name">${CURRENT_USER.coachName}</div><div class="chat-status">コーチ</div></div>
+
+  useEffect(()=>{
+    if(!isRunning) return;
+    if(timeLeft<=0){
+      setIsRunning(false);
+      playBeep();
+      if(mode==="focus"){ setSessionCount(c=>c+1); setShowModal(true); }
+      else { setMode("focus"); setTimeLeft(selectedMin*60); }
+      return;
+    }
+    const t = setTimeout(()=>setTimeLeft(s=>s-1), 1000);
+    return ()=>clearTimeout(t);
+  },[isRunning, timeLeft]);
+
+  const selectPreset = (min) => {
+    setSelectedMin(min); setTimeLeft(min*60);
+    setIsRunning(false); setStartTime(null); setMode("focus");
+  };
+  const start = () => { if(!startTime) setStartTime(new Date()); setIsRunning(true); };
+  const pause = () => setIsRunning(false);
+  const reset = () => { setIsRunning(false); setTimeLeft(selectedMin*60); setStartTime(null); setMode("focus"); };
+
+  const saveLog = async () => {
+    setSaving(true);
+    const st = startTime||new Date();
+    const h  = st.getHours();
+    const timeBlock = String(h).padStart(2,"0")+":00";
+    const url = new URL(GAS_URL);
+    url.searchParams.set("action","saveLog");
+    url.searchParams.set("studentEmail",CURRENT_USER.email);
+    url.searchParams.set("time_block",timeBlock);
+    url.searchParams.set("task",task.trim()||`ポモドーロ${selectedMin}分集中`);
+    url.searchParams.set("focus_level",logFocus);
+    url.searchParams.set("memo",logMemo.trim());
+    url.searchParams.set("goal_related","true");
+    const res = await fetch(url).then(r=>r.json()).catch(()=>({}));
+    if(res.xp_gained){ const lv=res.level_up?` → Lv.${res.level}！`:""; onToast(`+${res.xp_gained} XP 獲得${lv}`); }
+    else onToast("記録しました");
+    setSaving(false); setShowModal(false); setLogMemo("");
+    setMode("break"); setTimeLeft(breakMin*60); setStartTime(null);
+  };
+  const skipLog = () => { setShowModal(false); setMode("break"); setTimeLeft(breakMin*60); setStartTime(null); };
+
+  const mins = Math.floor(timeLeft/60);
+  const secs = timeLeft%60;
+  const totalSec = (mode==="focus"?selectedMin:breakMin)*60;
+  const pct = Math.max(0,Math.min(100,((totalSec-timeLeft)/totalSec)*100));
+  const r=90, circ=2*Math.PI*r, offset=circ*(1-pct/100);
+  const accentColor = mode==="break"?"var(--green)":"var(--accent)";
+
+  return html`<div style=${{paddingBottom:32}}>
+    <div class="ph"><div class="ph-title-accent">ポモドーロタイマー</div></div>
+    <div style=${{padding:"0 16px"}}>
+
+      <div style=${{display:"flex",gap:8,marginBottom:24}}>
+        ${presets.map(min=>html`
+          <button key=${min} onClick=${()=>!isRunning&&selectPreset(min)}
+            style=${{flex:1,padding:"10px 0",borderRadius:10,border:`1.5px solid ${selectedMin===min?"var(--accent)":"var(--border)"}`,
+            background:selectedMin===min?"var(--accent-l)":"var(--card)",color:selectedMin===min?"var(--accent)":"var(--sub)",
+            fontWeight:600,fontSize:14,cursor:isRunning?"default":"pointer",opacity:isRunning&&selectedMin!==min?0.4:1}}>
+            ${min}分
+          </button>
+        `)}
       </div>
-      <div class="msgs" style=${{flex:1,overflowY:"auto"}}>
-        ${msgs.length===0&&html`<div style=${{textAlign:"center",color:"var(--sub)",fontSize:13,marginTop:40}}>メッセージはまだありません</div>`}
-        ${msgs.map(m=>{
-          const me=m.sender_role==="student";
-          return html`<div key=${m.message_id} style=${{alignSelf:me?"flex-end":"flex-start",maxWidth:"75%",display:"flex",flexDirection:"column",alignItems:me?"flex-end":"flex-start"}}>
-            ${!me&&html`<div style=${{fontSize:11,color:"var(--sub)",marginBottom:3,paddingLeft:2}}>${m.sender_name}</div>`}
-            <div class=${"bubble "+(me?"b-out":"b-in")} dangerouslySetInnerHTML=${{__html: m.content.replace(/\*\*(.+?)\*\*/g,"<b>$1</b>").replace(/\n/g,"<br/>")}}></div>
-            <div class=${"btime"+(me?" btime-r":"")}>${fmtT(m.timestamp)}</div>
-          </div>`;
-        })}
-        <div ref=${bottomRef}/>
+
+      <div style=${{display:"flex",flexDirection:"column",alignItems:"center",marginBottom:20}}>
+        <svg width="220" height="220" viewBox="0 0 220 220">
+          <circle cx="110" cy="110" r=${r} fill="none" stroke="var(--border)" stroke-width="10"/>
+          <circle cx="110" cy="110" r=${r} fill="none" stroke=${accentColor} stroke-width="10"
+            stroke-dasharray=${circ} stroke-dashoffset=${offset}
+            stroke-linecap="round" transform="rotate(-90 110 110)"
+            style=${{transition:"stroke-dashoffset 1s linear"}}/>
+          <text x="110" y="97" text-anchor="middle" font-size="46" font-weight="800" fill="var(--text)" font-family="inherit">
+            ${String(mins).padStart(2,"0")}:${String(secs).padStart(2,"0")}
+          </text>
+          <text x="110" y="128" text-anchor="middle" font-size="13" fill=${mode==="break"?"var(--green)":"var(--sub)"} font-family="inherit">
+            ${mode==="focus"?`集中中 · 第${sessionCount+1}セッション`:`休憩中 · 第${sessionCount}セッション完了`}
+          </text>
+        </svg>
       </div>
-      <div class="chat-bar">
-        <textarea ref=${inputRef} class="chat-inp" placeholder="メッセージを入力..." rows="1" value=${input}
-          onChange=${e=>setInput(e.target.value)}
-          onCompositionStart=${()=>{compRef.current=true;}}
-          onCompositionEnd=${()=>{compRef.current=false;}}
-          onKeyDown=${onKey}/>
-        <button class="send" onClick=${send} disabled=${!input.trim()||sending}>
-          ${sending?html`<span class="spin" style=${{width:14,height:14,borderWidth:2}}/>`:html`<${S} n="up" s=${17}/>`}
+
+      ${mode==="focus"&&html`
+        <div class="form-grp" style=${{marginBottom:16}}>
+          <label class="form-lbl">何に集中しますか？（任意）</label>
+          <input class="inp" placeholder="例：企画書の作成、架電対応..." value=${task}
+            onInput=${e=>setTask(e.target.value)} disabled=${isRunning}/>
+        </div>
+      `}
+
+      <div style=${{display:"flex",gap:10,marginBottom:16}}>
+        <button onClick=${isRunning?pause:start}
+          style=${{flex:1,padding:"15px",borderRadius:12,border:"none",background:accentColor,
+          color:"white",fontSize:17,fontWeight:700,cursor:"pointer"}}>
+          ${isRunning?"⏸ 一時停止":"▶ スタート"}
         </button>
+        <button onClick=${reset}
+          style=${{padding:"15px 18px",borderRadius:12,border:"1.5px solid var(--border)",
+          background:"var(--card)",color:"var(--sub)",fontSize:18,cursor:"pointer"}}>↺</button>
       </div>
+
+      ${sessionCount>0&&html`
+        <div style=${{textAlign:"center",fontSize:13,color:"var(--sub)"}}>
+          今日: <b style=${{color:"var(--accent)"}}>${sessionCount}</b> セッション完了
+        </div>
+      `}
     </div>
-  `;
+
+    ${showModal&&html`
+      <div style=${{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"flex-end",zIndex:200}}
+        onClick=${e=>{if(e.target===e.currentTarget)skipLog();}}>
+        <div style=${{background:"var(--card)",borderRadius:"20px 20px 0 0",padding:"24px 20px 32px",width:"100%",boxSizing:"border-box"}}>
+          <div style=${{fontSize:20,fontWeight:800,marginBottom:4}}>お疲れ様でした！🎉</div>
+          <div style=${{fontSize:13,color:"var(--sub)",marginBottom:20}}>${selectedMin}分の集中セッションが完了しました。記録しましょう。</div>
+          <div class="form-grp">
+            <label class="form-lbl">何をしましたか？</label>
+            <input class="inp" value=${task} onInput=${e=>setTask(e.target.value)}
+              placeholder="例：企画書の作成"/>
+          </div>
+          <div class="form-grp">
+            <label class="form-lbl">自己評価</label>
+            ${EVALS.map(f=>html`<button key=${f.l} class=${"eval-btn"+(logFocus===f.l?" "+f.c:"")} onClick=${()=>setLogFocus(f.l)}>${f.l}</button>`)}
+          </div>
+          <div class="form-grp" style=${{marginBottom:20}}>
+            <label class="form-lbl">メモ（任意）</label>
+            <textarea class="txa" placeholder="気づいたことや振り返り..." value=${logMemo}
+              onInput=${e=>setLogMemo(e.target.value)}/>
+          </div>
+          <button class="btn" onClick=${saveLog} disabled=${saving} style=${{marginBottom:10}}>
+            ${saving?html`<span class="spin"/>`:html`記録して休憩へ（${breakMin}分）`}
+          </button>
+          <button onClick=${skipLog} style=${{width:"100%",background:"none",border:"none",color:"var(--sub)",fontSize:13,padding:"8px",cursor:"pointer"}}>
+            スキップ（記録しない）
+          </button>
+        </div>
+      </div>
+    `}
+  </div>`;
 }
 
 // ── Settings ──
@@ -920,6 +1037,25 @@ function SettingsScreen({onToast,onLogout,onGoalSaved}) {
       </div>
 
       <div class="card" style=${{marginTop:12}}>
+        <div class="card-label">タイマー設定</div>
+        <div style=${{fontSize:12,color:"var(--sub)",marginBottom:10}}>プリセット時間（カンマ区切りで最大3つ、単位:分）</div>
+        <input class="inp" style=${{marginBottom:10}}
+          defaultValue=${localStorage.getItem("timer_presets")?JSON.parse(localStorage.getItem("timer_presets")).join(","):"25,45,60"}
+          onBlur=${e=>{
+            const vals=e.target.value.split(",").map(v=>parseInt(v.trim())).filter(v=>v>0&&v<=180).slice(0,3);
+            if(vals.length>0){ localStorage.setItem("timer_presets",JSON.stringify(vals)); onToast("タイマー設定を保存しました"); }
+          }}
+          placeholder="例: 25,45,60"/>
+        <div style=${{fontSize:12,color:"var(--sub)",marginBottom:10}}>休憩時間（分）</div>
+        <input class="inp" type="number" min="1" max="60" style=${{marginBottom:4}}
+          defaultValue=${localStorage.getItem("timer_break")||"5"}
+          onBlur=${e=>{
+            const v=parseInt(e.target.value);
+            if(v>0&&v<=60){ localStorage.setItem("timer_break",String(v)); onToast("タイマー設定を保存しました"); }
+          }}/>
+      </div>
+
+      <div class="card" style=${{marginTop:12}}>
         <div class="card-label">階級システム</div>
         <div style=${{display:"flex",gap:8,flexWrap:"wrap",marginBottom:14}}>
           <div style=${{flex:"1 1 140px",background:"var(--bg)",borderRadius:9,padding:"10px 12px",fontSize:12,lineHeight:1.8,color:"var(--sub)"}}>
@@ -993,7 +1129,7 @@ function SettingsScreen({onToast,onLogout,onGoalSaved}) {
   </div>`;
 }
 
-const TABS=[{id:"home",l:"ホーム",n:"home"},{id:"log",l:"記録",n:"clock"},{id:"report",l:"レポート",n:"chart"},{id:"chat",l:"チャット",n:"chat"},{id:"settings",l:"設定",n:"gear"}];
+const TABS=[{id:"home",l:"ホーム",n:"home"},{id:"log",l:"記録",n:"clock"},{id:"report",l:"レポート",n:"chart"},{id:"timer",l:"タイマー",n:"timer"},{id:"settings",l:"設定",n:"gear"}];
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
@@ -1260,7 +1396,7 @@ function App() {
         ${tab==="home"&&html`<${HomeScreen} goalData=${goalData} onGoalSaved=${setGoalData}/>`}
         ${tab==="log"&&html`<${LogScreen} onToast=${setToast}/>`}
         ${tab==="report"&&html`<${ReportScreen}/>`}
-        ${tab==="chat"&&html`<${ChatScreen} onToast=${setToast}/>`}
+        ${tab==="timer"&&html`<${TimerScreen} onToast=${setToast}/>`}
         ${tab==="settings"&&html`<${SettingsScreen} onToast=${setToast} onLogout=${logout} onGoalSaved=${setGoalData}/>`}
       </div>
       <nav class="nav">
