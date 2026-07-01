@@ -536,10 +536,46 @@ function saveSettings(studentEmail, body) {
 function morningScheduleNotify() {
   sheetToObjects(getSheet("Users")).filter(u => u.is_active.toUpperCase() === "TRUE").forEach(user => {
     try {
-      const s = getSchedule(user.student_email);
-      if (!s.data || s.data.length === 0) return;
-      sendLineMessage(user.line_user_id, "☀️ おはようございます、" + user.name + "さん！\n\n今日の予定：\n" + s.data.map(ev => ev.time + " " + ev.title).join("\n") + "\n\n頑張りましょう！");
-    } catch (err) {}
+      if (!user.line_user_id) return;
+      const today = formatDate(new Date());
+      const streak = Number(user.streak || 0);
+      const goalsText = [user.goal, user.goal2, user.goal3].filter(Boolean).join("、") || "未設定";
+
+      // 目標期限の残り日数
+      const deadlineMessages = [];
+      [{ goal: user.goal, deadline: user.goal_deadline }, { goal: user.goal2, deadline: user.goal_deadline2 }, { goal: user.goal3, deadline: user.goal_deadline3 }].forEach(g => {
+        if (g.goal && g.deadline) {
+          const daysLeft = Math.ceil((new Date(g.deadline) - new Date(today)) / 86400000);
+          if (daysLeft >= 0) deadlineMessages.push(`「${g.goal}」まであと${daysLeft}日`);
+        }
+      });
+
+      const apiKey = PropertiesService.getScriptProperties().getProperty("CLAUDE_API_KEY");
+      if (!apiKey) return;
+
+      const prompt = `あなたは生徒に寄り添う教育コーチです。以下の情報をもとに、今朝の応援メッセージを日本語で送ってください。
+
+【生徒名】${user.name}
+【目標】${goalsText}
+【期限情報】${deadlineMessages.length > 0 ? deadlineMessages.join("、") : "期限未設定"}
+【連続記録日数】${streak}日
+
+【メッセージの方針】
+- 温かく前向きなトーンで、今日も頑張れるような一言
+- 目標と期限を意識させる具体的な内容
+- 心理学的に動機づけになる言葉（承認・期待・小さな一歩）
+- 3〜5文で簡潔に。絵文字を1〜2個使ってOK`;
+
+      const res = UrlFetchApp.fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
+        payload: JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: 400, messages: [{ role: "user", content: prompt }] }),
+        muteHttpExceptions: true
+      });
+      const result = JSON.parse(res.getContentText());
+      if (!result.content || !result.content[0]) return;
+      sendLineMessage(user.line_user_id, "🌅 おはようございます、" + user.name + "さん！\n\n" + result.content[0].text);
+    } catch (err) { Logger.log("morningCoach error: " + err); }
   });
 }
 
@@ -556,6 +592,34 @@ function hourlyReminder() {
       if (hour !== start) return;
     } else {
       if ((hour - start) % interval !== 0) return;
+    }
+    // 今日の記録が2時間以上ない場合はコーチメッセージ付きで送る
+    const today = formatDate(new Date());
+    const todayLogs = sheetToObjects(getSheet("DailyLog")).filter(l => l.student_email === user.student_email && l.date === today);
+    const lastLogHour = todayLogs.length > 0
+      ? Math.max(...todayLogs.map(l => parseInt(l.time_block)))
+      : -99;
+    const hoursWithoutLog = hour - lastLogHour;
+
+    if (hoursWithoutLog >= 3 && todayLogs.length === 0) {
+      // まだ今日1件も記録がない場合
+      const apiKey = PropertiesService.getScriptProperties().getProperty("CLAUDE_API_KEY");
+      const goal = user.goal || "目標";
+      if (apiKey) {
+        try {
+          const res = UrlFetchApp.fetch("https://api.anthropic.com/v1/messages", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
+            payload: JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: 200, messages: [{ role: "user", content: `生徒「${user.name}」はまだ今日の記録を1件もしていません。目標は「${goal}」です。責めずに優しく記録を促す応援メッセージを2〜3文で送ってください。絵文字1個OK。` }] }),
+            muteHttpExceptions: true
+          });
+          const result = JSON.parse(res.getContentText());
+          if (result.content && result.content[0]) {
+            sendLineMessage(user.line_user_id, result.content[0].text + "\n\n📝 " + timeBlock + " の記録はこちらから↓\nhttps://kaisunagawa.github.io/edventure-app/");
+            return;
+          }
+        } catch(e) {}
+      }
     }
     sendLineMessage(user.line_user_id, "⏱ " + timeBlock + " の記録を入力しましょう！\nhttps://kaisunagawa.github.io/edventure-app/");
   });
@@ -621,9 +685,52 @@ function nightlyReport() {
       const report = generateReportWithClaude(user.student_email, user.name, logs);
       if (!report) return;
       getSheet("Reports").appendRow([today, user.student_email, report.score, report.feedback, report.action, report.highlights, report.improvement, new Date().toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" })]);
-      const streak = sheetToObjects(getSheet("Users")).find(u => u.student_email === user.student_email)?.streak || 1;
-      const streakMsg = Number(streak) >= 3 ? "\n\n連続" + streak + "日記録中！すごい！" : "";
-      sendLineMessage(user.line_user_id, "今日のAIレポート\n\nスコア：" + report.score + "点\n\n" + report.feedback + "\n\n明日のアクション：\n" + report.action + streakMsg);
+      const latestUser = sheetToObjects(getSheet("Users")).find(u => u.student_email === user.student_email);
+      const streak = Number(latestUser?.streak || 1);
+      const streakMsg = streak >= 3 ? "\n\n🔥 連続" + streak + "日記録中！すごい！" : "";
+      sendLineMessage(user.line_user_id, "📊 今日のAIレポート\n\nスコア：" + report.score + "点\n\n" + report.feedback + "\n\n明日のアクション：\n" + report.action + streakMsg);
+
+      // コーチからの夜のメッセージ
+      try {
+        const apiKey = PropertiesService.getScriptProperties().getProperty("CLAUDE_API_KEY");
+        if (apiKey) {
+          const goalsText = [user.goal, user.goal2, user.goal3].filter(Boolean).join("、") || "未設定";
+          const deadlineMessages = [];
+          [{ goal: user.goal, deadline: user.goal_deadline }, { goal: user.goal2, deadline: user.goal_deadline2 }, { goal: user.goal3, deadline: user.goal_deadline3 }].forEach(g => {
+            if (g.goal && g.deadline) {
+              const daysLeft = Math.ceil((new Date(g.deadline) - new Date(today)) / 86400000);
+              if (daysLeft >= 0) deadlineMessages.push(`「${g.goal}」まであと${daysLeft}日`);
+            }
+          });
+          const coachPrompt = `あなたは生徒に寄り添う教育コーチです。今日の振り返りをもとに、夜の締めくくりメッセージを送ってください。
+
+【生徒名】${user.name}
+【目標】${goalsText}
+【期限情報】${deadlineMessages.length > 0 ? deadlineMessages.join("、") : "期限未設定"}
+【今日のスコア】${report.score}点
+【良かった点】${report.highlights}
+【改善点】${report.improvement}
+【連続記録日数】${streak}日
+
+【方針】
+- 今日の頑張りを具体的に承認する
+- 明日への期待と小さな一歩を伝える
+- 目標の期限を意識しつつ前向きに締める
+- 3〜4文で。絵文字1〜2個OK`;
+
+          const res = UrlFetchApp.fetch("https://api.anthropic.com/v1/messages", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
+            payload: JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: 400, messages: [{ role: "user", content: coachPrompt }] }),
+            muteHttpExceptions: true
+          });
+          const result = JSON.parse(res.getContentText());
+          if (result.content && result.content[0]) {
+            sendLineMessage(user.line_user_id, "💬 コーチより\n\n" + result.content[0].text);
+          }
+        }
+      } catch(e) { Logger.log("nightly coach message error: " + e); }
+
       notifyCoachOnReport(user, report);
     } catch (err) { Logger.log(err); }
   });
