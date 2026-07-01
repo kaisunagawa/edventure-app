@@ -907,7 +907,7 @@ function SettingsScreen({onToast,onLogout,onGoalSaved}) {
 
       <div class="card" style=${{marginTop:12}}>
         <div class="card-label">Googleカレンダー連携（任意）</div>
-        <p style=${{fontSize:12,color:"var(--sub)",lineHeight:1.7,marginBottom:14}}>${calLinked?"カレンダーと連携済みです。":"連携すると朝に今日の予定が届きます。スキップしても他の機能は全て使えます。"}</p>
+        <p style=${{fontSize:12,color:"var(--sub)",lineHeight:1.7,marginBottom:14}}>${calLinked?"カレンダーと連携済みです。":"連携すると朝に今日の予定が届きます。スキップしても他の機能は全て使えます。\n\n⚠️ 利用するにはコーチへのGmailアドレスの連絡が必要です。未登録の場合はコーチにメールで申請してください。"}</p>
         ${calLinked
           ? html`<div style=${{display:"flex",alignItems:"center",gap:8,color:"var(--accent)",fontWeight:700,fontSize:14}}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>連携済み</div>`
           : html`<button class="btn" onClick=${linkCalendar} disabled=${calLoading}>${calLoading?"連携中...":"Googleカレンダーを連携する"}</button>`
