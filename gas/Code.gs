@@ -647,9 +647,15 @@ function sheetToObjects(sheet) {
     headers.forEach((h, i) => {
       const v = row[i];
       if (v instanceof Date) {
-        obj[h] = v.getFullYear() === 1899
-          ? String(v.getHours()).padStart(2,"0") + ":" + String(v.getMinutes()).padStart(2,"0")
-          : Utilities.formatDate(v, "Asia/Tokyo", "yyyy-MM-dd HH:mm");
+        if (v.getFullYear() === 1899) {
+          obj[h] = String(v.getHours()).padStart(2,"0") + ":" + String(v.getMinutes()).padStart(2,"0");
+        } else {
+          const inTokyo = new Date(v.toLocaleString("en-US", {timeZone:"Asia/Tokyo"}));
+          const hasTime = inTokyo.getHours() !== 0 || inTokyo.getMinutes() !== 0;
+          obj[h] = hasTime
+            ? Utilities.formatDate(v, "Asia/Tokyo", "yyyy-MM-dd HH:mm")
+            : Utilities.formatDate(v, "Asia/Tokyo", "yyyy-MM-dd");
+        }
       }
       else { obj[h] = v !== undefined && v !== null ? String(v) : ""; }
     });
