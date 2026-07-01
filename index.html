@@ -1025,13 +1025,17 @@ function LoginScreen({onLogin}) {
     setLoading(false);
   };
 
-  const finishWithLine=()=>{
-    localStorage.setItem("line_prompted","1");
-    window.open("https://lin.ee/5pElLYY","_blank");
-    CURRENT_USER=pendingUser; onLogin(pendingUser);
+  const [lineCopied,setLineCopied]=useState(false);
+
+  const copyEmail=()=>{
+    navigator.clipboard.writeText(pendingUser?.email||"").then(()=>{ setLineCopied(true); setTimeout(()=>setLineCopied(false),2000); });
   };
 
-  const skipLine=()=>{
+  const openLine=()=>{
+    window.open("https://lin.ee/5pElLYY","_blank");
+  };
+
+  const finishLine=()=>{
     localStorage.setItem("line_prompted","1");
     CURRENT_USER=pendingUser; onLogin(pendingUser);
   };
@@ -1042,20 +1046,29 @@ function LoginScreen({onLogin}) {
         <svg width="26" height="26" viewBox="0 0 24 24" fill="white"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/></svg>
       </div>
       <div class="login-title">登録完了！🎉</div>
-      <div class="login-sub" style=${{marginBottom:28}}>最後にLINE通知を設定しましょう</div>
+      <div class="login-sub" style=${{marginBottom:28}}>LINEでアカウントを連携しましょう</div>
       <div class="login-box">
         <div style=${{background:"var(--card)",borderRadius:14,padding:"20px 18px",border:"1px solid var(--border)"}}>
-          <div style=${{fontWeight:700,fontSize:15,marginBottom:8}}>📩 公式LINEを友達追加</div>
           <div style=${{fontSize:13,color:"var(--sub)",lineHeight:1.7,marginBottom:16}}>
-            友達追加後、LINEに<b>登録したGmailアドレス</b>を送ると連携完了！<br/><br/>
-            連携すると<br/>
-            ✅ 毎時間の記録リマインダー<br/>
-            ✅ 毎晩のAIレポート<br/>
-            がLINEに届きます！
+            LINEボットに<b>あなたのGmailアドレス</b>を送信すると連携完了！<br/>
+            連携すると毎時間のリマインダーとAIレポートが届きます。
           </div>
-          <button class="btn" style=${{background:"#06C755",fontSize:15}} onClick=${finishWithLine}>LINEで友達追加する</button>
+          <div style=${{fontSize:11,color:"var(--sub)",marginBottom:6}}>あなたのGmailアドレス</div>
+          <div style=${{display:"flex",gap:8,alignItems:"center",marginBottom:16}}>
+            <div style=${{flex:1,background:"var(--bg)",border:"1px solid var(--border)",borderRadius:8,padding:"10px 12px",fontSize:14,fontWeight:600,color:"var(--text)",wordBreak:"break-all"}}>${pendingUser?.email}</div>
+            <button onClick=${copyEmail} style=${{padding:"10px 14px",borderRadius:8,border:"1px solid var(--border)",background:lineCopied?"#06C755":"var(--card)",color:lineCopied?"#fff":"var(--text)",fontSize:13,cursor:"pointer",whiteSpace:"nowrap",fontWeight:600}}>
+              ${lineCopied?"✓コピー済み":"コピー"}
+            </button>
+          </div>
+          <button class="btn" style=${{background:"#06C755",fontSize:15}} onClick=${openLine}>LINEを開く</button>
+          <div style=${{fontSize:12,color:"var(--sub)",marginTop:10,lineHeight:1.6}}>
+            ① 上のアドレスをコピー<br/>
+            ② 「LINEを開く」→ ボットに貼り付けて送信<br/>
+            ③ 連携完了のメッセージが届いたら↓をタップ
+          </div>
         </div>
-        <button style=${{background:"none",border:"none",color:"var(--sub)",fontSize:13,cursor:"pointer",marginTop:8}} onClick=${skipLine}>あとで設定する →</button>
+        <button class="btn" style=${{marginTop:8}} onClick=${finishLine}>アプリを開く</button>
+        <button style=${{background:"none",border:"none",color:"var(--sub)",fontSize:13,cursor:"pointer",marginTop:4}} onClick=${finishLine}>あとで設定する →</button>
       </div>
     </div>
   `;
@@ -1141,11 +1154,14 @@ function App() {
 
   useEffect(()=>{
     if(!CURRENT_USER){ setChecking(false); return; }
-    // キャッシュがあってもGASで存在確認
+    // キャッシュがあってもGASで存在確認（10秒でタイムアウト→キャッシュで続行）
     const url=new URL(GAS_URL);
     url.searchParams.set("action","getUser");
     url.searchParams.set("studentEmail",CURRENT_USER.email);
-    fetch(url).then(r=>r.json()).then(r=>{
+    const ctrl=new AbortController();
+    const timeout=setTimeout(()=>ctrl.abort(),10000);
+    fetch(url,{signal:ctrl.signal}).then(r=>r.json()).then(r=>{
+      clearTimeout(timeout);
       if(r.ok&&r.data){
         const u={...CURRENT_USER, name:r.data.name||CURRENT_USER.name, coachName:r.data.coachName||"コーチ", coachEmail:r.data.coach_email||""};
         CURRENT_USER=u; localStorage.setItem("edventure_user",JSON.stringify(u)); setUser(u);
@@ -1156,7 +1172,7 @@ function App() {
         localStorage.removeItem("cal_linked");
         CURRENT_USER=null;
       }
-    }).catch(()=>{ setUser(CURRENT_USER); }) // 通信エラー時はキャッシュで続行
+    }).catch(()=>{ clearTimeout(timeout); setUser(CURRENT_USER); }) // 通信エラー・タイムアウト時はキャッシュで続行
     .finally(()=>setChecking(false));
   },[]);
 
