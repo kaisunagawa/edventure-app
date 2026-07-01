@@ -282,7 +282,7 @@ function getGameStatus(studentEmail) {
 function getMessages(studentEmail) {
   const rows = sheetToObjects(getSheet("Messages"));
   const msgs = rows.filter(r => r.student_email === studentEmail)
-    .sort((a, b) => a.timestamp > b.timestamp ? 1 : -1)
+    .sort((a, b) => a.message_id > b.message_id ? 1 : -1)
     .map(r => ({ message_id: r.message_id, content: r.content, sender_name: r.sender_name, sender_role: r.sender_role, timestamp: r.timestamp, is_read: r.is_read }));
   return { ok: true, data: msgs };
 }
@@ -313,9 +313,11 @@ function autoReplyFromClaude(studentEmail, studentMessage) {
       ? logs.map(l => l.time_block + ": " + l.task + "（集中度" + l.focus_level + "）").join("\n")
       : "まだ記録なし";
 
-    const recentMessages = sheetToObjects(getSheet("Messages"))
+    const allMsgs = sheetToObjects(getSheet("Messages"))
       .filter(m => m.student_email === studentEmail)
-      .slice(-10)
+      .sort((a, b) => a.message_id > b.message_id ? 1 : -1);
+    // 直前にappendRowした現在のメッセージを除いた直近10件
+    const recentMessages = allMsgs.slice(-11, -1)
       .map(m => ({ role: m.sender_role === "student" ? "user" : "assistant", content: m.content }));
 
     const systemPrompt = `あなたは教育コーチです。温かく具体的なフィードバックを日本語で返してください。返信は2〜4文で簡潔にまとめてください。
@@ -330,7 +332,7 @@ ${logSummary}`;
     const response = UrlFetchApp.fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
-      payload: JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: 300, system: systemPrompt, messages }),
+      payload: JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: 800, system: systemPrompt, messages }),
       muteHttpExceptions: true
     });
 
