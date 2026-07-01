@@ -572,6 +572,10 @@ function nightlyReport() {
         return;
       }
 
+      // 既存レポートがあればスキップ（重複防止）
+      const existing = sheetToObjects(getSheet("Reports")).find(r => r.student_email === user.student_email && r.date === today);
+      if (existing) { Logger.log(user.student_email + ": 本日のレポートは既に存在します"); return; }
+
       updateStreak(user.student_email);
       const report = generateReportWithClaude(user.student_email, user.name, logs);
       if (!report) return;
