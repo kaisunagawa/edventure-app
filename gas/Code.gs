@@ -539,37 +539,59 @@ function morningScheduleNotify() {
       if (!user.line_user_id) return;
       const today = formatDate(new Date());
       const streak = Number(user.streak || 0);
-      const goalsText = [user.goal, user.goal2, user.goal3].filter(Boolean).join("、") || "未設定";
 
-      // 目標期限の残り日数
-      const deadlineMessages = [];
-      [{ goal: user.goal, deadline: user.goal_deadline }, { goal: user.goal2, deadline: user.goal_deadline2 }, { goal: user.goal3, deadline: user.goal_deadline3 }].forEach(g => {
-        if (g.goal && g.deadline) {
-          const daysLeft = Math.ceil((new Date(g.deadline) - new Date(today)) / 86400000);
-          if (daysLeft >= 0) deadlineMessages.push(`「${g.goal}」まであと${daysLeft}日`);
-        }
+      // 目標と期限
+      const goalDetails = [];
+      [{ goal: user.goal, deadline: user.goal_deadline }, { goal: user.goal2, deadline: user.goal_deadline2 }, { goal: user.goal3, deadline: user.goal_deadline3 }].forEach((g, i) => {
+        if (!g.goal) return;
+        const daysLeft = g.deadline ? Math.ceil((new Date(g.deadline) - new Date(today)) / 86400000) : null;
+        goalDetails.push(`目標${i+1}: ${g.goal}${daysLeft !== null ? "（期限まで残り" + daysLeft + "日）" : ""}`);
       });
+      const goalsText = goalDetails.length > 0 ? goalDetails.join("\n") : "未設定";
+
+      // 直近7日のログ統計
+      const sevenDaysAgo = formatDate(new Date(Date.now() - 7 * 86400000));
+      const recentLogs = sheetToObjects(getSheet("DailyLog")).filter(l => l.student_email === user.student_email && l.date >= sevenDaysAgo);
+      const activeDays = new Set(recentLogs.map(l => l.date)).size;
+      const goalRelatedCount = recentLogs.filter(l => l.goal_related === "true").length;
+      const topTasks = Object.entries(recentLogs.reduce((acc, l) => { acc[l.task] = (acc[l.task] || 0) + 1; return acc; }, {}))
+        .sort((a, b) => b[1] - a[1]).slice(0, 3).map(([task]) => task).join("、");
+
+      // 直近レポート
+      const pastReports = sheetToObjects(getSheet("Reports"))
+        .filter(r => r.student_email === user.student_email)
+        .sort((a, b) => b.date > a.date ? 1 : -1)
+        .slice(0, 3);
+      const reportSummary = pastReports.length > 0
+        ? pastReports.map(r => `${r.date}: ${r.score}点 / ${r.highlights}`).join("\n")
+        : "まだレポートなし";
+      const latestFeedback = pastReports.length > 0 ? pastReports[0].improvement : "";
 
       const apiKey = PropertiesService.getScriptProperties().getProperty("CLAUDE_API_KEY");
       if (!apiKey) return;
 
-      const prompt = `あなたは生徒に寄り添う教育コーチです。以下の情報をもとに、今朝の応援メッセージを日本語で送ってください。
+      const prompt = `あなたは生徒一人ひとりに寄り添う教育コーチです。以下の情報をしっかり読み込んだ上で、今朝の個別メッセージを送ってください。
 
 【生徒名】${user.name}
-【目標】${goalsText}
-【期限情報】${deadlineMessages.length > 0 ? deadlineMessages.join("、") : "期限未設定"}
+【目標と期限】
+${goalsText}
 【連続記録日数】${streak}日
+【直近7日の活動】${activeDays}日記録、目標関連作業${goalRelatedCount}ブロック、よく取り組んだこと: ${topTasks || "まだ記録なし"}
+【直近のレポート】
+${reportSummary}
+【前回の改善提案】${latestFeedback || "なし"}
 
 【メッセージの方針】
-- 温かく前向きなトーンで、今日も頑張れるような一言
-- 目標と期限を意識させる具体的な内容
-- 心理学的に動機づけになる言葉（承認・期待・小さな一歩）
-- 3〜5文で簡潔に。絵文字を1〜2個使ってOK`;
+- 直近の記録・レポートを踏まえた「この生徒のことを知っている」と感じさせる内容
+- 目標の期限に対する現在地を一言で言語化する
+- 前回の改善提案があれば今日につながる一言を添える
+- 承認→今日への期待の流れで締める
+- 4〜5文。絵文字1〜2個OK。「おはようございます」は不要（冒頭に入れるため）`;
 
       const res = UrlFetchApp.fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
-        payload: JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: 400, messages: [{ role: "user", content: prompt }] }),
+        payload: JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: 500, messages: [{ role: "user", content: prompt }] }),
         muteHttpExceptions: true
       });
       const result = JSON.parse(res.getContentText());
