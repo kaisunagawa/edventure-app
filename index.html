@@ -1056,6 +1056,23 @@ function LoginScreen({onLogin}) {
     </div>
   `;
 
+  const isLineWebView = /Line\//i.test(navigator.userAgent);
+
+  if(isLineWebView) return html`
+    <div class="login-wrap">
+      <div class="login-logo"><${S} n="clock" s=${26}/></div>
+      <div class="login-title">JIROKU</div>
+      <div style=${{textAlign:"center",padding:"0 24px"}}>
+        <div style=${{fontSize:48,marginBottom:16}}>🌐</div>
+        <div style=${{fontWeight:700,fontSize:17,marginBottom:12,color:"var(--text)"}}>Safariで開いてください</div>
+        <div style=${{fontSize:14,color:"var(--sub)",lineHeight:1.7,marginBottom:24}}>
+          LINEのブラウザではGoogleログインができません。<br/>
+          右下の<b>「…」→「ブラウザで開く」</b>をタップしてSafariで開いてください。
+        </div>
+      </div>
+    </div>
+  `;
+
   return html`
     <div class="login-wrap">
       <div class="login-logo"><${S} n="clock" s=${26}/></div>
