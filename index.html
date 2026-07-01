@@ -757,9 +757,7 @@ function ReportScreen() {
     gasApi("getReportList").then(r=>{
       if(r.ok && r.data.length>0){
         setReportList(r.data);
-        const yesterday = formatDateStr(new Date(Date.now()-86400000));
-        const target = r.data.find(d=>d.date.substring(0,10)===yesterday) || r.data[0];
-        setDate(target.date);
+        setDate(r.data[0].date);
       }
       setListLoading(false);
     });
