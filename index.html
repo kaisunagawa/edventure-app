@@ -912,11 +912,23 @@ function TimerScreen({onToast}) {
           background:"var(--card)",color:"var(--sub)",fontSize:18,cursor:"pointer"}}>↺</button>
       </div>
 
-      ${sessionCount>0&&html`
-        <div style=${{textAlign:"center",fontSize:13,color:"var(--sub)"}}>
-          今日: <b style=${{color:"var(--accent)"}}>${sessionCount}</b> セッション完了
+      <div style=${{display:"flex",gap:10,marginTop:8,marginBottom:20}}>
+        <div style=${{flex:1,background:"var(--card)",borderRadius:14,padding:"14px 0",textAlign:"center",border:"1px solid var(--border)"}}>
+          <div style=${{fontSize:26,fontWeight:800,color:"var(--accent)",lineHeight:1}}>${sessionCount}</div>
+          <div style=${{fontSize:11,color:"var(--sub)",marginTop:4}}>セッション完了</div>
         </div>
-      `}
+        <div style=${{flex:1,background:"var(--card)",borderRadius:14,padding:"14px 0",textAlign:"center",border:"1px solid var(--border)"}}>
+          <div style=${{fontSize:26,fontWeight:800,color:"var(--accent)",lineHeight:1}}>${sessionCount*selectedMin}</div>
+          <div style=${{fontSize:11,color:"var(--sub)",marginTop:4}}>集中した分数</div>
+        </div>
+      </div>
+
+      <div style=${{background:"var(--accent-l)",borderRadius:14,padding:"14px 16px",display:"flex",gap:12,alignItems:"flex-start"}}>
+        <div style=${{fontSize:20,lineHeight:1,marginTop:2}}>💡</div>
+        <div style=${{fontSize:13,color:"var(--accent)",lineHeight:1.6}}>
+          ${["タスクを始める前に「何をするか」を1行書くと集中しやすくなります。","25分集中したら必ず休憩を。脳を回復させると次の集中力が上がります。","スマホの通知をオフにして、今この瞬間だけに集中しよう。","完璧を目指さなくていい。まず動き始めることが大切です。","記録を続けることで、自分の集中パターンが見えてきます。"][sessionCount%5]}
+        </div>
+      </div>
     </div>
 
     ${showModal&&html`
