@@ -205,7 +205,7 @@ function getLogs(studentEmail, body) {
   const targetDate = (body && body.date) ? body.date : formatDate(new Date());
   const logs = rows.filter(r => r.student_email === studentEmail && r.date === targetDate)
     .sort((a, b) => a.time_block > b.time_block ? 1 : -1)
-    .map(r => ({ log_id: r.log_id, time_block: r.time_block, task: r.task, focus_level: r.focus_level, memo: r.memo }));
+    .map(r => ({ log_id: r.log_id, time_block: r.time_block, task: r.task, focus_level: r.focus_level, memo: r.memo, goal_related: r.goal_related || "false" }));
   return { ok: true, data: logs };
 }
 
@@ -231,6 +231,9 @@ function saveLog(studentEmail, body) {
       sheet.getRange(i+1, headers.indexOf("task")+1).setValue(body.task);
       sheet.getRange(i+1, headers.indexOf("focus_level")+1).setValue(body.focus_level);
       sheet.getRange(i+1, headers.indexOf("memo")+1).setValue(body.memo || "");
+      let grIdx = headers.indexOf("goal_related");
+      if(grIdx === -1){ grIdx = headers.length; sheet.getRange(1, grIdx+1).setValue("goal_related"); }
+      sheet.getRange(i+1, grIdx+1).setValue(body.goal_related || "false");
       updateStreak(studentEmail);
       const xpResult = addXP(studentEmail, body.memo);
       return { ok: true, log_id: String(data[i][0]), updated: true, ...xpResult };
@@ -239,7 +242,7 @@ function saveLog(studentEmail, body) {
 
   const logId = "log_" + Date.now();
   const newRow = sheet.getLastRow() + 1;
-  sheet.appendRow([logId, studentEmail, today, "", body.task, body.focus_level, body.memo || "", now]);
+  sheet.appendRow([logId, studentEmail, today, "", body.task, body.focus_level, body.memo || "", now, body.goal_related || "false"]);
   sheet.getRange(newRow, 4).setNumberFormat("@").setValue(String(body.time_block));
 
   updateStreak(studentEmail);
@@ -626,6 +629,11 @@ function generateReportWithClaude(studentEmail, studentName, logs) {
   const totalBlocks = logs.length;
   const withMemo = logs.filter(l => l.memo && l.memo.trim()).length;
   const focusVariety = new Set(logs.map(l => l.focus_level)).size;
+  const goalRelatedCount = logs.filter(l => l.goal_related === "true" || l.goal_related === true).length;
+  const goalRelatedPct = totalBlocks > 0 ? Math.round(goalRelatedCount / totalBlocks * 100) : 0;
+  const avgFocusScore = logs.length > 0
+    ? (logs.reduce((sum, l) => sum + (parseInt(l.focus_level) || 3), 0) / logs.length).toFixed(1)
+    : "データなし";
 
   // 過去30日分のレポート履歴を取得
   const pastReports = sheetToObjects(getSheet("Reports"))
@@ -645,7 +653,7 @@ function generateReportWithClaude(studentEmail, studentName, logs) {
     ? pastReports.slice(0, 7).map(r => r.date + ": スコア" + r.score + "点 / " + r.feedback).join("\n")
     : "なし（初回レポート）";
 
-  const logsText = logs.map(l => l.time_block + " - " + l.task + "（集中度：" + l.focus_level + (l.memo ? "、メモ：" + l.memo : "") + "）").join("\n");
+  const logsText = logs.map(l => l.time_block + " - " + l.task + "（集中度：" + l.focus_level + (l.goal_related === "true" ? "、目標関連" : "") + (l.memo ? "、メモ：" + l.memo : "") + "）").join("\n");
 
   const prompt = `あなたは生徒の成長を長期的に支援する教育コーチです。
 過去のデータと今日のログをもとに、深い分析と具体的なフィードバックを日本語で返してください。
@@ -657,14 +665,15 @@ ${goalsText}
 【過去レポート履歴（直近7日）】
 ${historyText}
 
-【今日のログ（${totalBlocks}ブロック、メモ${withMemo}個、集中度${focusVariety}種類使用）】
+【今日のログ（${totalBlocks}ブロック、メモ${withMemo}個、目標関連${goalRelatedCount}ブロック(${goalRelatedPct}%)、平均集中度${avgFocusScore}）】
 ${logsText}
 
-【採点基準】
-- 記録ブロック数: 多いほど良い（最大40点）
-- メモの質・量: 振り返りの深さ（最大30点）
-- 集中度の正直さ: 全部「高」でなく正直につけているか（最大30点）
-- 過去との比較: 成長・改善が見られれば加点
+【採点基準（各20点・合計100点）】
+- 記録数（20点）: 記録したブロック数。多いほど高得点
+- メモの質（20点）: 振り返りメモの深さと量
+- 集中度（20点）: 自己評価の平均スコア（高いほど良い）
+- 目標への取り組み（20点）: 目標関連の記録が全体に占める割合
+- 継続性（20点）: 連続記録日数と過去との継続状況
 
 以下のJSON形式のみで返してください（説明文不要）：
 {
@@ -760,7 +769,7 @@ function setupSheets() {
   const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
   const sheets = {
     "Users": ["student_email","name","line_user_id","coach_email","coach_line_id","google_calendar_id","chatwork_room","is_active","joined_at","notify_start","notify_end"],
-    "DailyLog": ["log_id","student_email","date","time_block","task","focus_level","memo","timestamp"],
+    "DailyLog": ["log_id","student_email","date","time_block","task","focus_level","memo","timestamp","goal_related"],
     "Reports": ["date","student_email","score","feedback","action","highlights","improvement","created_at"],
     "Messages": ["message_id","student_email","content","sender_name","sender_photo","sender_role","timestamp","is_read"],
     "Coaches": ["coach_email","coach_name","assigned_students"]
