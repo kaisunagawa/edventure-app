@@ -871,7 +871,7 @@ function SettingsScreen({onToast,onLogout,onGoalSaved}) {
               <label class="form-lbl" style=${{margin:0}}>目標${i+1}${i===0?" （メイン）":""}</label>
               ${i>0&&html`<button onClick=${()=>removeGoal(i)} style=${{background:"none",border:"none",color:"var(--sub)",fontSize:18,cursor:"pointer",lineHeight:1}}>×</button>`}
             </div>
-            <textarea class="txa" placeholder=${i===0?"例：英検2級に合格する":"例：毎月売上100万円達成"} value=${g.goal} onChange=${e=>updateGoal(i,"goal",e.target.value)} style=${{minHeight:64,resize:"vertical",overflow:"auto",marginBottom:8}}/>
+            <textarea class="txa" placeholder=${i===0?"例：英検2級に合格する":"例：毎月売上100万円達成"} value=${g.goal} onChange=${e=>{updateGoal(i,"goal",e.target.value);e.target.style.height="auto";e.target.style.height=e.target.scrollHeight+"px";}} ref=${el=>{if(el){el.style.height="auto";el.style.height=el.scrollHeight+"px";}}} style=${{minHeight:64,overflow:"hidden",resize:"none",marginBottom:8}}/>
             <label class="form-lbl">達成期限</label>
             <input type="date" class="inp" value=${g.deadline} onChange=${e=>updateGoal(i,"deadline",e.target.value)}/>
           </div>
@@ -1114,7 +1114,7 @@ function LoginScreen({onLogin}) {
         ${goals.map((g,i)=>html`
           <div key=${i} style=${{background:"var(--card)",borderRadius:12,padding:"14px",border:"1px solid var(--border)"}}>
             <div style=${{fontSize:11,color:"var(--sub)",marginBottom:5}}>目標${i+1}${i===0?" （メインの目標）":""}</div>
-            <textarea class="txa" placeholder=${i===0?"例：英検2級に合格する":"例：毎月売上100万円達成"} value=${g.goal} onChange=${e=>updateGoal(i,"goal",e.target.value)} style=${{minHeight:70,resize:"vertical",overflow:"auto",marginBottom:8}}/>
+            <textarea class="txa" placeholder=${i===0?"例：英検2級に合格する":"例：毎月売上100万円達成"} value=${g.goal} onChange=${e=>{updateGoal(i,"goal",e.target.value);e.target.style.height="auto";e.target.style.height=e.target.scrollHeight+"px";}} ref=${el=>{if(el){el.style.height="auto";el.style.height=el.scrollHeight+"px";}}} style=${{minHeight:70,overflow:"hidden",resize:"none",marginBottom:8}}/>
             <div style=${{fontSize:11,color:"var(--sub)",marginBottom:5}}>達成期限（任意）</div>
             <input type="date" class="login-inp" value=${g.deadline} onChange=${e=>updateGoal(i,"deadline",e.target.value)}/>
           </div>
