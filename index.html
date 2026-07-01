@@ -791,10 +791,11 @@ function ChatScreen({onToast}) {
 
 // ── Settings ──
 function SettingsScreen({onToast,onLogout,onGoalSaved}) {
-  const saved=JSON.parse(localStorage.getItem("notifySettings")||'{"start":7,"end":23}');
+  const saved=JSON.parse(localStorage.getItem("notifySettings")||'{"start":7,"end":23,"interval":1}');
   const savedGoal=JSON.parse(localStorage.getItem("jiroku_goal")||'{"goal":"","deadline":""}');
   const [start,setStart]=useState(saved.start);
   const [end,setEnd]=useState(saved.end);
+  const [interval,setInterval]=useState(saved.interval||1);
   const [goal,setGoal]=useState(savedGoal.goal);
   const [deadline,setDeadline]=useState(savedGoal.deadline);
   const [calLinked,setCalLinked]=useState(!!localStorage.getItem("cal_linked"));
@@ -826,8 +827,8 @@ function SettingsScreen({onToast,onLogout,onGoalSaved}) {
   };
 
   const saveNotify=()=>{
-    localStorage.setItem("notifySettings",JSON.stringify({start,end}));
-    gasPost("saveSettings",{notify_start:start,notify_end:end});
+    localStorage.setItem("notifySettings",JSON.stringify({start,end,interval}));
+    gasPost("saveSettings",{notify_start:start,notify_end:end,notify_interval:interval});
     onToast("通知設定を保存しました");
   };
   const saveGoal=()=>{
@@ -900,7 +901,17 @@ function SettingsScreen({onToast,onLogout,onGoalSaved}) {
           <div style=${{color:"var(--sub)",marginTop:18,fontSize:14}}>〜</div>
           <div style=${{flex:1}}><div style=${{fontSize:11,color:"var(--sub)",marginBottom:6}}>終了</div><select value=${end} onChange=${e=>setEnd(Number(e.target.value))}>${hours.map(h=>html`<option key=${h} value=${h}>${String(h).padStart(2,"0")}:00</option>`)}</select></div>
         </div>
-        <div style=${{fontSize:11,color:"var(--sub)",marginBottom:14,lineHeight:1.7}}>設定した時間帯に毎時リマインドが届きます</div>
+        <div style=${{marginTop:14,marginBottom:14}}>
+          <div style=${{fontSize:11,color:"var(--sub)",marginBottom:8}}>通知間隔</div>
+          <div style=${{display:"flex",gap:8,flexWrap:"wrap"}}>
+            ${[[1,"1時間"],[2,"2時間"],[3,"3時間"],[6,"6時間"],[24,"1日1回"]].map(([v,label])=>html`
+              <button key=${v} onClick=${()=>setInterval(v)} style=${{padding:"6px 14px",borderRadius:20,border:`1.5px solid ${interval===v?"var(--accent)":"var(--border)"}`,background:interval===v?"var(--accent)":"var(--card)",color:interval===v?"#fff":"var(--text)",fontSize:13,cursor:"pointer",fontWeight:interval===v?600:400}}>${label}</button>
+            `)}
+          </div>
+          <div style=${{fontSize:11,color:"var(--sub)",marginTop:8,lineHeight:1.6}}>
+            ${interval===1?"毎時間リマインドが届きます（基本設定）":interval===24?"1日の開始時間に1回だけ届きます":`${interval}時間ごとにリマインドが届きます`}
+          </div>
+        </div>
         <button class="btn" onClick=${saveNotify}>保存する</button>
       </div>
 
