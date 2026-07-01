@@ -1395,11 +1395,11 @@ function App() {
   return html`
     <div style=${{height:"100%",position:"relative"}}>
       <div class="screen">
-        ${tab==="home"&&html`<${HomeScreen} goalData=${goalData} onGoalSaved=${setGoalData}/>`}
-        ${tab==="log"&&html`<${LogScreen} onToast=${setToast}/>`}
-        ${tab==="report"&&html`<${ReportScreen}/>`}
-        ${tab==="timer"&&html`<${TimerScreen} onToast=${setToast}/>`}
-        ${tab==="settings"&&html`<${SettingsScreen} onToast=${setToast} onLogout=${logout} onGoalSaved=${setGoalData}/>`}
+        <div style=${{display:tab==="home"?"":"none"}}><${HomeScreen} goalData=${goalData} onGoalSaved=${setGoalData}/></div>
+        <div style=${{display:tab==="log"?"":"none"}}><${LogScreen} onToast=${setToast}/></div>
+        <div style=${{display:tab==="report"?"":"none"}}><${ReportScreen}/></div>
+        <div style=${{display:tab==="timer"?"":"none",height:"100%"}}><${TimerScreen} onToast=${setToast}/></div>
+        <div style=${{display:tab==="settings"?"":"none"}}><${SettingsScreen} onToast=${setToast} onLogout=${logout} onGoalSaved=${setGoalData}/></div>
       </div>
       <nav class="nav">
         ${TABS.map(t=>html`
