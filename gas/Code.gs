@@ -396,17 +396,19 @@ function saveSettings(studentEmail, body) {
     return idx;
   }
 
-  const startIdx = ensureCol("notify_start");
-  const endIdx   = ensureCol("notify_end");
-  const goalIdx  = ensureCol("goal");
+  const startIdx    = ensureCol("notify_start");
+  const endIdx      = ensureCol("notify_end");
+  const goalIdx     = ensureCol("goal");
   const deadlineIdx = ensureCol("goal_deadline");
+  const calIdx      = ensureCol("google_calendar_id");
 
   for (let i = 1; i < data.length; i++) {
     if (String(data[i][emailIdx]) !== studentEmail) continue;
-    if (body.notify_start !== undefined) sheet.getRange(i + 1, startIdx + 1).setValue(Number(body.notify_start) || 7);
-    if (body.notify_end   !== undefined) sheet.getRange(i + 1, endIdx   + 1).setValue(Number(body.notify_end)   || 23);
-    if (body.goal         !== undefined) sheet.getRange(i + 1, goalIdx  + 1).setValue(body.goal);
-    if (body.goal_deadline !== undefined) sheet.getRange(i + 1, deadlineIdx + 1).setValue(body.goal_deadline);
+    if (body.notify_start       !== undefined) sheet.getRange(i + 1, startIdx    + 1).setValue(Number(body.notify_start) || 7);
+    if (body.notify_end         !== undefined) sheet.getRange(i + 1, endIdx      + 1).setValue(Number(body.notify_end)   || 23);
+    if (body.goal               !== undefined) sheet.getRange(i + 1, goalIdx     + 1).setValue(body.goal);
+    if (body.goal_deadline      !== undefined) sheet.getRange(i + 1, deadlineIdx + 1).setValue(body.goal_deadline);
+    if (body.google_calendar_id !== undefined) sheet.getRange(i + 1, calIdx      + 1).setValue(body.google_calendar_id);
     break;
   }
   return { ok: true };
