@@ -183,8 +183,12 @@ function saveLog(studentEmail, body) {
   const dateIdx = headers.indexOf("date");
   const timeIdx = headers.indexOf("time_block");
   for (let i = 1; i < data.length; i++) {
+    const rawDate = data[i][dateIdx];
+    const rowDate = rawDate instanceof Date
+      ? Utilities.formatDate(rawDate, "Asia/Tokyo", "yyyy-MM-dd")
+      : String(rawDate);
     if (String(data[i][emailIdx]) === studentEmail &&
-        String(data[i][dateIdx]) === today &&
+        rowDate === today &&
         String(data[i][timeIdx]) === String(body.time_block)) {
       sheet.getRange(i+1, headers.indexOf("task")+1).setValue(body.task);
       sheet.getRange(i+1, headers.indexOf("focus_level")+1).setValue(body.focus_level);
@@ -463,7 +467,8 @@ function updateStreak(studentEmail) {
 
   for (let i = 1; i < data.length; i++) {
     if (String(data[i][emailIdx]) !== studentEmail) continue;
-    const lastLogDate = String(data[i][lastLogDateIdx] || "");
+    const rawLLD = data[i][lastLogDateIdx];
+    const lastLogDate = rawLLD instanceof Date ? Utilities.formatDate(rawLLD, "Asia/Tokyo", "yyyy-MM-dd") : String(rawLLD || "");
     const currentStreak = Number(data[i][streakIdx] || 0);
 
     let newStreak;
@@ -518,7 +523,8 @@ function applyXPDecay(studentEmail) {
     if (String(data[i][emailIdx]) !== studentEmail) continue;
 
     const currentXP = Number(data[i][xpIdx] || 0);
-    const lastLogDate = String(data[i][lastLogDateIdx] || "");
+    const rawLLD2 = data[i][lastLogDateIdx];
+    const lastLogDate = rawLLD2 instanceof Date ? Utilities.formatDate(rawLLD2, "Asia/Tokyo", "yyyy-MM-dd") : String(rawLLD2 || "");
     const yesterday = formatDate(new Date(Date.now() - 86400000));
 
     // 昨日も記録なしなら減少額を増やす（最大-30）
