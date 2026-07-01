@@ -482,7 +482,7 @@ function HomeScreen({goalData, onGoalSaved}) {
     <div style=${{margin:"0 16px 10px",padding:"16px",background:"var(--card)",borderRadius:12,border:"1px solid var(--border)"}}>
       <div style=${{fontSize:11,fontWeight:600,color:"var(--sub)",marginBottom:12}}>今日の予定</div>
       ${schedule.length===0
-        ? html`<div style=${{fontSize:13,color:"var(--sub)"}}>予定を取得中...</div>`
+        ? html`<div style=${{fontSize:13,color:"var(--sub)"}}>今日の予定はありません</div>`
         : schedule.map((ev,i)=>{
           const hasZoom=isZoom(ev.sub||"");
           return html`<div key=${i} style=${{display:"flex",gap:12,padding:"9px 0",borderBottom:i<schedule.length-1?"1px solid var(--border)":"none"}}>
@@ -785,7 +785,33 @@ function SettingsScreen({onToast,onLogout,onGoalSaved}) {
   const [end,setEnd]=useState(saved.end);
   const [goal,setGoal]=useState(savedGoal.goal);
   const [deadline,setDeadline]=useState(savedGoal.deadline);
+  const [calLinked,setCalLinked]=useState(!!localStorage.getItem("cal_linked"));
+  const [calLoading,setCalLoading]=useState(false);
   const hours=Array.from({length:24},(_,i)=>i);
+
+  const linkCalendar=()=>{
+    if(!window.google||!google.accounts) return;
+    setCalLoading(true);
+    const client=google.accounts.oauth2.initTokenClient({
+      client_id: GOOGLE_CLIENT_ID,
+      scope: "https://www.googleapis.com/auth/calendar.readonly",
+      callback: async(tokenResp)=>{
+        if(tokenResp.error){ setCalLoading(false); onToast("カレンダー連携に失敗しました"); return; }
+        try{
+          const calRes=await fetch("https://www.googleapis.com/calendar/v3/users/me/calendarList/primary",{
+            headers:{Authorization:"Bearer "+tokenResp.access_token}
+          }).then(r=>r.json());
+          const calId=calRes.id||CURRENT_USER.email;
+          await gasPost("saveSettings",{google_calendar_id:calId});
+          localStorage.setItem("cal_linked","1");
+          setCalLinked(true);
+          onToast("カレンダーを連携しました！");
+        }catch{ onToast("カレンダー取得に失敗しました"); }
+        setCalLoading(false);
+      }
+    });
+    client.requestAccessToken();
+  };
 
   const saveNotify=()=>{
     localStorage.setItem("notifySettings",JSON.stringify({start,end}));
@@ -863,6 +889,16 @@ function SettingsScreen({onToast,onLogout,onGoalSaved}) {
         <div class="s-row"><span class="s-k">名前</span><span class="s-v">${CURRENT_USER.name}</span></div>
         <div class="s-row"><span class="s-k">メール</span><span style=${{fontSize:12,color:"var(--sub)"}}>${CURRENT_USER.email}</span></div>
       </div>
+
+      <div class="card" style=${{marginTop:12}}>
+        <div class="card-label">Googleカレンダー連携</div>
+        <p style=${{fontSize:12,color:"var(--sub)",lineHeight:1.7,marginBottom:14}}>${calLinked?"カレンダーと連携済みです。コーチがあなたの予定を確認できます。":"連携するとコーチがあなたのGoogleカレンダーを確認できるようになります。"}</p>
+        ${calLinked
+          ? html`<div style=${{display:"flex",alignItems:"center",gap:8,color:"var(--accent)",fontWeight:700,fontSize:14}}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>連携済み</div>`
+          : html`<button class="btn" onClick=${linkCalendar} disabled=${calLoading}>${calLoading?"連携中...":"Googleカレンダーを連携する"}</button>`
+        }
+      </div>
+
       <div style=${{marginTop:12,marginBottom:32}}><button class="btn-g" onClick=${onLogout}>ログアウト</button></div>
     </div>
   </div>`;
