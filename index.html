@@ -468,13 +468,19 @@ function HomeScreen({goalData, onGoalSaved}) {
             </div>
             <span style=${{fontSize:13,fontWeight:600,color:"var(--text)"}}>${game.xp} XP</span>
           </div>
-          <div style=${{height:4,background:"var(--border)",borderRadius:99,overflow:"hidden",marginBottom:6}}>
-            <div style=${{height:4,borderRadius:99,background:"var(--accent)",width:game.xpInLevel+"%",transition:"width .7s cubic-bezier(.4,0,.2,1)"}}/>
-          </div>
-          <div style=${{display:"flex",justifyContent:"space-between",fontSize:11,color:"var(--sub)"}}>
-            <span>${game.streak>0?`${game.streak}日連続記録中`:"記録を続けてXPを貯めよう"}</span>
-            <span>次のレベルまで ${100-game.xpInLevel} XP</span>
-          </div>
+          ${(()=>{
+            const xpInLv = getXpInLevel(game.xp);
+            const xpForNxt = getXpForNextLevel(game.xp);
+            const pct = xpForNxt ? Math.min(100, Math.round(xpInLv / xpForNxt * 100)) : 100;
+            return html`
+              <div style=${{height:4,background:"var(--border)",borderRadius:99,overflow:"hidden",marginBottom:6}}>
+                <div style=${{height:4,borderRadius:99,background:"var(--accent)",width:pct+"%",transition:"width .7s cubic-bezier(.4,0,.2,1)"}}/>
+              </div>
+              <div style=${{display:"flex",justifyContent:"space-between",fontSize:11,color:"var(--sub)"}}>
+                <span>${game.streak>0?`${game.streak}日連続記録中`:"記録を続けてXPを貯めよう"}</span>
+                <span>${xpForNxt ? `次のレベルまで ${xpForNxt-xpInLv} XP` : "MAX LEVEL"}</span>
+              </div>`;
+          })()}
         </div>
       `;
     })()}
@@ -922,6 +928,11 @@ function SettingsScreen({onToast,onLogout,onGoalSaved}) {
 const TABS=[{id:"home",l:"ホーム",n:"home"},{id:"log",l:"記録",n:"clock"},{id:"report",l:"レポート",n:"chart"},{id:"chat",l:"チャット",n:"chat"},{id:"settings",l:"設定",n:"gear"}];
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
+
+const XP_THRESHOLDS = [0, 500, 1200, 2200, 3500, 5200, 7500, 10000, 13000, 17000, 21000, 25500, 30500, 36000, 42000, 49000];
+const getXpLevel = xp => { let lv=1; for(let i=1;i<XP_THRESHOLDS.length;i++){ if(xp>=XP_THRESHOLDS[i]) lv=i+1; else break; } return lv; };
+const getXpInLevel = xp => xp - (XP_THRESHOLDS[getXpLevel(xp)-1]||0);
+const getXpForNextLevel = xp => { const lv=getXpLevel(xp); return lv<XP_THRESHOLDS.length ? XP_THRESHOLDS[lv]-(XP_THRESHOLDS[lv-1]||0) : null; };
 
 function parseJwt(token) {
   try { return JSON.parse(atob(token.split(".")[1].replace(/-/g,"+").replace(/_/g,"/"))); } catch { return null; }
