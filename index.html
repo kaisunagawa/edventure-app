@@ -904,14 +904,6 @@ function SettingsScreen({onToast,onLogout,onGoalSaved}) {
         <div class="s-row"><span class="s-k">メール</span><span style=${{fontSize:12,color:"var(--sub)"}}>${CURRENT_USER.email}</span></div>
       </div>
 
-      <div class="card" style=${{marginTop:12}}>
-        <div class="card-label">Googleカレンダー連携</div>
-        <p style=${{fontSize:12,color:"var(--sub)",lineHeight:1.7,marginBottom:14}}>${calLinked?"カレンダーと連携済みです。コーチがあなたの予定を確認できます。":"連携するとコーチがあなたのGoogleカレンダーを確認できるようになります。"}</p>
-        ${calLinked
-          ? html`<div style=${{display:"flex",alignItems:"center",gap:8,color:"var(--accent)",fontWeight:700,fontSize:14}}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>連携済み</div>`
-          : html`<button class="btn" onClick=${linkCalendar} disabled=${calLoading}>${calLoading?"連携中...":"Googleカレンダーを連携する"}</button>`
-        }
-      </div>
 
       <div style=${{marginTop:12,marginBottom:32}}><button class="btn-g" onClick=${onLogout}>ログアウト</button></div>
     </div>
