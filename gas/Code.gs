@@ -6,6 +6,17 @@ const SPREADSHEET_ID = "1EbGxrI6e-rmzgDk4jczOX1RfHIYY-6Q1jOPpr5Hybqc";
 const CLAUDE_API_KEY = PropertiesService.getScriptProperties().getProperty("CLAUDE_API_KEY");
 const LINE_CHANNEL_TOKEN = PropertiesService.getScriptProperties().getProperty("LINE_CHANNEL_TOKEN");
 
+// XP閾値テーブル（非線形）: インデックス = レベル-1
+const XP_THRESHOLDS = [0, 500, 1200, 2200, 3500, 5200, 7500, 10000, 13000, 17000, 21000, 25500, 30500, 36000, 42000, 49000];
+
+function getXpLevel(xp) {
+  let level = 1;
+  for (let i = 1; i < XP_THRESHOLDS.length; i++) {
+    if (xp >= XP_THRESHOLDS[i]) level = i + 1; else break;
+  }
+  return level;
+}
+
 function getSheet(name) {
   return SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName(name);
 }
@@ -244,13 +255,18 @@ function addXP(studentEmail, memo) {
     const currentBadges = String(data[i][badgesIdx] || "");
     const streak = Number(data[i][headers.indexOf("streak")] || 0);
 
+    // ストリークボーナスは1日1回のみ
+    const today = formatDate(new Date());
+    const todayLogs = sheetToObjects(getSheet("DailyLog")).filter(l => l.student_email === studentEmail && l.date === today);
+    const isFirstLogToday = todayLogs.length <= 1;
+
     let gained = 10;
     if (memo && memo.trim()) gained += 5;
-    gained += streak * 2;
+    if (isFirstLogToday) gained += Math.min(streak, 30) * 2;
 
     const newXP = currentXP + gained;
-    const oldLevel = Math.floor(currentXP / 100) + 1;
-    const newLevel = Math.floor(newXP / 100) + 1;
+    const oldLevel = getXpLevel(currentXP);
+    const newLevel = getXpLevel(newXP);
     const levelUp = newLevel > oldLevel;
 
     usersSheet.getRange(i+1, xpIdx+1).setValue(newXP);
@@ -293,13 +309,16 @@ function getGameStatus(studentEmail) {
   const user = sheetToObjects(getSheet("Users")).find(u => u.student_email === studentEmail);
   if (!user) return { ok: true, data: { xp: 0, level: 1, streak: 0, badges: [], goal: "", goal_deadline: "" } };
   const xp = Number(user.xp || 0);
-  const level = Math.floor(xp / 100) + 1;
-  const xpInLevel = xp % 100;
+  const level = getXpLevel(xp);
+  const levelStart = XP_THRESHOLDS[level - 1] || 0;
+  const levelEnd = XP_THRESHOLDS[level] || null;
+  const xpInLevel = xp - levelStart;
+  const xpForNextLevel = levelEnd ? levelEnd - levelStart : null;
   const streak = Number(user.streak || 0);
   const badgeIds = user.badges ? user.badges.split(",").filter(Boolean) : [];
   const badgeMap = { first:"🌱 はじめての記録", streak3:"🔥 3日連続達成", streak7:"⚡ 7日連続達成", memo10:"📝 メモ名人", xp500:"🌟 XP500達成" };
   const badges = badgeIds.map(id => ({ id, label: badgeMap[id] || id }));
-  return { ok: true, data: { xp, level, xpInLevel, streak, badges, goal: user.goal || "", goal_deadline: user.goal_deadline || "" } };
+  return { ok: true, data: { xp, level, xpInLevel, xpForNextLevel, streak, badges, goal: user.goal || "", goal_deadline: user.goal_deadline || "" } };
 }
 
 function getMessages(studentEmail) {
