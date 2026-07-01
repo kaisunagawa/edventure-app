@@ -946,7 +946,11 @@ const getXpInLevel = xp => xp - (XP_THRESHOLDS[getXpLevel(xp)-1]||0);
 const getXpForNextLevel = xp => { const lv=getXpLevel(xp); return lv<XP_THRESHOLDS.length ? XP_THRESHOLDS[lv]-(XP_THRESHOLDS[lv-1]||0) : null; };
 
 function parseJwt(token) {
-  try { return JSON.parse(atob(token.split(".")[1].replace(/-/g,"+").replace(/_/g,"/"))); } catch { return null; }
+  try {
+    const base64 = token.split(".")[1].replace(/-/g,"+").replace(/_/g,"/");
+    const json = decodeURIComponent(atob(base64).split("").map(c=>"%"+("00"+c.charCodeAt(0).toString(16)).slice(-2)).join(""));
+    return JSON.parse(json);
+  } catch { return null; }
 }
 
 function LoginScreen({onLogin}) {
