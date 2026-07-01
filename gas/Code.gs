@@ -61,12 +61,31 @@ function doPost(e) {
       body.events.forEach(event => {
         if (event.type === "follow") {
           const lineUserId = event.source.userId;
-          const sheet = getSheet("Users");
-          const rows = sheetToObjects(sheet);
-          const exists = rows.find(r => r.line_user_id === lineUserId);
-          if (!exists) {
-            sheet.appendRow(["", "", lineUserId, "", "", "", "", "TRUE", formatDate(new Date())]);
-            sendLineMessage(lineUserId, "EdVentureへようこそ！\nコーチから案内が届くまで少々お待ちください。");
+          const rows = sheetToObjects(getSheet("Users"));
+          // すでに連携済みなら何もしない
+          if (rows.find(r => r.line_user_id === lineUserId)) return;
+          sendLineMessage(lineUserId, "EdVentureへようこそ！🎉\n\nアカウントを連携するために、登録済みのGmailアドレスをこのLINEに送ってください。\n（例: yourname@gmail.com）\n\nまだアプリ登録していない場合はこちらから👇\nhttps://kaisunagawa.github.io/edventure-app/");
+        }
+
+        if (event.type === "message" && event.message.type === "text") {
+          const lineUserId = event.source.userId;
+          const text = event.message.text.trim().toLowerCase();
+          // メールアドレス形式なら連携処理
+          if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(text)) {
+            const sheet = getSheet("Users");
+            const data = sheet.getDataRange().getValues();
+            const headers = data[0];
+            const emailIdx = headers.indexOf("student_email");
+            const lineIdx = headers.indexOf("line_user_id");
+            const nameIdx = headers.indexOf("name");
+            for (let i = 1; i < data.length; i++) {
+              if (String(data[i][emailIdx]).toLowerCase() === text) {
+                sheet.getRange(i + 1, lineIdx + 1).setValue(lineUserId);
+                sendLineMessage(lineUserId, "✅ 連携完了！\n" + String(data[i][nameIdx]) + "さんのアカウントと連携しました。\n\n毎時間の記録リマインダーと毎晩のAIレポートをお届けします！");
+                return;
+              }
+            }
+            sendLineMessage(lineUserId, "❌ このメールアドレスは見つかりませんでした。\nアプリで登録したGmailアドレスを確認して、もう一度送ってください。");
           }
         }
       });
@@ -407,6 +426,7 @@ function saveSettings(studentEmail, body) {
   const goalIdx     = ensureCol("goal");
   const deadlineIdx = ensureCol("goal_deadline");
   const calIdx      = ensureCol("google_calendar_id");
+  const lineIdx     = ensureCol("line_user_id");
 
   for (let i = 1; i < data.length; i++) {
     if (String(data[i][emailIdx]) !== studentEmail) continue;
@@ -415,6 +435,7 @@ function saveSettings(studentEmail, body) {
     if (body.goal               !== undefined) sheet.getRange(i + 1, goalIdx     + 1).setValue(body.goal);
     if (body.goal_deadline      !== undefined) sheet.getRange(i + 1, deadlineIdx + 1).setValue(body.goal_deadline);
     if (body.google_calendar_id !== undefined) sheet.getRange(i + 1, calIdx      + 1).setValue(body.google_calendar_id);
+    if (body.line_user_id       !== undefined) sheet.getRange(i + 1, lineIdx     + 1).setValue(body.line_user_id);
     break;
   }
   return { ok: true };
