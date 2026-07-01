@@ -101,26 +101,32 @@ function registerUser(studentEmail, body) {
   }
 
   const today = formatDate(new Date());
-  sheet.appendRow([
-    studentEmail,
-    body.name || "",
-    "",            // line_user_id
-    "",            // coach_email（後でコーチが設定）
-    "",            // coach_line_id
-    "",            // google_calendar_id
-    "",            // chatwork_room
-    "TRUE",        // is_active
-    today,         // joined_at
-    7,             // notify_start
-    23,            // notify_end
-    body.goal || "",
-    body.goal_deadline || "",
-  ]);
+  let headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
 
-  // ヘッダーにgoal/goal_deadline列がなければ追加
-  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
-  if (!headers.includes("goal")) sheet.getRange(1, headers.length + 1).setValue("goal");
-  if (!headers.includes("goal_deadline")) sheet.getRange(1, headers.length + 2).setValue("goal_deadline");
+  function ensureHeader(name) {
+    if (!headers.includes(name)) { sheet.getRange(1, headers.length + 1).setValue(name); headers.push(name); }
+    return headers.indexOf(name);
+  }
+
+  const idxEmail    = ensureHeader("student_email");
+  const idxName     = ensureHeader("name");
+  const idxActive   = ensureHeader("is_active");
+  const idxJoined   = ensureHeader("joined_at");
+  const idxGoal     = ensureHeader("goal");
+  const idxDeadline = ensureHeader("goal_deadline");
+  const idxStart    = ensureHeader("notify_start");
+  const idxEnd      = ensureHeader("notify_end");
+
+  const newRow = new Array(headers.length).fill("");
+  newRow[idxEmail]    = studentEmail;
+  newRow[idxName]     = body.name || "";
+  newRow[idxActive]   = "TRUE";
+  newRow[idxJoined]   = today;
+  newRow[idxGoal]     = body.goal || "";
+  newRow[idxDeadline] = body.goal_deadline || "";
+  newRow[idxStart]    = 7;
+  newRow[idxEnd]      = 23;
+  sheet.appendRow(newRow);
 
   return { ok: true, data: { name: body.name, coachName: "コーチ", coach_email: "" } };
 }
@@ -149,9 +155,9 @@ function getReportList(studentEmail) {
 
 function getReport(studentEmail, body) {
   const rows = sheetToObjects(getSheet("Reports"));
-  const targetDate = (body && body.date) ? body.date : formatDate(new Date());
   const userRows = rows.filter(r => r.student_email === studentEmail).sort((a, b) => b.date > a.date ? 1 : -1);
-  const report = userRows.find(r => r.date === targetDate);
+  const targetDate = (body && body.date) ? body.date : formatDate(new Date());
+  const report = userRows.find(r => r.date === targetDate) || userRows[0];
   if (!report) return { ok: true, data: null };
   return { ok: true, data: { score: Number(report.score), feedback: report.feedback, action: report.action, highlights: report.highlights, improvement: report.improvement, date: report.date } };
 }
@@ -641,7 +647,7 @@ function sheetToObjects(sheet) {
       if (v instanceof Date) {
         obj[h] = v.getFullYear() === 1899
           ? String(v.getHours()).padStart(2,"0") + ":" + String(v.getMinutes()).padStart(2,"0")
-          : formatDate(v);
+          : Utilities.formatDate(v, "Asia/Tokyo", "yyyy-MM-dd HH:mm");
       }
       else { obj[h] = v !== undefined && v !== null ? String(v) : ""; }
     });
