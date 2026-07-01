@@ -644,8 +644,9 @@ function ReportScreen() {
   },[date]);
 
   const fmtDate = d => {
-    const dt = new Date(d+"T00:00:00");
-    return dt.toLocaleDateString("ja-JP",{month:"long",day:"numeric",weekday:"short"});
+    const dateOnly = (d||"").substring(0,10);
+    const dt = new Date(dateOnly+"T00:00:00");
+    return isNaN(dt)?"--":dt.toLocaleDateString("ja-JP",{month:"long",day:"numeric",weekday:"short"});
   };
 
   // ── 一覧表示 ──
@@ -664,7 +665,7 @@ function ReportScreen() {
                 style=${{display:"flex",alignItems:"center",justifyContent:"space-between",width:"100%",background:"none",border:"none",padding:"13px 0",borderBottom:i<reportList.length-1?"1px solid var(--border)":"none",cursor:"pointer",fontFamily:"inherit",textAlign:"left"}}>
                 <div>
                   <div style=${{fontSize:14,fontWeight:500,color:"var(--text)"}}>${fmtDate(r.date)}</div>
-                  <div style=${{fontSize:11,color:"var(--sub)",marginTop:2}}>${isToday(r.date)?"今日":r.date}</div>
+                  <div style=${{fontSize:11,color:"var(--sub)",marginTop:2}}>${isToday(r.date)?"今日":r.date.substring(0,10)}</div>
                 </div>
                 <div style=${{display:"flex",alignItems:"center",gap:10}}>
                   <div style=${{fontSize:22,fontWeight:700,color:SCORE_COLOR(r.score)}}>${r.score}</div>
