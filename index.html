@@ -1188,54 +1188,79 @@ function SettingsScreen({onToast,onLogout,onGoalSaved}) {
     lv: r.maxLv >= 999 ? `Lv.${r.minLv}+` : r.minLv === r.maxLv ? `Lv.${r.minLv}` : `Lv.${r.minLv}–${r.maxLv}`
   }));
 
-  return html`<div>
-    <div class="ph"><div class="ph-title-accent">設定</div></div>
-    <div style=${{padding:"0 16px"}}>
+  const SectionHeader = ({icon, title}) => html`
+    <div style=${{display:"flex",alignItems:"center",gap:10,marginBottom:14}}>
+      <div style=${{width:32,height:32,borderRadius:10,background:"var(--accent-l)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,flexShrink:0}}>${icon}</div>
+      <div style=${{fontSize:14,fontWeight:700,color:"var(--text)"}}>${title}</div>
+    </div>
+  `;
 
-      <div class="card">
-        <div class="card-label">目標・期限（最大3つ）</div>
+  return html`<div style=${{paddingBottom:48}}>
+
+    <!-- Hero -->
+    <div style=${{background:"linear-gradient(135deg, var(--accent) 0%, #0e7490 100%)",padding:"36px 20px 28px",position:"relative",overflow:"hidden"}}>
+      <div style=${{position:"absolute",top:-20,right:-20,width:100,height:100,borderRadius:"50%",background:"rgba(255,255,255,0.06)"}}/>
+      <div style=${{position:"absolute",bottom:-24,right:40,width:64,height:64,borderRadius:"50%",background:"rgba(255,255,255,0.04)"}}/>
+      <div style=${{fontSize:12,color:"rgba(255,255,255,0.7)",marginBottom:6,letterSpacing:".05em"}}>ACCOUNT</div>
+      <div style=${{fontSize:24,fontWeight:800,color:"#fff",marginBottom:2}}>${CURRENT_USER.name}</div>
+      <div style=${{fontSize:13,color:"rgba(255,255,255,0.7)"}}>${CURRENT_USER.email}</div>
+    </div>
+
+    <div style=${{padding:"16px 16px 0"}}>
+
+      <!-- 目標 -->
+      <div style=${{background:"var(--card)",borderRadius:16,border:"1px solid var(--border)",padding:"18px",marginBottom:12}}>
+        <${SectionHeader} icon="🎯" title="目標・期限"/>
         ${goals.map((g,i)=>html`
-          <div key=${i} style=${{background:"var(--bg)",borderRadius:10,padding:"12px",marginBottom:10,border:"1px solid var(--border)"}}>
-            <div style=${{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
-              <label class="form-lbl" style=${{margin:0}}>目標${i+1}${i===0?" （メイン）":""}</label>
-              ${i>0&&html`<button onClick=${()=>removeGoal(i)} style=${{background:"none",border:"none",color:"var(--sub)",fontSize:18,cursor:"pointer",lineHeight:1}}>×</button>`}
+          <div key=${i} style=${{background:"var(--bg)",borderRadius:12,padding:"14px",marginBottom:10,border:"1px solid var(--border)"}}>
+            <div style=${{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+              <div style=${{display:"flex",alignItems:"center",gap:6}}>
+                <div style=${{width:6,height:6,borderRadius:"50%",background:i===0?"var(--accent)":i===1?"var(--amber)":"var(--green)"}}/>
+                <label class="form-lbl" style=${{margin:0,fontSize:12}}>目標${i+1}${i===0?" （メイン）":""}</label>
+              </div>
+              ${i>0&&html`<button onClick=${()=>removeGoal(i)} style=${{background:"none",border:"none",color:"var(--sub)",fontSize:18,cursor:"pointer",lineHeight:1,padding:"0 2px"}}>×</button>`}
             </div>
-            <textarea class="txa" placeholder=${i===0?"例：英検2級に合格する":"例：毎月売上100万円達成"} value=${g.goal} onChange=${e=>{updateGoal(i,"goal",e.target.value);e.target.style.height="auto";e.target.style.height=e.target.scrollHeight+"px";}} ref=${el=>{if(el){el.style.height="auto";el.style.height=el.scrollHeight+"px";}}} style=${{minHeight:64,overflow:"hidden",resize:"none",marginBottom:8}}/>
-            <label class="form-lbl">達成期限</label>
+            <textarea class="txa" placeholder=${i===0?"例：英検2級に合格する":"例：毎月売上100万円達成"} value=${g.goal}
+              onChange=${e=>{updateGoal(i,"goal",e.target.value);e.target.style.height="auto";e.target.style.height=e.target.scrollHeight+"px";}}
+              ref=${el=>{if(el){el.style.height="auto";el.style.height=el.scrollHeight+"px";}}}
+              style=${{minHeight:64,overflow:"hidden",resize:"none",marginBottom:8}}/>
+            <label class="form-lbl" style=${{fontSize:11}}>達成期限</label>
             <input type="date" class="inp" value=${g.deadline} onChange=${e=>updateGoal(i,"deadline",e.target.value)}/>
           </div>
         `)}
         ${goals.length<3&&html`
-          <button onClick=${addGoal} style=${{background:"none",border:"1px dashed var(--border)",borderRadius:10,padding:"10px",color:"var(--sub)",fontSize:13,cursor:"pointer",width:"100%",marginBottom:10}}>
+          <button onClick=${addGoal} style=${{background:"none",border:"1.5px dashed var(--border)",borderRadius:12,padding:"11px",color:"var(--accent)",fontSize:13,fontWeight:600,cursor:"pointer",width:"100%",marginBottom:10}}>
             ＋ 目標を追加する
           </button>
         `}
-        <button class="btn" onClick=${saveGoal}>目標を保存する</button>
+        <button class="btn" onClick=${saveGoal}>保存する</button>
       </div>
 
-      <div class="card" style=${{marginTop:12}}>
-        <div class="card-label">タイマー設定</div>
-        <div style=${{fontSize:12,color:"var(--sub)",marginBottom:10}}>集中時間プリセット（最大3つ選択）</div>
-        <div style=${{display:"flex",flexWrap:"wrap",gap:8,marginBottom:16}}>
+      <!-- タイマー -->
+      <div style=${{background:"var(--card)",borderRadius:16,border:"1px solid var(--border)",padding:"18px",marginBottom:12}}>
+        <${SectionHeader} icon="⏱" title="タイマー設定"/>
+        <div style=${{fontSize:12,color:"var(--sub)",marginBottom:10,fontWeight:500}}>集中時間プリセット（最大3つ）</div>
+        <div style=${{display:"flex",flexWrap:"wrap",gap:8,marginBottom:18}}>
           ${PRESET_OPTIONS.map(min=>html`
             <button key=${min} onClick=${()=>togglePreset(min)}
-              style=${{padding:"8px 16px",borderRadius:20,border:`1.5px solid ${selectedPresets.includes(min)?"var(--accent)":"var(--border)"}`,
-              background:selectedPresets.includes(min)?"var(--accent)":"var(--card)",
+              style=${{padding:"8px 18px",borderRadius:20,border:`1.5px solid ${selectedPresets.includes(min)?"var(--accent)":"var(--border)"}`,
+              background:selectedPresets.includes(min)?"var(--accent)":"transparent",
               color:selectedPresets.includes(min)?"#fff":"var(--text)",
-              fontSize:14,fontWeight:selectedPresets.includes(min)?700:400,cursor:"pointer",
-              opacity:!selectedPresets.includes(min)&&selectedPresets.length>=3?0.4:1}}>
+              fontSize:14,fontWeight:600,cursor:"pointer",
+              opacity:!selectedPresets.includes(min)&&selectedPresets.length>=3?0.35:1,
+              transition:"all .15s"}}>
               ${min}分
             </button>
           `)}
         </div>
-        <div style=${{fontSize:12,color:"var(--sub)",marginBottom:10}}>休憩時間</div>
-        <div style=${{display:"flex",flexWrap:"wrap",gap:8,marginBottom:16}}>
+        <div style=${{fontSize:12,color:"var(--sub)",marginBottom:10,fontWeight:500}}>休憩時間</div>
+        <div style=${{display:"flex",gap:8,marginBottom:18}}>
           ${[5,10,15,20].map(min=>html`
             <button key=${min} onClick=${()=>setBreakMin(min)}
-              style=${{padding:"8px 16px",borderRadius:20,border:`1.5px solid ${breakMin===min?"var(--accent)":"var(--border)"}`,
-              background:breakMin===min?"var(--accent)":"var(--card)",
-              color:breakMin===min?"#fff":"var(--text)",
-              fontSize:14,fontWeight:breakMin===min?700:400,cursor:"pointer"}}>
+              style=${{flex:1,padding:"10px 0",borderRadius:12,border:`1.5px solid ${breakMin===min?"var(--accent)":"var(--border)"}`,
+              background:breakMin===min?"var(--accent-l)":"transparent",
+              color:breakMin===min?"var(--accent)":"var(--text)",
+              fontSize:14,fontWeight:breakMin===min?700:400,cursor:"pointer",transition:"all .15s"}}>
               ${min}分
             </button>
           `)}
@@ -1243,73 +1268,21 @@ function SettingsScreen({onToast,onLogout,onGoalSaved}) {
         <button class="btn" onClick=${saveTimerSettings}>保存する</button>
       </div>
 
-      <div class="card" style=${{marginTop:12}}>
-        <div class="card-label">階級システム</div>
-        <div style=${{display:"flex",gap:8,flexWrap:"wrap",marginBottom:14}}>
-          <div style=${{flex:"1 1 140px",background:"var(--bg)",borderRadius:9,padding:"10px 12px",fontSize:12,lineHeight:1.8,color:"var(--sub)"}}>
-            <div style=${{fontWeight:600,color:"var(--text)",marginBottom:4}}>XPの貯め方</div>
-            記録した日：<b style=${{color:"var(--accent)"}}>+10〜25 XP</b><br/>
-            メモを書く：<b style=${{color:"var(--accent)"}}>+5 XP</b><br/>
-            連続記録ボーナスあり
-          </div>
-          <div style=${{flex:"1 1 140px",background:"var(--bg)",borderRadius:9,padding:"10px 12px",fontSize:12,lineHeight:1.8,color:"var(--sub)"}}>
-            <div style=${{fontWeight:600,color:"var(--text)",marginBottom:4}}>記録なしの日</div>
-            1日サボり：<b style=${{color:"var(--red)"}}>−15 XP</b><br/>
-            2日連続：<b style=${{color:"var(--red)"}}>−30 XP</b><br/>
-            ストリークもリセット
-          </div>
-        </div>
-        <div style=${{display:"flex",flexDirection:"column",gap:6}}>
-          ${RANK_RULES.map((r,i)=>html`
-            <div key=${r.name} style=${{display:"flex",alignItems:"center",gap:10,padding:"8px 10px",borderRadius:9,background:r.bg,border:`1px solid ${r.color}30`}}>
-              <div style=${{fontSize:20,flexShrink:0}}>${r.emoji}</div>
-              <div style=${{flex:1}}>
-                <div style=${{display:"flex",alignItems:"baseline",gap:6}}>
-                  <span style=${{fontSize:13,fontWeight:700,color:r.color}}>${r.name}</span>
-                  <span style=${{fontSize:11,color:"var(--sub)"}}>${r.sub}</span>
-                </div>
-              </div>
-              <div style=${{fontSize:11,fontWeight:600,color:r.color,flexShrink:0}}>${r.lv}</div>
-            </div>
-          `)}
-        </div>
-      </div>
-
-      <div class="card" style=${{marginTop:12}}>
-        <div class="card-label">LINE通知時間</div>
-        <div style=${{display:"flex",alignItems:"center",gap:12,marginBottom:14}}>
-          <div style=${{flex:1}}><div style=${{fontSize:11,color:"var(--sub)",marginBottom:6}}>開始</div><select value=${start} onChange=${e=>setStart(Number(e.target.value))}>${hours.map(h=>html`<option key=${h} value=${h}>${String(h).padStart(2,"0")}:00</option>`)}</select></div>
-          <div style=${{color:"var(--sub)",marginTop:18,fontSize:14}}>〜</div>
-          <div style=${{flex:1}}><div style=${{fontSize:11,color:"var(--sub)",marginBottom:6}}>終了</div><select value=${end} onChange=${e=>setEnd(Number(e.target.value))}>${hours.map(h=>html`<option key=${h} value=${h}>${String(h).padStart(2,"0")}:00</option>`)}</select></div>
-        </div>
-        <div style=${{marginTop:14,marginBottom:14}}>
-          <div style=${{fontSize:11,color:"var(--sub)",marginBottom:8}}>通知間隔</div>
-          <div style=${{display:"flex",gap:8,flexWrap:"wrap"}}>
-            ${[[1,"1時間"],[2,"2時間"],[3,"3時間"],[6,"6時間"],[24,"1日1回"]].map(([v,label])=>html`
-              <button key=${v} onClick=${()=>setInterval(v)} style=${{padding:"6px 14px",borderRadius:20,border:`1.5px solid ${interval===v?"var(--accent)":"var(--border)"}`,background:interval===v?"var(--accent)":"var(--card)",color:interval===v?"#fff":"var(--text)",fontSize:13,cursor:"pointer",fontWeight:interval===v?600:400}}>${label}</button>
-            `)}
-          </div>
-          <div style=${{fontSize:11,color:"var(--sub)",marginTop:8,lineHeight:1.6}}>
-            ${interval===1?"毎時間リマインドが届きます（基本設定）":interval===24?"1日の開始時間に1回だけ届きます":`${interval}時間ごとにリマインドが届きます`}
-          </div>
-        </div>
-        <button class="btn" onClick=${saveNotify}>保存する</button>
-      </div>
-
-      <div class="card" style=${{marginTop:12}}>
-        <div class="card-label">記録する時間帯</div>
-        <div style=${{fontSize:12,color:"var(--sub)",marginBottom:12,lineHeight:1.6}}>記録画面に表示される時間ブロックの範囲を設定します。</div>
-        <div style=${{display:"flex",alignItems:"center",gap:12,marginBottom:16}}>
+      <!-- 記録時間帯 -->
+      <div style=${{background:"var(--card)",borderRadius:16,border:"1px solid var(--border)",padding:"18px",marginBottom:12}}>
+        <${SectionHeader} icon="🕐" title="記録する時間帯"/>
+        <div style=${{fontSize:12,color:"var(--sub)",marginBottom:14,lineHeight:1.6}}>記録画面に表示する時間ブロックの範囲</div>
+        <div style=${{display:"flex",alignItems:"center",gap:10,marginBottom:16}}>
           <div style=${{flex:1}}>
-            <div style=${{fontSize:11,color:"var(--sub)",marginBottom:6}}>開始</div>
-            <select class="inp" style=${{padding:"10px 8px"}} value=${logStart} onChange=${e=>setLogStart(Number(e.target.value))}>
+            <div style=${{fontSize:11,color:"var(--sub)",marginBottom:6,fontWeight:500}}>開始</div>
+            <select class="inp" style=${{padding:"10px 8px",textAlign:"center"}} value=${logStart} onChange=${e=>setLogStart(Number(e.target.value))}>
               ${Array.from({length:20},(_,i)=>i+5).map(h=>html`<option key=${h} value=${h}>${String(h).padStart(2,"0")}:00</option>`)}
             </select>
           </div>
-          <div style=${{color:"var(--sub)",marginTop:16,fontSize:14}}>〜</div>
+          <div style=${{color:"var(--sub)",marginTop:18,fontSize:18,fontWeight:300}}>→</div>
           <div style=${{flex:1}}>
-            <div style=${{fontSize:11,color:"var(--sub)",marginBottom:6}}>終了</div>
-            <select class="inp" style=${{padding:"10px 8px"}} value=${logEnd} onChange=${e=>setLogEnd(Number(e.target.value))}>
+            <div style=${{fontSize:11,color:"var(--sub)",marginBottom:6,fontWeight:500}}>終了</div>
+            <select class="inp" style=${{padding:"10px 8px",textAlign:"center"}} value=${logEnd} onChange=${e=>setLogEnd(Number(e.target.value))}>
               ${Array.from({length:20},(_,i)=>i+6).map(h=>html`<option key=${h} value=${h}>${String(h).padStart(2,"0")}:00</option>`)}
             </select>
           </div>
@@ -1317,23 +1290,86 @@ function SettingsScreen({onToast,onLogout,onGoalSaved}) {
         <button class="btn" onClick=${saveLogHours}>保存する</button>
       </div>
 
-      <div class="card" style=${{marginTop:12}}>
-        <div class="card-label">アカウント</div>
-        <div class="s-row"><span class="s-k">名前</span><span class="s-v">${CURRENT_USER.name}</span></div>
-        <div class="s-row"><span class="s-k">メール</span><span style=${{fontSize:12,color:"var(--sub)"}}>${CURRENT_USER.email}</span></div>
+      <!-- LINE通知 -->
+      <div style=${{background:"var(--card)",borderRadius:16,border:"1px solid var(--border)",padding:"18px",marginBottom:12}}>
+        <${SectionHeader} icon="🔔" title="LINE通知時間"/>
+        <div style=${{display:"flex",alignItems:"center",gap:10,marginBottom:16}}>
+          <div style=${{flex:1}}>
+            <div style=${{fontSize:11,color:"var(--sub)",marginBottom:6,fontWeight:500}}>開始</div>
+            <select class="inp" style=${{padding:"10px 8px",textAlign:"center"}} value=${start} onChange=${e=>setStart(Number(e.target.value))}>
+              ${hours.map(h=>html`<option key=${h} value=${h}>${String(h).padStart(2,"0")}:00</option>`)}
+            </select>
+          </div>
+          <div style=${{color:"var(--sub)",marginTop:18,fontSize:18,fontWeight:300}}>→</div>
+          <div style=${{flex:1}}>
+            <div style=${{fontSize:11,color:"var(--sub)",marginBottom:6,fontWeight:500}}>終了</div>
+            <select class="inp" style=${{padding:"10px 8px",textAlign:"center"}} value=${end} onChange=${e=>setEnd(Number(e.target.value))}>
+              ${hours.map(h=>html`<option key=${h} value=${h}>${String(h).padStart(2,"0")}:00</option>`)}
+            </select>
+          </div>
+        </div>
+        <div style=${{fontSize:12,color:"var(--sub)",marginBottom:10,fontWeight:500}}>通知間隔</div>
+        <div style=${{display:"flex",gap:6,flexWrap:"wrap",marginBottom:10}}>
+          ${[[1,"1時間"],[2,"2時間"],[3,"3時間"],[6,"6時間"],[24,"1日1回"]].map(([v,label])=>html`
+            <button key=${v} onClick=${()=>setInterval(v)}
+              style=${{padding:"7px 13px",borderRadius:20,border:`1.5px solid ${interval===v?"var(--accent)":"var(--border)"}`,
+              background:interval===v?"var(--accent)":"transparent",
+              color:interval===v?"#fff":"var(--text)",fontSize:13,cursor:"pointer",fontWeight:interval===v?600:400,transition:"all .15s"}}>
+              ${label}
+            </button>
+          `)}
+        </div>
+        <div style=${{fontSize:11,color:"var(--sub)",marginBottom:16,lineHeight:1.6,padding:"8px 10px",background:"var(--bg)",borderRadius:8}}>
+          ${interval===1?"毎時間リマインドが届きます":interval===24?"1日の開始時間に1回届きます":`${interval}時間ごとにリマインドが届きます`}
+        </div>
+        <button class="btn" onClick=${saveNotify}>保存する</button>
       </div>
 
+      <!-- 階級システム -->
+      <div style=${{background:"var(--card)",borderRadius:16,border:"1px solid var(--border)",padding:"18px",marginBottom:12}}>
+        <${SectionHeader} icon="🏆" title="階級システム"/>
+        <div style=${{display:"flex",gap:8,marginBottom:14}}>
+          <div style=${{flex:1,background:"var(--bg)",borderRadius:10,padding:"12px",fontSize:12,lineHeight:1.8,color:"var(--sub)"}}>
+            <div style=${{fontWeight:700,color:"var(--text)",marginBottom:4,fontSize:13}}>XPの貯め方</div>
+            記録した日：<b style=${{color:"var(--accent)"}}>+10〜25 XP</b><br/>
+            メモを書く：<b style=${{color:"var(--accent)"}}>+5 XP</b><br/>
+            連続ボーナスあり
+          </div>
+          <div style=${{flex:1,background:"var(--bg)",borderRadius:10,padding:"12px",fontSize:12,lineHeight:1.8,color:"var(--sub)"}}>
+            <div style=${{fontWeight:700,color:"var(--text)",marginBottom:4,fontSize:13}}>記録なしの日</div>
+            1日：<b style=${{color:"var(--red)"}}>−15 XP</b><br/>
+            2日連続：<b style=${{color:"var(--red)"}}>−30 XP</b><br/>
+            ストリークリセット
+          </div>
+        </div>
+        <div style=${{display:"flex",flexDirection:"column",gap:6}}>
+          ${RANK_RULES.map(r=>html`
+            <div key=${r.name} style=${{display:"flex",alignItems:"center",gap:10,padding:"9px 12px",borderRadius:10,background:r.bg,border:`1px solid ${r.color}25`}}>
+              <span style=${{fontSize:18,flexShrink:0}}>${r.emoji}</span>
+              <div style=${{flex:1}}>
+                <span style=${{fontSize:13,fontWeight:700,color:r.color}}>${r.name}</span>
+                <span style=${{fontSize:11,color:"var(--sub)",marginLeft:6}}>${r.sub}</span>
+              </div>
+              <span style=${{fontSize:11,fontWeight:700,color:r.color,flexShrink:0}}>${r.lv}</span>
+            </div>
+          `)}
+        </div>
+      </div>
 
-      <div class="card" style=${{marginTop:12}}>
-        <div class="card-label">Googleカレンダー連携（任意）</div>
-        <p style=${{fontSize:12,color:"var(--sub)",lineHeight:1.7,marginBottom:14}}>${calLinked?"カレンダーと連携済みです。":"連携すると朝に今日の予定が届きます。スキップしても他の機能は全て使えます。\n\n⚠️ 利用するにはコーチへのGmailアドレスの連絡が必要です。未登録の場合はコーチにメールで申請してください。"}</p>
+      <!-- カレンダー -->
+      <div style=${{background:"var(--card)",borderRadius:16,border:"1px solid var(--border)",padding:"18px",marginBottom:12}}>
+        <${SectionHeader} icon="📅" title="Googleカレンダー連携"/>
+        <p style=${{fontSize:13,color:"var(--sub)",lineHeight:1.7,marginBottom:14}}>${calLinked?"連携済みです。朝に今日の予定が届きます。":"連携すると朝に今日の予定が届きます。スキップしても他の機能は全て使えます。"}</p>
         ${calLinked
-          ? html`<div style=${{display:"flex",alignItems:"center",gap:8,color:"var(--accent)",fontWeight:700,fontSize:14}}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>連携済み</div>`
+          ? html`<div style=${{display:"flex",alignItems:"center",gap:8,color:"var(--accent)",fontWeight:700,fontSize:14,padding:"10px 14px",background:"var(--accent-l)",borderRadius:10}}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>連携済み
+            </div>`
           : html`<button class="btn" onClick=${linkCalendar} disabled=${calLoading}>${calLoading?"連携中...":"Googleカレンダーを連携する"}</button>`
         }
       </div>
 
-      <div style=${{marginTop:12,marginBottom:32}}><button class="btn-g" onClick=${onLogout}>ログアウト</button></div>
+      <!-- ログアウト -->
+      <button class="btn-g" onClick=${onLogout} style=${{marginBottom:32}}>ログアウト</button>
     </div>
   </div>`;
 }
