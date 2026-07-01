@@ -373,17 +373,58 @@ function autoReplyFromClaude(studentEmail, studentMessage) {
       ? logs.map(l => l.time_block + ": " + l.task + "（集中度" + l.focus_level + "）").join("\n")
       : "まだ記録なし";
 
+    // 直近7日のログ数（継続状況の把握）
+    const sevenDaysAgo = formatDate(new Date(Date.now() - 7 * 86400000));
+    const recentAllLogs = sheetToObjects(getSheet("DailyLog")).filter(l => l.student_email === studentEmail && l.date >= sevenDaysAgo);
+    const activeDays = new Set(recentAllLogs.map(l => l.date)).size;
+    const streak = Number(user.streak || 0);
+
+    // 目標と期限
+    const goalsText = [
+      user.goal ? `① ${user.goal}${user.goal_deadline ? "（期限：" + user.goal_deadline + "）" : ""}` : "",
+      user.goal2 ? `② ${user.goal2}${user.goal_deadline2 ? "（期限：" + user.goal_deadline2 + "）" : ""}` : "",
+      user.goal3 ? `③ ${user.goal3}${user.goal_deadline3 ? "（期限：" + user.goal_deadline3 + "）" : ""}` : "",
+    ].filter(Boolean).join("\n") || "未設定";
+
+    // 目標期限までの残り日数
+    const deadlineInfo = [];
+    [{ goal: user.goal, deadline: user.goal_deadline }, { goal: user.goal2, deadline: user.goal_deadline2 }, { goal: user.goal3, deadline: user.goal_deadline3 }].forEach(g => {
+      if (g.goal && g.deadline) {
+        const daysLeft = Math.ceil((new Date(g.deadline) - new Date(today)) / 86400000);
+        deadlineInfo.push(`「${g.goal}」まで残り${daysLeft}日`);
+      }
+    });
+
+    // 過去レポート
+    const pastReports = sheetToObjects(getSheet("Reports"))
+      .filter(r => r.student_email === studentEmail)
+      .sort((a, b) => b.date > a.date ? 1 : -1)
+      .slice(0, 3);
+    const reportSummary = pastReports.length > 0
+      ? pastReports.map(r => r.date + ": " + r.score + "点").join("、")
+      : "なし";
+
     const allMsgs = sheetToObjects(getSheet("Messages"))
       .filter(m => m.student_email === studentEmail)
       .sort((a, b) => a.message_id > b.message_id ? 1 : -1);
-    // 直前にappendRowした現在のメッセージを除いた直近10件
     const recentMessages = allMsgs.slice(-11, -1)
       .map(m => ({ role: m.sender_role === "student" ? "user" : "assistant", content: m.content }));
 
-    const systemPrompt = `あなたは教育コーチです。温かく具体的なフィードバックを日本語で返してください。返信は2〜4文で簡潔にまとめてください。
+    const systemPrompt = `あなたは生徒一人ひとりに寄り添う教育コーチです。以下の方針で日本語で返信してください。
+
+【コーチの役割】
+- 基本は肯定的・共感的な姿勢で生徒を信じて応援する
+- 記録が少ない・途切れている場合は、責めずに優しく継続を促す
+- 心理学的アプローチ（承認→気づき→行動）を意識する
+- 目標の期限に対する現在地を具体的に言語化して伝える
+- 返信は2〜4文で簡潔に。ポジティブに締めくくる
 
 【生徒名】${user.name}
-【目標】${user.goal || "未設定"}
+【目標】
+${goalsText}
+【期限まで】${deadlineInfo.length > 0 ? deadlineInfo.join("、") : "期限未設定"}
+【連続記録日数】${streak}日（直近7日で${activeDays}日記録）
+【直近のスコア推移】${reportSummary}
 【今日のログ】
 ${logSummary}`;
 
@@ -659,52 +700,78 @@ function generateReportWithClaude(studentEmail, studentName, logs) {
 
   const logsText = logs.map(l => l.time_block + " - " + l.task + "（集中度：" + l.focus_level + (l.goal_related === "true" ? "、目標関連" : "") + (l.memo ? "、メモ：" + l.memo : "") + "）").join("\n");
 
-  const prompt = `あなたは生徒の成長を長期的に支援する教育コーチです。
-過去のデータと今日のログをもとに、深い分析と具体的なフィードバックを日本語で返してください。
+  // 目標期限までの残り日数
+  const today2 = formatDate(new Date());
+  const deadlineInfo2 = [];
+  [{ goal: user.goal, deadline: user.goal_deadline }, { goal: user.goal2, deadline: user.goal_deadline2 }, { goal: user.goal3, deadline: user.goal_deadline3 }].forEach(g => {
+    if (g.goal && g.deadline) {
+      const daysLeft = Math.ceil((new Date(g.deadline) - new Date(today2)) / 86400000);
+      const totalDays = Math.ceil((new Date(g.deadline) - new Date(user.joined_at || today2)) / 86400000);
+      const progress = totalDays > 0 ? Math.round((1 - daysLeft / totalDays) * 100) : 0;
+      deadlineInfo2.push(`「${g.goal}」: 期限まで残り${daysLeft}日（経過率${progress}%）`);
+    }
+  });
+  const deadlineText2 = deadlineInfo2.length > 0 ? deadlineInfo2.join("\n") : "期限未設定";
+
+  const prompt = `あなたは生徒一人ひとりに寄り添う教育コーチです。以下の方針と情報をもとに、今日の振り返りレポートを生成してください。
+
+【コーチの方針】
+- 基本は肯定的・共感的。生徒を信じて応援するスタンスを崩さない
+- 心理学的アプローチ（承認→気づき→行動）を意識する
+- 目標の期限に対する「現在地」を具体的に言語化して伝える
+- 今の取り組みが目標達成にどうつながるかを示す
+- 継続できていることは積極的に称える
 
 【生徒名】${studentName}
-【目標】
+【目標と期限までの現在地】
+${deadlineText2}
+【目標詳細】
 ${goalsText}
 【過去7日の高集中率】${avgFocusRecent}
-【過去レポート履歴（直近7日）】
+【直近レポート履歴】
 ${historyText}
 
 【今日のログ（${totalBlocks}ブロック、メモ${withMemo}個、目標関連${goalRelatedCount}ブロック(${goalRelatedPct}%)、平均集中度${avgFocusScore}）】
 ${logsText}
 
 【採点基準（各20点・合計100点）】
-- 記録数（20点）: 記録したブロック数。多いほど高得点
+- 記録数（20点）: 記録したブロック数
 - メモの質（20点）: 振り返りメモの深さと量
-- 集中度（20点）: 自己評価の平均スコア（高いほど良い）
-- 目標への取り組み（20点）: 目標関連の記録が全体に占める割合
-- 継続性（20点）: 連続記録日数と過去との継続状況
+- 集中度（20点）: 自己評価の平均スコア
+- 目標への取り組み（20点）: 目標関連の記録の割合
+- 継続性（20点）: 連続記録日数と継続状況
 
 以下のJSON形式のみで返してください（説明文不要）：
 {
   "score": <0-100の整数>,
-  "feedback": "<過去との比較を含む2-3文のフィードバック>",
-  "highlights": "<今日の良かった点を1文で>",
-  "improvement": "<改善点または継続すべき点を1文で>",
-  "action": "<明日の具体的なアクションを1-2文で>",
-  "trend": "<過去データからわかる成長トレンドを1文で>"
+  "feedback": "<目標の現在地と今日の取り組みへの共感・承認を含む2-3文>",
+  "highlights": "<今日の具体的な良かった点を1文で称える>",
+  "improvement": "<責めずに前向きな改善提案または継続すべき点を1文で>",
+  "action": "<目標達成に向けた明日の具体的アクションを1-2文で>",
+  "trend": "<スコア推移から見える成長・変化のトレンドを1文で>"
 }`;
 
   const res = UrlFetchApp.fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
-    payload: JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: 512, messages: [{ role: "user", content: prompt }] }),
+    payload: JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: 1024, messages: [{ role: "user", content: prompt }] }),
     muteHttpExceptions: true
   });
 
-  const result = JSON.parse(res.getContentText());
+  const rawText = res.getContentText();
+  Logger.log("Claude生レスポンス: " + rawText.substring(0, 800));
+  const result = JSON.parse(rawText);
   if (!result.content || !result.content[0]) {
-    Logger.log("Claude エラー: " + res.getContentText());
+    Logger.log("Claude エラー: " + rawText);
     return null;
   }
   try {
-    const m = result.content[0].text.trim().match(/\{[\s\S]*\}/);
-    return m ? JSON.parse(m[0]) : null;
-  } catch (e) { return null; }
+    const text = result.content[0].text.trim();
+    Logger.log("Claudeテキスト: " + text.substring(0, 500));
+    const m = text.match(/\{[\s\S]*\}/);
+    if (!m) { Logger.log("JSONが見つかりません"); return null; }
+    return JSON.parse(m[0]);
+  } catch (e) { Logger.log("JSONパースエラー: " + e.toString()); return null; }
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -884,4 +951,12 @@ function testGetUser() {
 function testStreak() {
   updateStreak("work.sunagawa@gmail.com");
   Logger.log(JSON.stringify(getStreak("work.sunagawa@gmail.com")));
+}
+
+function testReportForMe() {
+  const user = sheetToObjects(getSheet("Users")).find(u => u.student_email === "work.sunagawa@gmail.com");
+  const logs = getLogs("work.sunagawa@gmail.com").data;
+  Logger.log("ログ数: " + logs.length);
+  const report = generateReportWithClaude("work.sunagawa@gmail.com", user.name, logs);
+  Logger.log("レポート: " + JSON.stringify(report));
 }
