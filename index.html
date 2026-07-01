@@ -828,10 +828,13 @@ function ReportScreen() {
           <div class="report-hero" style=${{paddingTop:8}}>
             <div class="report-score">${report.score}</div>
             <div class="report-pts">/ 100点</div>
-            <div style=${{display:"flex",justifyContent:"center",gap:16,marginTop:12,flexWrap:"wrap"}}>
-              <div style=${{fontSize:11,color:"var(--sub)",display:"flex",alignItems:"center",gap:4}}><span style=${{color:"var(--accent)",fontWeight:600}}>記録数</span> 最大40点</div>
-              <div style=${{fontSize:11,color:"var(--sub)",display:"flex",alignItems:"center",gap:4}}><span style=${{color:"var(--accent)",fontWeight:600}}>メモの質</span> 最大30点</div>
-              <div style=${{fontSize:11,color:"var(--sub)",display:"flex",alignItems:"center",gap:4}}><span style=${{color:"var(--accent)",fontWeight:600}}>集中度の正直さ</span> 最大30点</div>
+            <div style=${{display:"flex",justifyContent:"center",gap:10,marginTop:14,flexWrap:"wrap"}}>
+              ${[["記録数","20"],["メモの質","20"],["集中度","20"],["目標への取り組み","20"],["継続性","20"]].map(([label,pt])=>html`
+                <div style=${{display:"flex",flexDirection:"column",alignItems:"center",background:"var(--accent-l)",borderRadius:10,padding:"6px 10px",minWidth:56}}>
+                  <span style=${{fontSize:13,fontWeight:700,color:"var(--accent)"}}>${pt}</span>
+                  <span style=${{fontSize:10,color:"var(--accent)",marginTop:1}}>${label}</span>
+                </div>
+              `)}
             </div>
           </div>
           <div class="card">
