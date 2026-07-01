@@ -1086,6 +1086,23 @@ function SettingsScreen({onToast,onLogout,onGoalSaved}) {
   const [interval,setInterval]=useState(saved.interval||1);
   const [logStart,setLogStart]=useState(savedLogHours.start);
   const [logEnd,setLogEnd]=useState(savedLogHours.end);
+  const PRESET_OPTIONS=[15,20,25,30,45,60,90];
+  const [selectedPresets,setSelectedPresets]=useState(()=>JSON.parse(localStorage.getItem("timer_presets")||"[25,45,60]"));
+  const [breakMin,setBreakMin]=useState(()=>Number(localStorage.getItem("timer_break")||"5"));
+  const togglePreset=(min)=>{
+    if(selectedPresets.includes(min)){
+      if(selectedPresets.length<=1){return;} // 最低1つ必須
+      setSelectedPresets(selectedPresets.filter(p=>p!==min));
+    } else {
+      if(selectedPresets.length>=3) return; // 最大3つ
+      setSelectedPresets([...selectedPresets,min].sort((a,b)=>a-b));
+    }
+  };
+  const saveTimerSettings=()=>{
+    localStorage.setItem("timer_presets",JSON.stringify(selectedPresets));
+    localStorage.setItem("timer_break",String(breakMin));
+    onToast("タイマー設定を保存しました");
+  };
   const [goals,setGoals]=useState(savedGoals.length?savedGoals:[{goal:"",deadline:""}]);
   const updateGoal=(i,field,val)=>{ const g=[...goals]; g[i]={...g[i],[field]:val}; setGoals(g); };
   const addGoal=()=>{ if(goals.length<3) setGoals([...goals,{goal:"",deadline:""}]); };
@@ -1173,21 +1190,32 @@ function SettingsScreen({onToast,onLogout,onGoalSaved}) {
 
       <div class="card" style=${{marginTop:12}}>
         <div class="card-label">タイマー設定</div>
-        <div style=${{fontSize:12,color:"var(--sub)",marginBottom:10}}>プリセット時間（カンマ区切りで最大3つ、単位:分）</div>
-        <input class="inp" style=${{marginBottom:10}}
-          defaultValue=${localStorage.getItem("timer_presets")?JSON.parse(localStorage.getItem("timer_presets")).join(","):"25,45,60"}
-          onBlur=${e=>{
-            const vals=e.target.value.split(",").map(v=>parseInt(v.trim())).filter(v=>v>0&&v<=180).slice(0,3);
-            if(vals.length>0){ localStorage.setItem("timer_presets",JSON.stringify(vals)); onToast("タイマー設定を保存しました"); }
-          }}
-          placeholder="例: 25,45,60"/>
-        <div style=${{fontSize:12,color:"var(--sub)",marginBottom:10}}>休憩時間（分）</div>
-        <input class="inp" type="number" min="1" max="60" style=${{marginBottom:4}}
-          defaultValue=${localStorage.getItem("timer_break")||"5"}
-          onBlur=${e=>{
-            const v=parseInt(e.target.value);
-            if(v>0&&v<=60){ localStorage.setItem("timer_break",String(v)); onToast("タイマー設定を保存しました"); }
-          }}/>
+        <div style=${{fontSize:12,color:"var(--sub)",marginBottom:10}}>集中時間プリセット（最大3つ選択）</div>
+        <div style=${{display:"flex",flexWrap:"wrap",gap:8,marginBottom:16}}>
+          ${PRESET_OPTIONS.map(min=>html`
+            <button key=${min} onClick=${()=>togglePreset(min)}
+              style=${{padding:"8px 16px",borderRadius:20,border:`1.5px solid ${selectedPresets.includes(min)?"var(--accent)":"var(--border)"}`,
+              background:selectedPresets.includes(min)?"var(--accent)":"var(--card)",
+              color:selectedPresets.includes(min)?"#fff":"var(--text)",
+              fontSize:14,fontWeight:selectedPresets.includes(min)?700:400,cursor:"pointer",
+              opacity:!selectedPresets.includes(min)&&selectedPresets.length>=3?0.4:1}}>
+              ${min}分
+            </button>
+          `)}
+        </div>
+        <div style=${{fontSize:12,color:"var(--sub)",marginBottom:10}}>休憩時間</div>
+        <div style=${{display:"flex",flexWrap:"wrap",gap:8,marginBottom:16}}>
+          ${[5,10,15,20].map(min=>html`
+            <button key=${min} onClick=${()=>setBreakMin(min)}
+              style=${{padding:"8px 16px",borderRadius:20,border:`1.5px solid ${breakMin===min?"var(--accent)":"var(--border)"}`,
+              background:breakMin===min?"var(--accent)":"var(--card)",
+              color:breakMin===min?"#fff":"var(--text)",
+              fontSize:14,fontWeight:breakMin===min?700:400,cursor:"pointer"}}>
+              ${min}分
+            </button>
+          `)}
+        </div>
+        <button class="btn" onClick=${saveTimerSettings}>保存する</button>
       </div>
 
       <div class="card" style=${{marginTop:12}}>
