@@ -439,9 +439,9 @@ function HomeScreen({goalData, onGoalSaved}) {
   };
   const saveEdit = () => {
     const filtered = editItems.map(s=>s.trim()).filter(s=>s.length>0);
-    setCustomActions(filtered);
-    localStorage.setItem("jiroku_custom_actions_"+todayKey, JSON.stringify(filtered));
-    // チェック状態をリセット（項目が変わったため）
+    // 空で保存したらAIアクションに戻す
+    if(filtered.length===0){ setCustomActions(null); localStorage.removeItem("jiroku_custom_actions_"+todayKey); }
+    else { setCustomActions(filtered); localStorage.setItem("jiroku_custom_actions_"+todayKey, JSON.stringify(filtered)); }
     setChecked({});
     localStorage.removeItem("today_actions");
     setEditMode(false);
@@ -453,7 +453,7 @@ function HomeScreen({goalData, onGoalSaved}) {
 
   const hour = new Date().getHours();
   const greeting = hour < 12 ? "おはようございます" : hour < 18 ? "こんにちは" : "お疲れ様です";
-  const checkedCount = actionItems.filter((_,i)=>checked[i]).length;
+  const checkedCount = actionItems.filter(item=>checked[item]).length;
 
   return html`<div style=${{paddingBottom:40}}>
 
@@ -541,12 +541,12 @@ function HomeScreen({goalData, onGoalSaved}) {
         <button onClick=${openEdit} style=${{background:"none",border:"none",cursor:"pointer",color:"var(--accent)",fontSize:12,fontWeight:600,padding:"2px 6px"}}>編集</button>
       </div>
       ${actionItems.length>0 ? actionItems.map((item,i)=>html`
-        <button key=${i} onClick=${()=>toggleCheck(i)}
-          style=${{display:"flex",alignItems:"flex-start",gap:12,width:"100%",background:checked[i]?"var(--bg)":"none",border:"none",padding:"13px 16px",cursor:"pointer",borderBottom:i<actionItems.length-1?"1px solid var(--border)":"none",textAlign:"left",fontFamily:"inherit",transition:"background .15s"}}>
-          <div style=${{width:20,height:20,borderRadius:6,border:`2px solid ${checked[i]?"var(--accent)":"var(--border)"}`,background:checked[i]?"var(--accent)":"transparent",flexShrink:0,marginTop:1,display:"flex",alignItems:"center",justifyContent:"center",transition:"all .15s"}}>
-            ${checked[i]&&html`<svg width="11" height="11" viewBox="0 0 10 10" fill="none"><path d="M2 5l2.5 2.5L8 3" stroke="white" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`}
+        <button key=${item} onClick=${()=>toggleCheck(item)}
+          style=${{display:"flex",alignItems:"flex-start",gap:12,width:"100%",background:checked[item]?"var(--bg)":"none",border:"none",padding:"13px 16px",cursor:"pointer",borderBottom:i<actionItems.length-1?"1px solid var(--border)":"none",textAlign:"left",fontFamily:"inherit",transition:"background .15s"}}>
+          <div style=${{width:20,height:20,borderRadius:6,border:`2px solid ${checked[item]?"var(--accent)":"var(--border)"}`,background:checked[item]?"var(--accent)":"transparent",flexShrink:0,marginTop:1,display:"flex",alignItems:"center",justifyContent:"center",transition:"all .15s"}}>
+            ${checked[item]&&html`<svg width="11" height="11" viewBox="0 0 10 10" fill="none"><path d="M2 5l2.5 2.5L8 3" stroke="white" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`}
           </div>
-          <span style=${{fontSize:14,color:checked[i]?"var(--sub)":"var(--text)",textDecoration:checked[i]?"line-through":"none",lineHeight:1.6,transition:"color .15s"}}>${item}</span>
+          <span style=${{fontSize:14,color:checked[item]?"var(--sub)":"var(--text)",textDecoration:checked[item]?"line-through":"none",lineHeight:1.6,transition:"color .15s"}}>${item}</span>
         </button>
       `) : html`
         <div style=${{padding:"16px",fontSize:13,color:"var(--sub)",lineHeight:1.7}}>
@@ -882,7 +882,6 @@ function TimerScreen({onToast, isActive}) {
   const saved = loadTimerState();
   const defaultMin = getPresets()[0];
 
-  const [presets]        = useState(getPresets);
   const [breakMin]       = useState(getBreak);
   const [selectedMin, setSelectedMin] = useState(saved?.selectedMin ?? defaultMin);
   const [timeLeft, setTimeLeft]       = useState(saved?.timeLeft ?? defaultMin*60);
@@ -903,6 +902,10 @@ function TimerScreen({onToast, isActive}) {
       task, startTime: startTime?.toISOString()||null, savedAt: Date.now()
     }));
   },[selectedMin, timeLeft, isRunning, mode, sessionCount, task, startTime]);
+
+  // タブに戻った時にプリセット設定を再読込
+  const [presets, setPresets] = useState(getPresets);
+  useEffect(()=>{ if(isActive) setPresets(getPresets()); },[isActive]);
 
   const playBeep = () => {
     try {
@@ -930,8 +933,8 @@ function TimerScreen({onToast, isActive}) {
     return ()=>clearTimeout(t);
   },[isRunning, timeLeft]);
 
-  // タブを離れたら自動一時停止
-  useEffect(()=>{ if(!isActive && isRunning) setIsRunning(false); },[isActive]);
+  // タブを離れたら自動一時停止（タイマーが残り時間ある場合のみ）
+  useEffect(()=>{ if(!isActive && isRunning && timeLeft>0) setIsRunning(false); },[isActive, isRunning, timeLeft]);
 
   const selectPreset = (min) => {
     setSelectedMin(min); setTimeLeft(min*60);
