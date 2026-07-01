@@ -378,6 +378,13 @@ function HomeScreen({goalData, onGoalSaved}) {
   const [game, setGame] = useState(null);
   const [todayLogs, setTodayLogs] = useState([]);
   const [checked, setChecked] = useState(()=>JSON.parse(localStorage.getItem("today_actions")||"{}"));
+  const todayKey = formatDateStr(new Date());
+  const [customActions, setCustomActions] = useState(()=>{
+    const s=localStorage.getItem("jiroku_custom_actions_"+formatDateStr(new Date()));
+    return s ? JSON.parse(s) : null; // null = use AI actions
+  });
+  const [editMode, setEditMode] = useState(false);
+  const [editItems, setEditItems] = useState([]);
   useEffect(()=>{
     // キャッシュで即時表示
     const cachedGame = localStorage.getItem("cache_gameStatus");
@@ -414,15 +421,30 @@ function HomeScreen({goalData, onGoalSaved}) {
     ? Math.ceil((new Date(mainGoal.deadline) - new Date()) / 86400000)
     : null;
 
-  // actionテキストを行に分割
-  const actionItems = report?.action
+  // actionテキストを行に分割（カスタムがあればそちらを優先）
+  const aiItems = report?.action
     ? report.action.split(/[。\n・]/).map(s=>s.trim()).filter(s=>s.length>2)
     : [];
+  const actionItems = customActions !== null ? customActions : aiItems;
 
   const toggleCheck = (key) => {
     const next = {...checked, [key]: !checked[key]};
     setChecked(next);
     localStorage.setItem("today_actions", JSON.stringify(next));
+  };
+
+  const openEdit = () => {
+    setEditItems([...actionItems, ...(actionItems.length===0?[""]:[])]);
+    setEditMode(true);
+  };
+  const saveEdit = () => {
+    const filtered = editItems.map(s=>s.trim()).filter(s=>s.length>0);
+    setCustomActions(filtered);
+    localStorage.setItem("jiroku_custom_actions_"+todayKey, JSON.stringify(filtered));
+    // チェック状態をリセット（項目が変わったため）
+    setChecked({});
+    localStorage.removeItem("today_actions");
+    setEditMode(false);
   };
 
   const isZoom = (s="") => /zoom\.us|meet\.google|teams\.microsoft/i.test(s);
@@ -479,7 +501,10 @@ function HomeScreen({goalData, onGoalSaved}) {
     `}
 
     <div style=${{margin:"0 16px 10px",padding:"16px",background:"var(--card)",borderRadius:12,border:"1px solid var(--border)"}}>
-      <div style=${{fontSize:11,fontWeight:600,color:"var(--sub)",marginBottom:12}}>今日のアクション</div>
+      <div style=${{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+        <div style=${{fontSize:11,fontWeight:600,color:"var(--sub)"}}>今日のアクション</div>
+        <button onClick=${openEdit} style=${{background:"none",border:"none",cursor:"pointer",color:"var(--accent)",fontSize:12,fontWeight:600,padding:"2px 6px"}}>編集</button>
+      </div>
       ${actionItems.length > 0 ? actionItems.map((item,i)=>html`
         <button key=${i} onClick=${()=>toggleCheck(i)}
           style=${{display:"flex",alignItems:"flex-start",gap:10,width:"100%",background:"none",border:"none",padding:"8px 0",cursor:"pointer",borderBottom:i<actionItems.length-1?"1px solid var(--border)":"none",textAlign:"left",fontFamily:"inherit"}}>
@@ -488,8 +513,35 @@ function HomeScreen({goalData, onGoalSaved}) {
           </div>
           <span style=${{fontSize:14,color:checked[i]?"var(--sub)":"var(--text)",textDecoration:checked[i]?"line-through":"none",lineHeight:1.5,transition:"color .15s"}}>${item}</span>
         </button>
-      `) : html`<div style=${{fontSize:13,color:"var(--sub)",lineHeight:1.7}}>${report?"アクション項目を取得中...":"記録を入力すると毎晩AIがアクションを提案します"}</div>`}
+      `) : html`
+        <div style=${{fontSize:13,color:"var(--sub)",lineHeight:1.7,marginBottom:8}}>${report?"アクション項目を取得中...":"記録を入力すると毎晩AIがアクションを提案します"}</div>
+      `}
     </div>
+
+    ${editMode&&html`
+      <div style=${{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"flex-end",zIndex:200}}>
+        <div style=${{background:"var(--card)",borderRadius:"20px 20px 0 0",padding:"24px 20px 32px",width:"100%",boxSizing:"border-box",maxHeight:"80vh",overflowY:"auto"}}>
+          <div style=${{fontSize:17,fontWeight:800,marginBottom:4}}>今日のアクションを編集</div>
+          <div style=${{fontSize:12,color:"var(--sub)",marginBottom:20}}>やることを自由に追加・編集・削除できます</div>
+          ${editItems.map((item,i)=>html`
+            <div key=${i} style=${{display:"flex",gap:8,alignItems:"center",marginBottom:10}}>
+              <input class="inp" style=${{flex:1,margin:0}} value=${item}
+                onInput=${e=>{ const a=[...editItems]; a[i]=e.target.value; setEditItems(a); }}
+                placeholder="アクションを入力..."/>
+              <button onClick=${()=>setEditItems(editItems.filter((_,j)=>j!==i))}
+                style=${{background:"none",border:"none",color:"var(--sub)",fontSize:20,cursor:"pointer",flexShrink:0,padding:"0 4px"}}>×</button>
+            </div>
+          `)}
+          <button onClick=${()=>setEditItems([...editItems,""])}
+            style=${{width:"100%",padding:"10px",borderRadius:10,border:"1.5px dashed var(--border)",background:"none",color:"var(--accent)",fontSize:14,fontWeight:600,cursor:"pointer",marginBottom:16}}>
+            ＋ アクションを追加
+          </button>
+          <button class="btn" onClick=${saveEdit} style=${{marginBottom:10}}>保存する</button>
+          <button onClick=${()=>setEditMode(false)}
+            style=${{width:"100%",background:"none",border:"none",color:"var(--sub)",fontSize:13,padding:"8px",cursor:"pointer"}}>キャンセル</button>
+        </div>
+      </div>
+    `}
 
     ${game && (()=>{
       const rank = getRank(game.level);
