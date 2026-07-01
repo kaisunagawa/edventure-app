@@ -780,7 +780,7 @@ function ReportScreen() {
 }
 
 // ── Chat ──
-function TimerScreen({onToast}) {
+function TimerScreen({onToast, isActive}) {
   const getPresets = () => JSON.parse(localStorage.getItem("timer_presets")||"[25,45,60]");
   const getBreak   = () => Number(localStorage.getItem("timer_break")||"5");
 
@@ -847,6 +847,9 @@ function TimerScreen({onToast}) {
     const t = setTimeout(()=>setTimeLeft(s=>s-1), 1000);
     return ()=>clearTimeout(t);
   },[isRunning, timeLeft]);
+
+  // タブを離れたら自動一時停止
+  useEffect(()=>{ if(!isActive && isRunning) setIsRunning(false); },[isActive]);
 
   const selectPreset = (min) => {
     setSelectedMin(min); setTimeLeft(min*60);
@@ -1464,7 +1467,7 @@ function App() {
         <div style=${{display:tab==="home"?"block":"none"}}><${HomeScreen} goalData=${goalData} onGoalSaved=${setGoalData}/></div>
         <div style=${{display:tab==="log"?"block":"none"}}><${LogScreen} onToast=${setToast}/></div>
         <div style=${{display:tab==="report"?"block":"none"}}><${ReportScreen}/></div>
-        <div style=${{display:tab==="timer"?"block":"none",height:"100%"}}><${TimerScreen} onToast=${setToast}/></div>
+        <div style=${{display:tab==="timer"?"block":"none",height:"100%"}}><${TimerScreen} onToast=${setToast} isActive=${tab==="timer"}/></div>
         <div style=${{display:tab==="settings"?"block":"none"}}><${SettingsScreen} onToast=${setToast} onLogout=${logout} onGoalSaved=${setGoalData}/></div>
       </div>
       <nav class="nav">
