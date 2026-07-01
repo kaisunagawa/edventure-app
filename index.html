@@ -508,15 +508,9 @@ function LogScreen({onToast}) {
   const [saving, setSaving] = useState(false);
   const timeRef = useRef(null);
 
-  // 現在時刻のブロック（まだ未記録のもの）を自動選択
-  const getDefaultBlock = (currentLogs) => {
-    const recorded = new Set(currentLogs.map(l => l.time_block));
-    // 現在時刻から過去に向かって未記録のブロックを探す
-    for (let h = nowH; h >= 6; h--) {
-      const b = TIME_BLOCKS.find(t => parseInt(t) === h);
-      if (b && !recorded.has(b)) return b;
-    }
-    return TIME_BLOCKS.find(t => parseInt(t) === nowH) || "09:00-10:00";
+  // 現在時刻のブロックを返す（記録済みでもそのまま表示）
+  const getDefaultBlock = () => {
+    return TIME_BLOCKS.find(t => parseInt(t) === nowH) || TIME_BLOCKS[TIME_BLOCKS.length - 1];
   };
 
   const [block, setBlock] = useState(TIME_BLOCKS.find(t=>parseInt(t)===nowH)||"09:00-10:00");
@@ -546,7 +540,7 @@ function LogScreen({onToast}) {
       const data = r.ok ? r.data : [];
       setLogs(data);
       if (isToday(date)) {
-        const def = getDefaultBlock(data);
+        const def = getDefaultBlock();
         setBlock(def);
         loadBlockData(def, data);
         setTimeout(()=>{ const el=timeRef.current?.querySelector(".chip.on"); if(el) el.scrollIntoView({inline:"center",behavior:"smooth"}); },100);
