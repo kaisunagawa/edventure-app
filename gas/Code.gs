@@ -441,7 +441,7 @@ function hourlyReminder() {
     const start = Number(user.notify_start) || 7;
     const end = Number(user.notify_end) || 23;
     if (hour < start || hour > end) return;
-    sendLineMessage(user.line_user_id, "⏱ " + timeBlock + " の記録を入力しましょう！\nこの1時間、何をしましたか？");
+    sendLineMessage(user.line_user_id, "⏱ " + timeBlock + " の記録を入力しましょう！\nこの1時間、何をしましたか？\n\nhttps://kaisunagawa.github.io/edventure-app/");
   });
 }
 
