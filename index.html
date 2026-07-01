@@ -451,73 +451,111 @@ function HomeScreen({goalData, onGoalSaved}) {
 
   const today = new Date().toLocaleDateString("ja-JP",{month:"long",day:"numeric",weekday:"short"});
 
-  return html`<div style=${{paddingBottom:32}}>
-    <div style=${{padding:"28px 20px 20px"}}>
-      <div style=${{fontSize:13,color:"var(--sub)",marginBottom:4}}>${today}</div>
-      <div style=${{fontSize:26,fontWeight:800,color:"var(--text)",letterSpacing:"-.5px"}}>${CURRENT_USER.name}</div>
+  const hour = new Date().getHours();
+  const greeting = hour < 12 ? "おはようございます" : hour < 18 ? "こんにちは" : "お疲れ様です";
+  const checkedCount = actionItems.filter((_,i)=>checked[i]).length;
+
+  return html`<div style=${{paddingBottom:40}}>
+
+    <!-- Hero Header -->
+    <div style=${{background:"linear-gradient(135deg, var(--accent) 0%, #0e7490 100%)",padding:"36px 20px 28px",position:"relative",overflow:"hidden"}}>
+      <div style=${{position:"absolute",top:-20,right:-20,width:120,height:120,borderRadius:"50%",background:"rgba(255,255,255,0.06)"}}/>
+      <div style=${{position:"absolute",bottom:-30,right:30,width:80,height:80,borderRadius:"50%",background:"rgba(255,255,255,0.04)"}}/>
+      <div style=${{fontSize:13,color:"rgba(255,255,255,0.75)",marginBottom:4}}>${today} · ${greeting}</div>
+      <div style=${{fontSize:28,fontWeight:800,color:"#fff",letterSpacing:"-.5px",marginBottom:16}}>${CURRENT_USER.name}</div>
+      ${game&&(()=>{
+        const rank=getRank(game.level);
+        const xpInLv=getXpInLevel(game.xp), xpForNxt=getXpForNextLevel(game.xp);
+        const pct=xpForNxt?Math.min(100,Math.round(xpInLv/xpForNxt*100)):100;
+        return html`
+          <div style=${{background:"rgba(255,255,255,0.15)",borderRadius:12,padding:"10px 14px",backdropFilter:"blur(4px)"}}>
+            <div style=${{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:7}}>
+              <div style=${{display:"flex",alignItems:"center",gap:8}}>
+                <span style=${{fontSize:18}}>${rank.emoji}</span>
+                <span style=${{fontSize:13,fontWeight:700,color:"#fff"}}>Lv.${game.level} ${rank.name}</span>
+                ${game.streak>0&&html`<span style=${{fontSize:11,background:"rgba(255,255,255,0.2)",color:"#fff",padding:"2px 7px",borderRadius:20,fontWeight:600}}>🔥 ${game.streak}日</span>`}
+              </div>
+              <span style=${{fontSize:13,fontWeight:700,color:"rgba(255,255,255,0.9)"}}>${game.xp} XP</span>
+            </div>
+            <div style=${{height:4,background:"rgba(255,255,255,0.2)",borderRadius:99,overflow:"hidden"}}>
+              <div style=${{height:"100%",width:pct+"%",background:"#fff",borderRadius:99,transition:"width .7s ease"}}/>
+            </div>
+            <div style=${{fontSize:11,color:"rgba(255,255,255,0.65)",marginTop:5,textAlign:"right"}}>
+              ${xpForNxt?`次のレベルまで ${xpForNxt-xpInLv} XP`:"MAX LEVEL"}
+            </div>
+          </div>`;
+      })()}
     </div>
 
-    ${goalsArr.length>0 && html`
-      <div style=${{margin:"0 16px 10px",padding:"16px",background:"var(--card)",borderRadius:12,border:"1px solid var(--border)"}}>
-        <div style=${{fontSize:11,fontWeight:600,color:"var(--sub)",marginBottom:6}}>目標</div>
+    <!-- Goals -->
+    ${goalsArr.length>0&&html`
+      <div style=${{margin:"16px 16px 10px",background:"var(--card)",borderRadius:16,border:"1px solid var(--border)",overflow:"hidden"}}>
+        <div style=${{padding:"14px 16px 10px",borderBottom:"1px solid var(--border)",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <div style=${{fontSize:12,fontWeight:700,color:"var(--text)",letterSpacing:".02em"}}>目標</div>
+          ${(()=>{
+            const goalMins=todayLogs.filter(l=>l.goal_related==="true"||l.goal_related===true).length*60;
+            const pct=Math.min(100,Math.round(goalMins/480*100));
+            const hh=Math.floor(goalMins/60),mm=goalMins%60;
+            const timeStr=hh>0?`${hh}h${mm>0?mm+"m":""}`:`${mm}m`;
+            return html`<div style=${{display:"flex",alignItems:"center",gap:6}}>
+              <div style=${{fontSize:11,color:goalMins>0?"var(--accent)":"var(--sub)",fontWeight:600}}>${goalMins>0?timeStr:"未記録"} / 8h</div>
+              <div style=${{width:48,height:4,background:"var(--border)",borderRadius:99,overflow:"hidden"}}>
+                <div style=${{height:"100%",width:pct+"%",background:"var(--accent)",borderRadius:99}}/>
+              </div>
+            </div>`;
+          })()}
+        </div>
         ${goalsArr.map((g,i)=>{
-          const dl = g.deadline ? Math.ceil((new Date(g.deadline)-new Date())/86400000) : null;
+          const dl=g.deadline?Math.ceil((new Date(g.deadline)-new Date())/86400000):null;
+          const dlColor=dl===null?"var(--sub)":dl<=7?"var(--red)":dl<=14?"var(--amber)":"var(--accent)";
           return html`
-            <div key=${i} style=${{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8,marginBottom:i<goalsArr.length-1?12:0}}>
-              <div style=${{flex:1}}>
-                ${goalsArr.length>1&&html`<div style=${{fontSize:10,color:"var(--sub)",marginBottom:2}}>目標${i+1}</div>`}
-                <div style=${{fontSize:15,fontWeight:600,color:"var(--text)",lineHeight:1.55}}>${g.goal}</div>
-                ${g.deadline&&html`<div style=${{marginTop:4,fontSize:12,color:"var(--sub)"}}>期限：${new Date(g.deadline).toLocaleDateString("ja-JP",{year:"numeric",month:"long",day:"numeric"})}</div>`}
+            <div key=${i} style=${{display:"flex",alignItems:"center",gap:12,padding:"13px 16px",borderBottom:i<goalsArr.length-1?"1px solid var(--border)":"none"}}>
+              <div style=${{width:3,alignSelf:"stretch",borderRadius:99,background:dlColor,flexShrink:0}}/>
+              <div style=${{flex:1,minWidth:0}}>
+                ${goalsArr.length>1&&html`<div style=${{fontSize:10,color:"var(--sub)",marginBottom:2,fontWeight:600}}>目標${i+1}</div>`}
+                <div style=${{fontSize:14,fontWeight:600,color:"var(--text)",lineHeight:1.5,overflow:"hidden",display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical"}}>${g.goal}</div>
               </div>
               ${dl!==null&&html`
-                <div style=${{flexShrink:0,textAlign:"center",minWidth:52}}>
-                  <div style=${{fontSize:24,fontWeight:800,lineHeight:1,color:dl<=7?"var(--red)":dl<=14?"var(--amber)":"var(--accent)"}}>${dl<0?0:dl}</div>
-                  <div style=${{fontSize:11,color:"var(--sub)",marginTop:2}}>${dl<0?"期限切れ":"残り日"}</div>
+                <div style=${{flexShrink:0,textAlign:"center",background:"var(--bg)",borderRadius:10,padding:"6px 10px",minWidth:48}}>
+                  <div style=${{fontSize:20,fontWeight:800,color:dlColor,lineHeight:1}}>${dl<0?0:dl}</div>
+                  <div style=${{fontSize:10,color:"var(--sub)",marginTop:2}}>${dl<0?"期限切れ":"残り日"}</div>
                 </div>
               `}
             </div>
           `;
         })}
-        ${(()=>{
-          const goalMins = todayLogs.filter(l=>l.goal_related==="true"||l.goal_related===true).length * 60;
-          const targetMins = 480;
-          const pct = Math.min(100, Math.round(goalMins/targetMins*100));
-          const hh = Math.floor(goalMins/60), mm = goalMins%60;
-          const timeStr = hh>0 ? `${hh}時間${mm>0?mm+"分":""}` : `${mm}分`;
-          return html`
-            <div style=${{marginTop:14,paddingTop:14,borderTop:"1px solid var(--border)"}}>
-              <div style=${{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:6}}>
-                <div style=${{fontSize:11,fontWeight:600,color:"var(--sub)"}}>今日の目標関連時間</div>
-                <div style=${{fontSize:12,fontWeight:700,color:"var(--accent)"}}>${goalMins>0?timeStr:"未記録"} <span style=${{fontWeight:400,color:"var(--sub)"}}>/ 8時間</span></div>
-              </div>
-              <div style=${{height:6,background:"var(--border)",borderRadius:99,overflow:"hidden"}}>
-                <div style=${{height:"100%",width:pct+"%",background:"var(--accent)",borderRadius:99,transition:"width .6s ease"}}/>
-              </div>
-              <div style=${{fontSize:11,color:"var(--sub)",marginTop:4,textAlign:"right"}}>${pct}%</div>
-            </div>
-          `;
-        })()}
       </div>
     `}
 
-    <div style=${{margin:"0 16px 10px",padding:"16px",background:"var(--card)",borderRadius:12,border:"1px solid var(--border)"}}>
-      <div style=${{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
-        <div style=${{fontSize:11,fontWeight:600,color:"var(--sub)"}}>今日のアクション</div>
+    <!-- Today's Actions -->
+    <div style=${{margin:"0 16px 10px",background:"var(--card)",borderRadius:16,border:"1px solid var(--border)",overflow:"hidden"}}>
+      <div style=${{padding:"14px 16px",borderBottom:actionItems.length>0?"1px solid var(--border)":"none",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+        <div style=${{display:"flex",alignItems:"center",gap:8}}>
+          <div style=${{fontSize:12,fontWeight:700,color:"var(--text)"}}>今日のアクション</div>
+          ${actionItems.length>0&&html`
+            <div style=${{fontSize:11,background:checkedCount===actionItems.length?"var(--accent)":"var(--bg)",color:checkedCount===actionItems.length?"#fff":"var(--sub)",padding:"2px 8px",borderRadius:20,fontWeight:600}}>
+              ${checkedCount}/${actionItems.length}
+            </div>
+          `}
+        </div>
         <button onClick=${openEdit} style=${{background:"none",border:"none",cursor:"pointer",color:"var(--accent)",fontSize:12,fontWeight:600,padding:"2px 6px"}}>編集</button>
       </div>
-      ${actionItems.length > 0 ? actionItems.map((item,i)=>html`
+      ${actionItems.length>0 ? actionItems.map((item,i)=>html`
         <button key=${i} onClick=${()=>toggleCheck(i)}
-          style=${{display:"flex",alignItems:"flex-start",gap:10,width:"100%",background:"none",border:"none",padding:"8px 0",cursor:"pointer",borderBottom:i<actionItems.length-1?"1px solid var(--border)":"none",textAlign:"left",fontFamily:"inherit"}}>
-          <div style=${{width:18,height:18,borderRadius:5,border:`1.5px solid ${checked[i]?"var(--accent)":"var(--border)"}`,background:checked[i]?"var(--accent)":"transparent",flexShrink:0,marginTop:1,display:"flex",alignItems:"center",justifyContent:"center",transition:"all .15s"}}>
-            ${checked[i]&&html`<svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M2 5l2.5 2.5L8 3" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`}
+          style=${{display:"flex",alignItems:"flex-start",gap:12,width:"100%",background:checked[i]?"var(--bg)":"none",border:"none",padding:"13px 16px",cursor:"pointer",borderBottom:i<actionItems.length-1?"1px solid var(--border)":"none",textAlign:"left",fontFamily:"inherit",transition:"background .15s"}}>
+          <div style=${{width:20,height:20,borderRadius:6,border:`2px solid ${checked[i]?"var(--accent)":"var(--border)"}`,background:checked[i]?"var(--accent)":"transparent",flexShrink:0,marginTop:1,display:"flex",alignItems:"center",justifyContent:"center",transition:"all .15s"}}>
+            ${checked[i]&&html`<svg width="11" height="11" viewBox="0 0 10 10" fill="none"><path d="M2 5l2.5 2.5L8 3" stroke="white" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`}
           </div>
-          <span style=${{fontSize:14,color:checked[i]?"var(--sub)":"var(--text)",textDecoration:checked[i]?"line-through":"none",lineHeight:1.5,transition:"color .15s"}}>${item}</span>
+          <span style=${{fontSize:14,color:checked[i]?"var(--sub)":"var(--text)",textDecoration:checked[i]?"line-through":"none",lineHeight:1.6,transition:"color .15s"}}>${item}</span>
         </button>
       `) : html`
-        <div style=${{fontSize:13,color:"var(--sub)",lineHeight:1.7,marginBottom:8}}>${report?"アクション項目を取得中...":"記録を入力すると毎晩AIがアクションを提案します"}</div>
+        <div style=${{padding:"16px",fontSize:13,color:"var(--sub)",lineHeight:1.7}}>
+          ${report?"アクション項目を取得中...":"記録を入力すると毎晩AIがアクションを提案します"}
+        </div>
       `}
     </div>
 
+    <!-- Edit Modal -->
     ${editMode&&html`
       <div style=${{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"flex-end",zIndex:200}}>
         <div style=${{background:"var(--card)",borderRadius:"20px 20px 0 0",padding:"24px 20px 32px",width:"100%",boxSizing:"border-box",maxHeight:"80vh",overflowY:"auto"}}>
@@ -543,52 +581,24 @@ function HomeScreen({goalData, onGoalSaved}) {
       </div>
     `}
 
-    ${game && (()=>{
-      const rank = getRank(game.level);
-      return html`
-        <div style=${{margin:"0 16px 10px",padding:"16px",background:"var(--card)",borderRadius:12,border:"1px solid var(--border)"}}>
-          <div style=${{fontSize:11,fontWeight:600,color:"var(--sub)",marginBottom:12}}>成長ステータス</div>
-          <div style=${{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10}}>
-            <div style=${{display:"flex",alignItems:"baseline",gap:8}}>
-              <span style=${{fontSize:16,fontWeight:700,color:"var(--accent)"}}>Lv.${game.level}</span>
-              <span style=${{fontSize:13,color:"var(--sub)"}}>${rank.name}</span>
-            </div>
-            <span style=${{fontSize:13,fontWeight:600,color:"var(--text)"}}>${game.xp} XP</span>
-          </div>
-          ${(()=>{
-            const xpInLv = getXpInLevel(game.xp);
-            const xpForNxt = getXpForNextLevel(game.xp);
-            const pct = xpForNxt ? Math.min(100, Math.round(xpInLv / xpForNxt * 100)) : 100;
-            return html`
-              <div style=${{height:4,background:"var(--border)",borderRadius:99,overflow:"hidden",marginBottom:6}}>
-                <div style=${{height:4,borderRadius:99,background:"var(--accent)",width:pct+"%",transition:"width .7s cubic-bezier(.4,0,.2,1)"}}/>
-              </div>
-              <div style=${{display:"flex",justifyContent:"space-between",fontSize:11,color:"var(--sub)"}}>
-                <span>${game.streak>0?`${game.streak}日連続記録中`:"記録を続けてXPを貯めよう"}</span>
-                <span>${xpForNxt ? `次のレベルまで ${xpForNxt-xpInLv} XP` : "MAX LEVEL"}</span>
-              </div>`;
-          })()}
+    <!-- Schedule -->
+    ${schedule.length>0&&html`
+      <div style=${{margin:"0 16px 10px",background:"var(--card)",borderRadius:16,border:"1px solid var(--border)",overflow:"hidden"}}>
+        <div style=${{padding:"14px 16px",borderBottom:"1px solid var(--border)"}}>
+          <div style=${{fontSize:12,fontWeight:700,color:"var(--text)"}}>今日の予定</div>
         </div>
-      `;
-    })()}
-
-    <div style=${{margin:"0 16px 10px",padding:"16px",background:"var(--card)",borderRadius:12,border:"1px solid var(--border)"}}>
-      <div style=${{fontSize:11,fontWeight:600,color:"var(--sub)",marginBottom:12}}>今日の予定</div>
-      ${schedule.length===0
-        ? html`<div style=${{fontSize:13,color:"var(--sub)"}}>今日の予定はありません</div>`
-        : schedule.map((ev,i)=>{
+        ${schedule.map((ev,i)=>{
           const hasZoom=isZoom(ev.sub||"");
-          return html`<div key=${i} style=${{display:"flex",gap:12,padding:"9px 0",borderBottom:i<schedule.length-1?"1px solid var(--border)":"none"}}>
-            <div style=${{fontSize:12,fontWeight:600,color:"var(--accent)",minWidth:38,paddingTop:1,flexShrink:0}}>${ev.time}</div>
-            <div>
+          return html`<div key=${i} style=${{display:"flex",gap:12,padding:"12px 16px",borderBottom:i<schedule.length-1?"1px solid var(--border)":"none",alignItems:"flex-start"}}>
+            <div style=${{fontSize:12,fontWeight:700,color:"var(--accent)",minWidth:42,paddingTop:2,flexShrink:0}}>${ev.time}</div>
+            <div style=${{flex:1}}>
               <div style=${{fontSize:14,color:"var(--text)",fontWeight:500}}>${ev.title}</div>
-              ${hasZoom&&html`<div style=${{fontSize:11,color:"var(--sub)",marginTop:2}}>Zoomリンクあり</div>`}
-              ${ev.sub&&!hasZoom&&html`<div style=${{fontSize:11,color:"var(--sub)",marginTop:2}}>${ev.sub}</div>`}
+              ${(hasZoom||ev.sub)&&html`<div style=${{fontSize:11,color:"var(--sub)",marginTop:3}}>${hasZoom?"🔗 Zoomリンクあり":ev.sub}</div>`}
             </div>
           </div>`;
-        })
-      }
-    </div>
+        })}
+      </div>
+    `}
   </div>`;
 }
 
