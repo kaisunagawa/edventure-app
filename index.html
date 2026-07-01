@@ -1193,8 +1193,8 @@ function SettingsScreen({onToast,onLogout,onGoalSaved}) {
   }));
 
   const SectionHeader = ({icon, title}) => html`
-    <div style=${{display:"flex",alignItems:"center",gap:10,marginBottom:14}}>
-      <div style=${{width:32,height:32,borderRadius:10,background:"var(--accent-l)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,flexShrink:0}}>${icon}</div>
+    <div style=${{display:"flex",alignItems:"center",gap:8,marginBottom:14}}>
+      <span style=${{fontSize:15}}>${icon}</span>
       <div style=${{fontSize:14,fontWeight:700,color:"var(--text)"}}>${title}</div>
     </div>
   `;
