@@ -442,6 +442,7 @@ function saveSettings(studentEmail, body) {
 
   const startIdx    = ensureCol("notify_start");
   const endIdx      = ensureCol("notify_end");
+  const intervalIdx = ensureCol("notify_interval");
   const goalIdx     = ensureCol("goal");
   const deadlineIdx = ensureCol("goal_deadline");
   const calIdx      = ensureCol("google_calendar_id");
@@ -449,8 +450,9 @@ function saveSettings(studentEmail, body) {
 
   for (let i = 1; i < data.length; i++) {
     if (String(data[i][emailIdx]) !== studentEmail) continue;
-    if (body.notify_start       !== undefined) sheet.getRange(i + 1, startIdx    + 1).setValue(Number(body.notify_start) || 7);
-    if (body.notify_end         !== undefined) sheet.getRange(i + 1, endIdx      + 1).setValue(Number(body.notify_end)   || 23);
+    if (body.notify_start    !== undefined) sheet.getRange(i + 1, startIdx    + 1).setValue(Number(body.notify_start) || 7);
+    if (body.notify_end      !== undefined) sheet.getRange(i + 1, endIdx      + 1).setValue(Number(body.notify_end)   || 23);
+    if (body.notify_interval !== undefined) sheet.getRange(i + 1, intervalIdx + 1).setValue(Number(body.notify_interval) || 1);
     if (body.goal               !== undefined) sheet.getRange(i + 1, goalIdx     + 1).setValue(body.goal);
     if (body.goal_deadline      !== undefined) sheet.getRange(i + 1, deadlineIdx + 1).setValue(body.goal_deadline);
     if (body.google_calendar_id !== undefined) sheet.getRange(i + 1, calIdx      + 1).setValue(body.google_calendar_id);
@@ -480,8 +482,15 @@ function hourlyReminder() {
   sheetToObjects(getSheet("Users")).filter(u => u.is_active.toUpperCase() === "TRUE").forEach(user => {
     const start = Number(user.notify_start) || 7;
     const end = Number(user.notify_end) || 23;
+    const interval = Number(user.notify_interval) || 1;
     if (hour < start || hour > end) return;
-    sendLineMessage(user.line_user_id, "⏱ " + timeBlock + " の記録を入力しましょう！\nこの1時間、何をしましたか？\n\nhttps://kaisunagawa.github.io/edventure-app/");
+    // 間隔チェック: 1日1回(interval=24)はstart時のみ、それ以外は間隔で割り切れる時間のみ
+    if (interval >= 24) {
+      if (hour !== start) return;
+    } else {
+      if ((hour - start) % interval !== 0) return;
+    }
+    sendLineMessage(user.line_user_id, "⏱ " + timeBlock + " の記録を入力しましょう！\nhttps://kaisunagawa.github.io/edventure-app/");
   });
 }
 
