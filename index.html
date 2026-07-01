@@ -373,6 +373,7 @@ function HomeScreen({goalData, onGoalSaved}) {
   const [report, setReport] = useState(null);
   const [schedule, setSchedule] = useState([]);
   const [game, setGame] = useState(null);
+  const [todayLogs, setTodayLogs] = useState([]);
   const [checked, setChecked] = useState(()=>JSON.parse(localStorage.getItem("today_actions")||"{}"));
   useEffect(()=>{
     // キャッシュで即時表示
@@ -386,7 +387,8 @@ function HomeScreen({goalData, onGoalSaved}) {
       gasApi("getReport"),
       gasApi("getGameStatus"),
       gasApi("getSchedule"),
-    ]).then(([rep, game, sched])=>{
+      gasApi("getLogs"),
+    ]).then(([rep, game, sched, logs])=>{
       if(rep.ok){ setReport(rep.data); localStorage.setItem("cache_report", JSON.stringify(rep.data)); }
       if(game.ok){
         setGame(game.data);
@@ -394,6 +396,7 @@ function HomeScreen({goalData, onGoalSaved}) {
         if(game.data.goals?.length){ localStorage.setItem("jiroku_goals",JSON.stringify(game.data.goals)); onGoalSaved(game.data.goals); }
       }
       if(sched.ok) setSchedule(sched.data);
+      if(logs.ok) setTodayLogs(logs.data);
     });
 
     // 日付が変わったらチェック状態リセット
@@ -450,6 +453,25 @@ function HomeScreen({goalData, onGoalSaved}) {
             </div>
           `;
         })}
+        ${(()=>{
+          const goalMins = todayLogs.filter(l=>l.goal_related==="true"||l.goal_related===true).length * 60;
+          const targetMins = 480;
+          const pct = Math.min(100, Math.round(goalMins/targetMins*100));
+          const hh = Math.floor(goalMins/60), mm = goalMins%60;
+          const timeStr = hh>0 ? `${hh}時間${mm>0?mm+"分":""}` : `${mm}分`;
+          return html`
+            <div style=${{marginTop:14,paddingTop:14,borderTop:"1px solid var(--border)"}}>
+              <div style=${{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:6}}>
+                <div style=${{fontSize:11,fontWeight:600,color:"var(--sub)"}}>今日の目標関連時間</div>
+                <div style=${{fontSize:12,fontWeight:700,color:"var(--accent)"}}>${goalMins>0?timeStr:"未記録"} <span style=${{fontWeight:400,color:"var(--sub)"}}>/ 8時間</span></div>
+              </div>
+              <div style=${{height:6,background:"var(--border)",borderRadius:99,overflow:"hidden"}}>
+                <div style=${{height:"100%",width:pct+"%",background:"var(--accent)",borderRadius:99,transition:"width .6s ease"}}/>
+              </div>
+              <div style=${{fontSize:11,color:"var(--sub)",marginTop:4,textAlign:"right"}}>${pct}%</div>
+            </div>
+          `;
+        })()}
       </div>
     `}
 
@@ -533,6 +555,7 @@ function LogScreen({onToast}) {
   const [task, setTask] = useState("");
   const [focus, setFocus] = useState(EVALS[0].l);
   const [memo, setMemo] = useState("");
+  const [goalRelated, setGoalRelated] = useState(false);
 
   // ブロック切替時に既存ログを読み込んでフォームに反映
   const loadBlockData = (b, currentLogs) => {
@@ -541,8 +564,9 @@ function LogScreen({onToast}) {
       setTask(existing.task || "");
       setFocus(existing.focus_level || EVALS[0].l);
       setMemo(existing.memo || "");
+      setGoalRelated(existing.goal_related === "true" || existing.goal_related === true);
     } else {
-      setTask(""); setFocus(EVALS[0].l); setMemo("");
+      setTask(""); setFocus(EVALS[0].l); setMemo(""); setGoalRelated(false);
     }
   };
 
@@ -571,6 +595,7 @@ function LogScreen({onToast}) {
     url.searchParams.set("action","saveLog"); url.searchParams.set("studentEmail",CURRENT_USER.email);
     url.searchParams.set("time_block",block); url.searchParams.set("task",task.trim());
     url.searchParams.set("focus_level",focus); url.searchParams.set("memo",memo.trim());
+    url.searchParams.set("goal_related", goalRelated ? "true" : "false");
     const res=await fetch(url).then(r=>r.json()).catch(()=>({}));
     if(res.xp_gained){ const lv=res.level_up?`  →  Lv.${res.level} へ！`:""; onToast(`+${res.xp_gained} XP 獲得${lv}`); }
     else onToast("保存しました");
@@ -614,6 +639,14 @@ function LogScreen({onToast}) {
         <div class="form-grp">
           <label class="form-lbl">メモ（任意）</label>
           <textarea class="txa" placeholder="気づいたことや振り返り..." value=${memo} onInput=${e=>setMemo(e.target.value)} />
+        </div>
+        <div class="form-grp">
+          <button onClick=${()=>setGoalRelated(!goalRelated)} style=${{display:"flex",alignItems:"center",gap:10,background:"none",border:`1.5px solid ${goalRelated?"var(--accent)":"var(--border)"}`,borderRadius:10,padding:"10px 14px",width:"100%",cursor:"pointer",transition:"all .15s",backgroundColor:goalRelated?"var(--accent-l)":"transparent"}}>
+            <div style=${{width:20,height:20,borderRadius:6,border:`2px solid ${goalRelated?"var(--accent)":"var(--border)"}`,background:goalRelated?"var(--accent)":"transparent",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,transition:"all .15s"}}>
+              ${goalRelated&&html`<svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="white" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`}
+            </div>
+            <span style=${{fontSize:14,fontWeight:500,color:goalRelated?"var(--accent)":"var(--sub)"}}>この時間は目標に関連している</span>
+          </button>
         </div>
         <button class="btn" onClick=${save} disabled=${!task.trim()||saving}>${saving?html`<span class="spin"/>`:recorded.has(block)?"更新する":"保存する"}</button>
       </div>
