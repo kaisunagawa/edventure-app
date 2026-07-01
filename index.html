@@ -366,7 +366,10 @@ const EVALS = [
   {l:"5 — 完璧にできた", c:"e5"},{l:"4 — よくできた", c:"e4"},
   {l:"3 — まあまあだった", c:"e3"},{l:"2 — もう少しだった", c:"e2"},{l:"1 — 全然だめだった", c:"e1"},
 ];
-const TIME_BLOCKS = ["06:00-07:00","07:00-08:00","08:00-09:00","09:00-10:00","10:00-11:00","11:00-12:00","12:00-13:00","13:00-14:00","14:00-15:00","15:00-16:00","16:00-17:00","17:00-18:00","18:00-19:00","19:00-20:00","20:00-21:00","21:00-22:00","22:00-23:00","23:00-24:00"];
+const ALL_TIME_BLOCKS = ["05:00-06:00","06:00-07:00","07:00-08:00","08:00-09:00","09:00-10:00","10:00-11:00","11:00-12:00","12:00-13:00","13:00-14:00","14:00-15:00","15:00-16:00","16:00-17:00","17:00-18:00","18:00-19:00","19:00-20:00","20:00-21:00","21:00-22:00","22:00-23:00","23:00-24:00"];
+const getLogHours = () => JSON.parse(localStorage.getItem("jiroku_log_hours")||'{"start":6,"end":23}');
+const getTimeBlocks = () => { const {start,end}=getLogHours(); return ALL_TIME_BLOCKS.filter(b=>parseInt(b)>=start&&parseInt(b)<=end); };
+const TIME_BLOCKS = getTimeBlocks();
 
 // ── Home ──
 function HomeScreen({goalData, onGoalSaved}) {
@@ -545,13 +548,14 @@ function LogScreen({onToast}) {
   const [logs, setLogs] = useState([]);
   const [saving, setSaving] = useState(false);
   const timeRef = useRef(null);
+  const timeBlocks = getTimeBlocks();
 
   // 現在時刻のブロックを返す（記録済みでもそのまま表示）
   const getDefaultBlock = () => {
-    return TIME_BLOCKS.find(t => parseInt(t) === nowH) || TIME_BLOCKS[TIME_BLOCKS.length - 1];
+    return timeBlocks.find(t => parseInt(t) === nowH) || timeBlocks[timeBlocks.length - 1];
   };
 
-  const [block, setBlock] = useState(TIME_BLOCKS.find(t=>parseInt(t)===nowH)||"09:00-10:00");
+  const [block, setBlock] = useState(()=>{ const b=timeBlocks.find(t=>parseInt(t)===nowH); return b||timeBlocks[timeBlocks.length-1]||"09:00-10:00"; });
   const [task, setTask] = useState("");
   const [focus, setFocus] = useState(EVALS[0].l);
   const [memo, setMemo] = useState("");
@@ -620,7 +624,7 @@ function LogScreen({onToast}) {
 
     ${isToday(date)&&html`<div>
       <div ref=${timeRef} class="time-bar">
-        ${TIME_BLOCKS.map(t=>html`<button key=${t}
+        ${timeBlocks.map(t=>html`<button key=${t}
           class=${"chip"+(block===t?" on":"")+(recorded.has(t)?" done":"")}
           onClick=${()=>handleBlockSelect(t)}>${t}</button>`)}
       </div>
@@ -1024,9 +1028,12 @@ function TimerScreen({onToast, isActive}) {
 function SettingsScreen({onToast,onLogout,onGoalSaved}) {
   const saved=JSON.parse(localStorage.getItem("notifySettings")||'{"start":7,"end":23,"interval":1}');
   const savedGoals=JSON.parse(localStorage.getItem("jiroku_goals")||'[{"goal":"","deadline":""}]');
+  const savedLogHours=getLogHours();
   const [start,setStart]=useState(saved.start);
   const [end,setEnd]=useState(saved.end);
   const [interval,setInterval]=useState(saved.interval||1);
+  const [logStart,setLogStart]=useState(savedLogHours.start);
+  const [logEnd,setLogEnd]=useState(savedLogHours.end);
   const [goals,setGoals]=useState(savedGoals.length?savedGoals:[{goal:"",deadline:""}]);
   const updateGoal=(i,field,val)=>{ const g=[...goals]; g[i]={...g[i],[field]:val}; setGoals(g); };
   const addGoal=()=>{ if(goals.length<3) setGoals([...goals,{goal:"",deadline:""}]); };
@@ -1063,6 +1070,11 @@ function SettingsScreen({onToast,onLogout,onGoalSaved}) {
     localStorage.setItem("notifySettings",JSON.stringify({start,end,interval}));
     gasPost("saveSettings",{notify_start:start,notify_end:end,notify_interval:interval});
     onToast("通知設定を保存しました");
+  };
+  const saveLogHours=()=>{
+    if(logEnd<=logStart){onToast("終了時間は開始より後にしてください");return;}
+    localStorage.setItem("jiroku_log_hours",JSON.stringify({start:logStart,end:logEnd}));
+    onToast("記録時間帯を保存しました");
   };
   const saveGoal=()=>{
     if(!goals[0]?.goal.trim()){onToast("目標1を入力してください");return;}
@@ -1177,6 +1189,27 @@ function SettingsScreen({onToast,onLogout,onGoalSaved}) {
           </div>
         </div>
         <button class="btn" onClick=${saveNotify}>保存する</button>
+      </div>
+
+      <div class="card" style=${{marginTop:12}}>
+        <div class="card-label">記録する時間帯</div>
+        <div style=${{fontSize:12,color:"var(--sub)",marginBottom:12,lineHeight:1.6}}>記録画面に表示される時間ブロックの範囲を設定します。</div>
+        <div style=${{display:"flex",alignItems:"center",gap:12,marginBottom:16}}>
+          <div style=${{flex:1}}>
+            <div style=${{fontSize:11,color:"var(--sub)",marginBottom:6}}>開始</div>
+            <select class="inp" style=${{padding:"10px 8px"}} value=${logStart} onChange=${e=>setLogStart(Number(e.target.value))}>
+              ${Array.from({length:20},(_,i)=>i+5).map(h=>html`<option key=${h} value=${h}>${String(h).padStart(2,"0")}:00</option>`)}
+            </select>
+          </div>
+          <div style=${{color:"var(--sub)",marginTop:16,fontSize:14}}>〜</div>
+          <div style=${{flex:1}}>
+            <div style=${{fontSize:11,color:"var(--sub)",marginBottom:6}}>終了</div>
+            <select class="inp" style=${{padding:"10px 8px"}} value=${logEnd} onChange=${e=>setLogEnd(Number(e.target.value))}>
+              ${Array.from({length:20},(_,i)=>i+6).map(h=>html`<option key=${h} value=${h}>${String(h).padStart(2,"0")}:00</option>`)}
+            </select>
+          </div>
+        </div>
+        <button class="btn" onClick=${saveLogHours}>保存する</button>
       </div>
 
       <div class="card" style=${{marginTop:12}}>
