@@ -376,7 +376,7 @@ function HomeScreen({goalData, onGoalSaved}) {
     // キャッシュで即時表示
     const cachedGame = localStorage.getItem("cache_gameStatus");
     const cachedReport = localStorage.getItem("cache_report");
-    if(cachedGame) { try { const g=JSON.parse(cachedGame); setGame(g); if(g.goal) onGoalSaved({goal:g.goal,deadline:g.goal_deadline||""}); } catch(e){} }
+    if(cachedGame) { try { const g=JSON.parse(cachedGame); setGame(g); if(g.goals?.length) onGoalSaved(g.goals); } catch(e){} }
     if(cachedReport) { try { setReport(JSON.parse(cachedReport)); } catch(e){} }
 
     // 並列フェッチ
@@ -389,7 +389,7 @@ function HomeScreen({goalData, onGoalSaved}) {
       if(game.ok){
         setGame(game.data);
         localStorage.setItem("cache_gameStatus", JSON.stringify(game.data));
-        if(game.data.goal){ const synced={goal:game.data.goal,deadline:game.data.goal_deadline||""}; localStorage.setItem("jiroku_goal",JSON.stringify(synced)); onGoalSaved(synced); }
+        if(game.data.goals?.length){ localStorage.setItem("jiroku_goals",JSON.stringify(game.data.goals)); onGoalSaved(game.data.goals); }
       }
       if(sched.ok) setSchedule(sched.data);
     });
@@ -400,8 +400,10 @@ function HomeScreen({goalData, onGoalSaved}) {
     if(saved !== today){ localStorage.removeItem("today_actions"); localStorage.setItem("today_actions_date", today); setChecked({}); }
   },[]);
 
-  const daysLeft = goalData?.deadline
-    ? Math.ceil((new Date(goalData.deadline) - new Date()) / 86400000)
+  const goalsArr = Array.isArray(goalData) ? goalData : (goalData?.goal ? [goalData] : []);
+  const mainGoal = goalsArr[0] || null;
+  const daysLeft = mainGoal?.deadline
+    ? Math.ceil((new Date(mainGoal.deadline) - new Date()) / 86400000)
     : null;
 
   // actionテキストを行に分割
@@ -425,13 +427,18 @@ function HomeScreen({goalData, onGoalSaved}) {
       <div style=${{fontSize:26,fontWeight:800,color:"var(--text)",letterSpacing:"-.5px"}}>${CURRENT_USER.name}</div>
     </div>
 
-    ${goalData?.goal && html`
+    ${goalsArr.length>0 && html`
       <div style=${{margin:"0 16px 10px",padding:"16px",background:"var(--card)",borderRadius:12,border:"1px solid var(--border)"}}>
         <div style=${{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
           <div style=${{flex:1}}>
-            <div style=${{fontSize:11,fontWeight:600,color:"var(--sub)",marginBottom:6}}>今月の目標</div>
-            <div style=${{fontSize:15,fontWeight:600,color:"var(--text)",lineHeight:1.55}}>${goalData.goal}</div>
-            ${goalData.deadline && html`<div style=${{marginTop:8,fontSize:12,color:"var(--sub)"}}>期限：${new Date(goalData.deadline).toLocaleDateString("ja-JP",{year:"numeric",month:"long",day:"numeric"})}</div>`}
+            <div style=${{fontSize:11,fontWeight:600,color:"var(--sub)",marginBottom:6}}>目標</div>
+            ${goalsArr.map((g,i)=>html`
+              <div key=${i} style=${{marginBottom:i<goalsArr.length-1?10:0}}>
+                ${goalsArr.length>1&&html`<div style=${{fontSize:10,color:"var(--sub)",marginBottom:2}}>目標${i+1}</div>`}
+                <div style=${{fontSize:15,fontWeight:600,color:"var(--text)",lineHeight:1.55}}>${g.goal}</div>
+                ${g.deadline&&html`<div style=${{marginTop:4,fontSize:12,color:"var(--sub)"}}>期限：${new Date(g.deadline).toLocaleDateString("ja-JP",{year:"numeric",month:"long",day:"numeric"})}</div>`}
+              </div>
+            `)}
           </div>
           ${daysLeft !== null && html`
             <div style=${{flexShrink:0,textAlign:"center",minWidth:52}}>
@@ -792,12 +799,14 @@ function ChatScreen({onToast}) {
 // ── Settings ──
 function SettingsScreen({onToast,onLogout,onGoalSaved}) {
   const saved=JSON.parse(localStorage.getItem("notifySettings")||'{"start":7,"end":23,"interval":1}');
-  const savedGoal=JSON.parse(localStorage.getItem("jiroku_goal")||'{"goal":"","deadline":""}');
+  const savedGoals=JSON.parse(localStorage.getItem("jiroku_goals")||'[{"goal":"","deadline":""}]');
   const [start,setStart]=useState(saved.start);
   const [end,setEnd]=useState(saved.end);
   const [interval,setInterval]=useState(saved.interval||1);
-  const [goal,setGoal]=useState(savedGoal.goal);
-  const [deadline,setDeadline]=useState(savedGoal.deadline);
+  const [goals,setGoals]=useState(savedGoals.length?savedGoals:[{goal:"",deadline:""}]);
+  const updateGoal=(i,field,val)=>{ const g=[...goals]; g[i]={...g[i],[field]:val}; setGoals(g); };
+  const addGoal=()=>{ if(goals.length<3) setGoals([...goals,{goal:"",deadline:""}]); };
+  const removeGoal=(i)=>{ if(goals.length>1) setGoals(goals.filter((_,j)=>j!==i)); };
   const [calLinked,setCalLinked]=useState(!!localStorage.getItem("cal_linked"));
   const [calLoading,setCalLoading]=useState(false);
   const hours=Array.from({length:24},(_,i)=>i);
@@ -832,10 +841,14 @@ function SettingsScreen({onToast,onLogout,onGoalSaved}) {
     onToast("通知設定を保存しました");
   };
   const saveGoal=()=>{
-    if(!goal.trim()){onToast("目標を入力してください");return;}
-    localStorage.setItem("jiroku_goal",JSON.stringify({goal:goal.trim(),deadline}));
-    gasPost("saveSettings",{goal:goal.trim(),goal_deadline:deadline});
-    onGoalSaved({goal:goal.trim(),deadline});
+    if(!goals[0]?.goal.trim()){onToast("目標1を入力してください");return;}
+    localStorage.setItem("jiroku_goals",JSON.stringify(goals));
+    gasPost("saveSettings",{
+      goal:goals[0]?.goal.trim()||"", goal_deadline:goals[0]?.deadline||"",
+      goal2:goals[1]?.goal.trim()||"", goal_deadline2:goals[1]?.deadline||"",
+      goal3:goals[2]?.goal.trim()||"", goal_deadline3:goals[2]?.deadline||"",
+    });
+    onGoalSaved(goals);
     onToast("目標を保存しました");
   };
 
@@ -850,15 +863,23 @@ function SettingsScreen({onToast,onLogout,onGoalSaved}) {
     <div style=${{padding:"0 16px"}}>
 
       <div class="card">
-        <div class="card-label">目標・期限</div>
-        <div class="form-grp" style=${{marginBottom:12}}>
-          <label class="form-lbl">目標</label>
-          <textarea class="txa" placeholder="例：英検2級に合格する" value=${goal} onChange=${e=>setGoal(e.target.value)} style=${{height:72}}/>
-        </div>
-        <div class="form-grp" style=${{marginBottom:14}}>
-          <label class="form-lbl">達成期限</label>
-          <input type="date" class="inp" value=${deadline} onChange=${e=>setDeadline(e.target.value)}/>
-        </div>
+        <div class="card-label">目標・期限（最大3つ）</div>
+        ${goals.map((g,i)=>html`
+          <div key=${i} style=${{background:"var(--bg)",borderRadius:10,padding:"12px",marginBottom:10,border:"1px solid var(--border)"}}>
+            <div style=${{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+              <label class="form-lbl" style=${{margin:0}}>目標${i+1}${i===0?" （メイン）":""}</label>
+              ${i>0&&html`<button onClick=${()=>removeGoal(i)} style=${{background:"none",border:"none",color:"var(--sub)",fontSize:18,cursor:"pointer",lineHeight:1}}>×</button>`}
+            </div>
+            <textarea class="txa" placeholder=${i===0?"例：英検2級に合格する":"例：毎月売上100万円達成"} value=${g.goal} onChange=${e=>updateGoal(i,"goal",e.target.value)} style=${{height:64,marginBottom:8}}/>
+            <label class="form-lbl">達成期限</label>
+            <input type="date" class="inp" value=${g.deadline} onChange=${e=>updateGoal(i,"deadline",e.target.value)}/>
+          </div>
+        `)}
+        ${goals.length<3&&html`
+          <button onClick=${addGoal} style=${{background:"none",border:"1px dashed var(--border)",borderRadius:10,padding:"10px",color:"var(--sub)",fontSize:13,cursor:"pointer",width:"100%",marginBottom:10}}>
+            ＋ 目標を追加する
+          </button>
+        `}
         <button class="btn" onClick=${saveGoal}>目標を保存する</button>
       </div>
 
@@ -955,8 +976,9 @@ function parseJwt(token) {
 
 function LoginScreen({onLogin}) {
   const [step,setStep]=useState("top"); // "top" | "goal" | "line"
-  const [goal,setGoal]=useState("");
-  const [deadline,setDeadline]=useState("");
+  const [goals,setGoals]=useState([{goal:"",deadline:""}]);
+  const addGoal=()=>{ if(goals.length<3) setGoals([...goals,{goal:"",deadline:""}]); };
+  const updateGoal=(i,field,val)=>{ const g=[...goals]; g[i]={...g[i],[field]:val}; setGoals(g); };
   const [loading,setLoading]=useState(false);
   const [error,setError]=useState("");
   const [pendingUser,setPendingUser]=useState(null);
@@ -1016,12 +1038,17 @@ function LoginScreen({onLogin}) {
       url.searchParams.set("action","registerUser");
       url.searchParams.set("studentEmail",email);
       url.searchParams.set("name",name);
-      url.searchParams.set("goal",goal.trim());
-      url.searchParams.set("goal_deadline",deadline);
+      url.searchParams.set("goal",goals[0]?.goal.trim()||"");
+      url.searchParams.set("goal_deadline",goals[0]?.deadline||"");
+      url.searchParams.set("goal2",goals[1]?.goal.trim()||"");
+      url.searchParams.set("goal_deadline2",goals[1]?.deadline||"");
+      url.searchParams.set("goal3",goals[2]?.goal.trim()||"");
+      url.searchParams.set("goal_deadline3",goals[2]?.deadline||"");
       const r=await fetch(url).then(res=>res.json());
       if(r.ok||r.error==="already_registered"){
         const u={email,name,coachName:"コーチ",coachEmail:""};
-        if(goal.trim()) localStorage.setItem("jiroku_goal",JSON.stringify({goal:goal.trim(),deadline}));
+        const validGoals=goals.filter(g=>g.goal.trim());
+        if(validGoals.length) localStorage.setItem("jiroku_goals",JSON.stringify(validGoals));
         localStorage.setItem("edventure_user",JSON.stringify(u));
         setPendingUser(u); setStep("line");
       } else { setError("登録に失敗しました"); }
@@ -1081,16 +1108,21 @@ function LoginScreen({onLogin}) {
     <div class="login-wrap" style=${{justifyContent:"flex-start",paddingTop:48}}>
       <div class="login-logo"><${S} n="clock" s=${26}/></div>
       <div class="login-title">はじめまして 👋</div>
-      <div class="login-sub" style=${{marginBottom:24}}>${pendingUser?.name}さん、目標を教えてください</div>
+      <div class="login-sub" style=${{marginBottom:24}}>${pendingUser?.name}さん、目標を教えてください（最大3つ）</div>
       <div class="login-box">
-        <div>
-          <div style=${{fontSize:11,color:"var(--sub)",marginBottom:5}}>今一番達成したい目標（任意）</div>
-          <textarea class="txa" placeholder="例：英検2級に合格する" value=${goal} onChange=${e=>setGoal(e.target.value)} style=${{height:80}}/>
-        </div>
-        <div>
-          <div style=${{fontSize:11,color:"var(--sub)",marginBottom:5}}>達成期限（任意）</div>
-          <input type="date" class="login-inp" value=${deadline} onChange=${e=>setDeadline(e.target.value)}/>
-        </div>
+        ${goals.map((g,i)=>html`
+          <div key=${i} style=${{background:"var(--card)",borderRadius:12,padding:"14px",border:"1px solid var(--border)"}}>
+            <div style=${{fontSize:11,color:"var(--sub)",marginBottom:5}}>目標${i+1}${i===0?" （メインの目標）":""}</div>
+            <textarea class="txa" placeholder=${i===0?"例：英検2級に合格する":"例：毎月売上100万円達成"} value=${g.goal} onChange=${e=>updateGoal(i,"goal",e.target.value)} style=${{height:70,marginBottom:8}}/>
+            <div style=${{fontSize:11,color:"var(--sub)",marginBottom:5}}>達成期限（任意）</div>
+            <input type="date" class="login-inp" value=${g.deadline} onChange=${e=>updateGoal(i,"deadline",e.target.value)}/>
+          </div>
+        `)}
+        ${goals.length<3&&html`
+          <button onClick=${addGoal} style=${{background:"none",border:"1px dashed var(--border)",borderRadius:12,padding:"12px",color:"var(--sub)",fontSize:14,cursor:"pointer",width:"100%"}}>
+            ＋ 目標を追加する
+          </button>
+        `}
         ${error&&html`<div class="login-err">${error}</div>`}
         <button class="btn" onClick=${register} disabled=${loading}>${loading?"登録中...":"JIROKUをはじめる"}</button>
       </div>
@@ -1148,7 +1180,11 @@ function App() {
   const [checking,setChecking]=useState(!!CURRENT_USER);
   const [tab,setTab]=useState("home");
   const [toast,setToast]=useState(null);
-  const [goalData,setGoalData]=useState(()=>JSON.parse(localStorage.getItem("jiroku_goal")||'{"goal":"","deadline":""}'));
+  const [goalData,setGoalData]=useState(()=>{
+    const g=localStorage.getItem("jiroku_goals"); if(g) try{return JSON.parse(g);}catch(e){}
+    const old=localStorage.getItem("jiroku_goal"); if(old) try{const p=JSON.parse(old); if(p.goal) return [p];}catch(e){}
+    return [];
+  });
   const logout=()=>{
     localStorage.removeItem("edventure_user");
     localStorage.removeItem("line_prompted");

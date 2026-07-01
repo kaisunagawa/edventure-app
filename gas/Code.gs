@@ -75,7 +75,7 @@ function doPost(e) {
           const rows = sheetToObjects(getSheet("Users"));
           // すでに連携済みなら何もしない
           if (rows.find(r => r.line_user_id === lineUserId)) return;
-          sendLineMessage(lineUserId, "EdVentureへようこそ！🎉\n\nアカウントを連携するために、登録済みのGmailアドレスをこのLINEに送ってください。\n（例: yourname@gmail.com）\n\nまだアプリ登録していない場合はこちらから👇\nhttps://kaisunagawa.github.io/edventure-app/");
+          sendLineMessage(lineUserId, "🎉 追加ありがとうございます！\n\nまず、下のリンクからJIROKUアプリに登録してください👇\nhttps://kaisunagawa.github.io/edventure-app/\n\n登録が完了したら、このLINEに登録したGmailアドレスを送ってください。それだけで連携完了です！\n\n✅ 毎時間の記録リマインダー\n✅ 毎晩のAIレポート\nがこのLINEに届くようになります。");
         }
 
         if (event.type === "message" && event.message.type === "text") {
@@ -138,24 +138,32 @@ function registerUser(studentEmail, body) {
     return headers.indexOf(name);
   }
 
-  const idxEmail    = ensureHeader("student_email");
-  const idxName     = ensureHeader("name");
-  const idxActive   = ensureHeader("is_active");
-  const idxJoined   = ensureHeader("joined_at");
-  const idxGoal     = ensureHeader("goal");
-  const idxDeadline = ensureHeader("goal_deadline");
-  const idxStart    = ensureHeader("notify_start");
-  const idxEnd      = ensureHeader("notify_end");
+  const idxEmail     = ensureHeader("student_email");
+  const idxName      = ensureHeader("name");
+  const idxActive    = ensureHeader("is_active");
+  const idxJoined    = ensureHeader("joined_at");
+  const idxGoal1     = ensureHeader("goal");
+  const idxDead1     = ensureHeader("goal_deadline");
+  const idxGoal2     = ensureHeader("goal2");
+  const idxDead2     = ensureHeader("goal_deadline2");
+  const idxGoal3     = ensureHeader("goal3");
+  const idxDead3     = ensureHeader("goal_deadline3");
+  const idxStart     = ensureHeader("notify_start");
+  const idxEnd       = ensureHeader("notify_end");
 
   const newRow = new Array(headers.length).fill("");
-  newRow[idxEmail]    = studentEmail;
-  newRow[idxName]     = body.name || "";
-  newRow[idxActive]   = "TRUE";
-  newRow[idxJoined]   = today;
-  newRow[idxGoal]     = body.goal || "";
-  newRow[idxDeadline] = body.goal_deadline || "";
-  newRow[idxStart]    = 7;
-  newRow[idxEnd]      = 23;
+  newRow[idxEmail]  = studentEmail;
+  newRow[idxName]   = body.name || "";
+  newRow[idxActive] = "TRUE";
+  newRow[idxJoined] = today;
+  newRow[idxGoal1]  = body.goal || "";
+  newRow[idxDead1]  = body.goal_deadline || "";
+  newRow[idxGoal2]  = body.goal2 || "";
+  newRow[idxDead2]  = body.goal_deadline2 || "";
+  newRow[idxGoal3]  = body.goal3 || "";
+  newRow[idxDead3]  = body.goal_deadline3 || "";
+  newRow[idxStart]  = 7;
+  newRow[idxEnd]    = 23;
   sheet.appendRow(newRow);
 
   return { ok: true, data: { name: body.name, coachName: "コーチ", coach_email: "" } };
@@ -223,6 +231,7 @@ function saveLog(studentEmail, body) {
       sheet.getRange(i+1, headers.indexOf("task")+1).setValue(body.task);
       sheet.getRange(i+1, headers.indexOf("focus_level")+1).setValue(body.focus_level);
       sheet.getRange(i+1, headers.indexOf("memo")+1).setValue(body.memo || "");
+      updateStreak(studentEmail);
       const xpResult = addXP(studentEmail, body.memo);
       return { ok: true, log_id: String(data[i][0]), updated: true, ...xpResult };
     }
@@ -233,6 +242,7 @@ function saveLog(studentEmail, body) {
   sheet.appendRow([logId, studentEmail, today, "", body.task, body.focus_level, body.memo || "", now]);
   sheet.getRange(newRow, 4).setNumberFormat("@").setValue(String(body.time_block));
 
+  updateStreak(studentEmail);
   const xpResult = addXP(studentEmail, body.memo);
   return { ok: true, log_id: logId, ...xpResult };
 }
@@ -318,7 +328,12 @@ function getGameStatus(studentEmail) {
   const badgeIds = user.badges ? user.badges.split(",").filter(Boolean) : [];
   const badgeMap = { first:"🌱 はじめての記録", streak3:"🔥 3日連続達成", streak7:"⚡ 7日連続達成", memo10:"📝 メモ名人", xp500:"🌟 XP500達成" };
   const badges = badgeIds.map(id => ({ id, label: badgeMap[id] || id }));
-  return { ok: true, data: { xp, level, xpInLevel, xpForNextLevel, streak, badges, goal: user.goal || "", goal_deadline: user.goal_deadline || "" } };
+  const goals = [
+    { goal: user.goal || "", deadline: user.goal_deadline || "" },
+    { goal: user.goal2 || "", deadline: user.goal_deadline2 || "" },
+    { goal: user.goal3 || "", deadline: user.goal_deadline3 || "" },
+  ].filter(g => g.goal);
+  return { ok: true, data: { xp, level, xpInLevel, xpForNextLevel, streak, badges, goals } };
 }
 
 function getMessages(studentEmail) {
@@ -443,8 +458,12 @@ function saveSettings(studentEmail, body) {
   const startIdx    = ensureCol("notify_start");
   const endIdx      = ensureCol("notify_end");
   const intervalIdx = ensureCol("notify_interval");
-  const goalIdx     = ensureCol("goal");
-  const deadlineIdx = ensureCol("goal_deadline");
+  const goal1Idx    = ensureCol("goal");
+  const dead1Idx    = ensureCol("goal_deadline");
+  const goal2Idx    = ensureCol("goal2");
+  const dead2Idx    = ensureCol("goal_deadline2");
+  const goal3Idx    = ensureCol("goal3");
+  const dead3Idx    = ensureCol("goal_deadline3");
   const calIdx      = ensureCol("google_calendar_id");
   const lineIdx     = ensureCol("line_user_id");
 
@@ -453,10 +472,14 @@ function saveSettings(studentEmail, body) {
     if (body.notify_start    !== undefined) sheet.getRange(i + 1, startIdx    + 1).setValue(Number(body.notify_start) || 7);
     if (body.notify_end      !== undefined) sheet.getRange(i + 1, endIdx      + 1).setValue(Number(body.notify_end)   || 23);
     if (body.notify_interval !== undefined) sheet.getRange(i + 1, intervalIdx + 1).setValue(Number(body.notify_interval) || 1);
-    if (body.goal               !== undefined) sheet.getRange(i + 1, goalIdx     + 1).setValue(body.goal);
-    if (body.goal_deadline      !== undefined) sheet.getRange(i + 1, deadlineIdx + 1).setValue(body.goal_deadline);
-    if (body.google_calendar_id !== undefined) sheet.getRange(i + 1, calIdx      + 1).setValue(body.google_calendar_id);
-    if (body.line_user_id       !== undefined) sheet.getRange(i + 1, lineIdx     + 1).setValue(body.line_user_id);
+    if (body.goal            !== undefined) sheet.getRange(i + 1, goal1Idx    + 1).setValue(body.goal);
+    if (body.goal_deadline   !== undefined) sheet.getRange(i + 1, dead1Idx    + 1).setValue(body.goal_deadline);
+    if (body.goal2           !== undefined) sheet.getRange(i + 1, goal2Idx    + 1).setValue(body.goal2);
+    if (body.goal_deadline2  !== undefined) sheet.getRange(i + 1, dead2Idx    + 1).setValue(body.goal_deadline2);
+    if (body.goal3           !== undefined) sheet.getRange(i + 1, goal3Idx    + 1).setValue(body.goal3);
+    if (body.goal_deadline3  !== undefined) sheet.getRange(i + 1, dead3Idx    + 1).setValue(body.goal_deadline3);
+    if (body.google_calendar_id !== undefined) sheet.getRange(i + 1, calIdx   + 1).setValue(body.google_calendar_id);
+    if (body.line_user_id    !== undefined) sheet.getRange(i + 1, lineIdx     + 1).setValue(body.line_user_id);
     break;
   }
   return { ok: true };
@@ -595,7 +618,11 @@ function generateReportWithClaude(studentEmail, studentName, logs) {
   if (!apiKey) { Logger.log("CLAUDE_API_KEY が未設定"); return null; }
 
   const user = sheetToObjects(getSheet("Users")).find(u => u.student_email === studentEmail);
-  const goal = user ? (user.goal || "未設定") : "未設定";
+  const goalsText = user ? [
+    user.goal ? `① ${user.goal}${user.goal_deadline ? "（期限：" + user.goal_deadline + "）" : ""}` : "",
+    user.goal2 ? `② ${user.goal2}${user.goal_deadline2 ? "（期限：" + user.goal_deadline2 + "）" : ""}` : "",
+    user.goal3 ? `③ ${user.goal3}${user.goal_deadline3 ? "（期限：" + user.goal_deadline3 + "）" : ""}` : "",
+  ].filter(Boolean).join("\n") || "未設定" : "未設定";
   const totalBlocks = logs.length;
   const withMemo = logs.filter(l => l.memo && l.memo.trim()).length;
   const focusVariety = new Set(logs.map(l => l.focus_level)).size;
@@ -624,7 +651,8 @@ function generateReportWithClaude(studentEmail, studentName, logs) {
 過去のデータと今日のログをもとに、深い分析と具体的なフィードバックを日本語で返してください。
 
 【生徒名】${studentName}
-【目標】${goal}
+【目標】
+${goalsText}
 【過去7日の高集中率】${avgFocusRecent}
 【過去レポート履歴（直近7日）】
 ${historyText}
