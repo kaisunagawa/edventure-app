@@ -747,7 +747,13 @@ function ReportScreen() {
   const [listLoading, setListLoading]=useState(true);
 
   useEffect(()=>{
-    gasApi("getReportList").then(r=>{ if(r.ok){ setReportList(r.data); } setListLoading(false); });
+    gasApi("getReportList").then(r=>{
+      if(r.ok && r.data.length>0){
+        setReportList(r.data);
+        setDate(r.data[0].date); // 最新を自動で開く
+      }
+      setListLoading(false);
+    });
   },[]);
 
   useEffect(()=>{
@@ -824,8 +830,8 @@ function ReportScreen() {
             <p style=${{fontSize:14,lineHeight:1.8,color:"var(--text)"}}>${report.feedback}</p>
           </div>
           <div class="card">
-            ${report.highlights&&html`<div style=${{marginBottom:12}}><span class="tag t-g">良かった点</span><p style=${{fontSize:13,color:"var(--sub)",marginTop:7,lineHeight:1.6}}>${report.highlights}</p></div>`}
-            ${report.improvement&&html`<div><span class="tag t-a">改善点</span><p style=${{fontSize:13,color:"var(--sub)",marginTop:7,lineHeight:1.6}}>${report.improvement}</p></div>`}
+            ${report.highlights&&html`<div style=${{marginBottom:12}}><span class="tag t-g">良かった点</span><p style=${{fontSize:14,color:"var(--text)",marginTop:7,lineHeight:1.8}}>${report.highlights}</p></div>`}
+            ${report.improvement&&html`<div><span class="tag t-a">改善点</span><p style=${{fontSize:14,color:"var(--text)",marginTop:7,lineHeight:1.8}}>${report.improvement}</p></div>`}
           </div>
           ${report.action&&html`<div class="card"><div class="card-label">明日のアクション</div><p style=${{fontSize:14,lineHeight:1.8,color:"var(--text)"}}>${report.action}</p></div>`}
           ${logs.length>0&&html`
