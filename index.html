@@ -925,7 +925,7 @@ function TimerScreen({onToast}) {
         </div>
       `}
 
-      <div style=${{display:"flex",gap:10,marginBottom:16}}>
+      <div style=${{display:"flex",gap:10,marginBottom:startTime&&!showModal?8:16}}>
         <button onClick=${isRunning?pause:start}
           style=${{flex:1,padding:"15px",borderRadius:12,border:"none",background:accentColor,
           color:"white",fontSize:17,fontWeight:700,cursor:"pointer"}}>
@@ -936,7 +936,15 @@ function TimerScreen({onToast}) {
           background:"var(--card)",color:"var(--sub)",fontSize:18,cursor:"pointer"}}>↺</button>
       </div>
 
-      <div style=${{display:"flex",gap:10,marginTop:8,marginBottom:20}}>
+      ${startTime&&!showModal&&html`
+        <button onClick=${()=>{pause();setShowModal(true);}}
+          style=${{width:"100%",padding:"11px",borderRadius:12,border:"1.5px solid var(--accent)",
+          background:"none",color:"var(--accent)",fontSize:14,fontWeight:600,cursor:"pointer",marginBottom:16}}>
+          ✓ タスク完了・途中で記録する
+        </button>
+      `}
+
+      <div style=${{display:"flex",gap:10,marginBottom:20}}>
         <div style=${{flex:1,background:"var(--card)",borderRadius:14,padding:"14px 0",textAlign:"center",border:"1px solid var(--border)"}}>
           <div style=${{fontSize:26,fontWeight:800,color:"var(--accent)",lineHeight:1}}>${sessionCount}</div>
           <div style=${{fontSize:11,color:"var(--sub)",marginTop:4}}>セッション完了</div>
@@ -947,12 +955,34 @@ function TimerScreen({onToast}) {
         </div>
       </div>
 
-      <div style=${{background:"var(--accent-l)",borderRadius:14,padding:"14px 16px",display:"flex",gap:12,alignItems:"flex-start"}}>
-        <div style=${{fontSize:20,lineHeight:1,marginTop:2}}>💡</div>
-        <div style=${{fontSize:13,color:"var(--accent)",lineHeight:1.6}}>
-          ${["タスクを始める前に「何をするか」を1行書くと集中しやすくなります。","25分集中したら必ず休憩を。脳を回復させると次の集中力が上がります。","スマホの通知をオフにして、今この瞬間だけに集中しよう。","完璧を目指さなくていい。まず動き始めることが大切です。","記録を続けることで、自分の集中パターンが見えてきます。"][sessionCount%5]}
-        </div>
-      </div>
+      ${(()=>{
+        const quotes=[
+          {text:"成功は最終的なものではなく、失敗は致命的ではない。大切なのは続ける勇気だ。",author:"ウィンストン・チャーチル"},
+          {text:"千里の道も一歩から。",author:"老子"},
+          {text:"今日できることを明日に延ばすな。",author:"ベンジャミン・フランクリン"},
+          {text:"才能とは、毎日同じことを新鮮な気持ちでできる能力のことである。",author:"古賀稔彦"},
+          {text:"行動こそが全てを決める。今すぐ動け。",author:"ゲーテ"},
+          {text:"どんな小さな進歩も、昨日の自分を超えている。",author:"匿名"},
+          {text:"夢を見るだけでは不十分。行動しなければ夢は夢のままだ。",author:"ヴァルター・スコット"},
+          {text:"集中力は、成功への最短ルートだ。",author:"ブルース・リー"},
+          {text:"できると思えばできる。できないと思えばできない。どちらも正しい。",author:"ヘンリー・フォード"},
+          {text:"一度に一つのことに集中すれば、あなたは多くのことを成し遂げられる。",author:"オグ・マンディーノ"},
+          {text:"石の上にも三年。",author:"日本のことわざ"},
+          {text:"努力は必ず報われる。もし報われない努力があるならば、それはまだ努力と呼べない。",author:"王貞治"},
+          {text:"やってみなければ分からない。やってみれば必ず分かる。",author:"本田宗一郎"},
+          {text:"小さなことを重ねることが、とんでもないところへ行くただひとつの道。",author:"イチロー"},
+          {text:"人生は今日一日の積み重ねである。",author:"伊藤忠兵衛"},
+        ];
+        const today=new Date(); const idx=(today.getFullYear()*10000+((today.getMonth()+1)*100)+today.getDate())%quotes.length;
+        const q=quotes[idx];
+        return html`
+          <div style=${{background:"var(--card)",borderRadius:14,padding:"18px 16px",border:"1px solid var(--border)",marginBottom:8}}>
+            <div style=${{fontSize:11,color:"var(--accent)",fontWeight:700,marginBottom:8,letterSpacing:"0.05em"}}>TODAY'S QUOTE</div>
+            <div style=${{fontSize:14,color:"var(--text)",lineHeight:1.7,fontStyle:"italic",marginBottom:10}}>"${q.text}"</div>
+            <div style=${{fontSize:12,color:"var(--sub)",textAlign:"right"}}>— ${q.author}</div>
+          </div>
+        `;
+      })()}
     </div>
 
     ${showModal&&html`
