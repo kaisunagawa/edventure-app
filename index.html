@@ -939,10 +939,11 @@ function LoginScreen({onLogin}) {
     if(step!=="top") return;
     const init=()=>{
       if(!window.google) return setTimeout(init,200);
+      const isIosPwa = window.navigator.standalone === true;
       google.accounts.id.initialize({
         client_id: GOOGLE_CLIENT_ID,
         callback: handleGoogleLogin,
-        use_fedcm_for_prompt: true,
+        ...(isIosPwa ? { use_fedcm_for_prompt: true } : { ux_mode: "popup" }),
       });
       google.accounts.id.renderButton(btnRef.current, {
         theme:"outline", size:"large", text:"signin_with", locale:"ja", width:280
