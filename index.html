@@ -733,7 +733,7 @@ function ChatScreen({onToast}) {
   const inputRef=useRef(null);
   const compRef=useRef(false);
   const load=useCallback(async()=>{ const r=await gasApi("getMessages"); if(r.ok) setMsgs(r.data); },[]);
-  useEffect(()=>{ load(); },[]);
+  useEffect(()=>{ load(); const t=setInterval(load,10000); return ()=>clearInterval(t); },[]);
   useEffect(()=>{ bottomRef.current?.scrollIntoView({behavior:"smooth"}); },[msgs]);
   const send=async()=>{
     const content=input.trim(); if(!content||sending) return;
