@@ -1057,21 +1057,31 @@ function LoginScreen({onLogin}) {
   `;
 
   const isLineWebView = /Line\//i.test(navigator.userAgent);
+  const isAndroid = /Android/i.test(navigator.userAgent);
 
-  if(isLineWebView) return html`
-    <div class="login-wrap">
-      <div class="login-logo"><${S} n="clock" s=${26}/></div>
-      <div class="login-title">JIROKU</div>
-      <div style=${{textAlign:"center",padding:"0 24px"}}>
-        <div style=${{fontSize:48,marginBottom:16}}>🌐</div>
-        <div style=${{fontWeight:700,fontSize:17,marginBottom:12,color:"var(--text)"}}>Safariで開いてください</div>
-        <div style=${{fontSize:14,color:"var(--sub)",lineHeight:1.7,marginBottom:24}}>
-          LINEのブラウザではGoogleログインができません。<br/>
-          右下の<b>「…」→「ブラウザで開く」</b>をタップしてSafariで開いてください。
+  if(isLineWebView){
+    if(isAndroid){
+      // AndroidはChromeで自動で開く
+      window.location.href=`intent://${location.host}${location.pathname}#Intent;scheme=https;action=android.intent.action.VIEW;package=com.android.chrome;end`;
+    }
+    return html`
+      <div class="login-wrap">
+        <div class="login-logo"><${S} n="clock" s=${26}/></div>
+        <div class="login-title">JIROKU</div>
+        <div style=${{textAlign:"center",padding:"0 24px"}}>
+          <div style=${{fontSize:48,marginBottom:16}}>🌐</div>
+          <div style=${{fontWeight:700,fontSize:17,marginBottom:12,color:"var(--text)"}}>ブラウザで開いてください</div>
+          <div style=${{fontSize:14,color:"var(--sub)",lineHeight:1.8,marginBottom:24}}>
+            LINEのブラウザではGoogleログインができません。<br/>
+            ${isAndroid
+              ? html`Chromeが自動で開きます。開かない場合は右上の<b>「…」→「ブラウザで開く」</b>をタップしてください。`
+              : html`画面右下の<b>「…」→「ブラウザで開く」</b>をタップして、SafariかChromeで開いてください。`
+            }
+          </div>
         </div>
       </div>
-    </div>
-  `;
+    `;
+  }
 
   return html`
     <div class="login-wrap">
