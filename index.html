@@ -1018,11 +1018,40 @@ function LoginScreen({onLogin}) {
 }
 
 function App() {
-  const [user,setUser]=useState(CURRENT_USER);
+  const [user,setUser]=useState(null);
+  const [checking,setChecking]=useState(!!CURRENT_USER);
   const [tab,setTab]=useState("home");
   const [toast,setToast]=useState(null);
   const [goalData,setGoalData]=useState(()=>JSON.parse(localStorage.getItem("jiroku_goal")||'{"goal":"","deadline":""}'));
-  const logout=()=>{localStorage.removeItem("edventure_user");CURRENT_USER=null;setUser(null);};
+  const logout=()=>{
+    localStorage.removeItem("edventure_user");
+    localStorage.removeItem("line_prompted");
+    localStorage.removeItem("cal_linked");
+    CURRENT_USER=null; setUser(null);
+  };
+
+  useEffect(()=>{
+    if(!CURRENT_USER){ setChecking(false); return; }
+    // キャッシュがあってもGASで存在確認
+    const url=new URL(GAS_URL);
+    url.searchParams.set("action","getUser");
+    url.searchParams.set("studentEmail",CURRENT_USER.email);
+    fetch(url).then(r=>r.json()).then(r=>{
+      if(r.ok&&r.data){
+        const u={...CURRENT_USER, name:r.data.name||CURRENT_USER.name, coachName:r.data.coachName||"コーチ", coachEmail:r.data.coach_email||""};
+        CURRENT_USER=u; localStorage.setItem("edventure_user",JSON.stringify(u)); setUser(u);
+      } else {
+        // スプレッドシートに存在しない → キャッシュ削除してログイン画面へ
+        localStorage.removeItem("edventure_user");
+        localStorage.removeItem("line_prompted");
+        localStorage.removeItem("cal_linked");
+        CURRENT_USER=null;
+      }
+    }).catch(()=>{ setUser(CURRENT_USER); }) // 通信エラー時はキャッシュで続行
+    .finally(()=>setChecking(false));
+  },[]);
+
+  if(checking) return html`<div style=${{display:"flex",alignItems:"center",justifyContent:"center",height:"100%",color:"var(--sub)",fontSize:14}}>読み込み中...</div>`;
   if(!user) return html`<${LoginScreen} onLogin=${setUser}/>`;
   return html`
     <div style=${{height:"100%",position:"relative"}}>
