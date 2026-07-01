@@ -1123,14 +1123,30 @@ function App() {
     </div>
   `;
 }
+const ERR_STYLE = "padding:20px;font-family:monospace;font-size:12px;color:red;background:#fff;position:fixed;top:0;left:0;right:0;bottom:0;overflow:auto;z-index:9999;white-space:pre-wrap";
+class ErrorBoundary extends React.Component {
+  constructor(p){ super(p); this.state={err:null}; }
+  static getDerivedStateFromError(e){ return {err:e}; }
+  componentDidCatch(e,info){ console.error("ErrorBoundary caught:",e,info); }
+  render(){
+    if(this.state.err) return React.createElement("div",{style:{padding:20,fontFamily:"monospace",fontSize:13,color:"red",background:"#fff",position:"fixed",top:0,left:0,right:0,bottom:0,overflow:"auto",zIndex:9999,whiteSpace:"pre-wrap"}},
+      "レンダーエラー（スクショを送ってください）:\n"+this.state.err.message+"\n\n"+this.state.err.stack);
+    return this.props.children;
+  }
+}
 try {
-  ReactDOM.createRoot(document.getElementById("root")).render(html`<${App}/>`);
+  ReactDOM.createRoot(document.getElementById("root")).render(
+    React.createElement(ErrorBoundary,null,html`<${App}/>`)
+  );
 } catch(e) {
-  document.getElementById("root").innerHTML = '<div style="padding:20px;font-family:monospace;font-size:12px;color:red;background:#fff;position:fixed;top:0;left:0;right:0;bottom:0;overflow:auto;z-index:9999;white-space:pre-wrap">ERROR:\n'+e.message+'\n\nSTACK:\n'+e.stack+'</div>';
+  document.getElementById("root").innerHTML = '<div style="'+ERR_STYLE+'">ERROR:\n'+e.message+'\n\n'+e.stack+'</div>';
 }
 window.onerror = (msg,src,line,col,err) => {
-  document.getElementById("root").innerHTML = '<div style="padding:20px;font-family:monospace;font-size:12px;color:red;background:#fff;position:fixed;top:0;left:0;right:0;bottom:0;overflow:auto;z-index:9999;white-space:pre-wrap">JS ERROR:\n'+msg+'\n\nLine:'+line+' Col:'+col+'</div>';
+  document.getElementById("root").innerHTML = '<div style="'+ERR_STYLE+'">JS ERROR:\n'+msg+'\nLine:'+line+' Col:'+col+'</div>';
 };
+window.addEventListener("unhandledrejection", e => {
+  console.error("Unhandled promise rejection:", e.reason);
+});
 if('serviceWorker' in navigator){navigator.serviceWorker.register('sw.js');}
 </script>
 </body>
