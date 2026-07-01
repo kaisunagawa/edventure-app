@@ -933,24 +933,28 @@ function LoginScreen({onLogin}) {
   const [loading,setLoading]=useState(false);
   const [error,setError]=useState("");
   const [pendingUser,setPendingUser]=useState(null);
-  const btnRef=useRef(null);
 
+  // Googleリダイレクト後のid_tokenを検出
   useEffect(()=>{
-    if(step!=="top") return;
-    const init=()=>{
-      if(!window.google) return setTimeout(init,200);
-      const isIosPwa = window.navigator.standalone === true;
-      google.accounts.id.initialize({
-        client_id: GOOGLE_CLIENT_ID,
-        callback: handleGoogleLogin,
-        ...(isIosPwa ? { use_fedcm_for_prompt: true } : { ux_mode: "popup" }),
-      });
-      google.accounts.id.renderButton(btnRef.current, {
-        theme:"outline", size:"large", text:"signin_with", locale:"ja", width:280
-      });
-    };
-    init();
-  },[step]);
+    const hash=new URLSearchParams(location.hash.slice(1));
+    const idToken=hash.get("id_token");
+    if(idToken){
+      history.replaceState(null,"",location.pathname);
+      handleGoogleLogin({credential:idToken});
+    }
+  },[]);
+
+  const handleGoogleSignIn=()=>{
+    const nonce=Math.random().toString(36).slice(2);
+    const params=new URLSearchParams({
+      client_id: GOOGLE_CLIENT_ID,
+      redirect_uri: "https://kaisunagawa.github.io/edventure-app/",
+      response_type: "id_token",
+      scope: "openid email profile",
+      nonce,
+    });
+    window.location.href="https://accounts.google.com/o/oauth2/v2/auth?"+params;
+  };
 
   const handleGoogleLogin=async(res)=>{
     const payload=parseJwt(res.credential);
@@ -1060,7 +1064,10 @@ function LoginScreen({onLogin}) {
       <div class="login-box" style=${{alignItems:"center"}}>
         ${loading
           ? html`<div style=${{color:"var(--sub)",fontSize:14}}>確認中...</div>`
-          : html`<div ref=${btnRef}/>`
+          : html`<button onClick=${handleGoogleSignIn} style=${{display:"flex",alignItems:"center",gap:10,padding:"10px 20px",borderRadius:8,border:"1px solid #dadce0",background:"#fff",cursor:"pointer",fontSize:15,fontWeight:500,color:"#3c4043",width:280,justifyContent:"center"}}>
+              <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" width="18" height="18"/>
+              Googleでサインイン
+            </button>`
         }
         ${error&&html`<div class="login-err">${error}</div>`}
       </div>
