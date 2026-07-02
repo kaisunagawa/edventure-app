@@ -235,8 +235,7 @@ function saveLog(studentEmail, body) {
       if(grIdx === -1){ grIdx = headers.length; sheet.getRange(1, grIdx+1).setValue("goal_related"); }
       sheet.getRange(i+1, grIdx+1).setValue(body.goal_related || "false");
       updateStreak(studentEmail);
-      const xpResult = addXP(studentEmail, body.memo);
-      return { ok: true, log_id: String(data[i][0]), updated: true, ...xpResult };
+      return { ok: true, log_id: String(data[i][0]), updated: true, xp_gained: 0 };
     }
   }
 
@@ -368,63 +367,31 @@ function autoReplyFromClaude(studentEmail, studentMessage) {
     if (!user) return;
 
     const today = formatDate(new Date());
-    const logs = sheetToObjects(getSheet("DailyLog")).filter(l => l.student_email === studentEmail && l.date === today);
-    const logSummary = logs.length > 0
-      ? logs.map(l => l.time_block + ": " + l.task + "（集中度" + l.focus_level + "）").join("\n")
+    const todayLogs = sheetToObjects(getSheet("DailyLog")).filter(l => l.student_email === studentEmail && l.date === today);
+    const logSummary = todayLogs.length > 0
+      ? todayLogs.map(l => l.time_block + ": " + l.task + "（集中度" + l.focus_level + "）").join("\n")
       : "まだ記録なし";
 
-    // 直近7日のログ数（継続状況の把握）
-    const sevenDaysAgo = formatDate(new Date(Date.now() - 7 * 86400000));
-    const recentAllLogs = sheetToObjects(getSheet("DailyLog")).filter(l => l.student_email === studentEmail && l.date >= sevenDaysAgo);
-    const activeDays = new Set(recentAllLogs.map(l => l.date)).size;
-    const streak = Number(user.streak || 0);
-
-    // 目標と期限
-    const goalsText = [
-      user.goal ? `① ${user.goal}${user.goal_deadline ? "（期限：" + user.goal_deadline + "）" : ""}` : "",
-      user.goal2 ? `② ${user.goal2}${user.goal_deadline2 ? "（期限：" + user.goal_deadline2 + "）" : ""}` : "",
-      user.goal3 ? `③ ${user.goal3}${user.goal_deadline3 ? "（期限：" + user.goal_deadline3 + "）" : ""}` : "",
-    ].filter(Boolean).join("\n") || "未設定";
-
-    // 目標期限までの残り日数
-    const deadlineInfo = [];
-    [{ goal: user.goal, deadline: user.goal_deadline }, { goal: user.goal2, deadline: user.goal_deadline2 }, { goal: user.goal3, deadline: user.goal_deadline3 }].forEach(g => {
-      if (g.goal && g.deadline) {
-        const daysLeft = Math.ceil((new Date(g.deadline) - new Date(today)) / 86400000);
-        deadlineInfo.push(`「${g.goal}」まで残り${daysLeft}日`);
-      }
-    });
-
-    // 過去レポート
-    const pastReports = sheetToObjects(getSheet("Reports"))
-      .filter(r => r.student_email === studentEmail)
-      .sort((a, b) => b.date > a.date ? 1 : -1)
-      .slice(0, 3);
-    const reportSummary = pastReports.length > 0
-      ? pastReports.map(r => r.date + ": " + r.score + "点").join("、")
-      : "なし";
+    const ctx = buildStudentContext(studentEmail, user);
 
     const allMsgs = sheetToObjects(getSheet("Messages"))
       .filter(m => m.student_email === studentEmail)
       .sort((a, b) => a.message_id > b.message_id ? 1 : -1);
-    const recentMessages = allMsgs.slice(-11, -1)
+    const recentMessages = allMsgs.slice(-21, -1)
       .map(m => ({ role: m.sender_role === "student" ? "user" : "assistant", content: m.content }));
 
-    const systemPrompt = `あなたは生徒一人ひとりに寄り添う教育コーチです。以下の方針で日本語で返信してください。
+    const systemPrompt = `あなたは生徒の友人でもあるコーチです。以下の情報をすべて把握した上で、会話に返信してください。
 
-【コーチの役割】
-- 基本は肯定的・共感的な姿勢で生徒を信じて応援する
-- 記録が少ない・途切れている場合は、責めずに優しく継続を促す
-- 心理学的アプローチ（承認→気づき→行動）を意識する
-- 目標の期限に対する現在地を具体的に言語化して伝える
-- 返信は2〜4文で簡潔に。ポジティブに締めくくる
+【コーチのスタイル】
+- 敬語とタメ語を自然に混ぜながら話す（例：「すごいじゃん！それ続けていきましょう」）
+- ユーモアを交えて、読んで少し笑えるくらいの温度感
+- 「〇〇へのメッセージ」「〇〇案：」「〇〇さんへ」「---」「【】」などのAI的な見出し・宛名・ラベルは絶対使わない
+- 本文だけをそのまま書く。前置き・宛名・説明は一切不要
+- 心理学的アプローチ（承認→気づき→行動）を自然に織り込む
+- 目標の期限に対する現在地をさらっと言語化する
+- 2〜4文で。締めは必ず前向きかつ人間味のある言葉で
 
-【生徒名】${user.name}
-【目標】
-${goalsText}
-【期限まで】${deadlineInfo.length > 0 ? deadlineInfo.join("、") : "期限未設定"}
-【連続記録日数】${streak}日（直近7日で${activeDays}日記録）
-【直近のスコア推移】${reportSummary}
+${ctx}
 【今日のログ】
 ${logSummary}`;
 
@@ -448,7 +415,7 @@ ${logSummary}`;
 
     // LINEで通知
     if (user.line_user_id) {
-      sendLineMessage(user.line_user_id, "💬 コーチより：\n" + replyText);
+      sendLineMessage(user.line_user_id, replyText);
     }
   } catch (err) {
     Logger.log("autoReplyFromClaude error: " + err.toString());
@@ -515,7 +482,7 @@ function saveSettings(studentEmail, body) {
     if (String(data[i][emailIdx]) !== studentEmail) continue;
     if (body.notify_start    !== undefined) sheet.getRange(i + 1, startIdx    + 1).setValue(Number(body.notify_start) || 7);
     if (body.notify_end      !== undefined) sheet.getRange(i + 1, endIdx      + 1).setValue(Number(body.notify_end)   || 23);
-    if (body.notify_interval !== undefined) sheet.getRange(i + 1, intervalIdx + 1).setValue(Number(body.notify_interval) || 1);
+    if (body.notify_interval !== undefined) sheet.getRange(i + 1, intervalIdx + 1).setValue(Number(body.notify_interval) || 2);
     if (body.goal            !== undefined) sheet.getRange(i + 1, goal1Idx    + 1).setValue(body.goal);
     if (body.goal_deadline   !== undefined) sheet.getRange(i + 1, dead1Idx    + 1).setValue(body.goal_deadline);
     if (body.goal2           !== undefined) sheet.getRange(i + 1, goal2Idx    + 1).setValue(body.goal2);
@@ -537,55 +504,23 @@ function morningScheduleNotify() {
   sheetToObjects(getSheet("Users")).filter(u => u.is_active.toUpperCase() === "TRUE").forEach(user => {
     try {
       if (!user.line_user_id) return;
-      const today = formatDate(new Date());
-      const streak = Number(user.streak || 0);
-
-      // 目標と期限
-      const goalDetails = [];
-      [{ goal: user.goal, deadline: user.goal_deadline }, { goal: user.goal2, deadline: user.goal_deadline2 }, { goal: user.goal3, deadline: user.goal_deadline3 }].forEach((g, i) => {
-        if (!g.goal) return;
-        const daysLeft = g.deadline ? Math.ceil((new Date(g.deadline) - new Date(today)) / 86400000) : null;
-        goalDetails.push(`目標${i+1}: ${g.goal}${daysLeft !== null ? "（期限まで残り" + daysLeft + "日）" : ""}`);
-      });
-      const goalsText = goalDetails.length > 0 ? goalDetails.join("\n") : "未設定";
-
-      // 直近7日のログ統計
-      const sevenDaysAgo = formatDate(new Date(Date.now() - 7 * 86400000));
-      const recentLogs = sheetToObjects(getSheet("DailyLog")).filter(l => l.student_email === user.student_email && l.date >= sevenDaysAgo);
-      const activeDays = new Set(recentLogs.map(l => l.date)).size;
-      const goalRelatedCount = recentLogs.filter(l => l.goal_related === "true").length;
-      const topTasks = Object.entries(recentLogs.reduce((acc, l) => { acc[l.task] = (acc[l.task] || 0) + 1; return acc; }, {}))
-        .sort((a, b) => b[1] - a[1]).slice(0, 3).map(([task]) => task).join("、");
-
-      // 直近レポート
-      const pastReports = sheetToObjects(getSheet("Reports"))
-        .filter(r => r.student_email === user.student_email)
-        .sort((a, b) => b.date > a.date ? 1 : -1)
-        .slice(0, 3);
-      const reportSummary = pastReports.length > 0
-        ? pastReports.map(r => `${r.date}: ${r.score}点 / ${r.highlights}`).join("\n")
-        : "まだレポートなし";
-      const latestFeedback = pastReports.length > 0 ? pastReports[0].improvement : "";
 
       const apiKey = PropertiesService.getScriptProperties().getProperty("CLAUDE_API_KEY");
       if (!apiKey) return;
 
-      const prompt = `あなたは生徒一人ひとりに寄り添う教育コーチです。以下の情報をしっかり読み込んだ上で、今朝の個別メッセージを送ってください。
+      const ctx = buildStudentContext(user.student_email, user);
 
-【生徒名】${user.name}
-【目標と期限】
-${goalsText}
-【連続記録日数】${streak}日
-【直近7日の活動】${activeDays}日記録、目標関連作業${goalRelatedCount}ブロック、よく取り組んだこと: ${topTasks || "まだ記録なし"}
-【直近のレポート】
-${reportSummary}
-【前回の改善提案】${latestFeedback || "なし"}
+      const prompt = `あなたは${user.name}の友人でもある教育コーチです。以下の情報をすべて把握した上で、今朝の個別メッセージを送ってください。
 
-【メッセージの方針】
-- 直近の記録・レポートを踏まえた「この生徒のことを知っている」と感じさせる内容
-- 目標の期限に対する現在地を一言で言語化する
-- 前回の改善提案があれば今日につながる一言を添える
-- 承認→今日への期待の流れで締める
+${ctx}
+
+【スタイル】
+- 敬語とタメ語を自然に混ぜる（「すごいじゃん、さすが！」「今日も一緒に頑張りましょう」など）
+- ユーモアを1つ忍ばせて、読んでクスッとできる温度感
+- 「---」「【】」「〇〇へのメッセージ」「〇〇案：」「〇〇さんへ」などの見出し・宛名・区切りは絶対使わない
+- 本文だけをそのまま書く。前置きや説明・宛名は一切不要
+- この子のことをよく知ってるコーチとして自然に話しかける感じ
+- 全レポート履歴と直近14日のログを踏まえて、パターンや成長を具体的に言及する
 - 4〜5文。絵文字1〜2個OK。「おはようございます」は不要（冒頭に入れるため）`;
 
       const res = UrlFetchApp.fetch("https://api.anthropic.com/v1/messages", {
@@ -607,7 +542,7 @@ function hourlyReminder() {
   sheetToObjects(getSheet("Users")).filter(u => u.is_active.toUpperCase() === "TRUE").forEach(user => {
     const start = Number(user.notify_start) || 7;
     const end = Number(user.notify_end) || 23;
-    const interval = Number(user.notify_interval) || 1;
+    const interval = Number(user.notify_interval) || 2;
     if (hour < start || hour > end) return;
     // 間隔チェック: 1日1回(interval=24)はstart時のみ、それ以外は間隔で割り切れる時間のみ
     if (interval >= 24) {
@@ -615,24 +550,52 @@ function hourlyReminder() {
     } else {
       if ((hour - start) % interval !== 0) return;
     }
-    // 今日の記録が2時間以上ない場合はコーチメッセージ付きで送る
     const today = formatDate(new Date());
     const todayLogs = sheetToObjects(getSheet("DailyLog")).filter(l => l.student_email === user.student_email && l.date === today);
+
+    // 直近interval時間以内に記録があればスキップ
+    const alreadyLogged = todayLogs.some(l => {
+      const lh = parseInt(l.time_block);
+      return lh >= hour - interval && lh <= hour;
+    });
+    if (alreadyLogged) return;
+
+    // 最後に記録した時間からの経過時間
     const lastLogHour = todayLogs.length > 0
       ? Math.max(...todayLogs.map(l => parseInt(l.time_block)))
       : -99;
     const hoursWithoutLog = hour - lastLogHour;
 
-    if (hoursWithoutLog >= 3 && todayLogs.length === 0) {
-      // まだ今日1件も記録がない場合
+    // 3時間以上記録がない場合はコーチメッセージ付き
+    if (hoursWithoutLog >= 3) {
       const apiKey = PropertiesService.getScriptProperties().getProperty("CLAUDE_API_KEY");
-      const goal = user.goal || "目標";
       if (apiKey) {
         try {
+          // 今日のログ内容をまとめる
+          const todayLogSummary = todayLogs.length === 0
+            ? "今日はまだ1件も記録していない"
+            : `今日すでに${todayLogs.length}件記録済み（${todayLogs.map(l => l.time_block + " " + l.task).join("、")}）、直近の記録から${hoursWithoutLog}時間経過`;
+
+          const ctx = buildStudentContext(user.student_email, user);
+
+          const prompt = `あなたは${user.name}の教育コーチです。以下の情報をすべて把握した上で、記録を促すメッセージを送ってください。
+
+${ctx}
+【今日の状況】${todayLogSummary}
+
+【スタイル】
+- 敬語とタメ語を自然に混ぜる
+- 今日すでに記録している場合は具体的な内容に触れながら承認してから次を促す
+- 今日まだ記録がない場合は責めずに軽く背中を押す
+- 「最近は」など現状と矛盾する表現は使わない。今日の状況に即した言葉を使う
+- 「○○さんへ」「Kai Sunagawaさんへ」などの宛名・呼びかけ文は絶対に書かない。本文だけを書く
+- 「---」「【】」などの見出し・区切りは使わない。普通の会話文のみ
+- 2〜3文。絵文字1個OK`;
+
           const res = UrlFetchApp.fetch("https://api.anthropic.com/v1/messages", {
             method: "POST",
             headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
-            payload: JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: 200, messages: [{ role: "user", content: `生徒「${user.name}」はまだ今日の記録を1件もしていません。目標は「${goal}」です。責めずに優しく記録を促す応援メッセージを2〜3文で送ってください。絵文字1個OK。` }] }),
+            payload: JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: 250, messages: [{ role: "user", content: prompt }] }),
             muteHttpExceptions: true
           });
           const result = JSON.parse(res.getContentText());
@@ -640,7 +603,7 @@ function hourlyReminder() {
             sendLineMessage(user.line_user_id, result.content[0].text + "\n\n📝 " + timeBlock + " の記録はこちらから↓\nhttps://kaisunagawa.github.io/edventure-app/");
             return;
           }
-        } catch(e) {}
+        } catch(e) { Logger.log("hourlyCoach error: " + e); }
       }
     }
     sendLineMessage(user.line_user_id, "⏱ " + timeBlock + " の記録を入力しましょう！\nhttps://kaisunagawa.github.io/edventure-app/");
@@ -716,29 +679,21 @@ function nightlyReport() {
       try {
         const apiKey = PropertiesService.getScriptProperties().getProperty("CLAUDE_API_KEY");
         if (apiKey) {
-          const goalsText = [user.goal, user.goal2, user.goal3].filter(Boolean).join("、") || "未設定";
-          const deadlineMessages = [];
-          [{ goal: user.goal, deadline: user.goal_deadline }, { goal: user.goal2, deadline: user.goal_deadline2 }, { goal: user.goal3, deadline: user.goal_deadline3 }].forEach(g => {
-            if (g.goal && g.deadline) {
-              const daysLeft = Math.ceil((new Date(g.deadline) - new Date(today)) / 86400000);
-              if (daysLeft >= 0) deadlineMessages.push(`「${g.goal}」まであと${daysLeft}日`);
-            }
-          });
-          const coachPrompt = `あなたは生徒に寄り添う教育コーチです。今日の振り返りをもとに、夜の締めくくりメッセージを送ってください。
+          const ctx = buildStudentContext(user.student_email, user);
+          const coachPrompt = `あなたは${user.name}の友人でもある教育コーチです。以下の情報をすべて把握した上で、夜の締めくくりメッセージを送ってください。
 
-【生徒名】${user.name}
-【目標】${goalsText}
-【期限情報】${deadlineMessages.length > 0 ? deadlineMessages.join("、") : "期限未設定"}
+${ctx}
 【今日のスコア】${report.score}点
-【良かった点】${report.highlights}
-【改善点】${report.improvement}
-【連続記録日数】${streak}日
+【今日の良かった点】${report.highlights}
+【今日の改善点】${report.improvement}
 
-【方針】
-- 今日の頑張りを具体的に承認する
-- 明日への期待と小さな一歩を伝える
-- 目標の期限を意識しつつ前向きに締める
-- 3〜4文で。絵文字1〜2個OK`;
+【スタイル】
+- 敬語とタメ語を自然に混ぜる
+- ユーモアを1つ入れて人間味を出す
+- 「---」「【】」「〇〇へのメッセージ」「〇〇案：」「〇〇さんへ」などの見出し・宛名・区切りは絶対使わない
+- 本文だけをそのまま書く。前置きや宛名・説明は一切不要
+- 全レポート履歴を踏まえて成長や変化に具体的に触れてから明日につなげる
+- 3〜4文。絵文字1〜2個OK`;
 
           const res = UrlFetchApp.fetch("https://api.anthropic.com/v1/messages", {
             method: "POST",
@@ -748,7 +703,7 @@ function nightlyReport() {
           });
           const result = JSON.parse(res.getContentText());
           if (result.content && result.content[0]) {
-            sendLineMessage(user.line_user_id, "💬 コーチより\n\n" + result.content[0].text);
+            sendLineMessage(user.line_user_id, result.content[0].text);
           }
         }
       } catch(e) { Logger.log("nightly coach message error: " + e); }
@@ -795,54 +750,15 @@ function generateReportWithClaude(studentEmail, studentName, logs) {
   if (!apiKey) { Logger.log("CLAUDE_API_KEY が未設定"); return null; }
 
   const user = sheetToObjects(getSheet("Users")).find(u => u.student_email === studentEmail);
-  const goalsText = user ? [
-    user.goal ? `① ${user.goal}${user.goal_deadline ? "（期限：" + user.goal_deadline + "）" : ""}` : "",
-    user.goal2 ? `② ${user.goal2}${user.goal_deadline2 ? "（期限：" + user.goal_deadline2 + "）" : ""}` : "",
-    user.goal3 ? `③ ${user.goal3}${user.goal_deadline3 ? "（期限：" + user.goal_deadline3 + "）" : ""}` : "",
-  ].filter(Boolean).join("\n") || "未設定" : "未設定";
+  const ctx = buildStudentContext(studentEmail, user);
+
   const totalBlocks = logs.length;
   const withMemo = logs.filter(l => l.memo && l.memo.trim()).length;
-  const focusVariety = new Set(logs.map(l => l.focus_level)).size;
   const goalRelatedCount = logs.filter(l => l.goal_related === "true" || l.goal_related === true).length;
   const goalRelatedPct = totalBlocks > 0 ? Math.round(goalRelatedCount / totalBlocks * 100) : 0;
-  const avgFocusScore = logs.length > 0
-    ? (logs.reduce((sum, l) => sum + (parseInt(l.focus_level) || 3), 0) / logs.length).toFixed(1)
-    : "データなし";
-
-  // 過去30日分のレポート履歴を取得
-  const pastReports = sheetToObjects(getSheet("Reports"))
-    .filter(r => r.student_email === studentEmail)
-    .sort((a, b) => b.date > a.date ? 1 : -1)
-    .slice(0, 30);
-
-  // 過去7日分のログ統計
-  const allLogs = sheetToObjects(getSheet("DailyLog")).filter(l => l.student_email === studentEmail);
-  const sevenDaysAgo = formatDate(new Date(Date.now() - 7 * 86400000));
-  const recentLogs = allLogs.filter(l => l.date >= sevenDaysAgo);
-  const avgFocusRecent = recentLogs.length > 0
-    ? (recentLogs.filter(l => l.focus_level === "高").length / recentLogs.length * 100).toFixed(0) + "%"
-    : "データなし";
-
-  const historyText = pastReports.length > 0
-    ? pastReports.slice(0, 7).map(r => r.date + ": スコア" + r.score + "点 / " + r.feedback).join("\n")
-    : "なし（初回レポート）";
-
   const logsText = logs.map(l => l.time_block + " - " + l.task + "（集中度：" + l.focus_level + (l.goal_related === "true" ? "、目標関連" : "") + (l.memo ? "、メモ：" + l.memo : "") + "）").join("\n");
 
-  // 目標期限までの残り日数
-  const today2 = formatDate(new Date());
-  const deadlineInfo2 = [];
-  [{ goal: user.goal, deadline: user.goal_deadline }, { goal: user.goal2, deadline: user.goal_deadline2 }, { goal: user.goal3, deadline: user.goal_deadline3 }].forEach(g => {
-    if (g.goal && g.deadline) {
-      const daysLeft = Math.ceil((new Date(g.deadline) - new Date(today2)) / 86400000);
-      const totalDays = Math.ceil((new Date(g.deadline) - new Date(user.joined_at || today2)) / 86400000);
-      const progress = totalDays > 0 ? Math.round((1 - daysLeft / totalDays) * 100) : 0;
-      deadlineInfo2.push(`「${g.goal}」: 期限まで残り${daysLeft}日（経過率${progress}%）`);
-    }
-  });
-  const deadlineText2 = deadlineInfo2.length > 0 ? deadlineInfo2.join("\n") : "期限未設定";
-
-  const prompt = `あなたは生徒一人ひとりに寄り添う教育コーチです。以下の方針と情報をもとに、今日の振り返りレポートを生成してください。
+  const prompt = `あなたは生徒一人ひとりに寄り添う教育コーチです。以下の情報をすべて把握した上で、今日の振り返りレポートを生成してください。
 
 【コーチの方針】
 - 基本は肯定的・共感的。生徒を信じて応援するスタンスを崩さない
@@ -850,17 +766,11 @@ function generateReportWithClaude(studentEmail, studentName, logs) {
 - 目標の期限に対する「現在地」を具体的に言語化して伝える
 - 今の取り組みが目標達成にどうつながるかを示す
 - 継続できていることは積極的に称える
+- 全レポート履歴を踏まえてスコアのトレンドや変化を具体的に読み取ること
 
-【生徒名】${studentName}
-【目標と期限までの現在地】
-${deadlineText2}
-【目標詳細】
-${goalsText}
-【過去7日の高集中率】${avgFocusRecent}
-【直近レポート履歴】
-${historyText}
+${ctx}
 
-【今日のログ（${totalBlocks}ブロック、メモ${withMemo}個、目標関連${goalRelatedCount}ブロック(${goalRelatedPct}%)、平均集中度${avgFocusScore}）】
+【今日のログ（${totalBlocks}ブロック、メモ${withMemo}個、目標関連${goalRelatedCount}ブロック(${goalRelatedPct}%)）】
 ${logsText}
 
 【採点基準（各20点・合計100点）】
@@ -877,7 +787,7 @@ ${logsText}
   "highlights": "<今日の具体的な良かった点を1文で称える>",
   "improvement": "<責めずに前向きな改善提案または継続すべき点を1文で>",
   "action": "<目標達成に向けた明日の具体的アクションを1-2文で>",
-  "trend": "<スコア推移から見える成長・変化のトレンドを1文で>"
+  "trend": "<全レポート履歴から見える成長・変化のトレンドを1文で>"
 }`;
 
   const res = UrlFetchApp.fetch("https://api.anthropic.com/v1/messages", {
@@ -901,6 +811,184 @@ ${logsText}
     if (!m) { Logger.log("JSONが見つかりません"); return null; }
     return JSON.parse(m[0]);
   } catch (e) { Logger.log("JSONパースエラー: " + e.toString()); return null; }
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// 生徒コンテキスト構築（全プロンプト共通）
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+function buildStudentContext(studentEmail, user) {
+  const today = formatDate(new Date());
+
+  // 直近14日の生ログ
+  const fourteenDaysAgo = formatDate(new Date(Date.now() - 14 * 86400000));
+  const allLogs = sheetToObjects(getSheet("DailyLog")).filter(l => l.student_email === studentEmail);
+  const recentLogs = allLogs.filter(l => l.date >= fourteenDaysAgo);
+  const logsByDay = {};
+  recentLogs.forEach(l => {
+    if (!logsByDay[l.date]) logsByDay[l.date] = [];
+    logsByDay[l.date].push(l);
+  });
+  const recentLogsText = Object.entries(logsByDay)
+    .sort((a,b) => a[0] > b[0] ? 1 : -1)
+    .map(([date, dayLogs]) => {
+      const entries = dayLogs
+        .sort((a,b) => a.time_block > b.time_block ? 1 : -1)
+        .map(l => l.time_block + " " + l.task + "（" + l.focus_level + (l.goal_related === "true" ? "・目標関連" : "") + (l.memo ? "・" + l.memo : "") + "）");
+      return date + ":\n  " + entries.join("\n  ");
+    })
+    .join("\n") || "記録なし";
+
+  // 月次サマリー（全期間・古い順）
+  const monthlySummaries = sheetToObjects(getSheet("MonthlySummary"))
+    .filter(r => r.student_email === studentEmail)
+    .sort((a,b) => a.month > b.month ? 1 : -1);
+  const summariesText = monthlySummaries.length > 0
+    ? monthlySummaries.map(r => `【${r.month}】\n${r.summary}`).join("\n\n")
+    : "まだ月次サマリーなし（入会1ヶ月未満）";
+
+  // 直近30日のレポート履歴（月次サマリーを補完）
+  const thirtyDaysAgo = formatDate(new Date(Date.now() - 30 * 86400000));
+  const allReports = sheetToObjects(getSheet("Reports"))
+    .filter(r => r.student_email === studentEmail)
+    .sort((a,b) => b.date > a.date ? 1 : -1);
+  const recentReports = allReports.filter(r => r.date >= thirtyDaysAgo);
+  const reportsText = recentReports.length > 0
+    ? recentReports.map(r => `${r.date}: ${r.score}点 / 良：${r.highlights} / 改善：${r.improvement}`).join("\n")
+    : allReports.length > 0
+      ? allReports.slice(0,7).map(r => `${r.date}: ${r.score}点 / 良：${r.highlights} / 改善：${r.improvement}`).join("\n")
+      : "まだレポートなし";
+
+  // 全期間スコアトレンド
+  const allScores = allReports.map(r => Number(r.score));
+  const avgScore = allScores.length > 0 ? Math.round(allScores.reduce((a,b)=>a+b,0)/allScores.length) : null;
+  const scoreTrend = avgScore !== null ? `全期間平均${avgScore}点（${allScores.length}日分）` : "データなし";
+
+  // 目標と期限
+  const goalsWithDeadline = [
+    { goal: user.goal, deadline: user.goal_deadline },
+    { goal: user.goal2, deadline: user.goal_deadline2 },
+    { goal: user.goal3, deadline: user.goal_deadline3 }
+  ].filter(g => g.goal).map((g, i) => {
+    const daysLeft = g.deadline ? Math.ceil((new Date(g.deadline) - new Date(today)) / 86400000) : null;
+    const totalDays = g.deadline && user.joined_at ? Math.ceil((new Date(g.deadline) - new Date(user.joined_at)) / 86400000) : null;
+    const progress = totalDays > 0 && daysLeft !== null ? Math.round((1 - daysLeft / totalDays) * 100) : null;
+    return `目標${i+1}: ${g.goal}` +
+      (daysLeft !== null ? `（期限まで残り${daysLeft}日` + (progress !== null ? `・経過率${progress}%` : "") + "）" : "（期限未設定）");
+  });
+  const goalsText = goalsWithDeadline.length > 0 ? goalsWithDeadline.join("\n") : "未設定";
+
+  const streak = Number(user.streak || 0);
+  const totalBlocks = allLogs.length;
+  const totalDaysRecorded = new Set(allLogs.map(l => l.date)).size;
+
+  return `【生徒名】${user.name}
+【入会日】${user.joined_at || "不明"}
+【連続記録日数】${streak}日
+【全期間の記録】合計${totalDaysRecorded}日・${totalBlocks}ブロック
+【目標と期限】
+${goalsText}
+【全期間スコアトレンド】${scoreTrend}
+【月次サマリー（入会〜先月まで）】
+${summariesText}
+【直近30日のレポート履歴】
+${reportsText}
+【直近14日の詳細ログ】
+${recentLogsText}`;
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// 月次サマリー生成（毎月1日に実行）
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+function generateMonthlySummaries() {
+  const now = new Date();
+  // 先月の年月を取得
+  const lastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  const monthStr = lastMonth.getFullYear() + "-" + String(lastMonth.getMonth() + 1).padStart(2, "0");
+  const monthStart = monthStr + "-01";
+  const monthEnd = monthStr + "-31";
+
+  const apiKey = PropertiesService.getScriptProperties().getProperty("CLAUDE_API_KEY");
+  if (!apiKey) return;
+
+  const summarySheet = getSheet("MonthlySummary") || SpreadsheetApp.openById(SPREADSHEET_ID).insertSheet("MonthlySummary");
+  if (summarySheet.getLastRow() === 0) {
+    summarySheet.appendRow(["month", "student_email", "summary", "created_at"]);
+  }
+
+  sheetToObjects(getSheet("Users")).filter(u => u.is_active.toUpperCase() === "TRUE").forEach(user => {
+    try {
+      // 既に先月のサマリーがあればスキップ
+      const existing = sheetToObjects(summarySheet).find(r => r.student_email === user.student_email && r.month === monthStr);
+      if (existing) return;
+
+      // 先月のログ
+      const monthLogs = sheetToObjects(getSheet("DailyLog"))
+        .filter(l => l.student_email === user.student_email && l.date >= monthStart && l.date <= monthEnd)
+        .sort((a,b) => a.date > b.date ? 1 : -1);
+      if (monthLogs.length === 0) {
+        summarySheet.appendRow([monthStr, user.student_email, "記録なし（この月は活動なし）", new Date().toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" })]);
+        return;
+      }
+
+      // 先月のレポート
+      const monthReports = sheetToObjects(getSheet("Reports"))
+        .filter(r => r.student_email === user.student_email && r.date >= monthStart && r.date <= monthEnd)
+        .sort((a,b) => a.date > b.date ? 1 : -1);
+
+      // 統計
+      const activeDays = new Set(monthLogs.map(l => l.date)).size;
+      const totalBlocks = monthLogs.length;
+      const goalRelatedCount = monthLogs.filter(l => l.goal_related === "true").length;
+      const focusCounts = monthLogs.reduce((acc, l) => { acc[l.focus_level] = (acc[l.focus_level] || 0) + 1; return acc; }, {});
+      const focusSummary = Object.entries(focusCounts).map(([k,v]) => `${k}:${v}件`).join("、");
+      const taskCounts = monthLogs.reduce((acc, l) => { if (l.task) acc[l.task] = (acc[l.task] || 0) + 1; return acc; }, {});
+      const topTasks = Object.entries(taskCounts).sort((a,b)=>b[1]-a[1]).slice(0,5).map(([t,c])=>`${t}(${c}回)`).join("、");
+      const avgScore = monthReports.length > 0
+        ? Math.round(monthReports.reduce((s,r)=>s+Number(r.score),0)/monthReports.length)
+        : null;
+      const scoreRange = monthReports.length > 0
+        ? `最高${Math.max(...monthReports.map(r=>Number(r.score)))}点・最低${Math.min(...monthReports.map(r=>Number(r.score)))}点`
+        : "レポートなし";
+
+      const logsText = monthLogs.map(l => l.date + " " + l.time_block + " " + l.task + "（" + l.focus_level + (l.goal_related === "true" ? "・目標関連" : "") + (l.memo ? "・" + l.memo : "") + "）").join("\n");
+
+      const prompt = `以下のデータをもとに、${user.name}の${monthStr}の活動を次のコーチへの引き継ぎ文として簡潔にまとめてください。
+
+【${monthStr}の統計】
+- 記録日数: ${activeDays}日 / ${totalBlocks}ブロック
+- 集中度内訳: ${focusSummary}
+- 目標関連: ${goalRelatedCount}ブロック
+- よく取り組んだこと: ${topTasks}
+- スコア: 平均${avgScore !== null ? avgScore + "点" : "データなし"}（${scoreRange}）
+
+【全ログ】
+${logsText}
+
+【要件】
+- 箇条書きなし・見出しなし。自然な文章で3〜5文
+- この月に何に取り組んだか、どんな状態だったか、良かった点と課題を含める
+- 次のコーチが読んで「この生徒はこういう人だ」とわかる引き継ぎ文にする
+- 宛名・前置き・説明は不要。本文だけ`;
+
+      const res = UrlFetchApp.fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
+        payload: JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: 400, messages: [{ role: "user", content: prompt }] }),
+        muteHttpExceptions: true
+      });
+      const result = JSON.parse(res.getContentText());
+      if (!result.content || !result.content[0]) return;
+
+      summarySheet.appendRow([monthStr, user.student_email, result.content[0].text, new Date().toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" })]);
+      Logger.log(user.student_email + ": " + monthStr + " 月次サマリー生成完了");
+    } catch(err) { Logger.log("monthlySummary error: " + err); }
+  });
+}
+
+function testGenerateMonthlySummary() {
+  generateMonthlySummaries();
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -972,7 +1060,8 @@ function setupSheets() {
     "DailyLog": ["log_id","student_email","date","time_block","task","focus_level","memo","timestamp","goal_related"],
     "Reports": ["date","student_email","score","feedback","action","highlights","improvement","created_at"],
     "Messages": ["message_id","student_email","content","sender_name","sender_photo","sender_role","timestamp","is_read"],
-    "Coaches": ["coach_email","coach_name","assigned_students"]
+    "Coaches": ["coach_email","coach_name","assigned_students"],
+    "MonthlySummary": ["month","student_email","summary","created_at"]
   };
   Object.entries(sheets).forEach(([name, headers]) => {
     let s = ss.getSheetByName(name);
@@ -986,6 +1075,7 @@ function setupTriggers() {
   ScriptApp.getProjectTriggers().forEach(t => ScriptApp.deleteTrigger(t));
   ScriptApp.newTrigger("morningScheduleNotify").timeBased().everyDays(1).atHour(7).create();
   ScriptApp.newTrigger("nightlyReport").timeBased().everyDays(1).atHour(21).create();
+  ScriptApp.newTrigger("generateMonthlySummaries").timeBased().onMonthDay(1).atHour(3).create();
   // 毎時ちょうどに届くよう、7〜23時それぞれにトリガーを設定
   for (let h = 7; h <= 23; h++) {
     ScriptApp.newTrigger("hourlyReminder").timeBased().everyDays(1).atHour(h).create();
