@@ -636,11 +636,13 @@ function LogScreen({onToast, isActive}) {
 
   const [block, setBlock] = useState(getCurrentBlock);
 
-  // タブを開くたびに現在時刻のブロックに更新（今日表示中のみ）
+  // タブを開くたびに現在時刻のブロックに更新してスクロール（今日表示中のみ）
   useEffect(()=>{
     if(isActive && isToday(date)) {
       const cur = getCurrentBlock();
       setBlock(cur);
+      loadBlockData(cur, logs);
+      setTimeout(()=>{ const el=timeRef.current?.querySelector(".chip.on"); if(el) el.scrollIntoView({inline:"center",behavior:"smooth"}); },100);
     }
   },[isActive]);
   const [task, setTask] = useState("");
