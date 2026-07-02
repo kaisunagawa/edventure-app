@@ -260,7 +260,7 @@
 
     /* ── Login ── */
     .login-wrap { height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 32px 24px; background: var(--bg); }
-    .login-logo { width: 52px; height: 52px; border-radius: 14px; background: var(--accent); display: flex; align-items: center; justify-content: center; margin: 0 auto 18px; }
+    .login-logo { width: 72px; height: 72px; margin: 0 auto 18px; }
     .login-title { font-size: 24px; font-weight: 700; letter-spacing: -.4px; text-align: center; color: var(--text); }
     .login-sub { font-size: 13px; color: var(--sub); text-align: center; margin: 5px 0 32px; line-height: 1.6; }
     .login-box { width: 100%; max-width: 320px; display: flex; flex-direction: column; gap: 8px; }
@@ -271,12 +271,19 @@
 </head>
 <body>
 <div id="root">
-  <div id="splash" style="height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;background:#F8F8FA;gap:16px">
-    <div style="width:56px;height:56px;border-radius:16px;background:linear-gradient(135deg,#7B7AE8,#A78BF5);display:flex;align-items:center;justify-content:center">
-      <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>
+  <div id="splash" style="height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;background:#F8F8FA;gap:20px">
+    <!-- 案Aロゴ: リングマーク -->
+    <svg width="80" height="80" viewBox="0 0 80 80" xmlns="http://www.w3.org/2000/svg">
+      <circle cx="40" cy="40" r="40" fill="#0891B2"/>
+      <circle cx="40" cy="40" r="28" fill="none" stroke="rgba(255,255,255,0.2)" stroke-width="5"/>
+      <path d="M40 12 A28 28 0 1 1 16.4 55.6" fill="none" stroke="#fff" stroke-width="5" stroke-linecap="round"/>
+      <text x="40" y="47" text-anchor="middle" font-family="DM Sans,-apple-system,sans-serif" font-size="24" font-weight="800" fill="#fff">J</text>
+    </svg>
+    <div style="display:flex;flex-direction:column;align-items:center;gap:4px">
+      <div style="font-family:'DM Sans',-apple-system,sans-serif;font-size:26px;font-weight:800;color:#1F2937;letter-spacing:-.3px">JIROKU</div>
+      <div style="font-family:'DM Sans',-apple-system,sans-serif;font-size:10px;font-weight:500;color:#9CA3AF;letter-spacing:2px">HABIT DESIGN</div>
     </div>
-    <div style="font-family:-apple-system,sans-serif;font-size:20px;font-weight:800;color:#1F2937;letter-spacing:-.3px">JIROKU</div>
-    <div style="width:24px;height:24px;border:2.5px solid #E5E7EB;border-top-color:#4F46E5;border-radius:50%;animation:sp 0.7s linear infinite"></div>
+    <div style="width:22px;height:22px;border:2.5px solid #E5E7EB;border-top-color:#0891B2;border-radius:50%;animation:sp 0.7s linear infinite;margin-top:8px"></div>
   </div>
   <style>#splash{animation:none}@keyframes sp{to{transform:rotate(360deg)}}</style>
 </div>
@@ -1527,7 +1534,7 @@ function LoginScreen({onLogin}) {
 
   if(step==="goal") return html`
     <div class="login-wrap" style=${{justifyContent:"flex-start",paddingTop:48}}>
-      <div class="login-logo"><${S} n="clock" s=${26}/></div>
+      <div class="login-logo"><svg width="72" height="72" viewBox="0 0 72 72" xmlns="http://www.w3.org/2000/svg"><circle cx="36" cy="36" r="36" fill="#0891B2"/><circle cx="36" cy="36" r="25" fill="none" stroke="rgba(255,255,255,0.2)" stroke-width="4.5"/><path d="M36 11 A25 25 0 1 1 14.5 50" fill="none" stroke="#fff" stroke-width="4.5" stroke-linecap="round"/><text x="36" y="43" text-anchor="middle" font-family="DM Sans,-apple-system,sans-serif" font-size="21" font-weight="800" fill="#fff">J</text></svg></div>
       <div class="login-title">はじめまして 👋</div>
       <div class="login-sub" style=${{marginBottom:24}}>${pendingUser?.name}さん、目標を教えてください（最大3つ）</div>
       <div class="login-box">
@@ -1560,7 +1567,7 @@ function LoginScreen({onLogin}) {
     }
     return html`
       <div class="login-wrap">
-        <div class="login-logo"><${S} n="clock" s=${26}/></div>
+        <div class="login-logo"><svg width="72" height="72" viewBox="0 0 72 72" xmlns="http://www.w3.org/2000/svg"><circle cx="36" cy="36" r="36" fill="#0891B2"/><circle cx="36" cy="36" r="25" fill="none" stroke="rgba(255,255,255,0.2)" stroke-width="4.5"/><path d="M36 11 A25 25 0 1 1 14.5 50" fill="none" stroke="#fff" stroke-width="4.5" stroke-linecap="round"/><text x="36" y="43" text-anchor="middle" font-family="DM Sans,-apple-system,sans-serif" font-size="21" font-weight="800" fill="#fff">J</text></svg></div>
         <div class="login-title">JIROKU</div>
         <div style=${{textAlign:"center",padding:"0 24px"}}>
           <div style=${{fontSize:48,marginBottom:16}}>🌐</div>
@@ -1579,7 +1586,7 @@ function LoginScreen({onLogin}) {
 
   return html`
     <div class="login-wrap">
-      <div class="login-logo"><${S} n="clock" s=${26}/></div>
+      <div class="login-logo"><svg width="72" height="72" viewBox="0 0 72 72" xmlns="http://www.w3.org/2000/svg"><circle cx="36" cy="36" r="36" fill="#0891B2"/><circle cx="36" cy="36" r="25" fill="none" stroke="rgba(255,255,255,0.2)" stroke-width="4.5"/><path d="M36 11 A25 25 0 1 1 14.5 50" fill="none" stroke="#fff" stroke-width="4.5" stroke-linecap="round"/><text x="36" y="43" text-anchor="middle" font-family="DM Sans,-apple-system,sans-serif" font-size="21" font-weight="800" fill="#fff">J</text></svg></div>
       <div class="login-title">JIROKU</div>
       <div class="login-sub">時間を記録し、目標を達成する</div>
       <div class="login-box" style=${{alignItems:"center"}}>
