@@ -945,6 +945,39 @@ function TimerScreen({onToast, isActive}) {
     } catch(e){}
   };
 
+  // バックグラウンド復帰時に経過時間を補正する
+  const timeLeftRef = useRef(timeLeft);
+  const isRunningRef = useRef(isRunning);
+  const selectedMinRef = useRef(selectedMin);
+  const modeRef = useRef(mode);
+  useEffect(()=>{ timeLeftRef.current = timeLeft; },[timeLeft]);
+  useEffect(()=>{ isRunningRef.current = isRunning; },[isRunning]);
+  useEffect(()=>{ selectedMinRef.current = selectedMin; },[selectedMin]);
+  useEffect(()=>{ modeRef.current = mode; },[mode]);
+
+  useEffect(()=>{
+    const onVisible = () => {
+      if(document.visibilityState === 'visible' && isRunningRef.current) {
+        try {
+          const s = JSON.parse(localStorage.getItem("jiroku_timer_state")||"null");
+          if(s && s.isRunning && s.savedAt) {
+            const elapsed = Math.floor((Date.now() - s.savedAt) / 1000);
+            const corrected = Math.max(0, s.timeLeft - elapsed);
+            setTimeLeft(corrected);
+            if(corrected <= 0) {
+              setIsRunning(false);
+              playBeep();
+              if(modeRef.current === "focus"){ setSessionCount(c=>c+1); setShowModal(true); }
+              else { setMode("focus"); setTimeLeft(selectedMinRef.current*60); }
+            }
+          }
+        } catch(e){}
+      }
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return ()=>document.removeEventListener('visibilitychange', onVisible);
+  },[]);
+
   useEffect(()=>{
     if(!isRunning) return;
     if(timeLeft<=0){
@@ -957,9 +990,6 @@ function TimerScreen({onToast, isActive}) {
     const t = setTimeout(()=>setTimeLeft(s=>s-1), 1000);
     return ()=>clearTimeout(t);
   },[isRunning, timeLeft]);
-
-  // タブを離れたら自動一時停止（タイマーが残り時間ある場合のみ）
-  useEffect(()=>{ if(!isActive && isRunning && timeLeft>0) setIsRunning(false); },[isActive, isRunning, timeLeft]);
 
   const selectPreset = (min) => {
     setSelectedMin(min); setTimeLeft(min*60);
