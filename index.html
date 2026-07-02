@@ -977,7 +977,8 @@ function TimerScreen({onToast, isActive}) {
     url.searchParams.set("focus_level",logFocus);
     url.searchParams.set("memo",logMemo.trim());
     url.searchParams.set("goal_related","true");
-    const res = await fetch(url).then(r=>r.json()).catch(()=>({}));
+    const res = await fetch(url).then(r=>r.json()).catch(()=>({error:true}));
+    if(res.error){ onToast("記録に失敗しました。もう一度お試しください"); setSaving(false); return; }
     if(res.xp_gained){ const lv=res.level_up?` → Lv.${res.level}！`:""; onToast(`+${res.xp_gained} XP 獲得${lv}`); }
     else onToast("記録しました");
     setSaving(false); setShowModal(false); setLogMemo("");
@@ -1118,6 +1119,9 @@ function TimerScreen({onToast, isActive}) {
           </button>
           <button onClick=${skipLog} style=${{width:"100%",background:"none",border:"none",color:"var(--sub)",fontSize:13,padding:"8px",cursor:"pointer"}}>
             スキップ（記録しない）
+          </button>
+          <button onClick=${()=>{setShowModal(false);}} style=${{width:"100%",background:"none",border:"none",color:"var(--sub)",fontSize:12,padding:"4px",cursor:"pointer",marginTop:2}}>
+            ← タイマーに戻る
           </button>
         </div>
       </div>
