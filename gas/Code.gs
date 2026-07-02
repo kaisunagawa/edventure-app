@@ -407,7 +407,7 @@ ${logSummary}`;
     const result = JSON.parse(response.getContentText());
     if (!result.content || !result.content[0]) return;
 
-    const replyText = result.content[0].text;
+    const replyText = stripSalutation(result.content[0].text);
     const sheet = getSheet("Messages");
     const msgId = "msg_" + Date.now();
     const now = new Date().toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" });
@@ -415,7 +415,7 @@ ${logSummary}`;
 
     // LINEで通知
     if (user.line_user_id) {
-      sendLineMessage(user.line_user_id, replyText);
+      sendLineMessage(user.line_user_id, "🤖 習慣AIコーチより\n\n" + replyText);
     }
   } catch (err) {
     Logger.log("autoReplyFromClaude error: " + err.toString());
@@ -531,7 +531,7 @@ ${ctx}
       });
       const result = JSON.parse(res.getContentText());
       if (!result.content || !result.content[0]) return;
-      sendLineMessage(user.line_user_id, "🌅 おはようございます、" + user.name + "さん！\n\n" + result.content[0].text);
+      sendLineMessage(user.line_user_id, "🌅 おはようございます、" + user.name + "さん！\n\n" + stripSalutation(result.content[0].text));
     } catch (err) { Logger.log("morningCoach error: " + err); }
   });
 }
@@ -600,7 +600,7 @@ ${ctx}
           });
           const result = JSON.parse(res.getContentText());
           if (result.content && result.content[0]) {
-            sendLineMessage(user.line_user_id, result.content[0].text + "\n\n📝 " + timeBlock + " の記録はこちらから↓\nhttps://kaisunagawa.github.io/edventure-app/");
+            sendLineMessage(user.line_user_id, "🤖 習慣AIコーチより\n\n" + stripSalutation(result.content[0].text) + "\n\n📝 " + timeBlock + " の記録はこちらから↓\nhttps://kaisunagawa.github.io/edventure-app/");
             return;
           }
         } catch(e) { Logger.log("hourlyCoach error: " + e); }
@@ -703,7 +703,7 @@ ${ctx}
           });
           const result = JSON.parse(res.getContentText());
           if (result.content && result.content[0]) {
-            sendLineMessage(user.line_user_id, result.content[0].text);
+            sendLineMessage(user.line_user_id, "🤖 習慣AIコーチより\n\n" + stripSalutation(result.content[0].text));
           }
         }
       } catch(e) { Logger.log("nightly coach message error: " + e); }
@@ -994,6 +994,27 @@ function testGenerateMonthlySummary() {
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // LINE
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+// Claudeが生成した宛名行（「〇〇へ」「〇〇さん、」など）を除去する
+function stripSalutation(text) {
+  if (!text) return text;
+  const lines = text.split('\n');
+  const first = lines[0].trim();
+  // 短い行（30文字未満）で「へ」「さんへ」「さん、」「さん,」で終わるなら宛名と判断して除去
+  if (first.length < 30 && /(へ$|さんへ$|くんへ$|ちゃんへ$|さん[、,]$|さん$)/.test(first)) {
+    lines.shift();
+    while (lines.length > 0 && lines[0].trim() === '') lines.shift();
+    return lines.join('\n').trim();
+  }
+  // 「〇〇さん、」が行頭にある場合（名前+さん+読点で始まる）も除去
+  const salutationInline = first.match(/^.{1,15}さん[、,]\s*/);
+  if (salutationInline) {
+    lines[0] = first.slice(salutationInline[0].length);
+    if (!lines[0].trim()) lines.shift();
+    return lines.join('\n').trim();
+  }
+  return text.trim();
+}
 
 function sendLineMessage(lineUserId, text) {
   if (!lineUserId || !LINE_CHANNEL_TOKEN) return;
