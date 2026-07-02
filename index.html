@@ -1127,12 +1127,12 @@ function TimerScreen({onToast, isActive}) {
 
 // ── Settings ──
 function SettingsScreen({onToast,onLogout,onGoalSaved}) {
-  const saved=JSON.parse(localStorage.getItem("notifySettings")||'{"start":7,"end":23,"interval":1}');
+  const saved=JSON.parse(localStorage.getItem("notifySettings")||'{"start":7,"end":23,"interval":2}');
   const savedGoals=JSON.parse(localStorage.getItem("jiroku_goals")||'[{"goal":"","deadline":""}]');
   const savedLogHours=getLogHours();
   const [start,setStart]=useState(saved.start);
   const [end,setEnd]=useState(saved.end);
-  const [interval,setInterval]=useState(saved.interval||1);
+  const [interval,setInterval]=useState(saved.interval||2);
   const [logStart,setLogStart]=useState(savedLogHours.start);
   const [logEnd,setLogEnd]=useState(savedLogHours.end);
   const PRESET_OPTIONS=[15,20,25,30,45,60,90];
