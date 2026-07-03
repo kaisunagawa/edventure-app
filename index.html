@@ -1528,13 +1528,16 @@ function TimerScreen({onToast, isActive}) {
   const primeAudio = () => {
     try {
       const el = getAudioEl();
-      el.volume = 0.001;
-      el.play().then(()=>{ el.pause(); el.currentTime = 0; el.volume = 1; }).catch(()=>{});
+      el.volume = 0.35;
+      el.currentTime = 0;
+      el.play().catch(()=>{});
     } catch(e){}
+    try { navigator.vibrate?.(80); } catch(e){}
   };
   const playBeep = () => {
     try {
       const el = getAudioEl();
+      el.volume = 1;
       el.currentTime = 0;
       el.play().catch(()=>{});
     } catch(e){}
