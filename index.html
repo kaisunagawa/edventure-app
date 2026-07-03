@@ -913,7 +913,7 @@ function LogScreen({onToast, isActive}) {
     }
   },[isActive]);
   const [task, setTask] = useState("");
-  const [focus, setFocus] = useState(EVALS[0].l);
+  const [focus, setFocus] = useState("");
   const [memo, setMemo] = useState("");
   const [goalRelated, setGoalRelated] = useState(false);
 
@@ -952,11 +952,11 @@ function LogScreen({onToast, isActive}) {
     const existing = currentLogs.find(l => l.time_block === b);
     if (existing) {
       setTask(existing.task || "");
-      setFocus(existing.focus_level || EVALS[0].l);
+      setFocus(existing.focus_level || "");
       setMemo(existing.memo || "");
       setGoalRelated(existing.goal_related === "true" || existing.goal_related === true);
     } else {
-      setTask(""); setFocus(EVALS[0].l); setMemo(""); setGoalRelated(false);
+      setTask(""); setFocus(""); setMemo(""); setGoalRelated(false);
     }
   };
 
@@ -1389,7 +1389,7 @@ function TimerScreen({onToast, isActive}) {
   const [task, setTask]               = useState(saved?.task ?? "");
   const [startTime, setStartTime]     = useState(saved?.startTime ? new Date(saved.startTime) : null);
   const [showModal, setShowModal]     = useState(false);
-  const [logFocus, setLogFocus]       = useState(EVALS[0].l);
+  const [logFocus, setLogFocus]       = useState("");
   const [logMemo, setLogMemo]         = useState("");
   const [logGoalRelated, setLogGoalRelated] = useState(true);
   const [saving, setSaving]           = useState(false);
