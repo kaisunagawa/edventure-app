@@ -1043,14 +1043,21 @@ function JournalSection({date, logs}) {
     setSaving(false);
   };
 
-  // 予定と記録の対比（タイトルの部分一致で「記録あり」判定）
-  const isDone=(ev)=>logs.some(l=>l.task&&(l.task.includes(ev.title)||ev.title.includes(l.task)));
+  // 予定と記録の対比: 予定の時間帯と重なる記録があるか（時間の重なり優先、なければタイトル一致で補完）
+  const isDone=(ev)=>{
+    if(!ev.allDay && ev.startHour!=null){
+      const byTime=logs.some(l=>{ const lh=parseInt(l.time_block); return !isNaN(lh) && lh < ev.endHour && (lh+1) > ev.startHour; });
+      if(byTime) return true;
+    }
+    return logs.some(l=>l.task&&(l.task.includes(ev.title)||ev.title.includes(l.task)));
+  };
 
   return html`<div>
     <!-- 予定と実績 -->
     ${events&&events.length>0&&html`
       <div class="card">
         <div class="card-label">予定と実績</div>
+        <div style=${{fontSize:11,color:"var(--sub)",marginBottom:10,lineHeight:1.6}}>予定の時間帯に記録があれば「記録あり」になります</div>
         ${events.map((ev,i)=>html`
           <div key=${i} style=${{display:"flex",alignItems:"center",gap:10,padding:"8px 0",borderBottom:i<events.length-1?"1px solid var(--border)":"none"}}>
             <div style=${{fontSize:11,fontWeight:600,color:"var(--sub)",minWidth:42,flexShrink:0}}>${ev.time}</div>
@@ -1082,6 +1089,7 @@ function ReportScreen() {
   const [loading, setLoading]=useState(false);
   const [reportList, setReportList]=useState([]);
   const [listLoading, setListLoading]=useState(true);
+  const [view, setView]=useState("report"); // "report" | "diary"
 
   useEffect(()=>{
     gasApi("getReportList").then(r=>{
@@ -1095,7 +1103,7 @@ function ReportScreen() {
 
   useEffect(()=>{
     if(!date) return;
-    setLoading(true);
+    setLoading(true); setView("report");
     Promise.all([gasApi("getReport",{date}),gasApi("getLogs",{date})]).then(([r,l])=>{
       setReport(r.ok?r.data:null); if(l.ok) setLogs(l.data); setLoading(false);
     });
@@ -1147,6 +1155,9 @@ function ReportScreen() {
     <div style=${{display:"flex",justifyContent:"center",padding:40}}><div class="spin" style=${{borderColor:"var(--border)",borderTopColor:"var(--accent)",width:24,height:24,borderWidth:2}}/></div>
   </div>`;
 
+  const hasReport = !!report;
+  const currentView = hasReport ? view : "diary";
+
   return html`<div>
     <div class="ph">
       <button onClick=${()=>setDate(null)} style=${{background:"none",border:"none",color:"var(--accent)",fontSize:14,cursor:"pointer",padding:0,fontFamily:"inherit",marginBottom:4}}>← 一覧に戻る</button>
@@ -1154,14 +1165,29 @@ function ReportScreen() {
     </div>
 
     ${!report&&logs.length===0&&html`<div class="empty"><div class="empty-title">この日の記録はありません</div></div>`}
-    ${!report
-      ? null
-      : html`<div>
+
+    ${(report||logs.length>0)&&html`
+      <div style=${{display:"flex",gap:6,margin:"0 16px 4px",background:"var(--bg)",borderRadius:10,padding:3}}>
+        <button onClick=${()=>setView("report")} disabled=${!hasReport}
+          style=${{flex:1,padding:"8px",borderRadius:8,border:"none",cursor:hasReport?"pointer":"default",fontFamily:"inherit",fontSize:13,fontWeight:600,
+            background:currentView==="report"?"var(--card)":"transparent",color:currentView==="report"?"var(--accent)":"var(--sub)",
+            boxShadow:currentView==="report"?"0 1px 3px rgba(0,0,0,.08)":"none",opacity:hasReport?1:0.5}}>
+          📊 レポート
+        </button>
+        <button onClick=${()=>setView("diary")}
+          style=${{flex:1,padding:"8px",borderRadius:8,border:"none",cursor:"pointer",fontFamily:"inherit",fontSize:13,fontWeight:600,
+            background:currentView==="diary"?"var(--card)":"transparent",color:currentView==="diary"?"var(--accent)":"var(--sub)",
+            boxShadow:currentView==="diary"?"0 1px 3px rgba(0,0,0,.08)":"none"}}>
+          ✍️ 日記
+        </button>
+      </div>
+    `}
+
+    ${currentView==="report"&&report&&html`<div>
           <div class="report-hero" style=${{paddingTop:8}}>
             <div class="report-score">${report.score}</div>
             <div class="report-pts">/ 100点</div>
           </div>
-          ${logs.length>0&&html`<${JournalStats} logs=${logs}/>`}
           ${report.breakdown&&html`
             <div class="card">
               <div class="card-label">採点の内訳</div>
@@ -1188,7 +1214,12 @@ function ReportScreen() {
             ${report.highlights&&html`<div style=${{marginBottom:12}}><span class="tag t-g">良かった点</span><p style=${{fontSize:14,color:"var(--text)",marginTop:7,lineHeight:1.8}}>${report.highlights}</p></div>`}
             ${report.improvement&&html`<div><span class="tag t-a">改善点</span><p style=${{fontSize:14,color:"var(--text)",marginTop:7,lineHeight:1.8}}>${report.improvement}</p></div>`}
           </div>
-          ${report.action&&html`<div class="card"><div class="card-label">明日のアクション</div><p style=${{fontSize:14,lineHeight:1.8,color:"var(--text)"}}>${report.action}</p></div>`}
+          ${report.action&&html`<div class="card" style=${{marginBottom:24}}><div class="card-label">明日のアクション</div><p style=${{fontSize:14,lineHeight:1.8,color:"var(--text)"}}>${report.action}</p></div>`}
+        </div>`
+    }
+
+    ${currentView==="diary"&&html`<div>
+          ${logs.length>0&&html`<${JournalStats} logs=${logs}/>`}
           ${logs.length>0&&html`
             <div class="card" style=${{marginBottom:24}}>
               <div class="card-label">時間ログ</div>
@@ -1201,9 +1232,9 @@ function ReportScreen() {
               })}
             </div>
           `}
+          <${JournalSection} date=${date} logs=${logs}/>
         </div>`
     }
-    ${logs.length>0&&html`<${JournalSection} date=${date} logs=${logs}/>`}
   </div>`;
 }
 
