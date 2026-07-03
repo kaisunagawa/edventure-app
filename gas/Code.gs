@@ -203,7 +203,22 @@ function getReport(studentEmail, body) {
   const targetDate = (body && body.date) ? body.date : formatDate(new Date());
   const report = userRows.find(r => r.date === targetDate) || userRows[0];
   if (!report) return { ok: true, data: null };
-  return { ok: true, data: { score: Number(report.score), feedback: report.feedback, action: report.action, highlights: report.highlights, improvement: report.improvement, date: report.date } };
+  let breakdown = null;
+  if (report.breakdown) { try { breakdown = JSON.parse(report.breakdown); } catch (e) {} }
+  return { ok: true, data: { score: Number(report.score), breakdown: breakdown, feedback: report.feedback, action: report.action, highlights: report.highlights, improvement: report.improvement, date: report.date } };
+}
+
+// レポート行を保存（breakdown列は後付けのため動的にヘッダーを確保する）
+function appendReportRow(targetDate, studentEmail, report) {
+  const sheet = getSheet("Reports");
+  const newRow = sheet.getLastRow() + 1;
+  sheet.appendRow([targetDate, studentEmail, report.score, report.feedback, report.action, report.highlights, report.improvement, new Date().toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" })]);
+  if (report.breakdown) {
+    const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+    let bIdx = headers.indexOf("breakdown");
+    if (bIdx === -1) { bIdx = headers.length; sheet.getRange(1, bIdx + 1).setValue("breakdown"); }
+    sheet.getRange(newRow, bIdx + 1).setValue(JSON.stringify(report.breakdown));
+  }
 }
 
 function getLogs(studentEmail, body) {
@@ -692,7 +707,7 @@ function nightlyReport() {
       updateStreak(user.student_email);
       const report = generateReportWithClaude(user.student_email, user.name, logs);
       if (!report) return;
-      getSheet("Reports").appendRow([today, user.student_email, report.score, report.feedback, report.action, report.highlights, report.improvement, new Date().toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" })]);
+      appendReportRow(today, user.student_email, report);
       const latestUser = sheetToObjects(getSheet("Users")).find(u => u.student_email === user.student_email);
       const streak = Number(latestUser?.streak || 1);
       const streakMsg = streak >= 3 ? "\n\n🔥 連続" + streak + "日記録中！" : "";
@@ -817,21 +832,22 @@ ${ctx}
 【今日のログ（${totalBlocks}ブロック、メモ${withMemo}個、目標関連${goalRelatedCount}ブロック(${goalRelatedPct}%)）】
 ${logsText}
 
-【採点基準（各20点・合計100点）】
-- 記録数（20点）: 記録したブロック数
-- メモの質（20点）: 振り返りメモの深さと量
-- 集中度（20点）: 自己評価の平均スコア
-- 目標への取り組み（20点）: 目標関連の記録の割合
-- 継続性（20点）: 連続記録日数と継続状況
+【採点基準（各0〜20点・合計で100点満点のscoreになるようにする）】
+- records（20点）: 記録したブロック数の多さ
+- memo（20点）: 振り返りメモの深さと量
+- focus（20点）: 自己評価（集中度）の平均の高さ
+- goal（20点）: 目標関連の記録の割合の高さ
+- consistency（20点）: 連続記録日数・継続状況の良さ
 
 【文体ルール（全フィールド共通）】
 - 「〇〇さん」「お疲れ様です」などの宛名・挨拶は絶対に書かない。本文から始める
 - 毎日同じ書き出しにならないよう、直近レポートと違う切り口で書く
 - 抽象的な褒め言葉より、今日のログの具体的な内容・数字に触れる
 
-以下のJSON形式のみで返してください（説明文不要）：
+以下のJSON形式のみで返してください（説明文不要）。breakdownの5項目の合計は必ずscoreと一致させること：
 {
   "score": <0-100の整数>,
+  "breakdown": { "records": <0-20>, "memo": <0-20>, "focus": <0-20>, "goal": <0-20>, "consistency": <0-20> },
   "feedback": "<目標の現在地と今日の取り組みへの共感・承認を含む2-3文>",
   "highlights": "<今日の具体的な良かった点を1文で称える>",
   "improvement": "<責めずに前向きな改善提案または継続すべき点を1文で>",
@@ -1248,7 +1264,7 @@ function setupSheets() {
   const sheets = {
     "Users": ["student_email","name","line_user_id","coach_email","coach_line_id","google_calendar_id","chatwork_room","is_active","joined_at","notify_start","notify_end"],
     "DailyLog": ["log_id","student_email","date","time_block","task","focus_level","memo","timestamp","goal_related"],
-    "Reports": ["date","student_email","score","feedback","action","highlights","improvement","created_at"],
+    "Reports": ["date","student_email","score","feedback","action","highlights","improvement","created_at","breakdown"],
     "Messages": ["message_id","student_email","content","sender_name","sender_photo","sender_role","timestamp","is_read"],
     "Coaches": ["coach_email","coach_name","assigned_students"],
     "MonthlySummary": ["month","student_email","summary","created_at"],
@@ -1304,7 +1320,7 @@ function generateReportForDate(targetDate) {
 
       const report = generateReportWithClaude(user.student_email, user.name, logs);
       if (!report) { Logger.log("レポート生成失敗"); return; }
-      getSheet("Reports").appendRow([targetDate, user.student_email, report.score, report.feedback, report.action, report.highlights, report.improvement, new Date().toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" })]);
+      appendReportRow(targetDate, user.student_email, report);
       Logger.log(user.student_email + ": " + targetDate + " レポート生成完了 スコア=" + report.score);
     } catch(err) { Logger.log(err); }
   });
