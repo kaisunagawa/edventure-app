@@ -376,7 +376,7 @@ function getCalendarToken(interactive){
     }catch{ resolve(null); }
   });
 }
-const gcalCache={};
+const gcalCache={}, gcalSynced={};
 async function fetchCalendarEvents(dateStr, interactive=false){
   if(gcalCache[dateStr]) return gcalCache[dateStr];
   const token=await getCalendarToken(interactive);
@@ -399,6 +399,14 @@ async function fetchCalendarEvents(dateStr, interactive=false){
       };
     });
     gcalCache[dateStr]=evs;
+    // コーチが「予定×記録×目標」を見られるよう、取得した予定をスプレッドシートに同期
+    try{
+      if(CURRENT_USER && !gcalSynced[dateStr]){
+        gcalSynced[dateStr]=1;
+        const txt=evs.map(e=>e.allDay?("終日 "+e.title):(e.time+"〜 "+e.title)).join(" / ").slice(0,1200);
+        gasPost("syncCalendar",{date:dateStr,events:txt||"予定なし"});
+      }
+    }catch{}
     return evs;
   }catch{ return null; }
 }

@@ -52,6 +52,7 @@ function doGet(e) {
       case "saveLog":      result = saveLog(studentEmail, e.parameter); break;
       case "sendMessage":  result = sendMessage(studentEmail, e.parameter); break;
       case "saveSettings": result = saveSettings(studentEmail, e.parameter); break;
+      case "syncCalendar": result = syncCalendar(studentEmail, e.parameter); break;
       default: result = { ok: false, error: "Unknown action: " + action };
     }
     return jsonResponse(result, callback);
@@ -533,6 +534,7 @@ ${recentMsgs}
 - 本文だけをそのまま書く。前置きや説明・宛名は一切不要
 - 直近のコーチメッセージと同じ言い回し・内容・切り口は絶対に繰り返さない。毎回違う角度から話す
 - 全レポート履歴と直近14日のログを踏まえて、具体的なエピソードや数字に触れる
+- 今日のカレンダー予定がある場合は、目標との関係を意識しつつ今日の過ごし方に軽く触れる
 - 3文以内。絵文字1個まで。「おはようございます」は不要（冒頭に入れるため）`;
 
       const res = UrlFetchApp.fetch("https://api.anthropic.com/v1/messages", {
@@ -602,6 +604,7 @@ ${recentMsgs}
 【スタイル】
 - 1文だけ・40文字以内。LINEの通知でパッと読める長さ
 - 今日の状況に即した一言（記録済みなら軽く承認、未記録なら軽く後押し）
+- 今の時間帯にカレンダーの予定があれば、それに触れると効果的（例：「散歩どうだった？記録しとこ」）
 - 直近のコーチメッセージと同じ言い回しは使わない
 - 宛名・見出し・説明は一切なし。絵文字1個まで`;
 
@@ -724,6 +727,7 @@ ${recentMsgs}
 
 【スタイル】
 - レポートの内容（スコア・良かった点・改善点）を言い直さない。分析はもう終わってる
+- カレンダーの予定と実際の記録を見比べて、予定どおり実行できていた場面があれば具体的に承認する
 - 今日のログの中の具体的な一場面を1つだけ拾って、そこに一言添える
 - 敬語とタメ語を自然に混ぜる。友人が寝る前に送るLINEのような温度感
 - 「---」「【】」「〇〇さんへ」などの見出し・宛名は絶対使わない
@@ -798,6 +802,7 @@ function generateReportWithClaude(studentEmail, studentName, logs) {
 - 今の取り組みが目標達成にどうつながるかを示す
 - 継続できていることは積極的に称える
 - 全レポート履歴を踏まえてスコアのトレンドや変化を具体的に読み取ること
+- カレンダーの予定と実際の記録を照らし合わせ、予定を実行できたか（計画実行力）の視点も入れる
 
 ${ctx}
 
@@ -847,6 +852,44 @@ ${logsText}
     if (!m) { Logger.log("JSONが見つかりません"); return null; }
     return JSON.parse(m[0]);
   } catch (e) { Logger.log("JSONパースエラー: " + e.toString()); return null; }
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// カレンダー同期（アプリがユーザー本人の権限で取得した予定を保存）
+// GASからは他ユーザーのカレンダーを読めないため、アプリ経由でキャッシュする
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+function syncCalendar(studentEmail, body) {
+  if (!body.date || body.events === undefined) return { ok: false, error: "missing params" };
+  let sheet = getSheet("CalendarCache");
+  if (!sheet) {
+    sheet = SpreadsheetApp.openById(SPREADSHEET_ID).insertSheet("CalendarCache");
+    sheet.appendRow(["student_email", "date", "events", "updated_at"]);
+  }
+  const now = new Date().toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" });
+  const data = sheet.getDataRange().getValues();
+  for (let i = 1; i < data.length; i++) {
+    const rowDate = data[i][1] instanceof Date
+      ? Utilities.formatDate(data[i][1], "Asia/Tokyo", "yyyy-MM-dd")
+      : String(data[i][1]);
+    if (String(data[i][0]) === studentEmail && rowDate === String(body.date)) {
+      sheet.getRange(i + 1, 3).setValue(String(body.events).slice(0, 2000));
+      sheet.getRange(i + 1, 4).setValue(now);
+      return { ok: true, updated: true };
+    }
+  }
+  const newRow = sheet.getLastRow() + 1;
+  sheet.appendRow([studentEmail, "", String(body.events).slice(0, 2000), now]);
+  sheet.getRange(newRow, 2).setNumberFormat("@").setValue(String(body.date));
+  return { ok: true };
+}
+
+// 指定日のカレンダー予定キャッシュを取得
+function getCachedCalendar(studentEmail, dateStr) {
+  const sheet = getSheet("CalendarCache");
+  if (!sheet) return null;
+  const row = sheetToObjects(sheet).find(r => r.student_email === studentEmail && r.date === dateStr);
+  return row && row.events ? row.events : null;
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -918,10 +961,14 @@ function buildStudentContext(studentEmail, user) {
   const totalBlocks = allLogs.length;
   const totalDaysRecorded = new Set(allLogs.map(l => l.date)).size;
 
+  // 今日のカレンダー予定（アプリが同期したキャッシュ）
+  const todayPlan = getCachedCalendar(studentEmail, today);
+
   return `【生徒名】${user.name}
 【入会日】${user.joined_at || "不明"}
 【連続記録日数】${streak}日
 【全期間の記録】合計${totalDaysRecorded}日・${totalBlocks}ブロック
+【今日のカレンダー予定】${todayPlan || "未同期（予定情報なし）"}
 【目標と期限】
 ${goalsText}
 【全期間スコアトレンド】${scoreTrend}
@@ -1139,7 +1186,8 @@ function setupSheets() {
     "Reports": ["date","student_email","score","feedback","action","highlights","improvement","created_at"],
     "Messages": ["message_id","student_email","content","sender_name","sender_photo","sender_role","timestamp","is_read"],
     "Coaches": ["coach_email","coach_name","assigned_students"],
-    "MonthlySummary": ["month","student_email","summary","created_at"]
+    "MonthlySummary": ["month","student_email","summary","created_at"],
+    "CalendarCache": ["student_email","date","events","updated_at"]
   };
   Object.entries(sheets).forEach(([name, headers]) => {
     let s = ss.getSheetByName(name);
