@@ -1729,6 +1729,7 @@ function FAQSection(){
 function SettingsScreen({onToast,onLogout,onGoalSaved,profile,onProfileSaved}) {
   const [nickname,setNickname]=useState(profile?.nickname||CURRENT_USER.name);
   const [avatar,setAvatar]=useState(profile?.avatar||"🦊");
+  const [showAllAvatars,setShowAllAvatars]=useState(false);
   const saveProfile=async()=>{
     if(!nickname.trim()){ onToast("ニックネームを入力してください"); return; }
     const nn=nickname.trim();
@@ -1859,14 +1860,21 @@ function SettingsScreen({onToast,onLogout,onGoalSaved,profile,onProfileSaved}) {
         <label class="form-lbl" style=${{fontSize:11}}>ニックネーム（他の人に表示される名前）</label>
         <input class="inp" value=${nickname} maxLength=${20} onChange=${e=>setNickname(e.target.value)} style=${{marginBottom:14}}/>
         <div class="form-lbl" style=${{fontSize:11,marginBottom:8}}>アバター</div>
-        <div style=${{display:"grid",gridTemplateColumns:"repeat(5, 1fr)",gap:8,marginBottom:14}}>
-          ${AVATAR_OPTIONS.map(a=>html`
+        <div style=${{display:"grid",gridTemplateColumns:"repeat(4, 1fr)",gap:8,marginBottom:8}}>
+          ${(showAllAvatars?AVATAR_OPTIONS:AVATAR_OPTIONS.slice(0,8)).map(a=>html`
             <button key=${a} onClick=${()=>setAvatar(a)}
               style=${{fontSize:22,padding:"8px 0",borderRadius:12,border:`2px solid ${avatar===a?"var(--accent)":"var(--border)"}`,background:avatar===a?"var(--accent-bg, rgba(8,145,178,0.1))":"transparent",cursor:"pointer"}}>
               ${a}
             </button>
           `)}
         </div>
+        ${!showAllAvatars&&html`
+          <button onClick=${()=>setShowAllAvatars(true)}
+            style=${{background:"none",border:"none",color:"var(--accent)",fontSize:12.5,fontWeight:600,cursor:"pointer",padding:"2px 0 14px",width:"100%",textAlign:"center"}}>
+            もっと見る（他${AVATAR_OPTIONS.length-8}種類）
+          </button>
+        `}
+        ${showAllAvatars&&html`<div style=${{marginBottom:14}}/>`}
         <button class="btn" onClick=${saveProfile}>保存する</button>
       </div>
 
@@ -2046,6 +2054,7 @@ function LoginScreen({onLogin}) {
   const [pendingUser,setPendingUser]=useState(null);
   const [nickname,setNickname]=useState("");
   const [avatar,setAvatar]=useState(AVATAR_OPTIONS[0]);
+  const [showAllAvatars,setShowAllAvatars]=useState(false);
 
   // Googleリダイレクト後のid_tokenを検出
   useEffect(()=>{
@@ -2189,14 +2198,20 @@ function LoginScreen({onLogin}) {
         </div>
         <div style=${{background:"var(--card)",borderRadius:12,padding:"14px",border:"1px solid var(--border)"}}>
           <div style=${{fontSize:11,color:"var(--sub)",marginBottom:8}}>アバターを選ぶ</div>
-          <div style=${{display:"grid",gridTemplateColumns:"repeat(5, 1fr)",gap:8}}>
-            ${AVATAR_OPTIONS.map(a=>html`
+          <div style=${{display:"grid",gridTemplateColumns:"repeat(4, 1fr)",gap:8}}>
+            ${(showAllAvatars?AVATAR_OPTIONS:AVATAR_OPTIONS.slice(0,8)).map(a=>html`
               <button key=${a} onClick=${()=>setAvatar(a)}
                 style=${{fontSize:24,padding:"8px 0",borderRadius:12,border:`2px solid ${avatar===a?"var(--accent)":"var(--border)"}`,background:avatar===a?"var(--accent-bg, rgba(8,145,178,0.1))":"transparent",cursor:"pointer"}}>
                 ${a}
               </button>
             `)}
           </div>
+          ${!showAllAvatars&&html`
+            <button onClick=${()=>setShowAllAvatars(true)}
+              style=${{background:"none",border:"none",color:"var(--accent)",fontSize:12.5,fontWeight:600,cursor:"pointer",padding:"8px 0 0",width:"100%",textAlign:"center"}}>
+              もっと見る（他${AVATAR_OPTIONS.length-8}種類）
+            </button>
+          `}
         </div>
         ${error&&html`<div class="login-err">${error}</div>`}
         <button class="btn" onClick=${confirmProfile}>次へ</button>
