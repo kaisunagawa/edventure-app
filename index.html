@@ -548,6 +548,7 @@ function HomeScreen({goalData, onGoalSaved}) {
   const [report, setReport] = useState(null);
   const [schedule, setSchedule] = useState([]);
   const [game, setGame] = useState(null);
+  const [ranking, setRanking] = useState(null);
   const [todayLogs, setTodayLogs] = useState([]);
   const [checked, setChecked] = useState(()=>JSON.parse(localStorage.getItem("today_actions")||"{}"));
   const todayKey = formatDateStr(new Date());
@@ -561,8 +562,10 @@ function HomeScreen({goalData, onGoalSaved}) {
     // キャッシュで即時表示
     const cachedGame = localStorage.getItem("cache_gameStatus");
     const cachedReport = localStorage.getItem("cache_report");
+    const cachedRanking = localStorage.getItem("cache_ranking");
     if(cachedGame) { try { const g=JSON.parse(cachedGame); setGame(g); if(g.goals?.length) onGoalSaved(g.goals); } catch(e){} }
     if(cachedReport) { try { setReport(JSON.parse(cachedReport)); } catch(e){} }
+    if(cachedRanking) { try { setRanking(JSON.parse(cachedRanking)); } catch(e){} }
 
     // 並列フェッチ
     Promise.all([
@@ -570,7 +573,8 @@ function HomeScreen({goalData, onGoalSaved}) {
       gasApi("getGameStatus"),
       gasApi("getSchedule"),
       gasApi("getLogs"),
-    ]).then(([rep, game, sched, logs])=>{
+      gasApi("getRanking"),
+    ]).then(([rep, game, sched, logs, rank])=>{
       if(rep.ok){ setReport(rep.data); localStorage.setItem("cache_report", JSON.stringify(rep.data)); }
       if(game.ok){
         setGame(game.data);
@@ -579,6 +583,7 @@ function HomeScreen({goalData, onGoalSaved}) {
       }
       if(sched.ok) setSchedule(sched.data);
       if(logs.ok) setTodayLogs(logs.data);
+      if(rank.ok){ setRanking(rank.data); localStorage.setItem("cache_ranking", JSON.stringify(rank.data)); }
     });
 
     // カレンダー連携済みなら本人権限で直接取得（GAS経由はスクリプト所有者しか読めないためのフォールバック）
@@ -669,6 +674,14 @@ function HomeScreen({goalData, onGoalSaved}) {
             </div>
           </div>`;
       })()}
+      ${ranking&&html`
+        <div style=${{display:"flex",alignItems:"center",gap:8,marginTop:10,background:"rgba(255,255,255,0.15)",borderRadius:12,padding:"9px 14px",backdropFilter:"blur(4px)"}}>
+          <span style=${{fontSize:16}}>🏆</span>
+          <span style=${{fontSize:12.5,color:"rgba(255,255,255,0.9)",fontWeight:600,flex:1}}>
+            直近7日の記録量で <b style=${{fontSize:15}}>${ranking.total}人中${ranking.rank}位</b>
+          </span>
+        </div>
+      `}
     </div>
 
     <!-- Goals -->

@@ -43,6 +43,7 @@ function doGet(e) {
       case "registerUser": result = registerUser(studentEmail, e.parameter); break;
       case "getStreak":    result = getStreak(studentEmail); break;
       case "getGameStatus": result = getGameStatus(studentEmail); break;
+      case "getRanking":   result = getRanking(studentEmail); break;
       case "getReport":    result = getReport(studentEmail, e.parameter); break;
       case "getReportList": result = getReportList(studentEmail); break;
       case "getLogs":      result = getLogs(studentEmail, e.parameter); break;
@@ -369,6 +370,31 @@ function getGameStatus(studentEmail) {
     { goal: user.goal3 || "", deadline: user.goal_deadline3 || "" },
   ].filter(g => g.goal);
   return { ok: true, data: { xp, level, xpInLevel, xpForNextLevel, streak, badges, goals } };
+}
+
+// 直近7日間の記録量（ブロック数・活動日数）で全アクティブユーザーを順位付けする。
+// 累積XPだと入会が早い人が有利になり続けるため、「今どれだけ真剣に取り組めているか」を
+// 測る指標として直近の活動量を採用。他ユーザーの氏名やスコアは返さずプライバシーに配慮する。
+function getRanking(studentEmail) {
+  const users = sheetToObjects(getSheet("Users")).filter(u => u.is_active.toUpperCase() === "TRUE");
+  if (users.length < 2) return { ok: true, data: null };
+
+  const sevenDaysAgo = formatDate(new Date(Date.now() - 7 * 86400000));
+  const recentLogs = sheetToObjects(getSheet("DailyLog")).filter(l => l.date >= sevenDaysAgo);
+
+  const scores = users.map(u => {
+    const logs = recentLogs.filter(l => l.student_email === u.student_email);
+    return {
+      email: u.student_email,
+      blocks: logs.length,
+      activeDays: new Set(logs.map(l => l.date)).size
+    };
+  });
+  scores.sort((a, b) => b.blocks - a.blocks || b.activeDays - a.activeDays);
+
+  const idx = scores.findIndex(s => s.email === studentEmail);
+  if (idx === -1) return { ok: true, data: null };
+  return { ok: true, data: { rank: idx + 1, total: scores.length, blocks: scores[idx].blocks, activeDays: scores[idx].activeDays } };
 }
 
 function getMessages(studentEmail) {
