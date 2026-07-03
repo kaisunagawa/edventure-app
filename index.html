@@ -973,19 +973,6 @@ function LogScreen({onToast, isActive}) {
 
   const [block, setBlock] = useState(getCurrentBlock);
 
-  // タブを開くたびに現在時刻のブロックに更新してスクロール（今日表示中のみ）
-  useEffect(()=>{
-    if(isActive && isToday(date)) {
-      gasApi("getLogs",{date}).then(r=>{
-        const data = r.ok ? r.data : [];
-        setLogs(data);
-        const cur = getCurrentBlock();
-        setBlock(cur);
-        loadBlockData(cur, data);
-        setTimeout(()=>{ const el=timeRef.current?.querySelector(".chip.on"); if(el) el.scrollIntoView({inline:"center",behavior:"smooth"}); },100);
-      });
-    }
-  },[isActive]);
   const [task, setTask] = useState("");
   const [focus, setFocus] = useState("");
   const [memo, setMemo] = useState("");
@@ -1034,7 +1021,12 @@ function LogScreen({onToast, isActive}) {
     loadBlockData(b, logs);
   };
 
+  // 日付が変わった時、またはタブを開き直した時（今日表示中は現在時刻の
+  // ブロックに合わせ直したいので）に取得する。以前は[date]用と[isActive]用の
+  // 2つのeffectが同じgetLogsを二重に呼んでおり、記録タブを開くたびに
+  // 通信が2回走って読み込みが遅く感じられる原因になっていた
   useEffect(()=>{
+    if(!isActive) return;
     gasApi("getLogs",{date}).then(r=>{
       const data = r.ok ? r.data : [];
       setLogs(data);
@@ -1043,7 +1035,7 @@ function LogScreen({onToast, isActive}) {
       loadBlockData(def, data);
       setTimeout(()=>{ const el=timeRef.current?.querySelector(".chip.on"); if(el) el.scrollIntoView({inline:"center",behavior:"smooth"}); },100);
     });
-  },[date]);
+  },[date, isActive]);
 
   const save = async ()=>{
     if(!task.trim()) return;
