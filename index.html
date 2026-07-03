@@ -37,6 +37,8 @@
       --nav-h:    64px;
       --safe-bottom: env(safe-area-inset-bottom, 0px);
       --r:        14px;
+      --hero1:    #0891B2;
+      --hero2:    #0e7490;
     }
     @media (prefers-color-scheme: dark) {
       :root {
@@ -54,6 +56,8 @@
         --amber-l:  #2E2410;
         --red:      #F87171;
         --red-l:    #331717;
+        --hero1:    #0B4A5A;
+        --hero2:    #093642;
       }
       .nav { background: rgba(20,25,30,.96); }
       .toast { background: #E8ECEF; color: #111827; }
@@ -499,7 +503,7 @@ function HomeScreen({goalData, onGoalSaved}) {
   return html`<div style=${{paddingBottom:40}}>
 
     <!-- Hero Header -->
-    <div style=${{background:"linear-gradient(135deg, var(--accent) 0%, #0e7490 100%)",padding:"36px 20px 28px",position:"relative",overflow:"hidden"}}>
+    <div style=${{background:"linear-gradient(135deg, var(--hero1) 0%, var(--hero2) 100%)",padding:"36px 20px 28px",position:"relative",overflow:"hidden"}}>
       <!-- 右下: 大きなロゴマーク装飾 -->
       <svg style=${{position:"absolute",bottom:-30,right:-30,opacity:0.07}} width="160" height="160" viewBox="0 0 72 72" xmlns="http://www.w3.org/2000/svg"><circle cx="36" cy="36" r="36" fill="#fff"/><circle cx="36" cy="36" r="25" fill="none" stroke="#fff" stroke-width="4.5"/><path d="M36 11 A25 25 0 1 1 14.5 50" fill="none" stroke="#fff" stroke-width="4.5" stroke-linecap="round"/><circle cx="36" cy="36" r="15" fill="none" stroke="#fff" stroke-width="2"/><line x1="36" y1="36" x2="36" y2="25" stroke="#fff" stroke-width="2.2" stroke-linecap="round"/><line x1="36" y1="36" x2="43" y2="41" stroke="#fff" stroke-width="2" stroke-linecap="round"/><circle cx="36" cy="36" r="2" fill="#fff"/></svg>
       <!-- 右上: ロゴ -->
@@ -1325,7 +1329,7 @@ function SettingsScreen({onToast,onLogout,onGoalSaved}) {
   return html`<div style=${{paddingBottom:48}}>
 
     <!-- Hero -->
-    <div style=${{background:"linear-gradient(135deg, var(--accent) 0%, #0e7490 100%)",padding:"36px 20px 28px",position:"relative",overflow:"hidden"}}>
+    <div style=${{background:"linear-gradient(135deg, var(--hero1) 0%, var(--hero2) 100%)",padding:"36px 20px 28px",position:"relative",overflow:"hidden"}}>
       <!-- 右下: 大きなロゴマーク装飾 -->
       <svg style=${{position:"absolute",bottom:-30,right:-30,opacity:0.07}} width="140" height="140" viewBox="0 0 72 72" xmlns="http://www.w3.org/2000/svg"><circle cx="36" cy="36" r="36" fill="#fff"/><circle cx="36" cy="36" r="25" fill="none" stroke="#fff" stroke-width="4.5"/><path d="M36 11 A25 25 0 1 1 14.5 50" fill="none" stroke="#fff" stroke-width="4.5" stroke-linecap="round"/><circle cx="36" cy="36" r="15" fill="none" stroke="#fff" stroke-width="2"/><line x1="36" y1="36" x2="36" y2="25" stroke="#fff" stroke-width="2.2" stroke-linecap="round"/><line x1="36" y1="36" x2="43" y2="41" stroke="#fff" stroke-width="2" stroke-linecap="round"/><circle cx="36" cy="36" r="2" fill="#fff"/></svg>
       <!-- JIROKUロゴ 右上 -->
