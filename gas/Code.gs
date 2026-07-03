@@ -222,56 +222,70 @@ function getReportList(studentEmail) {
 // 「現在のステータス」用。AIレポートのbreakdown保存を待たず、
 // 記録済みのDailyLogから直接いま時点の5軸スコアを計算する。
 // student_emailで先に絞り込んでから必要な列だけ取り出す（getLogsと同じ理由）
-function getStatusSummary(studentEmail) {
+// 全ユーザー分のDailyLogを読み、student_email別に累計ステータス
+// {score, breakdown} を計算する。getStatusSummary・getCommunityの
+// 両方から使う共通ロジック（基準がズレないよう一本化している）。
+function computeAllStatuses() {
   const sheet = getSheet("DailyLog");
   const data = sheet.getDataRange().getValues();
   const headers = data[0];
-  const emailIdx = headers.indexOf("student_email");
   const idx = {
+    student_email: headers.indexOf("student_email"),
     date: headers.indexOf("date"),
     memo: headers.indexOf("memo"),
     focus_level: headers.indexOf("focus_level"),
     goal_related: headers.indexOf("goal_related"),
   };
-  const logs = [];
+  const byUser = {};
   for (let i = 1; i < data.length; i++) {
-    if (String(data[i][emailIdx]) !== studentEmail) continue;
+    const email = String(data[i][idx.student_email]);
+    if (!email) continue;
     const rawDate = data[i][idx.date];
     const rowDate = rawDate instanceof Date
       ? Utilities.formatDate(rawDate, "Asia/Tokyo", "yyyy-MM-dd")
       : String(rawDate);
-    logs.push({
+    (byUser[email] = byUser[email] || []).push({
       date: rowDate,
       memo: String(data[i][idx.memo] || ""),
       focus_level: String(data[i][idx.focus_level] || ""),
       goal_related: String(data[i][idx.goal_related] || ""),
     });
   }
-  if (logs.length === 0) return { ok: true, data: null };
 
   // ステータスは平均や割合ではなく「これまでの累計」で育つ設計。
   // やった分だけ必ず増え、サボっても下がらない（レベルと同じ感覚）。
   // sqrtカーブで、序盤は伸びやすく上限20に近づくほど1上げるのが大変になる。
-  const days = {};
-  logs.forEach(l => { (days[l.date] = days[l.date] || []).push(l); });
-  const activeDays = Object.keys(days).length;
-
-  const totalBlocks = logs.length;
-  const totalMemos = logs.filter(l => l.memo && String(l.memo).trim()).length;
-  // 集中: 自己評価4以上の「良い集中」ができたブロックの累計
-  const highFocusBlocks = logs.filter(l => (parseInt(l.focus_level) || 0) >= 4).length;
-  const goalBlocks = logs.filter(l => l.goal_related === "true" || l.goal_related === true).length;
-
   const grow = (total, factor) => Math.min(20, Math.floor(Math.sqrt(Math.max(0, total)) * factor));
-  const breakdown = {
-    records: grow(totalBlocks, 1),        // 400ブロック(約2ヶ月)で20
-    memo: grow(totalMemos, 1.3),          // 240メモで20
-    focus: grow(highFocusBlocks, 1.3),    // 高集中240ブロックで20
-    goal: grow(goalBlocks, 1.2),          // 目標関連280ブロックで20
-    consistency: grow(activeDays, 2.5),   // 記録64日で20
-  };
-  const score = breakdown.records + breakdown.memo + breakdown.focus + breakdown.goal + breakdown.consistency;
-  return { ok: true, data: { score, breakdown } };
+
+  const result = {};
+  Object.keys(byUser).forEach(email => {
+    const logs = byUser[email];
+    const days = {};
+    logs.forEach(l => { (days[l.date] = days[l.date] || []).push(l); });
+    const activeDays = Object.keys(days).length;
+
+    const totalBlocks = logs.length;
+    const totalMemos = logs.filter(l => l.memo && l.memo.trim()).length;
+    const highFocusBlocks = logs.filter(l => (parseInt(l.focus_level) || 0) >= 4).length;
+    const goalBlocks = logs.filter(l => l.goal_related === "true" || l.goal_related === true).length;
+
+    const breakdown = {
+      records: grow(totalBlocks, 1),        // 400ブロック(約2ヶ月)で20
+      memo: grow(totalMemos, 1.3),          // 240メモで20
+      focus: grow(highFocusBlocks, 1.3),    // 高集中240ブロックで20
+      goal: grow(goalBlocks, 1.2),          // 目標関連280ブロックで20
+      consistency: grow(activeDays, 2.5),   // 記録64日で20
+    };
+    const score = breakdown.records + breakdown.memo + breakdown.focus + breakdown.goal + breakdown.consistency;
+    result[email] = { score, breakdown };
+  });
+  return result;
+}
+
+function getStatusSummary(studentEmail) {
+  const status = computeAllStatuses()[studentEmail];
+  if (!status) return { ok: true, data: null };
+  return { ok: true, data: status };
 }
 
 function getReport(studentEmail, body) {
@@ -503,22 +517,22 @@ function getRanking(studentEmail) {
 
 // 「みんなの頑張り」画面用。ニックネーム＋アバターは本名と違い公開前提の情報なので
 // 実名やメールは一切含めず、直近7日の活動量でランキング表示する。
+// 「みんなの頑張り」のランキングは、ホームの「ステータス」と同じ累計基準。
+// 見ている場所によって基準がバラバラだと分かりにくいため一本化している。
 function getCommunity(studentEmail) {
   const users = sheetToObjects(getSheet("Users")).filter(u => u.is_active.toUpperCase() === "TRUE");
-  const sevenDaysAgo = formatDate(new Date(Date.now() - 7 * 86400000));
-  const recentLogs = sheetToObjects(getSheet("DailyLog")).filter(l => l.date >= sevenDaysAgo);
+  const statuses = computeAllStatuses();
 
   const list = users.map(u => {
-    const logs = recentLogs.filter(l => l.student_email === u.student_email);
+    const status = statuses[u.student_email];
     return {
       isMe: u.student_email === studentEmail,
       nickname: u.nickname || "名無しさん",
       avatar: u.avatar || "🦊",
       streak: Number(u.streak || 0),
-      blocks: logs.length,
-      activeDays: new Set(logs.map(l => l.date)).size
+      score: status ? status.score : 0
     };
-  }).sort((a, b) => b.blocks - a.blocks || b.streak - a.streak);
+  }).sort((a, b) => b.score - a.score);
 
   return { ok: true, data: list };
 }

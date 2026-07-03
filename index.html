@@ -692,7 +692,7 @@ function HomeScreen({goalData, onGoalSaved, profile}) {
           <div style=${{flex:1,minWidth:0,display:"flex",alignItems:"center",gap:7,background:"rgba(255,255,255,0.15)",borderRadius:12,padding:"7px 12px",backdropFilter:"blur(4px)"}}>
             <span style=${{fontSize:16,flexShrink:0}}>🏆</span>
             <span style=${{minWidth:0}}>
-              <span style=${{display:"block",fontSize:10,color:"rgba(255,255,255,0.75)",fontWeight:600,whiteSpace:"nowrap"}}>本日</span>
+              <span style=${{display:"block",fontSize:10,color:"rgba(255,255,255,0.75)",fontWeight:600,whiteSpace:"nowrap"}}>昨日の評価順位</span>
               <span style=${{display:"flex",alignItems:"baseline",gap:2,fontSize:13,color:"#fff",fontWeight:700,whiteSpace:"nowrap"}}>${ranking.total}人中<b style=${{fontSize:15}}>${ranking.rank}位</b></span>
             </span>
           </div>
@@ -899,7 +899,7 @@ function CommunityOverlay({onClose}) {
 
       <div style=${{padding:16}}>
         <div style=${{background:"var(--card)",borderRadius:16,border:"1px solid var(--border)",overflow:"hidden",marginBottom:16}}>
-          <div style=${{padding:"14px 16px",borderBottom:"1px solid var(--border)",fontSize:12,fontWeight:700,color:"var(--text)"}}>直近7日のランキング</div>
+          <div style=${{padding:"14px 16px",borderBottom:"1px solid var(--border)",fontSize:12,fontWeight:700,color:"var(--text)"}}>ステータスランキング</div>
           ${list===null&&html`<div style=${{padding:20,textAlign:"center",color:"var(--sub)",fontSize:13}}>読み込み中...</div>`}
           ${list&&list.map((u,i)=>html`
             <div key=${i} style=${{display:"flex",alignItems:"center",gap:10,padding:"11px 16px",borderBottom:i<list.length-1?"1px solid var(--border)":"none",background:u.isMe?"var(--bg)":"transparent"}}>
@@ -907,7 +907,7 @@ function CommunityOverlay({onClose}) {
               <div style=${{width:32,height:32,borderRadius:"50%",background:"var(--bg)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:17,flexShrink:0}}>${u.avatar}</div>
               <div style=${{flex:1,minWidth:0}}>
                 <div style=${{fontSize:14,fontWeight:600,color:"var(--text)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>${u.nickname}${u.isMe?" (あなた)":""}</div>
-                <div style=${{fontSize:11,color:"var(--sub)"}}>${u.blocks}記録・${u.activeDays}日活動${u.streak>0?` · 🔥${u.streak}日`:""}</div>
+                <div style=${{fontSize:11,color:"var(--sub)"}}>ステータス ${u.score}点${u.streak>0?` · 🔥${u.streak}日`:""}</div>
               </div>
             </div>
           `)}
@@ -975,13 +975,16 @@ function LogScreen({onToast, isActive}) {
 
   // カレンダー予定の自動入力（ボタン操作なし）。
   // 端末キャッシュ→本人認証→サーバー共有キャッシュの順に自動で試すため、
-  // ホーム画面で予定が見えている状態ならここでも必ず取得できる
+  // ホーム画面で予定が見えている状態ならここでも必ず取得できる。
+  // 全画面が常時マウントされている構成のため、アプリ起動直後だとホーム側の
+  // 取得がまだ終わっておらずキャッシュが無いことがある。記録タブを開くたび
+  // (isActive)にも取り直すことで、後からでも確実に反映されるようにする
   const [dayEvents, setDayEvents] = useState(null);
   const autoFillRef = useRef("");
   useEffect(()=>{
-    setDayEvents(null);
+    if(!isActive) return;
     fetchCalendarEvents(date).then(evs=>{ if(evs) setDayEvents(evs); });
-  },[date]);
+  },[date, isActive]);
   // 未記録ブロックを選んだとき、入力が空なら予定タイトルを自動セット
   useEffect(()=>{
     if(!dayEvents) return;
