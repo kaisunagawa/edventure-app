@@ -1014,8 +1014,12 @@ ${logsText}
       payload: JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: 400, messages: [{ role: "user", content: prompt }] }),
       muteHttpExceptions: true
     });
-    const result = JSON.parse(res.getContentText());
-    if (!result.content || !result.content[0]) return null;
+    const rawText = res.getContentText();
+    const result = JSON.parse(rawText);
+    if (!result.content || !result.content[0]) {
+      Logger.log("generateDaySummary: Claude応答にcontentなし: " + rawText.substring(0, 500));
+      return null;
+    }
     return stripSalutation(result.content[0].text).trim();
   } catch (e) {
     Logger.log("generateDaySummary error: " + e);
@@ -1023,52 +1027,58 @@ ${logsText}
   }
 }
 
-// Journalシートに「auto_summary」列を確保する（既存シートへの後付け対応）
-function ensureAutoSummaryCol(sheet) {
-  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
-  let idx = headers.indexOf("auto_summary");
-  if (idx === -1) { idx = headers.length; sheet.getRange(1, idx + 1).setValue("auto_summary"); }
-  return idx;
+function saveAutoSummary(studentEmail, targetDate, summary) {
+  upsertJournalRow(studentEmail, targetDate, { auto_summary: summary });
 }
 
-function saveAutoSummary(studentEmail, targetDate, summary) {
-  const sheet = getJournalSheet();
-  const colIdx = ensureAutoSummaryCol(sheet);
-  const data = sheet.getDataRange().getValues();
-  const now = new Date().toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" });
-  for (let i = 1; i < data.length; i++) {
-    const rowDate = data[i][0] instanceof Date
-      ? Utilities.formatDate(data[i][0], "Asia/Tokyo", "yyyy-MM-dd")
-      : String(data[i][0]);
-    if (String(data[i][1]) === studentEmail && rowDate === targetDate) {
-      sheet.getRange(i + 1, colIdx + 1).setValue(summary);
-      return;
+// Journalシートへの書き込みを一本化したupsert（diary/auto_summaryのどちらか、または両方を更新）。
+// saveDiaryとsaveAutoSummaryが別々に「検索→なければ追加」をしていると、
+// ほぼ同時にリクエストが来た場合に同じ日付の行が重複作成され、
+// 以後の検索が常に空欄側の行にヒットして「生成されない」ように見える不具合があったため、
+// スクリプトロックで排他制御しつつ1つの関数に統合する。
+function upsertJournalRow(studentEmail, targetDate, fields) {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    const sheet = getJournalSheet();
+    let headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+    if (headers.indexOf("auto_summary") === -1) {
+      sheet.getRange(1, headers.length + 1).setValue("auto_summary");
+      headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
     }
+    const diaryIdx = headers.indexOf("diary");
+    const updatedIdx = headers.indexOf("updated_at");
+    const summaryIdx = headers.indexOf("auto_summary");
+    const now = new Date().toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" });
+
+    const data = sheet.getDataRange().getValues();
+    for (let i = 1; i < data.length; i++) {
+      const rowDate = data[i][0] instanceof Date
+        ? Utilities.formatDate(data[i][0], "Asia/Tokyo", "yyyy-MM-dd")
+        : String(data[i][0]);
+      if (String(data[i][1]) === studentEmail && rowDate === targetDate) {
+        if (fields.diary !== undefined) sheet.getRange(i + 1, diaryIdx + 1).setValue(fields.diary);
+        if (fields.auto_summary !== undefined) sheet.getRange(i + 1, summaryIdx + 1).setValue(fields.auto_summary);
+        sheet.getRange(i + 1, updatedIdx + 1).setValue(now);
+        return;
+      }
+    }
+    const rowArr = new Array(headers.length).fill("");
+    rowArr[1] = studentEmail;
+    if (fields.diary !== undefined) rowArr[diaryIdx] = fields.diary;
+    if (fields.auto_summary !== undefined) rowArr[summaryIdx] = fields.auto_summary;
+    rowArr[updatedIdx] = now;
+    const newRow = sheet.getLastRow() + 1;
+    sheet.appendRow(rowArr);
+    sheet.getRange(newRow, 1).setNumberFormat("@").setValue(targetDate);
+  } finally {
+    lock.releaseLock();
   }
-  const newRow = sheet.getLastRow() + 1;
-  sheet.appendRow(["", studentEmail, "", now]);
-  sheet.getRange(newRow, 1).setNumberFormat("@").setValue(targetDate);
-  sheet.getRange(newRow, colIdx + 1).setValue(summary);
 }
 
 function saveDiary(studentEmail, body) {
   if (!body.date) return { ok: false, error: "missing date" };
-  const sheet = getJournalSheet();
-  const now = new Date().toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" });
-  const data = sheet.getDataRange().getValues();
-  for (let i = 1; i < data.length; i++) {
-    const rowDate = data[i][0] instanceof Date
-      ? Utilities.formatDate(data[i][0], "Asia/Tokyo", "yyyy-MM-dd")
-      : String(data[i][0]);
-    if (String(data[i][1]) === studentEmail && rowDate === String(body.date)) {
-      sheet.getRange(i + 1, 3).setValue(body.diary || "");
-      sheet.getRange(i + 1, 4).setValue(now);
-      return { ok: true, updated: true };
-    }
-  }
-  const newRow = sheet.getLastRow() + 1;
-  sheet.appendRow(["", studentEmail, body.diary || "", now]);
-  sheet.getRange(newRow, 1).setNumberFormat("@").setValue(String(body.date));
+  upsertJournalRow(studentEmail, String(body.date), { diary: body.diary || "" });
   return { ok: true };
 }
 
@@ -1583,4 +1593,13 @@ function testReportForMe() {
   Logger.log("ログ数: " + logs.length);
   const report = generateReportWithClaude("[REDACTED_EMAIL]", user.name, logs);
   Logger.log("レポート: " + JSON.stringify(report));
+}
+
+function testDaySummaryForMe() {
+  const email = "[REDACTED_EMAIL]";
+  const today = formatDate(new Date());
+  const logs = getLogs(email, { date: today }).data;
+  Logger.log("対象日: " + today + " / ログ数: " + logs.length);
+  const summary = generateDaySummary(email, today, logs);
+  Logger.log("事実まとめ: " + summary);
 }
