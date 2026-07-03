@@ -415,10 +415,12 @@ function cleanupGcalLS(){
 // 片方が失敗することがあったため、同じ日付の取得は1つの実行を共有する
 async function fetchCalendarEvents(dateStr, interactive=false){
   if(gcalCache[dateStr]) return gcalCache[dateStr];
-  if(gcalInFlight[dateStr]) return gcalInFlight[dateStr];
+  // interactive(ボタン手動タップ)はユーザー操作なので毎回必ず新規実行し、
+  // 裏で動いているサイレント取得の使い回しはしない
+  if(!interactive && gcalInFlight[dateStr]) return gcalInFlight[dateStr];
   const p=fetchCalendarEventsUncached(dateStr, interactive);
-  gcalInFlight[dateStr]=p;
-  try{ return await p; } finally { delete gcalInFlight[dateStr]; }
+  if(!interactive) gcalInFlight[dateStr]=p;
+  try{ return await p; } finally { if(!interactive) delete gcalInFlight[dateStr]; }
 }
 async function fetchCalendarEventsUncached(dateStr, interactive=false){
   if(gcalCache[dateStr]) return gcalCache[dateStr];
@@ -978,18 +980,27 @@ function LogScreen({onToast, isActive}) {
   const [memo, setMemo] = useState("");
   const [goalRelated, setGoalRelated] = useState(false);
 
-  // カレンダー予定の自動入力（ボタン操作なし）。
-  // 端末キャッシュ→本人認証→サーバー共有キャッシュの順に自動で試すため、
-  // ホーム画面で予定が見えている状態ならここでも必ず取得できる。
-  // 全画面が常時マウントされている構成のため、アプリ起動直後だとホーム側の
-  // 取得がまだ終わっておらずキャッシュが無いことがある。記録タブを開くたび
-  // (isActive)にも取り直すことで、後からでも確実に反映されるようにする
+  // カレンダー予定の自動入力。端末キャッシュ→本人認証→サーバー共有
+  // キャッシュの順にまず自動で試すが、Safari等でサードパーティCookieが
+  // ブロックされていると裏側の認証自体が失敗し続けることがあるため、
+  // 自動取得できなかった場合だけ手動で読み込むボタンを出す
   const [dayEvents, setDayEvents] = useState(null);
+  const [calNeedsTap, setCalNeedsTap] = useState(false);
   const autoFillRef = useRef("");
   useEffect(()=>{
     if(!isActive) return;
-    fetchCalendarEvents(date).then(evs=>{ if(evs) setDayEvents(evs); });
+    setCalNeedsTap(false);
+    fetchCalendarEvents(date).then(evs=>{
+      if(evs) setDayEvents(evs);
+      else setCalNeedsTap(true);
+    });
   },[date, isActive]);
+  const loadCalByTap=()=>{
+    fetchCalendarEvents(date, true).then(evs=>{
+      if(evs){ setDayEvents(evs); setCalNeedsTap(false); onToast("予定を読み込みました"); }
+      else onToast("予定の読み込みに失敗しました");
+    });
+  };
   // 未記録ブロックを選んだとき、入力が空なら予定タイトルを自動セット
   useEffect(()=>{
     if(!dayEvents) return;
@@ -1082,6 +1093,11 @@ function LogScreen({onToast, isActive}) {
         <div style=${{fontSize:12,color:"var(--sub)",marginBottom:8}}>
           ${!isToday(date) ? "🗓 過去の記録を追加・編集できます（XPは付きません）" : recorded.has(block) ? "✏️ 記録済み（編集できます）" : "📝 未記録"}
         </div>
+        ${calNeedsTap&&html`
+          <button onClick=${loadCalByTap} style=${{display:"flex",alignItems:"center",gap:8,width:"100%",padding:"10px 14px",marginBottom:12,borderRadius:10,border:"1.5px dashed var(--accent)",background:"var(--accent-l)",color:"var(--accent)",fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>
+            📅 タップしてカレンダーの予定を読み込む
+          </button>
+        `}
         <div class="form-grp">
           <label class="form-lbl">何をしましたか？</label>
           <input class="inp" placeholder="例：資料作成、家事、勉強など" value=${task} onInput=${e=>setTask(e.target.value)} />
