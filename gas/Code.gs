@@ -209,7 +209,11 @@ function getReportList(studentEmail) {
   const list = rows
     .filter(r => r.student_email === studentEmail)
     .sort((a, b) => b.date > a.date ? 1 : -1)
-    .map(r => ({ date: r.date, score: Number(r.score) }));
+    .map(r => {
+      let breakdown = null;
+      if (r.breakdown) { try { breakdown = JSON.parse(r.breakdown); } catch (e) {} }
+      return { date: r.date, score: Number(r.score), breakdown };
+    });
   return { ok: true, data: list };
 }
 

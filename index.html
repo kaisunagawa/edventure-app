@@ -1285,20 +1285,26 @@ function ReportScreen() {
   const [reportList, setReportList]=useState([]);
   const [listLoading, setListLoading]=useState(true);
   const [view, setView]=useState("report"); // "report" | "diary"
-  const [latestBreakdown, setLatestBreakdown]=useState(null);
-  const [latestScore, setLatestScore]=useState(null);
+  const [overallBreakdown, setOverallBreakdown]=useState(null);
+  const [overallScore, setOverallScore]=useState(null);
 
   useEffect(()=>{
     gasApi("getReportList").then(r=>{
       if(r.ok && r.data.length>0){
         setReportList(r.data);
         setDate(r.data[0].date);
-        // breakdown列が無い古いレポートもあるため、直近数件を調べて最初に見つかったものを使う
-        const candidates = r.data.slice(0,5);
-        Promise.all(candidates.map(c=>gasApi("getReport",{date:c.date}))).then(results=>{
-          const hit = results.find(rr=>rr.ok && rr.data && rr.data.breakdown);
-          if(hit){ setLatestBreakdown(hit.data.breakdown); setLatestScore(hit.data.score); }
-        });
+        // 「現在のステータス」はその日だけでなく、これまでの全履歴の平均で出す
+        const withBreakdown = r.data.filter(d=>d.breakdown);
+        if(withBreakdown.length){
+          const sums = {};
+          BREAKDOWN_CATS.forEach(([key])=>{ sums[key]=0; });
+          withBreakdown.forEach(d=>{ BREAKDOWN_CATS.forEach(([key])=>{ sums[key]+=Number(d.breakdown[key]||0); }); });
+          const avgBreakdown = {};
+          BREAKDOWN_CATS.forEach(([key])=>{ avgBreakdown[key]=Math.round(sums[key]/withBreakdown.length); });
+          const avgScore = Math.round(withBreakdown.reduce((s,d)=>s+Number(d.score||0),0)/withBreakdown.length);
+          setOverallBreakdown(avgBreakdown);
+          setOverallScore(avgScore);
+        }
       }
       setListLoading(false);
     });
@@ -1329,10 +1335,10 @@ function ReportScreen() {
             <div class="empty-body">記録を入力すると<br/>毎晩21時にAIがレポートを生成します</div>
           </div>`
         : html`<div>
-            ${latestBreakdown&&html`
+            ${overallBreakdown&&html`
               <div class="card" style=${{marginBottom:8}}>
-                <div class="card-label">現在のステータス</div>
-                <${BreakdownRadar} breakdown=${latestBreakdown} score=${latestScore}/>
+                <div class="card-label">現在のステータス（全期間平均）</div>
+                <${BreakdownRadar} breakdown=${overallBreakdown} score=${overallScore}/>
               </div>
             `}
             <${ScoreTrend} list=${reportList}/>
