@@ -943,6 +943,91 @@ function ScoreTrend({list}) {
     </div>`;
 }
 
+// 振り返り（数値化＋事実の整理＋自分の日記）
+function JournalSection({date, logs}) {
+  const [diary,setDiary]=useState("");
+  const [loaded,setLoaded]=useState(false);
+  const [saving,setSaving]=useState(false);
+  const [savedMsg,setSavedMsg]=useState(false);
+  const [events,setEvents]=useState(null);
+  useEffect(()=>{
+    setDiary(""); setLoaded(false); setEvents(null); setSavedMsg(false);
+    gasApi("getDiary",{date}).then(r=>{ if(r.ok&&r.data) setDiary(r.data.diary||""); setLoaded(true); });
+    if(localStorage.getItem("cal_linked")) fetchCalendarEvents(date).then(setEvents);
+  },[date]);
+  const save=async()=>{
+    setSaving(true);
+    try{
+      await fetch(GAS_URL,{method:"POST",mode:"no-cors",headers:{"Content-Type":"text/plain"},
+        body:JSON.stringify({action:"saveDiary",studentEmail:CURRENT_USER.email,date,diary})});
+      setSavedMsg(true); setTimeout(()=>setSavedMsg(false),2500);
+    }catch{}
+    setSaving(false);
+  };
+
+  // 数値化（事実ベース）
+  const goalBlocks=logs.filter(l=>l.goal_related==="true"||l.goal_related===true).length;
+  const goalPct=logs.length?Math.round(goalBlocks/logs.length*100):0;
+  const focusNums=logs.map(l=>parseInt(l.focus_level)||0).filter(n=>n>0);
+  const avgFocus=focusNums.length?(focusNums.reduce((a,b)=>a+b,0)/focusNums.length).toFixed(1):"−";
+  const memos=logs.filter(l=>l.memo&&l.memo.trim());
+  // 予定と記録の対比（タイトルの部分一致で「記録あり」判定）
+  const isDone=(ev)=>logs.some(l=>l.task&&(l.task.includes(ev.title)||ev.title.includes(l.task)));
+
+  return html`<div>
+    <!-- 数値サマリー -->
+    <div class="card">
+      <div class="card-label">この日の数値</div>
+      <div style=${{display:"flex",gap:8}}>
+        ${[["記録",logs.length+"時間"],["目標関連",goalBlocks+"時間 ("+goalPct+"%)"],["平均集中",avgFocus+" / 5"],["メモ",memos.length+"個"]].map(([l,v])=>html`
+          <div key=${l} style=${{flex:1,background:"var(--bg)",borderRadius:10,padding:"10px 6px",textAlign:"center"}}>
+            <div style=${{fontSize:13,fontWeight:800,color:"var(--accent)",lineHeight:1.3}}>${v}</div>
+            <div style=${{fontSize:10,color:"var(--sub)",marginTop:3}}>${l}</div>
+          </div>
+        `)}
+      </div>
+    </div>
+
+    <!-- 予定と実績 -->
+    ${events&&events.length>0&&html`
+      <div class="card">
+        <div class="card-label">予定と実績</div>
+        ${events.map((ev,i)=>html`
+          <div key=${i} style=${{display:"flex",alignItems:"center",gap:10,padding:"8px 0",borderBottom:i<events.length-1?"1px solid var(--border)":"none"}}>
+            <div style=${{fontSize:11,fontWeight:600,color:"var(--sub)",minWidth:42,flexShrink:0}}>${ev.time}</div>
+            <div style=${{flex:1,fontSize:13,color:"var(--text)"}}>${ev.title}</div>
+            <div style=${{fontSize:11,fontWeight:600,flexShrink:0,color:isDone(ev)?"var(--green)":"var(--sub)"}}>${isDone(ev)?"✓ 記録あり":"記録なし"}</div>
+          </div>
+        `)}
+      </div>
+    `}
+
+    <!-- メモまとめ -->
+    ${memos.length>0&&html`
+      <div class="card">
+        <div class="card-label">この日のメモ</div>
+        ${memos.map((l,i)=>html`
+          <div key=${i} style=${{padding:"8px 0",borderBottom:i<memos.length-1?"1px solid var(--border)":"none"}}>
+            <div style=${{fontSize:11,color:"var(--sub)",marginBottom:2}}>${l.time_block} · ${l.task}</div>
+            <div style=${{fontSize:13,color:"var(--text)",lineHeight:1.7}}>${l.memo}</div>
+          </div>
+        `)}
+      </div>
+    `}
+
+    <!-- 自分の日記 -->
+    <div class="card" style=${{marginBottom:24}}>
+      <div class="card-label">✍️ 日記</div>
+      <textarea class="txa" style=${{minHeight:110}} placeholder="この日を自由に振り返って書き残せます"
+        value=${diary} onInput=${e=>setDiary(e.target.value)} disabled=${!loaded}/>
+      <button class="btn" onClick=${save} disabled=${saving||!loaded} style=${{marginTop:10}}>
+        ${saving?html`<span class="spin"/>`:"日記を保存"}
+      </button>
+      ${savedMsg&&html`<div style=${{fontSize:12,color:"var(--green)",fontWeight:600,textAlign:"center",marginTop:8}}>保存しました ✓</div>`}
+    </div>
+  </div>`;
+}
+
 function ReportScreen() {
   const todayStr=formatDateStr(new Date());
   const [date, setDate]=useState(null); // null = list view
@@ -1022,8 +1107,9 @@ function ReportScreen() {
       <div class="ph-title">${fmtDate(date)}</div>
     </div>
 
+    ${!report&&logs.length===0&&html`<div class="empty"><div class="empty-title">この日の記録はありません</div></div>`}
     ${!report
-      ? html`<div class="empty"><div class="empty-title">この日のレポートはありません</div></div>`
+      ? null
       : html`<div>
           <div class="report-hero" style=${{paddingTop:8}}>
             <div class="report-score">${report.score}</div>
@@ -1055,6 +1141,7 @@ function ReportScreen() {
           `}
         </div>`
     }
+    ${logs.length>0&&html`<${JournalSection} date=${date} logs=${logs}/>`}
   </div>`;
 }
 

@@ -53,6 +53,8 @@ function doGet(e) {
       case "sendMessage":  result = sendMessage(studentEmail, e.parameter); break;
       case "saveSettings": result = saveSettings(studentEmail, e.parameter); break;
       case "syncCalendar": result = syncCalendar(studentEmail, e.parameter); break;
+      case "getDiary":     result = getDiary(studentEmail, e.parameter); break;
+      case "saveDiary":    result = saveDiary(studentEmail, e.parameter); break;
       default: result = { ok: false, error: "Unknown action: " + action };
     }
     return jsonResponse(result, callback);
@@ -111,6 +113,7 @@ function doPost(e) {
       case "saveLog":      return jsonResponse(saveLog(studentEmail, body));
       case "sendMessage":  return jsonResponse(sendMessage(studentEmail, body));
       case "saveSettings": return jsonResponse(saveSettings(studentEmail, body));
+      case "saveDiary":    return jsonResponse(saveDiary(studentEmail, body));
       default: return jsonResponse({ ok: false, error: "Unknown action" });
     }
   } catch (err) {
@@ -597,12 +600,14 @@ function hourlyReminder() {
 
           const prompt = `あなたは${user.name}の教育コーチです。以下の情報を踏まえて、記録を促すごく短い一言を送ってください。
 
+【現在時刻】${hour}時（この時間帯に合わない挨拶は厳禁。「おはよう」は朝以外絶対に使わない。挨拶自体不要）
 ${ctx}
 【今日の状況】${todayLogSummary}
 ${recentMsgs}
 
 【スタイル】
 - 1文だけ・40文字以内。LINEの通知でパッと読める長さ
+- 挨拶なしで本題から入る
 - 今日の状況に即した一言（記録済みなら軽く承認、未記録なら軽く後押し）
 - 今の時間帯にカレンダーの予定があれば、それに触れると効果的（例：「散歩どうだった？記録しとこ」）
 - 直近のコーチメッセージと同じ言い回しは使わない
@@ -726,6 +731,7 @@ ${ctx}
 ${recentMsgs}
 
 【スタイル】
+- 今は夜22時。挨拶（おはよう・こんにちは等）は書かず、時間帯に合った内容で本題から入る
 - レポートの内容（スコア・良かった点・改善点）を言い直さない。分析はもう終わってる
 - カレンダーの予定と実際の記録を見比べて、予定どおり実行できていた場面があれば具体的に承認する
 - 今日のログの中の具体的な一場面を1つだけ拾って、そこに一言添える
@@ -881,6 +887,46 @@ function syncCalendar(studentEmail, body) {
   const newRow = sheet.getLastRow() + 1;
   sheet.appendRow([studentEmail, "", String(body.events).slice(0, 2000), now]);
   sheet.getRange(newRow, 2).setNumberFormat("@").setValue(String(body.date));
+  return { ok: true };
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// 日記（ユーザーが自分で書く振り返り）
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+function getJournalSheet() {
+  let sheet = getSheet("Journal");
+  if (!sheet) {
+    sheet = SpreadsheetApp.openById(SPREADSHEET_ID).insertSheet("Journal");
+    sheet.appendRow(["date", "student_email", "diary", "updated_at"]);
+  }
+  return sheet;
+}
+
+function getDiary(studentEmail, body) {
+  const targetDate = (body && body.date) ? String(body.date) : formatDate(new Date());
+  const row = sheetToObjects(getJournalSheet()).find(r => r.student_email === studentEmail && r.date === targetDate);
+  return { ok: true, data: { diary: row ? row.diary : "" } };
+}
+
+function saveDiary(studentEmail, body) {
+  if (!body.date) return { ok: false, error: "missing date" };
+  const sheet = getJournalSheet();
+  const now = new Date().toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" });
+  const data = sheet.getDataRange().getValues();
+  for (let i = 1; i < data.length; i++) {
+    const rowDate = data[i][0] instanceof Date
+      ? Utilities.formatDate(data[i][0], "Asia/Tokyo", "yyyy-MM-dd")
+      : String(data[i][0]);
+    if (String(data[i][1]) === studentEmail && rowDate === String(body.date)) {
+      sheet.getRange(i + 1, 3).setValue(body.diary || "");
+      sheet.getRange(i + 1, 4).setValue(now);
+      return { ok: true, updated: true };
+    }
+  }
+  const newRow = sheet.getLastRow() + 1;
+  sheet.appendRow(["", studentEmail, body.diary || "", now]);
+  sheet.getRange(newRow, 1).setNumberFormat("@").setValue(String(body.date));
   return { ok: true };
 }
 
@@ -1187,7 +1233,8 @@ function setupSheets() {
     "Messages": ["message_id","student_email","content","sender_name","sender_photo","sender_role","timestamp","is_read"],
     "Coaches": ["coach_email","coach_name","assigned_students"],
     "MonthlySummary": ["month","student_email","summary","created_at"],
-    "CalendarCache": ["student_email","date","events","updated_at"]
+    "CalendarCache": ["student_email","date","events","updated_at"],
+    "Journal": ["date","student_email","diary","updated_at"]
   };
   Object.entries(sheets).forEach(([name, headers]) => {
     let s = ss.getSheetByName(name);
