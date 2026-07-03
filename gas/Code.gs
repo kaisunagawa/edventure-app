@@ -630,7 +630,8 @@ ${recentMsgs}
 - 今日の状況に即した一言（記録済みなら軽く承認、未記録なら軽く後押し）
 - 今の時間帯にカレンダーの予定があれば、それに触れると効果的（例：「散歩どうだった？記録しとこ」）
 - 直近のコーチメッセージと同じ言い回しは使わない
-- 宛名・見出し・説明は一切なし。絵文字1個まで`;
+- 「〇〇さんへ」「〇〇へのメッセージ案：」のような宛名・見出し・ラベル・説明は一切書かない。生徒にそのまま送るLINE本文だけを出力する
+- 絵文字1個まで`;
 
           const res = UrlFetchApp.fetch("https://api.anthropic.com/v1/messages", {
             method: "POST",
@@ -1254,22 +1255,30 @@ function getRecentCoachMessages(studentEmail, limit) {
 // Claudeが生成した宛名行（「〇〇へ」「〇〇さん、」など）を除去する
 function stripSalutation(text) {
   if (!text) return text;
-  const lines = text.split('\n');
-  const first = lines[0].trim();
-  // 短い行（30文字未満）で「へ」「さんへ」「さん、」「さん,」で終わるなら宛名と判断して除去
+  let lines = text.split('\n');
+  while (lines.length > 0 && lines[0].trim() === '') lines.shift();
+  let first = (lines[0] || '').trim();
+
+  // ケース1: 短い行（30文字未満）で「へ」「さんへ」「さん、」「さん,」で終わるなら宛名のみの行として除去
   if (first.length < 30 && /(へ$|さんへ$|くんへ$|ちゃんへ$|さん[、,]$|さん$)/.test(first)) {
     lines.shift();
-    while (lines.length > 0 && lines[0].trim() === '') lines.shift();
-    return lines.join('\n').trim();
   }
-  // 「〇〇さん、」が行頭にある場合（名前+さん+読点で始まる）も除去
-  const salutationInline = first.match(/^.{1,15}さん[、,]\s*/);
-  if (salutationInline) {
-    lines[0] = first.slice(salutationInline[0].length);
-    if (!lines[0].trim()) lines.shift();
-    return lines.join('\n').trim();
+  // ケース2: 短い行（40文字未満）が「：」「:」で終わる場合、内容によらず見出し・ラベル行として除去
+  //（「〇〇へのメッセージ案：」「メッセージ案：」等、自然な会話文はコロンで終わらないため）
+  else if (first.length < 40 && /[:：]\s*$/.test(first)) {
+    lines.shift();
   }
-  return text.trim();
+  // ケース3: 「〇〇さん、」が行頭にある場合（名前+さん+読点で始まる）は名前部分だけ削る
+  else {
+    const salutationInline = first.match(/^.{1,15}さん[、,]\s*/);
+    if (salutationInline) {
+      lines[0] = first.slice(salutationInline[0].length);
+      if (!lines[0].trim()) lines.shift();
+    }
+  }
+
+  while (lines.length > 0 && lines[0].trim() === '') lines.shift();
+  return lines.join('\n').trim();
 }
 
 function sendLineMessage(lineUserId, text) {
