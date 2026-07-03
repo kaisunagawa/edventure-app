@@ -1611,7 +1611,7 @@ function TimerScreen({onToast, isActive}) {
     scheduleEndNotify(timeLeft, mode);
   };
   const pause = () => { setIsRunning(false); cancelEndNotify(); };
-  const reset = () => { setIsRunning(false); setTimeLeft(selectedMin*60); setStartTime(null); setMode("focus"); localStorage.removeItem("jiroku_timer_state"); cancelEndNotify(); };
+  const reset = () => { setIsRunning(false); setTimeLeft(selectedMin*60); setStartTime(null); setMode("focus"); setTask(""); localStorage.removeItem("jiroku_timer_state"); cancelEndNotify(); };
 
   const saveLog = async () => {
     setSaving(true);
@@ -1630,10 +1630,10 @@ function TimerScreen({onToast, isActive}) {
     if(!res.ok){ onToast("記録に失敗しました。もう一度お試しください"); setSaving(false); return; }
     if(res.xp_gained){ const lv=res.level_up?` → Lv.${res.level}！`:""; onToast(`+${res.xp_gained} XP 獲得${lv}`); }
     else onToast(res.updated?"記録を更新しました":"記録しました");
-    setSaving(false); setShowModal(false); setLogMemo("");
+    setSaving(false); setShowModal(false); setLogMemo(""); setTask("");
     setMode("break"); setTimeLeft(breakMin*60); setStartTime(null);
   };
-  const skipLog = () => { setShowModal(false); setMode("break"); setTimeLeft(breakMin*60); setStartTime(null); };
+  const skipLog = () => { setShowModal(false); setTask(""); setMode("break"); setTimeLeft(breakMin*60); setStartTime(null); };
 
   const mins = Math.floor(timeLeft/60);
   const secs = timeLeft%60;
