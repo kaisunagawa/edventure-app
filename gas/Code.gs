@@ -56,6 +56,8 @@ function doGet(e) {
       case "getCalendar":  result = getCalendar(studentEmail, e.parameter); break;
       case "getDiary":     result = getDiary(studentEmail, e.parameter); break;
       case "saveDiary":    result = saveDiary(studentEmail, e.parameter); break;
+      case "scheduleTimerEnd": result = scheduleTimerEnd(studentEmail, e.parameter); break;
+      case "cancelTimerEnd":   result = cancelTimerEnd(studentEmail); break;
       default: result = { ok: false, error: "Unknown action: " + action };
     }
     return jsonResponse(result, callback);
@@ -957,6 +959,75 @@ function saveDiary(studentEmail, body) {
   return { ok: true };
 }
 
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// タイマー終了通知（アプリが閉じられていてもLINEで気づけるように）
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+function getTimerQueueSheet() {
+  let sheet = getSheet("TimerQueue");
+  if (!sheet) {
+    sheet = SpreadsheetApp.openById(SPREADSHEET_ID).insertSheet("TimerQueue");
+    sheet.appendRow(["student_email", "end_time", "label", "notified", "created_at"]);
+  }
+  return sheet;
+}
+
+// タイマー開始時に呼ばれる: 終了予定時刻を登録（同じユーザーの予約は上書き）
+function scheduleTimerEnd(studentEmail, body) {
+  if (!body.endTime) return { ok: false, error: "missing endTime" };
+  const sheet = getTimerQueueSheet();
+  const data = sheet.getDataRange().getValues();
+  const now = new Date().toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" });
+  const endDate = new Date(Number(body.endTime));
+  const label = body.label || "タイマー";
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][0]) === studentEmail) {
+      sheet.getRange(i + 1, 2).setValue(endDate);
+      sheet.getRange(i + 1, 3).setValue(label);
+      sheet.getRange(i + 1, 4).setValue(false);
+      sheet.getRange(i + 1, 5).setValue(now);
+      return { ok: true };
+    }
+  }
+  sheet.appendRow([studentEmail, endDate, label, false, now]);
+  return { ok: true };
+}
+
+// 一時停止・リセット・アプリ内で完了を確認できたときに呼ばれる: 予約を無効化
+function cancelTimerEnd(studentEmail) {
+  const sheet = getTimerQueueSheet();
+  const data = sheet.getDataRange().getValues();
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][0]) === studentEmail) {
+      sheet.getRange(i + 1, 4).setValue(true);
+      break;
+    }
+  }
+  return { ok: true };
+}
+
+// 毎分実行: 終了時刻を過ぎた未通知の予約があればLINEで知らせる
+function checkTimerQueue() {
+  const sheet = getTimerQueueSheet();
+  const data = sheet.getDataRange().getValues();
+  const now = new Date();
+  const users = sheetToObjects(getSheet("Users"));
+  for (let i = 1; i < data.length; i++) {
+    const notified = data[i][3];
+    if (notified === true || String(notified).toUpperCase() === "TRUE") continue;
+    const endTime = data[i][1] instanceof Date ? data[i][1] : new Date(data[i][1]);
+    if (endTime <= now) {
+      const studentEmail = String(data[i][0]);
+      const label = data[i][2] || "タイマー";
+      const user = users.find(u => u.student_email === studentEmail);
+      if (user && user.line_user_id) {
+        sendLineMessage(user.line_user_id, "⏰ " + label + "が終了しました！\n記録を忘れずに📝\nhttps://kaisunagawa.github.io/edventure-app/");
+      }
+      sheet.getRange(i + 1, 4).setValue(true);
+    }
+  }
+}
+
 // 指定日のカレンダー予定キャッシュを取得
 function getCachedCalendar(studentEmail, dateStr) {
   const sheet = getSheet("CalendarCache");
@@ -1269,7 +1340,8 @@ function setupSheets() {
     "Coaches": ["coach_email","coach_name","assigned_students"],
     "MonthlySummary": ["month","student_email","summary","created_at"],
     "CalendarCache": ["student_email","date","events","updated_at"],
-    "Journal": ["date","student_email","diary","updated_at"]
+    "Journal": ["date","student_email","diary","updated_at"],
+    "TimerQueue": ["student_email","end_time","label","notified","created_at"]
   };
   Object.entries(sheets).forEach(([name, headers]) => {
     let s = ss.getSheetByName(name);
@@ -1285,6 +1357,7 @@ function setupTriggers() {
   ScriptApp.newTrigger("nightlyReport").timeBased().everyDays(1).atHour(21).create();
   ScriptApp.newTrigger("nightlyCoachMessage").timeBased().everyDays(1).atHour(22).create();
   ScriptApp.newTrigger("generateMonthlySummaries").timeBased().onMonthDay(1).atHour(3).create();
+  ScriptApp.newTrigger("checkTimerQueue").timeBased().everyMinutes(1).create();
   // 毎時ちょうどに届くよう、7〜23時それぞれにトリガーを設定
   for (let h = 7; h <= 23; h++) {
     ScriptApp.newTrigger("hourlyReminder").timeBased().everyDays(1).atHour(h).create();

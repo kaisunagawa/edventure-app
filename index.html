@@ -1290,6 +1290,15 @@ function TimerScreen({onToast, isActive}) {
   useEffect(()=>{ selectedMinRef.current = selectedMin; },[selectedMin]);
   useEffect(()=>{ modeRef.current = mode; },[mode]);
 
+  // アプリが閉じられていても気づけるよう、開始時にLINE通知をGAS側に予約し、
+  // 一時停止・リセット・アプリ内で完了を検知できたときは予約を取り消す
+  const scheduleEndNotify = (secondsLeft, currentMode) => {
+    const endTime = Date.now() + secondsLeft*1000;
+    const label = currentMode==="focus" ? "集中セッション" : "休憩";
+    gasPost("scheduleTimerEnd", {endTime, label});
+  };
+  const cancelEndNotify = () => { gasPost("cancelTimerEnd"); };
+
   useEffect(()=>{
     const onVisible = () => {
       if(document.visibilityState === 'visible' && isRunningRef.current) {
@@ -1302,6 +1311,7 @@ function TimerScreen({onToast, isActive}) {
             if(corrected <= 0) {
               setIsRunning(false);
               playBeep();
+              cancelEndNotify(); // アプリ内で気づけたのでLINE通知は不要
               if(modeRef.current === "focus"){ setSessionCount(c=>c+1); setShowModal(true); }
               else { setMode("focus"); setTimeLeft(selectedMinRef.current*60); }
             }
@@ -1318,6 +1328,7 @@ function TimerScreen({onToast, isActive}) {
     if(timeLeft<=0){
       setIsRunning(false);
       playBeep();
+      cancelEndNotify(); // アプリ内で気づけたのでLINE通知は不要
       if(mode==="focus"){ setSessionCount(c=>c+1); setShowModal(true); }
       else { setMode("focus"); setTimeLeft(selectedMin*60); }
       return;
@@ -1329,10 +1340,16 @@ function TimerScreen({onToast, isActive}) {
   const selectPreset = (min) => {
     setSelectedMin(min); setTimeLeft(min*60);
     setIsRunning(false); setStartTime(null); setMode("focus");
+    cancelEndNotify();
   };
-  const start = () => { primeAudio(); if(!startTime) setStartTime(new Date()); setIsRunning(true); };
-  const pause = () => setIsRunning(false);
-  const reset = () => { setIsRunning(false); setTimeLeft(selectedMin*60); setStartTime(null); setMode("focus"); localStorage.removeItem("jiroku_timer_state"); };
+  const start = () => {
+    primeAudio();
+    if(!startTime) setStartTime(new Date());
+    setIsRunning(true);
+    scheduleEndNotify(timeLeft, mode);
+  };
+  const pause = () => { setIsRunning(false); cancelEndNotify(); };
+  const reset = () => { setIsRunning(false); setTimeLeft(selectedMin*60); setStartTime(null); setMode("focus"); localStorage.removeItem("jiroku_timer_state"); cancelEndNotify(); };
 
   const saveLog = async () => {
     setSaving(true);
