@@ -1228,7 +1228,7 @@ const BREAKDOWN_LABELS = {
 
 function BreakdownRadar({breakdown}) {
   const N = BREAKDOWN_CATS.length;
-  const cx = 80, cy = 80, maxR = 62, maxVal = 20;
+  const cx = 80, cy = 80, maxR = 46, maxVal = 20;
   const startAngle = -Math.PI/2;
   const angleStep = (Math.PI*2)/N;
   const pt = (i, frac, r) => {
@@ -1243,6 +1243,7 @@ function BreakdownRadar({breakdown}) {
     return pt(i, v/maxVal, maxR);
   });
   const dataPolygon = dataPoints.map(p=>p.join(",")).join(" ");
+  const labelPos = BREAKDOWN_CATS.map((_,i)=>pt(i,1,maxR*1.4));
   const gid = "radarGrad";
 
   return html`
@@ -1257,6 +1258,10 @@ function BreakdownRadar({breakdown}) {
       ${axisEnds.map((p,i)=>html`<line key=${i} x1=${cx} y1=${cy} x2=${p[0]} y2=${p[1]} stroke="var(--border)" stroke-width="1"/>`)}
       <polygon points=${dataPolygon} fill=${`url(#${gid})`} fill-opacity="0.32" stroke=${`url(#${gid})`} stroke-width="2.5" stroke-linejoin="round"/>
       ${dataPoints.map((p,i)=>html`<circle key=${i} cx=${p[0]} cy=${p[1]} r="3" fill="var(--hero1)"/>`)}
+      ${BREAKDOWN_CATS.map(([key],i)=>{
+        const [lx,ly] = labelPos[i];
+        return html`<text key=${key} x=${lx} y=${ly+3} text-anchor="middle" font-size="10" font-weight="700" fill="var(--sub)" style=${{fontFamily:"inherit"}}>${BREAKDOWN_LABELS[key].jp}</text>`;
+      })}
     </svg>
   `;
 }
