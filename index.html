@@ -1337,6 +1337,51 @@ function TimerScreen({onToast, isActive}) {
   </div>`;
 }
 
+// ── 使い方 Q&A ──
+const FAQ_ITEMS = [
+  { q:"📝 記録のやり方は？",
+    a:"記録タブで時間帯を選び、「何をしましたか？」と自己評価を入れて保存するだけです。\n同じ時間帯にもう一度保存すると上書きされるので、間違えても大丈夫。\nメモを書くと+5XPのボーナスがあります。" },
+  { q:"📅 Googleカレンダーと連携したい",
+    a:"設定の「Googleカレンダー連携」ボタンを押して、Googleアカウントでログインします。\n\n途中で「このアプリはGoogleで確認されていません」という警告が出ますが、これは小規模アプリに必ず表示されるものです。\n「詳細」→「kaisunagawa.github.io（安全ではないページ）に移動」→「許可」の順に進めば連携完了です。" },
+  { q:"📅 予定が記録に自動で入るって本当？",
+    a:"カレンダー連携済みなら、未記録の時間帯を選ぶとその時間の予定名が「何をしましたか？」に自動で入ります。\nあとは自己評価を選んで保存するだけ。もちろん自由に書き換えられます。\n\n予定が読み込めないときは「📅 タップしてカレンダーの予定を読み込む」ボタンが出るので押してください。" },
+  { q:"💬 LINE通知を受け取りたい",
+    a:"公式LINEを友だち追加して、アプリに登録したGmailアドレスをトークで送るだけで連携完了です。\nリマインダー・毎晩のAIレポート・コーチからのメッセージが届くようになります。" },
+  { q:"🔔 通知の時間や回数を変えたい",
+    a:"設定の「時間帯と通知」で開始・終了時間と通知間隔を変えて保存してください。\n記録画面に表示される時間帯も同じ設定に連動します。\nなお21時以降はリマインダーの代わりにレポートとコーチメッセージが届きます。" },
+  { q:"📊 AIレポートはいつ届く？",
+    a:"毎晩21時に、その日の記録をもとにスコアとフィードバックが届きます。22時にはコーチからの一言も。\n1件も記録がない日はレポートは作られず、XPが減ってしまうので、1日1記録を目指しましょう。" },
+  { q:"⭐ XPとレベルの仕組みは？",
+    a:"記録1件で+10XP、メモを書くと+5XP、その日最初の記録には連続日数ボーナスが付きます。\n既存の記録の「更新」や、過去の日付への後付け記録ではXPは増えません。\n記録なしの日はXPが減り、連続記録もリセットされます。" },
+  { q:"🗓 記録し忘れた日を後から入れたい",
+    a:"記録タブの日付の「‹」で過去の日に戻ると、追加・編集ができます。\nAIコーチはちゃんとその記録も見てくれます（ただしXPは付きません）。" },
+  { q:"⏱ タイマーの使い方は？",
+    a:"タイマータブで集中時間を選んでスタート。終了すると記録画面が出て、そのまま記録できます。\n集中時間のプリセットと休憩の長さは設定で変更できます。\n他のアプリを開いてもタイマーは進み続けます。" },
+  { q:"🌙 ダークモードにしたい",
+    a:"スマホ本体のダークモード設定に自動で追従します。アプリ側での操作は不要です。" },
+];
+function FAQSection(){
+  const [open,setOpen]=useState(null);
+  return html`<div style=${{background:"var(--card)",borderRadius:16,border:"1px solid var(--border)",padding:"18px",marginBottom:12}}>
+    <div style=${{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
+      <span style=${{fontSize:15}}>📖</span>
+      <div style=${{fontSize:14,fontWeight:700,color:"var(--text)"}}>使い方 Q&A</div>
+    </div>
+    ${FAQ_ITEMS.map((f,i)=>html`
+      <div key=${i} style=${{borderBottom:i<FAQ_ITEMS.length-1?"1px solid var(--border)":"none"}}>
+        <button onClick=${()=>setOpen(open===i?null:i)}
+          style=${{display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,width:"100%",background:"none",border:"none",padding:"13px 2px",cursor:"pointer",fontFamily:"inherit",textAlign:"left"}}>
+          <span style=${{fontSize:13.5,fontWeight:600,color:"var(--text)",lineHeight:1.5}}>${f.q}</span>
+          <span style=${{fontSize:16,color:"var(--sub)",flexShrink:0,transform:open===i?"rotate(45deg)":"none",transition:"transform .15s"}}>＋</span>
+        </button>
+        ${open===i&&html`
+          <div style=${{fontSize:13,color:"var(--sub)",lineHeight:1.8,padding:"0 2px 14px",whiteSpace:"pre-line"}}>${f.a}</div>
+        `}
+      </div>
+    `)}
+  </div>`;
+}
+
 // ── Settings ──
 function SettingsScreen({onToast,onLogout,onGoalSaved}) {
   const saved=JSON.parse(localStorage.getItem("notifySettings")||'{"start":7,"end":23,"interval":2}');
@@ -1589,6 +1634,9 @@ function SettingsScreen({onToast,onLogout,onGoalSaved}) {
           : html`<button class="btn" onClick=${linkCalendar} disabled=${calLoading}>${calLoading?"連携中...":"Googleカレンダーを連携する"}</button>`
         }
       </div>
+
+      <!-- 使い方 Q&A -->
+      <${FAQSection}/>
 
       <!-- ログアウト -->
       <button class="btn-g" onClick=${onLogout} style=${{marginBottom:32}}>ログアウト</button>
