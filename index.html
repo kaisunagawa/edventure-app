@@ -1293,8 +1293,11 @@ function ReportScreen() {
       if(r.ok && r.data.length>0){
         setReportList(r.data);
         setDate(r.data[0].date);
-        gasApi("getReport",{date:r.data[0].date}).then(rr=>{
-          if(rr.ok && rr.data && rr.data.breakdown){ setLatestBreakdown(rr.data.breakdown); setLatestScore(rr.data.score); }
+        // breakdown列が無い古いレポートもあるため、直近数件を調べて最初に見つかったものを使う
+        const candidates = r.data.slice(0,5);
+        Promise.all(candidates.map(c=>gasApi("getReport",{date:c.date}))).then(results=>{
+          const hit = results.find(rr=>rr.ok && rr.data && rr.data.breakdown);
+          if(hit){ setLatestBreakdown(hit.data.breakdown); setLatestScore(hit.data.score); }
         });
       }
       setListLoading(false);
