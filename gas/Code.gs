@@ -252,29 +252,63 @@ function computeAllStatuses() {
     });
   }
 
-  // ステータスは平均や割合ではなく「これまでの累計」で育つ設計。
-  // やった分だけ必ず増え、サボっても下がらない（レベルと同じ感覚）。
-  // sqrtカーブで、序盤は伸びやすく上限20に近づくほど1上げるのが大変になる。
-  const grow = (total, factor) => Math.min(20, Math.floor(Math.sqrt(Math.max(0, total)) * factor));
+  // ステータスは筋肉のように「やった分だけ増え、やらない期間が続くと
+  // 落ちる」設計。半減期21日の指数減衰で日々の実績を積み上げる
+  // （1日サボった程度では大きく減らないが、休み続けるとじわじわ下がる）。
+  const HALF_LIFE_DAYS = 21;
+  const decayPerDay = Math.pow(0.5, 1 / HALF_LIFE_DAYS);
+  const grow = (decayedTotal, factor) => Math.min(20, Math.floor(Math.sqrt(Math.max(0, decayedTotal)) * factor));
+  const today = new Date();
+  const todayKey = formatDate(today);
 
   const result = {};
   Object.keys(byUser).forEach(email => {
     const logs = byUser[email];
-    const days = {};
-    logs.forEach(l => { (days[l.date] = days[l.date] || []).push(l); });
-    const activeDays = Object.keys(days).length;
+    const perDay = {};
+    logs.forEach(l => {
+      const d = perDay[l.date] = perDay[l.date] || { blocks: 0, memos: 0, highFocus: 0, goal: 0 };
+      d.blocks++;
+      if (l.memo && l.memo.trim()) d.memos++;
+      if ((parseInt(l.focus_level) || 0) >= 4) d.highFocus++;
+      if (l.goal_related === "true" || l.goal_related === true) d.goal++;
+    });
+    const dateKeys = Object.keys(perDay).sort();
+    if (dateKeys.length === 0) {
+      result[email] = { score: 0, breakdown: { records: 0, memo: 0, focus: 0, goal: 0, consistency: 0 } };
+      return;
+    }
 
-    const totalBlocks = logs.length;
-    const totalMemos = logs.filter(l => l.memo && l.memo.trim()).length;
-    const highFocusBlocks = logs.filter(l => (parseInt(l.focus_level) || 0) >= 4).length;
-    const goalBlocks = logs.filter(l => l.goal_related === "true" || l.goal_related === true).length;
+    const decayed = { records: 0, memo: 0, focus: 0, goal: 0, consistency: 0 };
+    let cursor = new Date(dateKeys[0] + "T00:00:00");
+    const end = new Date(todayKey + "T00:00:00");
+    let first = true;
+    while (cursor <= end) {
+      if (!first) {
+        decayed.records *= decayPerDay;
+        decayed.memo *= decayPerDay;
+        decayed.focus *= decayPerDay;
+        decayed.goal *= decayPerDay;
+        decayed.consistency *= decayPerDay;
+      }
+      first = false;
+      const key = formatDate(cursor);
+      const day = perDay[key];
+      if (day) {
+        decayed.records += day.blocks;
+        decayed.memo += day.memos;
+        decayed.focus += day.highFocus;
+        decayed.goal += day.goal;
+        decayed.consistency += 1;
+      }
+      cursor.setDate(cursor.getDate() + 1);
+    }
 
     const breakdown = {
-      records: grow(totalBlocks, 1),        // 400ブロック(約2ヶ月)で20
-      memo: grow(totalMemos, 1.3),          // 240メモで20
-      focus: grow(highFocusBlocks, 1.3),    // 高集中240ブロックで20
-      goal: grow(goalBlocks, 1.2),          // 目標関連280ブロックで20
-      consistency: grow(activeDays, 2.5),   // 記録64日で20
+      records: grow(decayed.records, 1.47),     // 1日6ブロックを継続で20
+      memo: grow(decayed.memo, 2.08),           // 1日3メモを継続で20
+      focus: grow(decayed.focus, 2.08),         // 1日3回の高集中を継続で20
+      goal: grow(decayed.goal, 2.08),           // 1日3ブロックの目標関連を継続で20
+      consistency: grow(decayed.consistency, 3.6), // 毎日記録を継続で20
     };
     const score = breakdown.records + breakdown.memo + breakdown.focus + breakdown.goal + breakdown.consistency;
     result[email] = { score, breakdown };
