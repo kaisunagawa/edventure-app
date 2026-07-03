@@ -351,6 +351,64 @@ async function gasPost(action, body = {}) {
   return { ok:true };
 }
 
+// ── Googleカレンダー（各ユーザー本人の権限でブラウザから直接読む） ──
+// GAS(CalendarApp)はスクリプト所有者のアカウントでしか読めないため、
+// 他ユーザーのカレンダーはクライアント側で取得する
+let gcalToken=null, gcalTokenExp=0;
+function getCalendarToken(interactive){
+  return new Promise((resolve)=>{
+    if(gcalToken && Date.now() < gcalTokenExp-60000) return resolve(gcalToken);
+    if(!window.google?.accounts?.oauth2) return resolve(null);
+    if(!interactive && !localStorage.getItem("cal_linked")) return resolve(null);
+    try{
+      const client=google.accounts.oauth2.initTokenClient({
+        client_id: GOOGLE_CLIENT_ID,
+        scope: "https://www.googleapis.com/auth/calendar.readonly",
+        callback: (t)=>{
+          if(t.error){ resolve(null); return; }
+          gcalToken=t.access_token;
+          gcalTokenExp=Date.now()+(Number(t.expires_in)||3600)*1000;
+          resolve(gcalToken);
+        },
+        error_callback: ()=>resolve(null),
+      });
+      client.requestAccessToken({prompt: interactive ? "" : "none"});
+    }catch{ resolve(null); }
+  });
+}
+const gcalCache={};
+async function fetchCalendarEvents(dateStr, interactive=false){
+  if(gcalCache[dateStr]) return gcalCache[dateStr];
+  const token=await getCalendarToken(interactive);
+  if(!token) return null;
+  try{
+    const timeMin=new Date(dateStr+"T00:00:00").toISOString();
+    const timeMax=new Date(dateStr+"T23:59:59").toISOString();
+    const r=await fetch("https://www.googleapis.com/calendar/v3/calendars/primary/events?singleEvents=true&orderBy=startTime&maxResults=50&timeMin="+encodeURIComponent(timeMin)+"&timeMax="+encodeURIComponent(timeMax),
+      {headers:{Authorization:"Bearer "+token}}).then(r=>r.json());
+    if(!r.items) return null;
+    const evs=r.items.filter(e=>e.status!=="cancelled").map(e=>{
+      const s=e.start?.dateTime?new Date(e.start.dateTime):null;
+      const en=e.end?.dateTime?new Date(e.end.dateTime):null;
+      return {
+        title:e.summary||"(無題)", allDay:!s,
+        startHour:s?s.getHours()+s.getMinutes()/60:null,
+        endHour:en?en.getHours()+en.getMinutes()/60:null,
+        time:s?s.toLocaleTimeString("ja-JP",{hour:"2-digit",minute:"2-digit"}):"終日",
+        sub:e.location||(e.hangoutLink?"Zoom/Meet":"")
+      };
+    });
+    gcalCache[dateStr]=evs;
+    return evs;
+  }catch{ return null; }
+}
+// 時間ブロック（例 "10:00-11:00"）に重なる予定タイトル一覧
+function eventsForBlock(evs, block){
+  if(!evs) return [];
+  const h=parseInt(block);
+  return evs.filter(e=>!e.allDay && e.startHour!==null && e.startHour<h+1 && e.endHour>h).map(e=>e.title);
+}
+
 const MOCK_LOGS = [
   { time_block:"07:00", task:"朝の読書", focus_level:"5 — 完璧にできた", memo:"集中できた" },
   { time_block:"09:00", task:"英語リスニング", focus_level:"3 — まあまあだった", memo:"" },
@@ -453,6 +511,13 @@ function HomeScreen({goalData, onGoalSaved}) {
       if(sched.ok) setSchedule(sched.data);
       if(logs.ok) setTodayLogs(logs.data);
     });
+
+    // カレンダー連携済みなら本人権限で直接取得（GAS経由はスクリプト所有者しか読めないためのフォールバック）
+    if(localStorage.getItem("cal_linked")){
+      fetchCalendarEvents(formatDateStr(new Date())).then(evs=>{
+        if(evs&&evs.length) setSchedule(evs.map(e=>({time:e.time,title:e.title,sub:e.sub})));
+      });
+    }
 
     // 日付が変わったらチェック状態リセット
     const today = formatDateStr(new Date());
@@ -686,6 +751,26 @@ function LogScreen({onToast, isActive}) {
   const [memo, setMemo] = useState("");
   const [goalRelated, setGoalRelated] = useState(false);
 
+  // カレンダー予定の自動入力
+  const [dayEvents, setDayEvents] = useState(null);
+  const autoFillRef = useRef("");
+  useEffect(()=>{
+    setDayEvents(null);
+    if(localStorage.getItem("cal_linked")) fetchCalendarEvents(date).then(setDayEvents);
+  },[date]);
+  // 未記録ブロックを選んだとき、入力が空なら予定タイトルを自動セット
+  useEffect(()=>{
+    if(!dayEvents) return;
+    if(logs.find(l=>l.time_block===block)) return;
+    const titles=eventsForBlock(dayEvents, block);
+    if(titles.length===0){
+      if(task===autoFillRef.current && task!=="") { setTask(""); autoFillRef.current=""; }
+      return;
+    }
+    const suggestion=titles.join("、");
+    if(task==="" || task===autoFillRef.current){ setTask(suggestion); autoFillRef.current=suggestion; }
+  },[block, dayEvents, logs]);
+
   // ブロック切替時に既存ログを読み込んでフォームに反映
   const loadBlockData = (b, currentLogs) => {
     const existing = currentLogs.find(l => l.time_block === b);
@@ -758,6 +843,11 @@ function LogScreen({onToast, isActive}) {
         <div class="form-grp">
           <label class="form-lbl">何をしましたか？</label>
           <input class="inp" placeholder="例：数学の問題演習" value=${task} onInput=${e=>setTask(e.target.value)} />
+          ${task!==""&&task===autoFillRef.current&&html`
+            <div style=${{fontSize:11,color:"var(--accent)",marginTop:5,display:"flex",alignItems:"center",gap:4}}>
+              📅 カレンダーの予定から自動入力しました（編集できます）
+            </div>
+          `}
         </div>
         <div class="form-grp">
           <label class="form-lbl">自己評価</label>
@@ -1273,6 +1363,8 @@ function SettingsScreen({onToast,onLogout,onGoalSaved}) {
       callback: async(tokenResp)=>{
         if(tokenResp.error){ setCalLoading(false); onToast("カレンダー連携に失敗しました"); return; }
         try{
+          gcalToken=tokenResp.access_token;
+          gcalTokenExp=Date.now()+(Number(tokenResp.expires_in)||3600)*1000;
           const calRes=await fetch("https://www.googleapis.com/calendar/v3/users/me/calendarList/primary",{
             headers:{Authorization:"Bearer "+tokenResp.access_token}
           }).then(r=>r.json());
@@ -1280,6 +1372,7 @@ function SettingsScreen({onToast,onLogout,onGoalSaved}) {
           await gasPost("saveSettings",{google_calendar_id:calId});
           localStorage.setItem("cal_linked","1");
           setCalLinked(true);
+          fetchCalendarEvents(formatDateStr(new Date())); // 今日の予定を先読み
           onToast("カレンダーを連携しました！");
         }catch{ onToast("カレンダー取得に失敗しました"); }
         setCalLoading(false);
@@ -1469,7 +1562,7 @@ function SettingsScreen({onToast,onLogout,onGoalSaved}) {
       <!-- カレンダー -->
       <div style=${{background:"var(--card)",borderRadius:16,border:"1px solid var(--border)",padding:"18px",marginBottom:12}}>
         <${SectionHeader} icon="📅" title="Googleカレンダー連携"/>
-        <p style=${{fontSize:13,color:"var(--sub)",lineHeight:1.7,marginBottom:14}}>${calLinked?"連携済みです。朝に今日の予定が届きます。":"連携すると朝に今日の予定が届きます。スキップしても他の機能は全て使えます。"}</p>
+        <p style=${{fontSize:13,color:"var(--sub)",lineHeight:1.7,marginBottom:14}}>${calLinked?"連携済みです。ホームに今日の予定が表示され、記録の「何をしましたか？」に予定が自動入力されます。":"連携すると、ホームに今日の予定が表示され、記録の「何をしましたか？」にカレンダーの予定が自動で入ります。記録の手間が大幅に減ります。"}</p>
         ${calLinked
           ? html`<div style=${{display:"flex",alignItems:"center",gap:8,color:"var(--accent)",fontWeight:700,fontSize:14,padding:"10px 14px",background:"var(--accent-l)",borderRadius:10}}>
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>連携済み
