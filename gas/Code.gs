@@ -248,38 +248,26 @@ function getStatusSummary(studentEmail) {
   }
   if (logs.length === 0) return { ok: true, data: null };
 
+  // ステータスは平均や割合ではなく「これまでの累計」で育つ設計。
+  // やった分だけ必ず増え、サボっても下がらない（レベルと同じ感覚）。
+  // sqrtカーブで、序盤は伸びやすく上限20に近づくほど1上げるのが大変になる。
   const days = {};
   logs.forEach(l => { (days[l.date] = days[l.date] || []).push(l); });
-  const dateKeys = Object.keys(days);
-  const numDays = dateKeys.length;
+  const activeDays = Object.keys(days).length;
+
   const totalBlocks = logs.length;
+  const totalMemos = logs.filter(l => l.memo && String(l.memo).trim()).length;
+  // 集中: 自己評価4以上の「良い集中」ができたブロックの累計
+  const highFocusBlocks = logs.filter(l => (parseInt(l.focus_level) || 0) >= 4).length;
+  const goalBlocks = logs.filter(l => l.goal_related === "true" || l.goal_related === true).length;
 
-  const avgBlocksPerDay = totalBlocks / numDays;
-  const recordsScore = Math.min(20, avgBlocksPerDay / 8 * 20);
-
-  const withMemo = logs.filter(l => l.memo && String(l.memo).trim()).length;
-  const memoScore = Math.min(20, withMemo / totalBlocks * 20);
-
-  const focusNums = logs.map(l => parseInt(l.focus_level) || 0).filter(n => n > 0);
-  const avgFocus = focusNums.length ? focusNums.reduce((a, b) => a + b, 0) / focusNums.length : 0;
-  const focusScore = Math.min(20, avgFocus / 5 * 20);
-
-  const goalCount = logs.filter(l => l.goal_related === "true" || l.goal_related === true).length;
-  const goalScore = Math.min(20, goalCount / totalBlocks * 20);
-
-  // 継続性: 直近30日のうち記録がある日の割合
-  const today = new Date();
-  const recentDates = new Set();
-  for (let i = 0; i < 30; i++) recentDates.add(formatDate(new Date(today.getTime() - i * 86400000)));
-  const activeDaysInWindow = dateKeys.filter(d => recentDates.has(d)).length;
-  const consistencyScore = Math.min(20, activeDaysInWindow / 30 * 20);
-
+  const grow = (total, factor) => Math.min(20, Math.floor(Math.sqrt(Math.max(0, total)) * factor));
   const breakdown = {
-    records: Math.round(recordsScore),
-    memo: Math.round(memoScore),
-    focus: Math.round(focusScore),
-    goal: Math.round(goalScore),
-    consistency: Math.round(consistencyScore),
+    records: grow(totalBlocks, 1),        // 400ブロック(約2ヶ月)で20
+    memo: grow(totalMemos, 1.3),          // 240メモで20
+    focus: grow(highFocusBlocks, 1.3),    // 高集中240ブロックで20
+    goal: grow(goalBlocks, 1.2),          // 目標関連280ブロックで20
+    consistency: grow(activeDays, 2.5),   // 記録64日で20
   };
   const score = breakdown.records + breakdown.memo + breakdown.focus + breakdown.goal + breakdown.consistency;
   return { ok: true, data: { score, breakdown } };
