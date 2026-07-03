@@ -753,11 +753,21 @@ function LogScreen({onToast, isActive}) {
 
   // カレンダー予定の自動入力
   const [dayEvents, setDayEvents] = useState(null);
+  const [calNeedsTap, setCalNeedsTap] = useState(false);
   const autoFillRef = useRef("");
   useEffect(()=>{
-    setDayEvents(null);
-    if(localStorage.getItem("cal_linked")) fetchCalendarEvents(date).then(setDayEvents);
+    setDayEvents(null); setCalNeedsTap(false);
+    if(localStorage.getItem("cal_linked")) fetchCalendarEvents(date).then(evs=>{
+      if(evs) setDayEvents(evs);
+      else setCalNeedsTap(true); // サイレント取得失敗 → タップで再取得
+    });
   },[date]);
+  const loadCalByTap=()=>{
+    fetchCalendarEvents(date, true).then(evs=>{
+      if(evs){ setDayEvents(evs); setCalNeedsTap(false); onToast("予定を読み込みました"); }
+      else onToast("予定の読み込みに失敗しました");
+    });
+  };
   // 未記録ブロックを選んだとき、入力が空なら予定タイトルを自動セット
   useEffect(()=>{
     if(!dayEvents) return;
@@ -840,6 +850,11 @@ function LogScreen({onToast, isActive}) {
         <div style=${{fontSize:12,color:"var(--sub)",marginBottom:8}}>
           ${!isToday(date) ? "🗓 過去の記録を追加・編集できます（XPは付きません）" : recorded.has(block) ? "✏️ 記録済み（編集できます）" : "📝 未記録"}
         </div>
+        ${calNeedsTap&&html`
+          <button onClick=${loadCalByTap} style=${{display:"flex",alignItems:"center",gap:8,width:"100%",padding:"10px 14px",marginBottom:12,borderRadius:10,border:"1.5px dashed var(--accent)",background:"var(--accent-l)",color:"var(--accent)",fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>
+            📅 タップしてカレンダーの予定を読み込む
+          </button>
+        `}
         <div class="form-grp">
           <label class="form-lbl">何をしましたか？</label>
           <input class="inp" placeholder="例：数学の問題演習" value=${task} onInput=${e=>setTask(e.target.value)} />
