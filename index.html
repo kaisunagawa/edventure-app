@@ -614,9 +614,11 @@ function HomeScreen({goalData, onGoalSaved, profile}) {
     ? Math.ceil((new Date(mainGoal.deadline) - new Date()) / 86400000)
     : null;
 
-  // actionテキストを行に分割（カスタムがあればそちらを優先）
+  // actionテキストを行に分割（カスタムがあればそちらを優先）。
+  // 「。」で分割すると1つのタスクの説明文が途中で2つに割れてしまうため、
+  // 改行と箇条書きの「・」だけを区切りとして扱う
   const aiItems = report?.action
-    ? report.action.split(/[。\n・]/).map(s=>s.trim()).filter(s=>s.length>2)
+    ? report.action.split(/[\n・]/).map(s=>s.trim().replace(/。$/,"")).filter(s=>s.length>2)
     : [];
   const actionItems = customActions !== null ? customActions : aiItems;
 
@@ -687,10 +689,11 @@ function HomeScreen({goalData, onGoalSaved, profile}) {
       })()}
       <div style=${{display:"flex",gap:8,marginTop:10}}>
         ${ranking&&html`
-          <div style=${{flex:1,minWidth:0,display:"flex",alignItems:"center",gap:7,background:"rgba(255,255,255,0.15)",borderRadius:12,padding:"9px 12px",backdropFilter:"blur(4px)"}}>
+          <div style=${{flex:1,minWidth:0,display:"flex",alignItems:"center",gap:7,background:"rgba(255,255,255,0.15)",borderRadius:12,padding:"7px 12px",backdropFilter:"blur(4px)"}}>
             <span style=${{fontSize:16,flexShrink:0}}>🏆</span>
-            <span style=${{fontSize:13,color:"#fff",fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
-              ${ranking.total}人中<b style=${{fontSize:16}}>${ranking.rank}位</b>
+            <span style=${{minWidth:0}}>
+              <span style=${{display:"block",fontSize:10,color:"rgba(255,255,255,0.75)",fontWeight:600,whiteSpace:"nowrap"}}>本日のランキング</span>
+              <span style=${{display:"block",fontSize:13,color:"#fff",fontWeight:700,whiteSpace:"nowrap"}}>${ranking.total}人中<b style=${{fontSize:15}}>${ranking.rank}位</b></span>
             </span>
           </div>
         `}
@@ -970,23 +973,15 @@ function LogScreen({onToast, isActive}) {
   const [memo, setMemo] = useState("");
   const [goalRelated, setGoalRelated] = useState(false);
 
-  // カレンダー予定の自動入力
+  // カレンダー予定の自動入力（ボタン操作なし）。
+  // 端末キャッシュ→本人認証→サーバー共有キャッシュの順に自動で試すため、
+  // ホーム画面で予定が見えている状態ならここでも必ず取得できる
   const [dayEvents, setDayEvents] = useState(null);
-  const [calNeedsTap, setCalNeedsTap] = useState(false);
   const autoFillRef = useRef("");
   useEffect(()=>{
-    setDayEvents(null); setCalNeedsTap(false);
-    if(localStorage.getItem("cal_linked")) fetchCalendarEvents(date).then(evs=>{
-      if(evs) setDayEvents(evs);
-      else setCalNeedsTap(true); // サイレント取得失敗 → タップで再取得
-    });
+    setDayEvents(null);
+    fetchCalendarEvents(date).then(evs=>{ if(evs) setDayEvents(evs); });
   },[date]);
-  const loadCalByTap=()=>{
-    fetchCalendarEvents(date, true).then(evs=>{
-      if(evs){ setDayEvents(evs); setCalNeedsTap(false); onToast("予定を読み込みました"); }
-      else onToast("予定の読み込みに失敗しました");
-    });
-  };
   // 未記録ブロックを選んだとき、入力が空なら予定タイトルを自動セット
   useEffect(()=>{
     if(!dayEvents) return;
@@ -1074,11 +1069,6 @@ function LogScreen({onToast, isActive}) {
         <div style=${{fontSize:12,color:"var(--sub)",marginBottom:8}}>
           ${!isToday(date) ? "🗓 過去の記録を追加・編集できます（XPは付きません）" : recorded.has(block) ? "✏️ 記録済み（編集できます）" : "📝 未記録"}
         </div>
-        ${calNeedsTap&&html`
-          <button onClick=${loadCalByTap} style=${{display:"flex",alignItems:"center",gap:8,width:"100%",padding:"10px 14px",marginBottom:12,borderRadius:10,border:"1.5px dashed var(--accent)",background:"var(--accent-l)",color:"var(--accent)",fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>
-            📅 タップしてカレンダーの予定を読み込む
-          </button>
-        `}
         <div class="form-grp">
           <label class="form-lbl">何をしましたか？</label>
           <input class="inp" placeholder="例：資料作成、家事、勉強など" value=${task} onInput=${e=>setTask(e.target.value)} />
@@ -1292,7 +1282,7 @@ const BREAKDOWN_TIPS = {
 
 function BreakdownRadar({breakdown}) {
   const N = BREAKDOWN_CATS.length;
-  const cx = 80, cy = 80, maxR = 46, maxVal = 20;
+  const cx = 80, cy = 80, maxR = 54, maxVal = 20;
   const startAngle = -Math.PI/2;
   const angleStep = (Math.PI*2)/N;
   const pt = (i, frac, r) => {
@@ -1307,7 +1297,7 @@ function BreakdownRadar({breakdown}) {
     return pt(i, v/maxVal, maxR);
   });
   const dataPolygon = dataPoints.map(p=>p.join(",")).join(" ");
-  const labelPos = BREAKDOWN_CATS.map((_,i)=>pt(i,1,maxR*1.4));
+  const labelPos = BREAKDOWN_CATS.map((_,i)=>pt(i,1,maxR*1.27));
   const gid = "radarGrad";
 
   return html`
@@ -2420,8 +2410,9 @@ function LoginScreen({onLogin}) {
 }
 
 function App() {
-  const [user,setUser]=useState(null);
-  const [checking,setChecking]=useState(!!CURRENT_USER);
+  // 起動を速くするため、ログイン済みキャッシュがあれば即アプリを表示する。
+  // アカウントの存在確認はバックグラウンドで行い、消えていた場合だけログアウトさせる
+  const [user,setUser]=useState(CURRENT_USER);
   const [tab,setTab]=useState("home");
   const [toast,setToast]=useState(null);
   const [goalData,setGoalData]=useState(()=>{
@@ -2438,31 +2429,26 @@ function App() {
   };
 
   useEffect(()=>{
-    if(!CURRENT_USER){ setChecking(false); return; }
-    // キャッシュがあってもGASで存在確認（10秒でタイムアウト→キャッシュで続行）
+    if(!CURRENT_USER) return;
+    // バックグラウンドで最新プロフィール取得＋存在確認（起動はブロックしない）
     const url=new URL(GAS_URL);
     url.searchParams.set("action","getUser");
     url.searchParams.set("studentEmail",CURRENT_USER.email);
-    const ctrl=new AbortController();
-    const timeout=setTimeout(()=>ctrl.abort(),10000);
-    fetch(url,{signal:ctrl.signal}).then(r=>r.json()).then(r=>{
-      clearTimeout(timeout);
+    fetch(url).then(r=>r.json()).then(r=>{
       if(r.ok&&r.data){
         const u={...CURRENT_USER, name:r.data.name||CURRENT_USER.name, nickname:r.data.nickname||CURRENT_USER.name, avatar:r.data.avatar||"🦊", coachName:r.data.coachName||"コーチ", coachEmail:r.data.coach_email||""};
         CURRENT_USER=u; localStorage.setItem("edventure_user",JSON.stringify(u)); setUser(u);
         setProfile({nickname:u.nickname,avatar:u.avatar});
-      } else {
+      } else if(r.error==="User not found"){
         // スプレッドシートに存在しない → キャッシュ削除してログイン画面へ
         localStorage.removeItem("edventure_user");
         localStorage.removeItem("line_prompted");
         localStorage.removeItem("cal_linked");
-        CURRENT_USER=null;
+        CURRENT_USER=null; setUser(null);
       }
-    }).catch(()=>{ clearTimeout(timeout); setUser(CURRENT_USER); }) // 通信エラー・タイムアウト時はキャッシュで続行
-    .finally(()=>setChecking(false));
+    }).catch(()=>{}); // 通信エラー時はキャッシュのまま続行
   },[]);
 
-  if(checking) return html`<div style=${{display:"flex",alignItems:"center",justifyContent:"center",height:"100%",color:"var(--sub)",fontSize:14}}>読み込み中...</div>`;
   if(!user) return html`<${LoginScreen} onLogin=${setUser}/>`;
   return html`
     <div style=${{height:"100%",position:"relative"}}>

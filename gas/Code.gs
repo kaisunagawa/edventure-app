@@ -480,26 +480,25 @@ function getGameStatus(studentEmail) {
 // 直近7日間の記録量（ブロック数・活動日数）で全アクティブユーザーを順位付けする。
 // 累積XPだと入会が早い人が有利になり続けるため、「今どれだけ真剣に取り組めているか」を
 // 測る指標として直近の活動量を採用。他ユーザーの氏名やスコアは返さずプライバシーに配慮する。
+// 本日のランキング: 各ユーザーの最新レポートのスコアで順位付けする。
+// レポートは毎晩21時生成のため、日中は前日分のスコアで競う形になる。
 function getRanking(studentEmail) {
   const users = sheetToObjects(getSheet("Users")).filter(u => u.is_active.toUpperCase() === "TRUE");
   if (users.length < 2) return { ok: true, data: null };
+  const active = new Set(users.map(u => u.student_email));
 
-  const sevenDaysAgo = formatDate(new Date(Date.now() - 7 * 86400000));
-  const recentLogs = sheetToObjects(getSheet("DailyLog")).filter(l => l.date >= sevenDaysAgo);
-
-  const scores = users.map(u => {
-    const logs = recentLogs.filter(l => l.student_email === u.student_email);
-    return {
-      email: u.student_email,
-      blocks: logs.length,
-      activeDays: new Set(logs.map(l => l.date)).size
-    };
+  const latest = {};
+  sheetToObjects(getSheet("Reports")).forEach(r => {
+    if (!active.has(r.student_email)) return;
+    if (!latest[r.student_email] || r.date > latest[r.student_email].date) latest[r.student_email] = r;
   });
-  scores.sort((a, b) => b.blocks - a.blocks || b.activeDays - a.activeDays);
+
+  const scores = Object.keys(latest).map(email => ({ email, score: Number(latest[email].score) || 0 }));
+  scores.sort((a, b) => b.score - a.score);
 
   const idx = scores.findIndex(s => s.email === studentEmail);
   if (idx === -1) return { ok: true, data: null };
-  return { ok: true, data: { rank: idx + 1, total: scores.length, blocks: scores[idx].blocks, activeDays: scores[idx].activeDays } };
+  return { ok: true, data: { rank: idx + 1, total: scores.length, score: scores[idx].score } };
 }
 
 // 「みんなの頑張り」画面用。ニックネーム＋アバターは本名と違い公開前提の情報なので
@@ -1046,7 +1045,7 @@ ${logsText}
   "feedback": "<目標の現在地と今日の取り組みへの共感・承認を含む2-3文>",
   "highlights": "<今日の具体的な良かった点を1文で称える>",
   "improvement": "<責めずに前向きな改善提案または継続すべき点を1文で>",
-  "action": "<目標達成に向けた明日の具体的アクションを1-2文で>",
+  "action": "<目標達成に向けた明日の具体的アクション。1〜3個。複数ある場合は必ず「・」で区切り、1つのアクションは途中で区切らず1つにまとめる>",
   "trend": "<全レポート履歴から見える成長・変化のトレンドを1文で>"
 }`;
 
