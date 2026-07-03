@@ -421,7 +421,7 @@ function getCommunity(studentEmail) {
     const logs = recentLogs.filter(l => l.student_email === u.student_email);
     return {
       isMe: u.student_email === studentEmail,
-      nickname: u.nickname || u.name || "名無しさん",
+      nickname: u.nickname || "名無しさん",
       avatar: u.avatar || "🦊",
       streak: Number(u.streak || 0),
       blocks: logs.length,
@@ -452,7 +452,7 @@ function shareAchievement(studentEmail, body) {
   if (!user) return { ok: false, error: "user not found" };
   const sheet = getAchievementsSheet();
   const now = new Date().toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" });
-  sheet.appendRow([formatDate(new Date()), studentEmail, user.nickname || user.name, user.avatar || "🦊", message, now]);
+  sheet.appendRow([formatDate(new Date()), studentEmail, user.nickname || "名無しさん", user.avatar || "🦊", message, now]);
   return { ok: true };
 }
 
