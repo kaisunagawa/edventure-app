@@ -214,6 +214,13 @@ function saveLog(studentEmail, body) {
   const today = formatDate(new Date());
   const now = new Date().toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" });
 
+  // 対象日: 指定があれば過去日の編集も可（未来日は不可）
+  let targetDate = today;
+  if (body.date && /^\d{4}-\d{2}-\d{2}$/.test(String(body.date)) && String(body.date) <= today) {
+    targetDate = String(body.date);
+  }
+  const isPast = targetDate !== today;
+
   // Upsert: 同じ日・同じ時間帯があれば更新
   const data = sheet.getDataRange().getValues();
   const headers = data[0];
@@ -226,7 +233,7 @@ function saveLog(studentEmail, body) {
       ? Utilities.formatDate(rawDate, "Asia/Tokyo", "yyyy-MM-dd")
       : String(rawDate);
     if (String(data[i][emailIdx]) === studentEmail &&
-        rowDate === today &&
+        rowDate === targetDate &&
         String(data[i][timeIdx]) === String(body.time_block)) {
       sheet.getRange(i+1, headers.indexOf("task")+1).setValue(body.task);
       sheet.getRange(i+1, headers.indexOf("focus_level")+1).setValue(body.focus_level);
@@ -234,15 +241,18 @@ function saveLog(studentEmail, body) {
       let grIdx = headers.indexOf("goal_related");
       if(grIdx === -1){ grIdx = headers.length; sheet.getRange(1, grIdx+1).setValue("goal_related"); }
       sheet.getRange(i+1, grIdx+1).setValue(body.goal_related || "false");
-      updateStreak(studentEmail);
+      if (!isPast) updateStreak(studentEmail);
       return { ok: true, log_id: String(data[i][0]), updated: true, xp_gained: 0 };
     }
   }
 
   const logId = "log_" + Date.now();
   const newRow = sheet.getLastRow() + 1;
-  sheet.appendRow([logId, studentEmail, today, "", body.task, body.focus_level, body.memo || "", now, body.goal_related || "false"]);
+  sheet.appendRow([logId, studentEmail, targetDate, "", body.task, body.focus_level, body.memo || "", now, body.goal_related || "false"]);
   sheet.getRange(newRow, 4).setNumberFormat("@").setValue(String(body.time_block));
+
+  // 過去日の後付け入力はストリーク・XPの対象外（後から稼げない）
+  if (isPast) return { ok: true, log_id: logId, xp_gained: 0 };
 
   updateStreak(studentEmail);
   const xpResult = addXP(studentEmail, body.memo);
@@ -415,7 +425,7 @@ ${logSummary}`;
 
     // LINEで通知
     if (user.line_user_id) {
-      sendLineMessage(user.line_user_id, "🤖 習慣AIコーチより\n\n" + replyText);
+      sendLineMessage(user.line_user_id, "🤖 習慣AIコーチより\n\n" + formatForLine(replyText));
     }
   } catch (err) {
     Logger.log("autoReplyFromClaude error: " + err.toString());
@@ -509,29 +519,31 @@ function morningScheduleNotify() {
       if (!apiKey) return;
 
       const ctx = buildStudentContext(user.student_email, user);
+      const recentMsgs = getRecentCoachMessages(user.student_email, 5);
 
       const prompt = `あなたは${user.name}の友人でもある教育コーチです。以下の情報をすべて把握した上で、今朝の個別メッセージを送ってください。
 
 ${ctx}
+${recentMsgs}
 
 【スタイル】
 - 敬語とタメ語を自然に混ぜる（「すごいじゃん、さすが！」「今日も一緒に頑張りましょう」など）
 - ユーモアを1つ忍ばせて、読んでクスッとできる温度感
 - 「---」「【】」「〇〇へのメッセージ」「〇〇案：」「〇〇さんへ」などの見出し・宛名・区切りは絶対使わない
 - 本文だけをそのまま書く。前置きや説明・宛名は一切不要
-- この子のことをよく知ってるコーチとして自然に話しかける感じ
-- 全レポート履歴と直近14日のログを踏まえて、パターンや成長を具体的に言及する
-- 4〜5文。絵文字1〜2個OK。「おはようございます」は不要（冒頭に入れるため）`;
+- 直近のコーチメッセージと同じ言い回し・内容・切り口は絶対に繰り返さない。毎回違う角度から話す
+- 全レポート履歴と直近14日のログを踏まえて、具体的なエピソードや数字に触れる
+- 3文以内。絵文字1個まで。「おはようございます」は不要（冒頭に入れるため）`;
 
       const res = UrlFetchApp.fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
-        payload: JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: 500, messages: [{ role: "user", content: prompt }] }),
+        payload: JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: 300, messages: [{ role: "user", content: prompt }] }),
         muteHttpExceptions: true
       });
       const result = JSON.parse(res.getContentText());
       if (!result.content || !result.content[0]) return;
-      sendLineMessage(user.line_user_id, "🌅 おはようございます、" + user.name + "さん！\n\n" + stripSalutation(result.content[0].text));
+      sendLineMessage(user.line_user_id, "🌅 おはようございます、" + user.name + "さん！\n\n" + formatForLine(stripSalutation(result.content[0].text)));
     } catch (err) { Logger.log("morningCoach error: " + err); }
   });
 }
@@ -577,20 +589,21 @@ function hourlyReminder() {
             : `今日すでに${todayLogs.length}件記録済み（${todayLogs.map(l => l.time_block + " " + l.task).join("、")}）、直近の記録から${hoursWithoutLog}時間経過`;
 
           const ctx = buildStudentContext(user.student_email, user);
+          const recentMsgs = getRecentCoachMessages(user.student_email, 3);
 
-          const prompt = `あなたは${user.name}の教育コーチです。以下の情報をすべて把握した上で、記録を促すメッセージを送ってください。
+          const prompt = `あなたは${user.name}の教育コーチです。以下の情報をすべて把握した上で、記録を促す短いメッセージを送ってください。
 
 ${ctx}
 【今日の状況】${todayLogSummary}
+${recentMsgs}
 
 【スタイル】
 - 敬語とタメ語を自然に混ぜる
-- 今日すでに記録している場合は具体的な内容に触れながら承認してから次を促す
+- 今日すでに記録している場合は具体的な内容に一言触れてから次を促す
 - 今日まだ記録がない場合は責めずに軽く背中を押す
-- 「最近は」など現状と矛盾する表現は使わない。今日の状況に即した言葉を使う
-- 「○○さんへ」「Kai Sunagawaさんへ」などの宛名・呼びかけ文は絶対に書かない。本文だけを書く
-- 「---」「【】」などの見出し・区切りは使わない。普通の会話文のみ
-- 2〜3文。絵文字1個OK`;
+- 直近のコーチメッセージと同じ言い回し・パターンは絶対に使わない
+- 「---」「【】」宛名は使わない。普通の会話文のみ
+- 2文以内。絵文字1個まで`;
 
           const res = UrlFetchApp.fetch("https://api.anthropic.com/v1/messages", {
             method: "POST",
@@ -600,7 +613,7 @@ ${ctx}
           });
           const result = JSON.parse(res.getContentText());
           if (result.content && result.content[0]) {
-            sendLineMessage(user.line_user_id, "🤖 習慣AIコーチより\n\n" + stripSalutation(result.content[0].text) + "\n\n📝 " + timeBlock + " の記録はこちらから↓\nhttps://kaisunagawa.github.io/edventure-app/");
+            sendLineMessage(user.line_user_id, "🤖 習慣AIコーチより\n\n" + formatForLine(stripSalutation(result.content[0].text)) + "\n\n📝 " + timeBlock + " の記録はこちらから↓\nhttps://kaisunagawa.github.io/edventure-app/");
             return;
           }
         } catch(e) { Logger.log("hourlyCoach error: " + e); }
@@ -675,41 +688,55 @@ function nightlyReport() {
       const streakMsg = streak >= 3 ? "\n\n🔥 連続" + streak + "日記録中！すごい！" : "";
       sendLineMessage(user.line_user_id, "📊 今日のAIレポート\n\nスコア：" + report.score + "点\n\n" + report.feedback + "\n\n明日のアクション：\n" + report.action + streakMsg);
 
-      // コーチからの夜のメッセージ
-      try {
-        const apiKey = PropertiesService.getScriptProperties().getProperty("CLAUDE_API_KEY");
-        if (apiKey) {
-          const ctx = buildStudentContext(user.student_email, user);
-          const coachPrompt = `あなたは${user.name}の友人でもある教育コーチです。以下の情報をすべて把握した上で、夜の締めくくりメッセージを送ってください。
+      notifyCoachOnReport(user, report);
+    } catch (err) { Logger.log(err); }
+  });
+}
+
+function nightlyCoachMessage() {
+  const today = formatDate(new Date());
+  const apiKey = PropertiesService.getScriptProperties().getProperty("CLAUDE_API_KEY");
+  if (!apiKey) return;
+
+  sheetToObjects(getSheet("Users")).filter(u => u.is_active.toUpperCase() === "TRUE").forEach(user => {
+    try {
+      if (!user.line_user_id) return;
+      // 今日のレポートがある場合のみ送る
+      const report = sheetToObjects(getSheet("Reports")).find(r => r.student_email === user.student_email && r.date === today);
+      if (!report) return;
+
+      const ctx = buildStudentContext(user.student_email, user);
+      const recentMsgs = getRecentCoachMessages(user.student_email, 5);
+      const streak = Number(user.streak || 0);
+      const coachPrompt = `あなたは${user.name}の友人でもある教育コーチです。以下の情報をすべて把握した上で、夜の締めくくりメッセージを送ってください。
 
 ${ctx}
 【今日のスコア】${report.score}点
 【今日の良かった点】${report.highlights}
 【今日の改善点】${report.improvement}
+【連続記録日数】${streak}日
+${recentMsgs}
 
 【スタイル】
 - 敬語とタメ語を自然に混ぜる
 - ユーモアを1つ入れて人間味を出す
-- 「---」「【】」「〇〇へのメッセージ」「〇〇案：」「〇〇さんへ」などの見出し・宛名・区切りは絶対使わない
+- 「---」「【】」「〇〇へのメッセージ」「〇〇さんへ」などの見出し・宛名は絶対使わない
 - 本文だけをそのまま書く。前置きや宛名・説明は一切不要
-- 全レポート履歴を踏まえて成長や変化に具体的に触れてから明日につなげる
-- 3〜4文。絵文字1〜2個OK`;
+- 直近のコーチメッセージと同じ言い回し・構成は絶対に繰り返さない
+- 今日の具体的な記録内容や数字に触れる。抽象的な励ましは避ける
+- 2〜3文。絵文字1個まで`;
 
-          const res = UrlFetchApp.fetch("https://api.anthropic.com/v1/messages", {
-            method: "POST",
-            headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
-            payload: JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: 400, messages: [{ role: "user", content: coachPrompt }] }),
-            muteHttpExceptions: true
-          });
-          const result = JSON.parse(res.getContentText());
-          if (result.content && result.content[0]) {
-            sendLineMessage(user.line_user_id, "🤖 習慣AIコーチより\n\n" + stripSalutation(result.content[0].text));
-          }
-        }
-      } catch(e) { Logger.log("nightly coach message error: " + e); }
-
-      notifyCoachOnReport(user, report);
-    } catch (err) { Logger.log(err); }
+      const res = UrlFetchApp.fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
+        payload: JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: 400, messages: [{ role: "user", content: coachPrompt }] }),
+        muteHttpExceptions: true
+      });
+      const result = JSON.parse(res.getContentText());
+      if (result.content && result.content[0]) {
+        sendLineMessage(user.line_user_id, "🤖 習慣AIコーチより\n\n" + formatForLine(stripSalutation(result.content[0].text)));
+      }
+    } catch(e) { Logger.log("nightlyCoachMessage error: " + e); }
   });
 }
 
@@ -995,6 +1022,27 @@ function testGenerateMonthlySummary() {
 // LINE
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+// 句点・感嘆符の後に改行を入れて読みやすくする
+function formatForLine(text) {
+  if (!text) return text;
+  return text
+    .replace(/。(?!\n)/g, '。\n')
+    .replace(/！(?!\n)/g, '！\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+// 直近N件のLINEメッセージ（コーチ→生徒）を取得して繰り返し防止に使う
+function getRecentCoachMessages(studentEmail, limit) {
+  limit = limit || 5;
+  const msgs = sheetToObjects(getSheet("Messages"))
+    .filter(m => m.student_email === studentEmail && m.sender_role === "coach")
+    .sort((a, b) => b.message_id > a.message_id ? 1 : -1)
+    .slice(0, limit)
+    .map(m => m.content);
+  return msgs.length > 0 ? "【直近のコーチメッセージ（これと被らないようにする）】\n" + msgs.join("\n---\n") : "";
+}
+
 // Claudeが生成した宛名行（「〇〇へ」「〇〇さん、」など）を除去する
 function stripSalutation(text) {
   if (!text) return text;
@@ -1096,6 +1144,7 @@ function setupTriggers() {
   ScriptApp.getProjectTriggers().forEach(t => ScriptApp.deleteTrigger(t));
   ScriptApp.newTrigger("morningScheduleNotify").timeBased().everyDays(1).atHour(7).create();
   ScriptApp.newTrigger("nightlyReport").timeBased().everyDays(1).atHour(21).create();
+  ScriptApp.newTrigger("nightlyCoachMessage").timeBased().everyDays(1).atHour(22).create();
   ScriptApp.newTrigger("generateMonthlySummaries").timeBased().onMonthDay(1).atHour(3).create();
   // 毎時ちょうどに届くよう、7〜23時それぞれにトリガーを設定
   for (let h = 7; h <= 23; h++) {
