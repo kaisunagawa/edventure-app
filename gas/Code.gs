@@ -3,6 +3,7 @@
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 const SPREADSHEET_ID = "1EbGxrI6e-rmzgDk4jczOX1RfHIYY-6Q1jOPpr5Hybqc";
+const APP_URL = "https://kaisunagawa.github.io/edventure-app/";
 const CLAUDE_API_KEY = PropertiesService.getScriptProperties().getProperty("CLAUDE_API_KEY");
 const LINE_CHANNEL_TOKEN = PropertiesService.getScriptProperties().getProperty("LINE_CHANNEL_TOKEN");
 
@@ -86,7 +87,7 @@ function doPost(e) {
           const rows = sheetToObjects(getSheet("Users"));
           // すでに連携済みなら何もしない
           if (rows.find(r => r.line_user_id === lineUserId)) return;
-          sendLineMessage(lineUserId, "🎉 追加ありがとうございます！\n\nまず、下のリンクからJIROKUアプリに登録してください👇\nhttps://kaisunagawa.github.io/edventure-app/\n\n登録が完了したら、このLINEに登録したGmailアドレスを送ってください。それだけで連携完了です！\n\n✅ 毎時間の記録リマインダー\n✅ 毎晩のAIレポート\nがこのLINEに届くようになります。");
+          sendLineMessage(lineUserId, "🎉 追加ありがとうございます！\n\nまず、下のリンクからJIROKUアプリに登録してください👇\n" + APP_URL + "\n\n登録が完了したら、このLINEに登録したGmailアドレスを送ってください。それだけで連携完了です！\n\n✅ 毎時間の記録リマインダー\n✅ 毎晩のAIレポート\nがこのLINEに届くようになります。");
         }
 
         if (event.type === "message" && event.message.type === "text") {
@@ -832,13 +833,13 @@ ${recentMsgs}
           });
           const result = JSON.parse(res.getContentText());
           if (result.content && result.content[0]) {
-            sendLineMessage(user.line_user_id, stripSalutation(result.content[0].text).trim() + "\n📝 https://kaisunagawa.github.io/edventure-app/");
+            sendLineMessage(user.line_user_id, stripSalutation(result.content[0].text).trim() + "\n📝 " + APP_URL);
             return;
           }
         } catch(e) { Logger.log("hourlyCoach error: " + e); }
       }
     }
-    sendLineMessage(user.line_user_id, "⏱ " + timeBlock + " の記録タイム！\n📝 https://kaisunagawa.github.io/edventure-app/");
+    sendLineMessage(user.line_user_id, "⏱ " + timeBlock + " の記録タイム！\n📝 " + APP_URL);
   });
 }
 
@@ -1307,7 +1308,7 @@ function checkTimerQueue() {
       const label = data[i][2] || "タイマー";
       const user = users.find(u => u.student_email === studentEmail);
       if (user && user.line_user_id) {
-        sendLineMessage(user.line_user_id, "⏰ " + label + "が終了しました！\n記録を忘れずに📝\nhttps://kaisunagawa.github.io/edventure-app/");
+        sendLineMessage(user.line_user_id, "⏰ " + label + "が終了しました！\n記録を忘れずに📝\n" + APP_URL);
       }
       sheet.getRange(i + 1, 4).setValue(true);
     }
@@ -1696,6 +1697,13 @@ function generateReportForDate(targetDate) {
   });
 }
 
+// テスト関数用の管理者メールアドレス。本名を含むためコードに直書きせず、
+// GASエディタの「プロジェクトの設定 > スクリプト プロパティ」に
+// ADMIN_EMAIL として登録した値を読む（コードを貼り替えても消えない）。
+function adminEmail() {
+  return PropertiesService.getScriptProperties().getProperty("ADMIN_EMAIL") || "";
+}
+
 function generateYesterdayReport() {
   const yesterday = formatDate(new Date(Date.now() - 86400000));
   Logger.log("昨日: " + yesterday);
@@ -1703,7 +1711,7 @@ function generateYesterdayReport() {
 }
 
 function testSaveLog() {
-  const result = saveLog("[REDACTED_EMAIL]", { time_block: "10:00", task: "テスト", focus_level: "高", memo: "動作確認" });
+  const result = saveLog(adminEmail(), { time_block: "10:00", task: "テスト", focus_level: "高", memo: "動作確認" });
   console.log(JSON.stringify(result));
 }
 
@@ -1719,7 +1727,7 @@ function debugNightly() {
 
 function testLine() {
   const users = sheetToObjects(getSheet("Users"));
-  const user = users.find(u => u.student_email === "[REDACTED_EMAIL]");
+  const user = users.find(u => u.student_email === adminEmail());
   if (!user) { console.log("ユーザーが見つかりません"); return; }
   const res = UrlFetchApp.fetch("https://api.line.me/v2/bot/message/push", {
     method: "POST",
@@ -1743,24 +1751,24 @@ function testAutoReply() {
 }
 
 function testGetUser() {
-  Logger.log(JSON.stringify(getUser("[REDACTED_EMAIL]")));
+  Logger.log(JSON.stringify(getUser(adminEmail())));
 }
 
 function testStreak() {
-  updateStreak("[REDACTED_EMAIL]");
-  Logger.log(JSON.stringify(getStreak("[REDACTED_EMAIL]")));
+  updateStreak(adminEmail());
+  Logger.log(JSON.stringify(getStreak(adminEmail())));
 }
 
 function testReportForMe() {
-  const user = sheetToObjects(getSheet("Users")).find(u => u.student_email === "[REDACTED_EMAIL]");
-  const logs = getLogs("[REDACTED_EMAIL]").data;
+  const user = sheetToObjects(getSheet("Users")).find(u => u.student_email === adminEmail());
+  const logs = getLogs(adminEmail()).data;
   Logger.log("ログ数: " + logs.length);
-  const report = generateReportWithClaude("[REDACTED_EMAIL]", user.name, logs);
+  const report = generateReportWithClaude(adminEmail(), user.name, logs);
   Logger.log("レポート: " + JSON.stringify(report));
 }
 
 function testDaySummaryForMe() {
-  const email = "[REDACTED_EMAIL]";
+  const email = adminEmail();
   const today = formatDate(new Date());
   const logs = getLogs(email, { date: today }).data;
   Logger.log("対象日: " + today + " / ログ数: " + logs.length);
