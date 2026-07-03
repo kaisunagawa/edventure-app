@@ -49,6 +49,7 @@ function doGet(e) {
       case "shareAchievement": result = shareAchievement(studentEmail, e.parameter); break;
       case "getReport":    result = getReport(studentEmail, e.parameter); break;
       case "getReportList": result = getReportList(studentEmail); break;
+      case "getStatusSummary": result = getStatusSummary(studentEmail); break;
       case "getLogs":      result = getLogs(studentEmail, e.parameter); break;
       case "getMessages":  result = getMessages(studentEmail); break;
       case "getSchedule":  result = getSchedule(studentEmail); break;
@@ -215,6 +216,49 @@ function getReportList(studentEmail) {
       return { date: r.date, score: Number(r.score), breakdown };
     });
   return { ok: true, data: list };
+}
+
+// 「現在のステータス」用。AIレポートのbreakdown保存を待たず、
+// 記録済みのDailyLogから直接いま時点の5軸スコアを計算する。
+function getStatusSummary(studentEmail) {
+  const logs = sheetToObjects(getSheet("DailyLog")).filter(l => l.student_email === studentEmail);
+  if (logs.length === 0) return { ok: true, data: null };
+
+  const days = {};
+  logs.forEach(l => { (days[l.date] = days[l.date] || []).push(l); });
+  const dateKeys = Object.keys(days);
+  const numDays = dateKeys.length;
+  const totalBlocks = logs.length;
+
+  const avgBlocksPerDay = totalBlocks / numDays;
+  const recordsScore = Math.min(20, avgBlocksPerDay / 8 * 20);
+
+  const withMemo = logs.filter(l => l.memo && String(l.memo).trim()).length;
+  const memoScore = Math.min(20, withMemo / totalBlocks * 20);
+
+  const focusNums = logs.map(l => parseInt(l.focus_level) || 0).filter(n => n > 0);
+  const avgFocus = focusNums.length ? focusNums.reduce((a, b) => a + b, 0) / focusNums.length : 0;
+  const focusScore = Math.min(20, avgFocus / 5 * 20);
+
+  const goalCount = logs.filter(l => l.goal_related === "true" || l.goal_related === true).length;
+  const goalScore = Math.min(20, goalCount / totalBlocks * 20);
+
+  // 継続性: 直近30日のうち記録がある日の割合
+  const today = new Date();
+  const recentDates = new Set();
+  for (let i = 0; i < 30; i++) recentDates.add(formatDate(new Date(today.getTime() - i * 86400000)));
+  const activeDaysInWindow = dateKeys.filter(d => recentDates.has(d)).length;
+  const consistencyScore = Math.min(20, activeDaysInWindow / 30 * 20);
+
+  const breakdown = {
+    records: Math.round(recordsScore),
+    memo: Math.round(memoScore),
+    focus: Math.round(focusScore),
+    goal: Math.round(goalScore),
+    consistency: Math.round(consistencyScore),
+  };
+  const score = breakdown.records + breakdown.memo + breakdown.focus + breakdown.goal + breakdown.consistency;
+  return { ok: true, data: { score, breakdown } };
 }
 
 function getReport(studentEmail, body) {

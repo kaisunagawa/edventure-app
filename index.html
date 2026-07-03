@@ -1293,20 +1293,13 @@ function ReportScreen() {
       if(r.ok && r.data.length>0){
         setReportList(r.data);
         setDate(r.data[0].date);
-        // 「現在のステータス」はその日だけでなく、これまでの全履歴の平均で出す
-        const withBreakdown = r.data.filter(d=>d.breakdown);
-        if(withBreakdown.length){
-          const sums = {};
-          BREAKDOWN_CATS.forEach(([key])=>{ sums[key]=0; });
-          withBreakdown.forEach(d=>{ BREAKDOWN_CATS.forEach(([key])=>{ sums[key]+=Number(d.breakdown[key]||0); }); });
-          const avgBreakdown = {};
-          BREAKDOWN_CATS.forEach(([key])=>{ avgBreakdown[key]=Math.round(sums[key]/withBreakdown.length); });
-          const avgScore = Math.round(withBreakdown.reduce((s,d)=>s+Number(d.score||0),0)/withBreakdown.length);
-          setOverallBreakdown(avgBreakdown);
-          setOverallScore(avgScore);
-        }
       }
       setListLoading(false);
+    });
+    // 「現在のステータス」はAIレポートのbreakdown保存を待たず、
+    // 記録済みのログから直接いま時点の状態を計算して即座に出す
+    gasApi("getStatusSummary").then(r=>{
+      if(r.ok && r.data){ setOverallBreakdown(r.data.breakdown); setOverallScore(r.data.score); }
     });
   },[]);
 
