@@ -40,35 +40,6 @@
       --hero1:    #0891B2;
       --hero2:    #0e7490;
     }
-    @media (prefers-color-scheme: dark) {
-      :root {
-        --bg:       #101417;
-        --card:     #1A2025;
-        --border:   #2B333A;
-        --text:     #E8ECEF;
-        --sub:      #7E8A94;
-        --accent:   #22B8D4;
-        --accent-l: #123A44;
-        --glow:     rgba(34,184,212,.15);
-        --green:    #34D399;
-        --green-l:  #0E2B21;
-        --amber:    #FBBF24;
-        --amber-l:  #2E2410;
-        --red:      #F87171;
-        --red-l:    #331717;
-        --hero1:    #0B4A5A;
-        --hero2:    #093642;
-      }
-      .nav { background: rgba(20,25,30,.96); }
-      .toast { background: #E8ECEF; color: #111827; }
-      .e5 { background: var(--green-l); border-color: #14532D; color: #4ADE80; }
-      .e4 { background: var(--accent-l); border-color: #164E63; color: #67E8F9; }
-      .e3 { background: var(--amber-l); border-color: #78350F; color: #FCD34D; }
-      .e2, .e1 { background: var(--red-l); border-color: #7F1D1D; color: #FCA5A5; }
-      .t-g { background: var(--green-l); color: #4ADE80; }
-      .t-a { background: var(--amber-l); color: #FCD34D; }
-      input[type="date"].inp, input[type="date"].login-inp, select { color-scheme: dark; }
-    }
 
     html, body {
       height: 100%; background: var(--bg);
@@ -299,6 +270,35 @@
     .login-inp { width: 100%; padding: 13px 14px; border-radius: 9px; border: 1px solid var(--border); font-size: 15px; background: var(--card); color: var(--text); outline: none; font-family: inherit; transition: border-color .12s; box-sizing: border-box; }
     .login-inp:focus { border-color: var(--accent); }
     .login-err { font-size: 12px; color: var(--red); font-weight: 500; }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg:       #101417;
+        --card:     #1A2025;
+        --border:   #2B333A;
+        --text:     #E8ECEF;
+        --sub:      #7E8A94;
+        --accent:   #22B8D4;
+        --accent-l: #123A44;
+        --glow:     rgba(34,184,212,.15);
+        --green:    #34D399;
+        --green-l:  #0E2B21;
+        --amber:    #FBBF24;
+        --amber-l:  #2E2410;
+        --red:      #F87171;
+        --red-l:    #331717;
+        --hero1:    #0B4A5A;
+        --hero2:    #093642;
+      }
+      .nav { background: rgba(20,25,30,.96); }
+      .toast { background: #E8ECEF; color: #111827; }
+      .e5 { background: var(--green-l); border-color: #14532D; color: #4ADE80; }
+      .e4 { background: var(--accent-l); border-color: #164E63; color: #67E8F9; }
+      .e3 { background: var(--amber-l); border-color: #78350F; color: #FCD34D; }
+      .e2, .e1 { background: var(--red-l); border-color: #7F1D1D; color: #FCA5A5; }
+      .t-g { background: var(--green-l); color: #4ADE80; }
+      .t-a { background: var(--amber-l); color: #FCD34D; }
+      input[type="date"].inp, input[type="date"].login-inp, select { color-scheme: dark; }
+    }
   </style>
 </head>
 <body>
