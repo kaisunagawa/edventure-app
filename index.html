@@ -157,9 +157,9 @@
 
     /* ── Eval buttons ── */
     .eval-btn {
-      width: 100%; padding: 11px 14px; margin-bottom: 6px; border-radius: 9px;
+      width: 100%; padding: 8px 12px; margin-bottom: 4px; border-radius: 8px;
       border: 1px solid var(--border); background: var(--card);
-      font-size: 14px; font-weight: 500; cursor: pointer; text-align: left;
+      font-size: 13.5px; font-weight: 500; cursor: pointer; text-align: left;
       color: var(--sub); transition: all .12s; font-family: inherit;
       -webkit-tap-highlight-color: transparent;
     }
@@ -873,20 +873,20 @@ function LogScreen({onToast, isActive}) {
           `}
         </div>
         <div class="form-grp">
-          <label class="form-lbl">自己評価</label>
-          ${EVALS.map(f=>html`<button key=${f.l} class=${"eval-btn"+(focus===f.l?" "+f.c:"")} onClick=${()=>setFocus(f.l)}>${f.l}</button>`)}
-        </div>
-        <div class="form-grp">
-          <label class="form-lbl">メモ（任意）</label>
-          <textarea class="txa" placeholder="気づいたことや振り返り..." value=${memo} onInput=${e=>setMemo(e.target.value)} />
-        </div>
-        <div class="form-grp">
           <button onClick=${()=>setGoalRelated(!goalRelated)} style=${{display:"flex",alignItems:"center",gap:10,background:"none",border:`1.5px solid ${goalRelated?"var(--accent)":"var(--border)"}`,borderRadius:10,padding:"10px 14px",width:"100%",cursor:"pointer",transition:"all .15s",backgroundColor:goalRelated?"var(--accent-l)":"transparent"}}>
             <div style=${{width:20,height:20,borderRadius:6,border:`2px solid ${goalRelated?"var(--accent)":"var(--border)"}`,background:goalRelated?"var(--accent)":"transparent",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,transition:"all .15s"}}>
               ${goalRelated&&html`<svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="white" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`}
             </div>
             <span style=${{fontSize:14,fontWeight:500,color:goalRelated?"var(--accent)":"var(--sub)"}}>この時間は目標に関連している</span>
           </button>
+        </div>
+        <div class="form-grp">
+          <label class="form-lbl">自己評価</label>
+          ${EVALS.map(f=>html`<button key=${f.l} class=${"eval-btn"+(focus===f.l?" "+f.c:"")} onClick=${()=>setFocus(f.l)}>${f.l}</button>`)}
+        </div>
+        <div class="form-grp">
+          <label class="form-lbl">メモ（任意）</label>
+          <textarea class="txa" placeholder="気づいたことや振り返り..." value=${memo} onInput=${e=>setMemo(e.target.value)} />
         </div>
         <button class="btn" onClick=${save} disabled=${!task.trim()||saving}>${saving?html`<span class="spin"/>`:recorded.has(block)?"更新する":"保存する"}</button>
       </div>
@@ -1314,21 +1314,21 @@ function TimerScreen({onToast, isActive}) {
               placeholder="例：企画書の作成"/>
           </div>
           <div class="form-grp">
-            <label class="form-lbl">自己評価</label>
-            ${EVALS.map(f=>html`<button key=${f.l} class=${"eval-btn"+(logFocus===f.l?" "+f.c:"")} onClick=${()=>setLogFocus(f.l)}>${f.l}</button>`)}
-          </div>
-          <div class="form-grp">
-            <label class="form-lbl">メモ（任意）</label>
-            <textarea class="txa" placeholder="気づいたことや振り返り..." value=${logMemo}
-              onInput=${e=>setLogMemo(e.target.value)}/>
-          </div>
-          <div class="form-grp" style=${{marginBottom:20}}>
             <button onClick=${()=>setLogGoalRelated(!logGoalRelated)} style=${{display:"flex",alignItems:"center",gap:10,background:logGoalRelated?"var(--accent-l)":"none",border:`1.5px solid ${logGoalRelated?"var(--accent)":"var(--border)"}`,borderRadius:10,padding:"10px 14px",width:"100%",cursor:"pointer",transition:"all .15s"}}>
               <div style=${{width:20,height:20,borderRadius:6,border:`2px solid ${logGoalRelated?"var(--accent)":"var(--border)"}`,background:logGoalRelated?"var(--accent)":"transparent",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,transition:"all .15s"}}>
                 ${logGoalRelated&&html`<svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="white" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`}
               </div>
               <span style=${{fontSize:14,fontWeight:500,color:logGoalRelated?"var(--accent)":"var(--sub)"}}>この時間は目標に関連している</span>
             </button>
+          </div>
+          <div class="form-grp">
+            <label class="form-lbl">自己評価</label>
+            ${EVALS.map(f=>html`<button key=${f.l} class=${"eval-btn"+(logFocus===f.l?" "+f.c:"")} onClick=${()=>setLogFocus(f.l)}>${f.l}</button>`)}
+          </div>
+          <div class="form-grp" style=${{marginBottom:20}}>
+            <label class="form-lbl">メモ（任意）</label>
+            <textarea class="txa" placeholder="気づいたことや振り返り..." value=${logMemo}
+              onInput=${e=>setLogMemo(e.target.value)}/>
           </div>
           <button class="btn" onClick=${saveLog} disabled=${saving} style=${{marginBottom:10}}>
             ${saving?html`<span class="spin"/>`:html`記録して休憩へ（${breakMin}分）`}
