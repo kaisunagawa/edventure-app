@@ -1250,17 +1250,30 @@ function TimerScreen({onToast, isActive}) {
   const [presets, setPresets] = useState(getPresets);
   useEffect(()=>{ if(isActive) setPresets(getPresets()); },[isActive]);
 
+  // iOSはユーザー操作の外(タイマー完了など)でAudioContextを新規生成しても鳴らないため、
+  // スタートボタンを押した時点(ユーザー操作の直後)に1つ作って使い回す
+  const audioCtxRef = useRef(null);
+  const primeAudio = () => {
+    try {
+      if(!audioCtxRef.current) audioCtxRef.current = new (window.AudioContext||window.webkitAudioContext)();
+      if(audioCtxRef.current.state==="suspended") audioCtxRef.current.resume();
+    } catch(e){}
+  };
   const playBeep = () => {
     try {
-      const ctx = new (window.AudioContext||window.webkitAudioContext)();
-      [0,0.3,0.6].forEach(t=>{
+      const ctx = audioCtxRef.current || new (window.AudioContext||window.webkitAudioContext)();
+      audioCtxRef.current = ctx;
+      if(ctx.state==="suspended") ctx.resume();
+      [0,0.35,0.7].forEach(t=>{
         const o=ctx.createOscillator(), g=ctx.createGain();
         o.connect(g); g.connect(ctx.destination);
-        o.frequency.value=880; g.gain.setValueAtTime(0.25,ctx.currentTime+t);
-        g.gain.exponentialRampToValueAtTime(0.001,ctx.currentTime+t+0.25);
-        o.start(ctx.currentTime+t); o.stop(ctx.currentTime+t+0.25);
+        o.frequency.value=880; g.gain.setValueAtTime(0.4,ctx.currentTime+t);
+        g.gain.exponentialRampToValueAtTime(0.001,ctx.currentTime+t+0.3);
+        o.start(ctx.currentTime+t); o.stop(ctx.currentTime+t+0.3);
       });
     } catch(e){}
+    // 音が出せない環境（マナーモード等）でも気づけるよう振動も併用
+    try { navigator.vibrate?.([200,100,200,100,200]); } catch(e){}
   };
 
   // バックグラウンド復帰時に経過時間を補正する
@@ -1313,7 +1326,7 @@ function TimerScreen({onToast, isActive}) {
     setSelectedMin(min); setTimeLeft(min*60);
     setIsRunning(false); setStartTime(null); setMode("focus");
   };
-  const start = () => { if(!startTime) setStartTime(new Date()); setIsRunning(true); };
+  const start = () => { primeAudio(); if(!startTime) setStartTime(new Date()); setIsRunning(true); };
   const pause = () => setIsRunning(false);
   const reset = () => { setIsRunning(false); setTimeLeft(selectedMin*60); setStartTime(null); setMode("focus"); localStorage.removeItem("jiroku_timer_state"); };
 
