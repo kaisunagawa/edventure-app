@@ -1260,7 +1260,7 @@ function BreakdownRadar({breakdown}) {
       ${dataPoints.map((p,i)=>html`<circle key=${i} cx=${p[0]} cy=${p[1]} r="3" fill="var(--hero1)"/>`)}
       ${BREAKDOWN_CATS.map(([key],i)=>{
         const [lx,ly] = labelPos[i];
-        return html`<text key=${key} x=${lx} y=${ly+3} text-anchor="middle" font-size="10" font-weight="700" fill="var(--sub)" style=${{fontFamily:"inherit"}}>${BREAKDOWN_LABELS[key].jp}</text>`;
+        return html`<text key=${key} x=${lx} y=${ly+3} text-anchor="middle" font-size="10" font-weight="400" fill="var(--sub)" opacity="0.6" style=${{fontFamily:"inherit"}}>${BREAKDOWN_LABELS[key].jp}</text>`;
       })}
     </svg>
   `;
