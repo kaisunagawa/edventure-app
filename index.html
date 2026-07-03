@@ -307,7 +307,7 @@ async function gasApi(action, params = {}) {
   url.searchParams.set("studentEmail", CURRENT_USER.email);
   Object.entries(params).forEach(([k,v]) => url.searchParams.set(k,v));
   try { const r = await fetch(url.toString(), { redirect:"follow" }); return await r.json(); }
-  catch { return { ok:true, data:[] }; }
+  catch { return { ok:false, data:[] }; }
 }
 async function gasPost(action, body = {}) {
   if (!GAS_URL) return mockPost(action, body);
@@ -851,13 +851,8 @@ function ReportScreen() {
           <div class="report-hero" style=${{paddingTop:8}}>
             <div class="report-score">${report.score}</div>
             <div class="report-pts">/ 100点</div>
-            <div style=${{display:"flex",justifyContent:"center",gap:10,marginTop:14,flexWrap:"wrap"}}>
-              ${[["記録数","20"],["メモの質","20"],["集中度","20"],["目標への取り組み","20"],["継続性","20"]].map(([label,pt])=>html`
-                <div style=${{display:"flex",flexDirection:"column",alignItems:"center",background:"var(--accent-l)",borderRadius:10,padding:"6px 10px",minWidth:56}}>
-                  <span style=${{fontSize:13,fontWeight:700,color:"var(--accent)"}}>${pt}</span>
-                  <span style=${{fontSize:10,color:"var(--accent)",marginTop:1}}>${label}</span>
-                </div>
-              `)}
+            <div style=${{fontSize:11,color:"var(--sub)",marginTop:12,lineHeight:1.6}}>
+              採点基準：記録数 · メモの質 · 集中度 · 目標への取り組み · 継続性（各20点満点）
             </div>
           </div>
           <div class="card">
@@ -1131,7 +1126,7 @@ function TimerScreen({onToast, isActive}) {
 
     ${showModal&&html`
       <div style=${{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"flex-end",zIndex:200}}
-        onClick=${e=>{if(e.target===e.currentTarget)skipLog();}}>
+        onClick=${e=>{if(e.target===e.currentTarget)setShowModal(false);}}>
         <div style=${{background:"var(--card)",borderRadius:"20px 20px 0 0",padding:"24px 20px 32px",width:"100%",boxSizing:"border-box"}}>
           <div style=${{fontSize:20,fontWeight:800,marginBottom:4}}>お疲れ様でした！🎉</div>
           <div style=${{fontSize:13,color:"var(--sub)",marginBottom:20}}>${selectedMin}分の集中セッションが完了しました。記録しましょう。</div>
