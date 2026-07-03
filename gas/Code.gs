@@ -53,6 +53,7 @@ function doGet(e) {
       case "sendMessage":  result = sendMessage(studentEmail, e.parameter); break;
       case "saveSettings": result = saveSettings(studentEmail, e.parameter); break;
       case "syncCalendar": result = syncCalendar(studentEmail, e.parameter); break;
+      case "getCalendar":  result = getCalendar(studentEmail, e.parameter); break;
       case "getDiary":     result = getDiary(studentEmail, e.parameter); break;
       case "saveDiary":    result = saveDiary(studentEmail, e.parameter); break;
       default: result = { ok: false, error: "Unknown action: " + action };
@@ -114,6 +115,7 @@ function doPost(e) {
       case "sendMessage":  return jsonResponse(sendMessage(studentEmail, body));
       case "saveSettings": return jsonResponse(saveSettings(studentEmail, body));
       case "saveDiary":    return jsonResponse(saveDiary(studentEmail, body));
+      case "syncCalendar": return jsonResponse(syncCalendar(studentEmail, body));
       default: return jsonResponse({ ok: false, error: "Unknown action" });
     }
   } catch (err) {
@@ -879,15 +881,24 @@ function syncCalendar(studentEmail, body) {
       ? Utilities.formatDate(data[i][1], "Asia/Tokyo", "yyyy-MM-dd")
       : String(data[i][1]);
     if (String(data[i][0]) === studentEmail && rowDate === String(body.date)) {
-      sheet.getRange(i + 1, 3).setValue(String(body.events).slice(0, 2000));
+      sheet.getRange(i + 1, 3).setValue(String(body.events).slice(0, 8000));
       sheet.getRange(i + 1, 4).setValue(now);
       return { ok: true, updated: true };
     }
   }
   const newRow = sheet.getLastRow() + 1;
-  sheet.appendRow([studentEmail, "", String(body.events).slice(0, 2000), now]);
+  sheet.appendRow([studentEmail, "", String(body.events).slice(0, 8000), now]);
   sheet.getRange(newRow, 2).setNumberFormat("@").setValue(String(body.date));
   return { ok: true };
+}
+
+// アプリ向け: 共有キャッシュから予定を返す（本人認証が使えない端末のフォールバック）
+function getCalendar(studentEmail, body) {
+  const targetDate = (body && body.date) ? String(body.date) : formatDate(new Date());
+  const raw = getCachedCalendar(studentEmail, targetDate);
+  if (!raw) return { ok: true, data: null };
+  try { return { ok: true, data: JSON.parse(raw) }; }
+  catch (e) { return { ok: true, data: null }; } // 旧形式（テキスト）は返さない
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1007,8 +1018,16 @@ function buildStudentContext(studentEmail, user) {
   const totalBlocks = allLogs.length;
   const totalDaysRecorded = new Set(allLogs.map(l => l.date)).size;
 
-  // 今日のカレンダー予定（アプリが同期したキャッシュ）
-  const todayPlan = getCachedCalendar(studentEmail, today);
+  // 今日のカレンダー予定（アプリが同期したキャッシュ。JSON形式と旧テキスト形式の両対応）
+  let todayPlan = getCachedCalendar(studentEmail, today);
+  if (todayPlan) {
+    try {
+      const evs = JSON.parse(todayPlan);
+      todayPlan = evs.length > 0
+        ? evs.map(function(e){ return e.allDay ? ("終日 " + e.title) : (e.time + "〜 " + e.title); }).join(" / ")
+        : "予定なし";
+    } catch (e) { /* 旧テキスト形式はそのまま使う */ }
+  }
 
   return `【生徒名】${user.name}
 【入会日】${user.joined_at || "不明"}

@@ -142,9 +142,9 @@
     .chip.on.done { background: var(--accent); color: #fff; }
 
     /* ── Form ── */
-    .form-wrap { padding: 16px; }
-    .form-grp { margin-bottom: 16px; }
-    .form-lbl { font-size: 12px; font-weight: 500; color: var(--sub); margin-bottom: 7px; display: block; }
+    .form-wrap { padding: 14px 16px 16px; }
+    .form-grp { margin-bottom: 13px; }
+    .form-lbl { font-size: 12px; font-weight: 500; color: var(--sub); margin-bottom: 6px; display: block; }
     .inp, .txa {
       width: 100%; padding: 11px 13px; border: 1px solid var(--border);
       border-radius: 9px; font-size: 15px; font-family: inherit;
@@ -153,7 +153,7 @@
     }
     .inp:focus, .txa:focus { border-color: var(--accent); }
     input[type="date"].inp, input[type="date"].login-inp { -webkit-appearance: none; appearance: none; text-align: center; }
-    .txa { resize: none; min-height: 84px; line-height: 1.6; overflow: hidden; }
+    .txa { resize: none; min-height: 68px; line-height: 1.6; overflow: hidden; }
 
     /* ── Eval buttons ── */
     .eval-btn {
@@ -389,38 +389,66 @@ async function getCalendarToken(interactive){
   });
 }
 const gcalCache={}, gcalSynced={};
+const GCAL_LS="gcal_evs_";
+function cleanupGcalLS(){
+  try{
+    const limit=addDays(formatDateStr(new Date()),-7);
+    Object.keys(localStorage).forEach(k=>{
+      if(k.startsWith(GCAL_LS) && k.slice(GCAL_LS.length)<limit) localStorage.removeItem(k);
+    });
+  }catch{}
+}
+// 取得戦略: メモリ → 端末キャッシュ → 本人認証で取得 → サーバーの共有キャッシュ
+// 一度どこかで取得できれば端末とサーバーの両方に残るので、以後は認証なしで自動表示される
 async function fetchCalendarEvents(dateStr, interactive=false){
   if(gcalCache[dateStr]) return gcalCache[dateStr];
-  const token=await getCalendarToken(interactive);
-  if(!token) return null;
-  try{
-    const timeMin=new Date(dateStr+"T00:00:00").toISOString();
-    const timeMax=new Date(dateStr+"T23:59:59").toISOString();
-    const r=await fetch("https://www.googleapis.com/calendar/v3/calendars/primary/events?singleEvents=true&orderBy=startTime&maxResults=50&timeMin="+encodeURIComponent(timeMin)+"&timeMax="+encodeURIComponent(timeMax),
-      {headers:{Authorization:"Bearer "+token}}).then(r=>r.json());
-    if(!r.items) return null;
-    const evs=r.items.filter(e=>e.status!=="cancelled").map(e=>{
-      const s=e.start?.dateTime?new Date(e.start.dateTime):null;
-      const en=e.end?.dateTime?new Date(e.end.dateTime):null;
-      return {
-        title:e.summary||"(無題)", allDay:!s,
-        startHour:s?s.getHours()+s.getMinutes()/60:null,
-        endHour:en?en.getHours()+en.getMinutes()/60:null,
-        time:s?s.toLocaleTimeString("ja-JP",{hour:"2-digit",minute:"2-digit"}):"終日",
-        sub:e.location||(e.hangoutLink?"Zoom/Meet":"")
-      };
-    });
-    gcalCache[dateStr]=evs;
-    // コーチが「予定×記録×目標」を見られるよう、取得した予定をスプレッドシートに同期
+  if(!interactive){
     try{
-      if(CURRENT_USER && !gcalSynced[dateStr]){
-        gcalSynced[dateStr]=1;
-        const txt=evs.map(e=>e.allDay?("終日 "+e.title):(e.time+"〜 "+e.title)).join(" / ").slice(0,1200);
-        gasPost("syncCalendar",{date:dateStr,events:txt||"予定なし"});
+      const ls=localStorage.getItem(GCAL_LS+dateStr);
+      if(ls){ const evs=JSON.parse(ls); gcalCache[dateStr]=evs; gcalSynced[dateStr]=1; return evs; }
+    }catch{}
+  }
+  const token=await getCalendarToken(interactive);
+  if(token){
+    try{
+      const timeMin=new Date(dateStr+"T00:00:00").toISOString();
+      const timeMax=new Date(dateStr+"T23:59:59").toISOString();
+      const r=await fetch("https://www.googleapis.com/calendar/v3/calendars/primary/events?singleEvents=true&orderBy=startTime&maxResults=50&timeMin="+encodeURIComponent(timeMin)+"&timeMax="+encodeURIComponent(timeMax),
+        {headers:{Authorization:"Bearer "+token}}).then(r=>r.json());
+      if(r.items){
+        const evs=r.items.filter(e=>e.status!=="cancelled").map(e=>{
+          const s=e.start?.dateTime?new Date(e.start.dateTime):null;
+          const en=e.end?.dateTime?new Date(e.end.dateTime):null;
+          return {
+            title:e.summary||"(無題)", allDay:!s,
+            startHour:s?s.getHours()+s.getMinutes()/60:null,
+            endHour:en?en.getHours()+en.getMinutes()/60:null,
+            time:s?s.toLocaleTimeString("ja-JP",{hour:"2-digit",minute:"2-digit"}):"終日",
+            sub:e.location||(e.hangoutLink?"Zoom/Meet":"")
+          };
+        });
+        gcalCache[dateStr]=evs;
+        try{ localStorage.setItem(GCAL_LS+dateStr, JSON.stringify(evs)); cleanupGcalLS(); }catch{}
+        // サーバーへ同期（コーチのプロンプト用＆次回起動・他端末のフォールバック）
+        if(CURRENT_USER && !gcalSynced[dateStr]){
+          gcalSynced[dateStr]=1;
+          try{ fetch(GAS_URL,{method:"POST",mode:"no-cors",headers:{"Content-Type":"text/plain"},
+            body:JSON.stringify({action:"syncCalendar",studentEmail:CURRENT_USER.email,date:dateStr,events:JSON.stringify(evs).slice(0,6000)})}); }catch{}
+        }
+        return evs;
       }
     }catch{}
-    return evs;
-  }catch{ return null; }
+  }
+  // 認証できない場合はサーバーの共有キャッシュから復元
+  try{
+    const r=await gasApi("getCalendar",{date:dateStr});
+    if(r.ok && r.data){
+      gcalCache[dateStr]=r.data; gcalSynced[dateStr]=1;
+      try{ localStorage.setItem(GCAL_LS+dateStr, JSON.stringify(r.data)); }catch{}
+      return r.data;
+    }
+  }catch{}
+  return null;
 }
 // 時間ブロック（例 "10:00-11:00"）に重なる予定タイトル一覧
 function eventsForBlock(evs, block){
@@ -485,6 +513,24 @@ function RankBadge({ level, size = 32 }) {
   const rank = getRank(level);
   return html`<div style=${{width:size,height:size,borderRadius:"50%",background:rank.bg,border:`2px solid ${rank.color}40`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:size*0.5}}>${rank.emoji}</div>`;
 }
+// 自己評価ピッカー（5つ横並び・数字＋短いラベル）
+const EVAL_SHORT = {"5":"完璧","4":"よくできた","3":"まあまあ","2":"もう少し","1":"だめだった"};
+function EvalPicker({value, onChange}) {
+  return html`<div style=${{display:"flex",gap:6}}>
+    ${EVALS.map(f=>{
+      const n=f.l.charAt(0);
+      const on=value===f.l;
+      return html`<button key=${f.l} onClick=${()=>onChange(f.l)}
+        class=${on?f.c:""}
+        style=${{flex:1,padding:"9px 2px",borderRadius:10,cursor:"pointer",fontFamily:"inherit",textAlign:"center",transition:"all .12s",WebkitTapHighlightColor:"transparent",
+          ...(on?{border:"1px solid transparent"}:{border:"1px solid var(--border)",background:"var(--card)",color:"var(--sub)"})}}>
+        <div style=${{fontSize:16,fontWeight:800,lineHeight:1}}>${n}</div>
+        <div style=${{fontSize:9,marginTop:3,fontWeight:600,letterSpacing:"-.2px"}}>${EVAL_SHORT[n]}</div>
+      </button>`;
+    })}
+  </div>`;
+}
+
 const EVALS = [
   {l:"5 — 完璧にできた", c:"e5"},{l:"4 — よくできた", c:"e4"},
   {l:"3 — まあまあだった", c:"e3"},{l:"2 — もう少しだった", c:"e2"},{l:"1 — 全然だめだった", c:"e1"},
@@ -500,12 +546,6 @@ function HomeScreen({goalData, onGoalSaved}) {
   const [schedule, setSchedule] = useState([]);
   const [game, setGame] = useState(null);
   const [todayLogs, setTodayLogs] = useState([]);
-  const [calNeedsTap, setCalNeedsTap] = useState(false);
-  const loadCalByTap=()=>{
-    fetchCalendarEvents(formatDateStr(new Date()), true).then(evs=>{
-      if(evs){ setCalNeedsTap(false); if(evs.length) setSchedule(evs.map(e=>({time:e.time,title:e.title,sub:e.sub}))); }
-    });
-  };
   const [checked, setChecked] = useState(()=>JSON.parse(localStorage.getItem("today_actions")||"{}"));
   const todayKey = formatDateStr(new Date());
   const [customActions, setCustomActions] = useState(()=>{
@@ -542,7 +582,6 @@ function HomeScreen({goalData, onGoalSaved}) {
     if(localStorage.getItem("cal_linked")){
       fetchCalendarEvents(formatDateStr(new Date())).then(evs=>{
         if(evs&&evs.length) setSchedule(evs.map(e=>({time:e.time,title:e.title,sub:e.sub})));
-        else if(evs===null) setCalNeedsTap(true); // サイレント取得失敗 → タップで読み込み
       });
     }
 
@@ -720,15 +759,6 @@ function HomeScreen({goalData, onGoalSaved}) {
           <button onClick=${()=>setEditMode(false)}
             style=${{width:"100%",background:"none",border:"none",color:"var(--sub)",fontSize:13,padding:"8px",cursor:"pointer"}}>キャンセル</button>
         </div>
-      </div>
-    `}
-
-    <!-- カレンダー読み込みボタン（サイレント取得失敗時のみ） -->
-    ${calNeedsTap&&html`
-      <div style=${{margin:"0 16px 10px"}}>
-        <button onClick=${loadCalByTap} style=${{display:"flex",alignItems:"center",justifyContent:"center",gap:8,width:"100%",padding:"12px",borderRadius:12,border:"1.5px dashed var(--accent)",background:"var(--accent-l)",color:"var(--accent)",fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>
-          📅 タップして今日の予定を読み込む
-        </button>
       </div>
     `}
 
@@ -910,7 +940,7 @@ function LogScreen({onToast, isActive}) {
         </div>
         <div class="form-grp">
           <label class="form-lbl">自己評価</label>
-          ${EVALS.map(f=>html`<button key=${f.l} class=${"eval-btn"+(focus===f.l?" "+f.c:"")} onClick=${()=>setFocus(f.l)}>${f.l}</button>`)}
+          <${EvalPicker} value=${focus} onChange=${setFocus}/>
         </div>
         <div class="form-grp">
           <label class="form-lbl">メモ（任意）</label>
@@ -1438,7 +1468,7 @@ function TimerScreen({onToast, isActive}) {
           </div>
           <div class="form-grp">
             <label class="form-lbl">自己評価</label>
-            ${EVALS.map(f=>html`<button key=${f.l} class=${"eval-btn"+(logFocus===f.l?" "+f.c:"")} onClick=${()=>setLogFocus(f.l)}>${f.l}</button>`)}
+            <${EvalPicker} value=${logFocus} onChange=${setLogFocus}/>
           </div>
           <div class="form-grp" style=${{marginBottom:20}}>
             <label class="form-lbl">メモ（任意）</label>
