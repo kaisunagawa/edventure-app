@@ -1485,17 +1485,17 @@ function setupSheets() {
 }
 
 function setupTriggers() {
+  // GASは1スクリプトあたり時間主導トリガー最大20個までのため、
+  // 「毎時7〜23時に個別トリガー」(17個)は他と合わせると上限を超えてしまう。
+  // hourlyReminder側で時刻・間隔をチェックしているので、1時間ごとの単一トリガーに統合する。
   ScriptApp.getProjectTriggers().forEach(t => ScriptApp.deleteTrigger(t));
   ScriptApp.newTrigger("morningScheduleNotify").timeBased().everyDays(1).atHour(7).create();
   ScriptApp.newTrigger("nightlyReport").timeBased().everyDays(1).atHour(21).create();
   ScriptApp.newTrigger("nightlyCoachMessage").timeBased().everyDays(1).atHour(22).create();
   ScriptApp.newTrigger("generateMonthlySummaries").timeBased().onMonthDay(1).atHour(3).create();
   ScriptApp.newTrigger("checkTimerQueue").timeBased().everyMinutes(1).create();
-  // 毎時ちょうどに届くよう、7〜23時それぞれにトリガーを設定
-  for (let h = 7; h <= 23; h++) {
-    ScriptApp.newTrigger("hourlyReminder").timeBased().everyDays(1).atHour(h).create();
-  }
-  console.log("トリガーを設定しました");
+  ScriptApp.newTrigger("hourlyReminder").timeBased().everyHours(1).create();
+  console.log("トリガーを設定しました（合計6個）");
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
