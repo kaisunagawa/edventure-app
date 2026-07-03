@@ -355,11 +355,23 @@ async function gasPost(action, body = {}) {
 // GAS(CalendarApp)はスクリプト所有者のアカウントでしか読めないため、
 // 他ユーザーのカレンダーはクライアント側で取得する
 let gcalToken=null, gcalTokenExp=0;
-function getCalendarToken(interactive){
+// GISスクリプト（async defer読み込み）の準備を最大4秒待つ
+function waitForGis(ms=4000){
+  return new Promise(resolve=>{
+    const t0=Date.now();
+    (function check(){
+      if(window.google?.accounts?.oauth2) return resolve(true);
+      if(Date.now()-t0>ms) return resolve(false);
+      setTimeout(check,200);
+    })();
+  });
+}
+async function getCalendarToken(interactive){
+  if(gcalToken && Date.now() < gcalTokenExp-60000) return gcalToken;
+  if(!interactive && !localStorage.getItem("cal_linked")) return null;
+  const ready=await waitForGis();
+  if(!ready) return null;
   return new Promise((resolve)=>{
-    if(gcalToken && Date.now() < gcalTokenExp-60000) return resolve(gcalToken);
-    if(!window.google?.accounts?.oauth2) return resolve(null);
-    if(!interactive && !localStorage.getItem("cal_linked")) return resolve(null);
     try{
       const client=google.accounts.oauth2.initTokenClient({
         client_id: GOOGLE_CLIENT_ID,
@@ -488,6 +500,12 @@ function HomeScreen({goalData, onGoalSaved}) {
   const [schedule, setSchedule] = useState([]);
   const [game, setGame] = useState(null);
   const [todayLogs, setTodayLogs] = useState([]);
+  const [calNeedsTap, setCalNeedsTap] = useState(false);
+  const loadCalByTap=()=>{
+    fetchCalendarEvents(formatDateStr(new Date()), true).then(evs=>{
+      if(evs){ setCalNeedsTap(false); if(evs.length) setSchedule(evs.map(e=>({time:e.time,title:e.title,sub:e.sub}))); }
+    });
+  };
   const [checked, setChecked] = useState(()=>JSON.parse(localStorage.getItem("today_actions")||"{}"));
   const todayKey = formatDateStr(new Date());
   const [customActions, setCustomActions] = useState(()=>{
@@ -524,6 +542,7 @@ function HomeScreen({goalData, onGoalSaved}) {
     if(localStorage.getItem("cal_linked")){
       fetchCalendarEvents(formatDateStr(new Date())).then(evs=>{
         if(evs&&evs.length) setSchedule(evs.map(e=>({time:e.time,title:e.title,sub:e.sub})));
+        else if(evs===null) setCalNeedsTap(true); // サイレント取得失敗 → タップで読み込み
       });
     }
 
@@ -701,6 +720,15 @@ function HomeScreen({goalData, onGoalSaved}) {
           <button onClick=${()=>setEditMode(false)}
             style=${{width:"100%",background:"none",border:"none",color:"var(--sub)",fontSize:13,padding:"8px",cursor:"pointer"}}>キャンセル</button>
         </div>
+      </div>
+    `}
+
+    <!-- カレンダー読み込みボタン（サイレント取得失敗時のみ） -->
+    ${calNeedsTap&&html`
+      <div style=${{margin:"0 16px 10px"}}>
+        <button onClick=${loadCalByTap} style=${{display:"flex",alignItems:"center",justifyContent:"center",gap:8,width:"100%",padding:"12px",borderRadius:12,border:"1.5px dashed var(--accent)",background:"var(--accent-l)",color:"var(--accent)",fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>
+          📅 タップして今日の予定を読み込む
+        </button>
       </div>
     `}
 
