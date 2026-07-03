@@ -550,6 +550,8 @@ ${recentMsgs}
 
 function hourlyReminder() {
   const hour = new Date().getHours();
+  // 21時以降はレポート・夜のコーチメッセージの時間帯なのでリマインダーは送らない
+  if (hour >= 21) return;
   const timeBlock = String(hour).padStart(2, "0") + ":00";
   sheetToObjects(getSheet("Users")).filter(u => u.is_active.toUpperCase() === "TRUE").forEach(user => {
     const start = Number(user.notify_start) || 7;
@@ -685,8 +687,14 @@ function nightlyReport() {
       getSheet("Reports").appendRow([today, user.student_email, report.score, report.feedback, report.action, report.highlights, report.improvement, new Date().toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" })]);
       const latestUser = sheetToObjects(getSheet("Users")).find(u => u.student_email === user.student_email);
       const streak = Number(latestUser?.streak || 1);
-      const streakMsg = streak >= 3 ? "\n\n🔥 連続" + streak + "日記録中！すごい！" : "";
-      sendLineMessage(user.line_user_id, "📊 今日のAIレポート\n\nスコア：" + report.score + "点\n\n" + report.feedback + "\n\n明日のアクション：\n" + report.action + streakMsg);
+      const streakMsg = streak >= 3 ? "\n\n🔥 連続" + streak + "日記録中！" : "";
+      const trendMsg = report.trend ? "\n\n📈 " + formatForLine(stripSalutation(report.trend)) : "";
+      sendLineMessage(user.line_user_id,
+        "📊 今日のAIレポート\n\nスコア：" + report.score + "点\n\n"
+        + formatForLine(stripSalutation(report.feedback))
+        + trendMsg
+        + "\n\n✅ 明日のアクション\n" + formatForLine(stripSalutation(report.action))
+        + streakMsg);
 
       notifyCoachOnReport(user, report);
     } catch (err) { Logger.log(err); }
@@ -708,23 +716,21 @@ function nightlyCoachMessage() {
       const ctx = buildStudentContext(user.student_email, user);
       const recentMsgs = getRecentCoachMessages(user.student_email, 5);
       const streak = Number(user.streak || 0);
-      const coachPrompt = `あなたは${user.name}の友人でもある教育コーチです。以下の情報をすべて把握した上で、夜の締めくくりメッセージを送ってください。
+      const coachPrompt = `あなたは${user.name}の友人でもある教育コーチです。1時間前にAIレポート（スコアと分析）は既に送信済みです。それとは別の、1日の終わりの人間らしい一言を送ってください。
 
 ${ctx}
-【今日のスコア】${report.score}点
-【今日の良かった点】${report.highlights}
-【今日の改善点】${report.improvement}
+【1時間前に送信済みのレポート内容（絶対に繰り返さない）】
+スコア${report.score}点 / 良かった点：${report.highlights} / 改善点：${report.improvement}
 【連続記録日数】${streak}日
 ${recentMsgs}
 
 【スタイル】
-- 敬語とタメ語を自然に混ぜる
-- ユーモアを1つ入れて人間味を出す
-- 「---」「【】」「〇〇へのメッセージ」「〇〇さんへ」などの見出し・宛名は絶対使わない
-- 本文だけをそのまま書く。前置きや宛名・説明は一切不要
+- レポートの内容（スコア・良かった点・改善点）を言い直さない。分析はもう終わってる
+- 今日のログの中の具体的な一場面を1つだけ拾って、そこに一言添える
+- 敬語とタメ語を自然に混ぜる。友人が寝る前に送るLINEのような温度感
+- 「---」「【】」「〇〇さんへ」などの見出し・宛名は絶対使わない
 - 直近のコーチメッセージと同じ言い回し・構成は絶対に繰り返さない
-- 今日の具体的な記録内容や数字に触れる。抽象的な励ましは避ける
-- 2〜3文。絵文字1個まで`;
+- 2文以内。絵文字1個まで`;
 
       const res = UrlFetchApp.fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
@@ -806,6 +812,11 @@ ${logsText}
 - 集中度（20点）: 自己評価の平均スコア
 - 目標への取り組み（20点）: 目標関連の記録の割合
 - 継続性（20点）: 連続記録日数と継続状況
+
+【文体ルール（全フィールド共通）】
+- 「〇〇さん」「お疲れ様です」などの宛名・挨拶は絶対に書かない。本文から始める
+- 毎日同じ書き出しにならないよう、直近レポートと違う切り口で書く
+- 抽象的な褒め言葉より、今日のログの具体的な内容・数字に触れる
 
 以下のJSON形式のみで返してください（説明文不要）：
 {
