@@ -1218,38 +1218,46 @@ function JournalSection({date, logs}) {
   </div>`;
 }
 
-const BREAKDOWN_CATS = [["records","記録数","#0891B2"],["memo","メモの質","#6366F1"],["focus","集中度","#F59E0B"],["goal","目標への取り組み","#22C55E"],["consistency","継続性","#EC4899"]];
+const BREAKDOWN_CATS = [["records","記録数"],["memo","メモの質"],["focus","集中度"],["goal","目標への取り組み"],["consistency","継続性"]];
+const BREAKDOWN_SHORT = {records:"記録",memo:"メモ",focus:"集中",goal:"目標",consistency:"継続"};
 
-function BreakdownDonut({breakdown, score}) {
-  const R = 52, SW = 16, C = 2*Math.PI*R;
-  const total = BREAKDOWN_CATS.reduce((s,[k])=>s+Number(breakdown[k]||0),0) || 1;
-  let offset = 0;
-  const segments = BREAKDOWN_CATS.map(([key,label,color])=>{
-    const v = Number(breakdown[key]||0);
-    const dash = v/total*C;
-    const seg = {key,label,color,value:v,dashOffset:-offset};
-    offset += dash;
-    return {...seg, dash};
+function BreakdownRadar({breakdown, score}) {
+  const N = BREAKDOWN_CATS.length;
+  const cx = 110, cy = 110, maxR = 72, maxVal = 20;
+  const startAngle = -Math.PI/2;
+  const angleStep = (Math.PI*2)/N;
+  const pt = (i, frac, r) => {
+    const a = startAngle + i*angleStep;
+    return [cx + Math.cos(a)*r*frac, cy + Math.sin(a)*r*frac];
+  };
+  const ringFracs = [0.25,0.5,0.75,1];
+  const ringPoints = ringFracs.map(f => BREAKDOWN_CATS.map((_,i)=>pt(i,f,maxR).join(",")).join(" "));
+  const axisEnds = BREAKDOWN_CATS.map((_,i)=>pt(i,1,maxR));
+  const dataPoints = BREAKDOWN_CATS.map(([key],i)=>{
+    const v = Math.max(0,Math.min(maxVal,Number(breakdown[key]||0)));
+    return pt(i, v/maxVal, maxR);
   });
+  const dataPolygon = dataPoints.map(p=>p.join(",")).join(" ");
+  const labelPos = BREAKDOWN_CATS.map((_,i)=>pt(i,1,maxR*1.26));
+
   return html`
-    <div style=${{display:"flex",alignItems:"center",gap:20,marginBottom:16}}>
-      <svg width="128" height="128" viewBox="0 0 128 128" style=${{flexShrink:0}}>
-        <circle cx="64" cy="64" r=${R} fill="none" stroke="var(--bg)" stroke-width=${SW}/>
-        <g transform="rotate(-90 64 64)">
-          ${segments.map(s=>html`<circle key=${s.key} cx="64" cy="64" r=${R} fill="none" stroke=${s.color} stroke-width=${SW} stroke-dasharray="${s.dash} ${C-s.dash}" stroke-dashoffset=${s.dashOffset}/>`)}
-        </g>
-        <text x="64" y="60" text-anchor="middle" font-size="24" font-weight="800" fill="var(--text)" style=${{fontFamily:"inherit"}}>${score}</text>
-        <text x="64" y="78" text-anchor="middle" font-size="10" fill="var(--sub)" style=${{fontFamily:"inherit"}}>/ 100点</text>
+    <div style=${{display:"flex",justifyContent:"center",marginBottom:8}}>
+      <svg width="220" height="220" viewBox="0 0 220 220">
+        ${ringPoints.map((pts,i)=>html`<polygon key=${i} points=${pts} fill="none" stroke="var(--border)" stroke-width="1"/>`)}
+        ${axisEnds.map((p,i)=>html`<line key=${i} x1=${cx} y1=${cy} x2=${p[0]} y2=${p[1]} stroke="var(--border)" stroke-width="1"/>`)}
+        <polygon points=${dataPolygon} fill="var(--accent)" fill-opacity="0.28" stroke="var(--accent)" stroke-width="2" stroke-linejoin="round"/>
+        ${dataPoints.map((p,i)=>html`<circle key=${i} cx=${p[0]} cy=${p[1]} r="3.5" fill="var(--accent)"/>`)}
+        ${BREAKDOWN_CATS.map(([key],i)=>{
+          const [lx,ly] = labelPos[i];
+          const v = Number(breakdown[key]||0);
+          return html`<g key=${key}>
+            <text x=${lx} y=${ly-2} text-anchor="middle" font-size="12" font-weight="700" fill="var(--text)" style=${{fontFamily:"inherit"}}>${BREAKDOWN_SHORT[key]}</text>
+            <text x=${lx} y=${ly+12} text-anchor="middle" font-size="10" fill="var(--sub)" style=${{fontFamily:"inherit"}}>${v}/20</text>
+          </g>`;
+        })}
+        <text x=${cx} y=${cy-6} text-anchor="middle" font-size="28" font-weight="800" fill="var(--text)" style=${{fontFamily:"inherit"}}>${score}</text>
+        <text x=${cx} y=${cy+13} text-anchor="middle" font-size="10" fill="var(--sub)" style=${{fontFamily:"inherit"}}>/ 100点</text>
       </svg>
-      <div style=${{display:"flex",flexDirection:"column",gap:7,flex:1,minWidth:0}}>
-        ${segments.map(s=>html`
-          <div key=${s.key} style=${{display:"flex",alignItems:"center",gap:6,fontSize:12}}>
-            <span style=${{width:8,height:8,borderRadius:"50%",background:s.color,flexShrink:0}}/>
-            <span style=${{color:"var(--text)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>${s.label}</span>
-            <span style=${{color:"var(--sub)",marginLeft:"auto",flexShrink:0,fontWeight:600}}>${s.value}</span>
-          </div>
-        `)}
-      </div>
     </div>
   `;
 }
@@ -1364,7 +1372,7 @@ function ReportScreen() {
           ${report.breakdown&&html`
             <div class="card">
               <div class="card-label">採点の内訳</div>
-              <${BreakdownDonut} breakdown=${report.breakdown} score=${report.score}/>
+              <${BreakdownRadar} breakdown=${report.breakdown} score=${report.score}/>
               ${BREAKDOWN_CATS.map(([key,label])=>{
                 const v=Number(report.breakdown[key]||0);
                 const pct=Math.max(0,Math.min(100,v/20*100));
