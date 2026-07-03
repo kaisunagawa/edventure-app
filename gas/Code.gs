@@ -44,6 +44,9 @@ function doGet(e) {
       case "getStreak":    result = getStreak(studentEmail); break;
       case "getGameStatus": result = getGameStatus(studentEmail); break;
       case "getRanking":   result = getRanking(studentEmail); break;
+      case "getCommunity": result = getCommunity(studentEmail); break;
+      case "getAchievements": result = getAchievements(); break;
+      case "shareAchievement": result = shareAchievement(studentEmail, e.parameter); break;
       case "getReport":    result = getReport(studentEmail, e.parameter); break;
       case "getReportList": result = getReportList(studentEmail); break;
       case "getLogs":      result = getLogs(studentEmail, e.parameter); break;
@@ -159,6 +162,8 @@ function registerUser(studentEmail, body) {
   const idxDead3     = ensureHeader("goal_deadline3");
   const idxStart     = ensureHeader("notify_start");
   const idxEnd       = ensureHeader("notify_end");
+  const idxNickname  = ensureHeader("nickname");
+  const idxAvatar    = ensureHeader("avatar");
 
   const newRow = new Array(headers.length).fill("");
   newRow[idxEmail]  = studentEmail;
@@ -173,9 +178,11 @@ function registerUser(studentEmail, body) {
   newRow[idxDead3]  = body.goal_deadline3 || "";
   newRow[idxStart]  = 7;
   newRow[idxEnd]    = 23;
+  newRow[idxNickname] = (body.nickname || body.name || "").trim();
+  newRow[idxAvatar]   = body.avatar || "🦊";
   sheet.appendRow(newRow);
 
-  return { ok: true, data: { name: body.name, coachName: "コーチ", coach_email: "" } };
+  return { ok: true, data: { name: body.name, nickname: newRow[idxNickname], avatar: newRow[idxAvatar], coachName: "コーチ", coach_email: "" } };
 }
 
 function getStreak(studentEmail) {
@@ -188,7 +195,13 @@ function getUser(studentEmail) {
   const user = sheetToObjects(getSheet("Users")).find(u => u.student_email === studentEmail && u.is_active.toUpperCase() === "TRUE");
   if (!user) return { ok: false, error: "User not found" };
   const coach = sheetToObjects(getSheet("Coaches")).find(c => c.coach_email === user.coach_email);
-  return { ok: true, data: { name: user.name, coach_email: user.coach_email, coachName: coach ? coach.name : "コーチ" } };
+  return { ok: true, data: {
+    name: user.name,
+    nickname: user.nickname || user.name,
+    avatar: user.avatar || "🦊",
+    coach_email: user.coach_email,
+    coachName: coach ? coach.name : "コーチ"
+  } };
 }
 
 function getReportList(studentEmail) {
@@ -397,6 +410,61 @@ function getRanking(studentEmail) {
   return { ok: true, data: { rank: idx + 1, total: scores.length, blocks: scores[idx].blocks, activeDays: scores[idx].activeDays } };
 }
 
+// 「みんなの頑張り」画面用。ニックネーム＋アバターは本名と違い公開前提の情報なので
+// 実名やメールは一切含めず、直近7日の活動量でランキング表示する。
+function getCommunity(studentEmail) {
+  const users = sheetToObjects(getSheet("Users")).filter(u => u.is_active.toUpperCase() === "TRUE");
+  const sevenDaysAgo = formatDate(new Date(Date.now() - 7 * 86400000));
+  const recentLogs = sheetToObjects(getSheet("DailyLog")).filter(l => l.date >= sevenDaysAgo);
+
+  const list = users.map(u => {
+    const logs = recentLogs.filter(l => l.student_email === u.student_email);
+    return {
+      isMe: u.student_email === studentEmail,
+      nickname: u.nickname || u.name || "名無しさん",
+      avatar: u.avatar || "🦊",
+      streak: Number(u.streak || 0),
+      blocks: logs.length,
+      activeDays: new Set(logs.map(l => l.date)).size
+    };
+  }).sort((a, b) => b.blocks - a.blocks || b.streak - a.streak);
+
+  return { ok: true, data: list };
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// 達成シェア（任意）
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+function getAchievementsSheet() {
+  let sheet = getSheet("Achievements");
+  if (!sheet) {
+    sheet = SpreadsheetApp.openById(SPREADSHEET_ID).insertSheet("Achievements");
+    sheet.appendRow(["date", "student_email", "nickname", "avatar", "message", "created_at"]);
+  }
+  return sheet;
+}
+
+function shareAchievement(studentEmail, body) {
+  const message = String(body.message || "").trim().slice(0, 200);
+  if (!message) return { ok: false, error: "empty message" };
+  const user = sheetToObjects(getSheet("Users")).find(u => u.student_email === studentEmail);
+  if (!user) return { ok: false, error: "user not found" };
+  const sheet = getAchievementsSheet();
+  const now = new Date().toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" });
+  sheet.appendRow([formatDate(new Date()), studentEmail, user.nickname || user.name, user.avatar || "🦊", message, now]);
+  return { ok: true };
+}
+
+// 直近の達成シェアを新しい順に返す（本人特定につながる情報はニックネーム・アバターのみ）
+function getAchievements() {
+  const rows = sheetToObjects(getAchievementsSheet())
+    .sort((a, b) => b.created_at > a.created_at ? 1 : -1)
+    .slice(0, 30)
+    .map(r => ({ nickname: r.nickname, avatar: r.avatar, message: r.message, date: r.date }));
+  return { ok: true, data: rows };
+}
+
 function getMessages(studentEmail) {
   const rows = sheetToObjects(getSheet("Messages"));
   const msgs = rows.filter(r => r.student_email === studentEmail)
@@ -536,6 +604,8 @@ function saveSettings(studentEmail, body) {
   const dead3Idx    = ensureCol("goal_deadline3");
   const calIdx      = ensureCol("google_calendar_id");
   const lineIdx     = ensureCol("line_user_id");
+  const nicknameIdx = ensureCol("nickname");
+  const avatarIdx   = ensureCol("avatar");
 
   for (let i = 1; i < data.length; i++) {
     if (String(data[i][emailIdx]) !== studentEmail) continue;
@@ -550,6 +620,8 @@ function saveSettings(studentEmail, body) {
     if (body.goal_deadline3  !== undefined) sheet.getRange(i + 1, dead3Idx    + 1).setValue(body.goal_deadline3);
     if (body.google_calendar_id !== undefined) sheet.getRange(i + 1, calIdx   + 1).setValue(body.google_calendar_id);
     if (body.line_user_id    !== undefined) sheet.getRange(i + 1, lineIdx     + 1).setValue(body.line_user_id);
+    if (body.nickname        !== undefined) sheet.getRange(i + 1, nicknameIdx + 1).setValue(String(body.nickname).trim());
+    if (body.avatar          !== undefined) sheet.getRange(i + 1, avatarIdx   + 1).setValue(body.avatar);
     break;
   }
   return { ok: true };
@@ -1466,7 +1538,7 @@ function formatDate(date) {
 function setupSheets() {
   const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
   const sheets = {
-    "Users": ["student_email","name","line_user_id","coach_email","coach_line_id","google_calendar_id","chatwork_room","is_active","joined_at","notify_start","notify_end"],
+    "Users": ["student_email","name","line_user_id","coach_email","coach_line_id","google_calendar_id","chatwork_room","is_active","joined_at","notify_start","notify_end","nickname","avatar"],
     "DailyLog": ["log_id","student_email","date","time_block","task","focus_level","memo","timestamp","goal_related"],
     "Reports": ["date","student_email","score","feedback","action","highlights","improvement","created_at","breakdown"],
     "Messages": ["message_id","student_email","content","sender_name","sender_photo","sender_role","timestamp","is_read"],
@@ -1474,7 +1546,8 @@ function setupSheets() {
     "MonthlySummary": ["month","student_email","summary","created_at"],
     "CalendarCache": ["student_email","date","events","updated_at"],
     "Journal": ["date","student_email","diary","updated_at","auto_summary"],
-    "TimerQueue": ["student_email","end_time","label","notified","created_at"]
+    "TimerQueue": ["student_email","end_time","label","notified","created_at"],
+    "Achievements": ["date","student_email","nickname","avatar","message","created_at"]
   };
   Object.entries(sheets).forEach(([name, headers]) => {
     let s = ss.getSheetByName(name);

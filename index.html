@@ -544,11 +544,12 @@ const getTimeBlocks = () => { const {start,end}=getLogHours(); return ALL_TIME_B
 const TIME_BLOCKS = getTimeBlocks();
 
 // ── Home ──
-function HomeScreen({goalData, onGoalSaved}) {
+function HomeScreen({goalData, onGoalSaved, profile}) {
   const [report, setReport] = useState(null);
   const [schedule, setSchedule] = useState([]);
   const [game, setGame] = useState(null);
   const [ranking, setRanking] = useState(null);
+  const [showCommunity, setShowCommunity] = useState(false);
   const [todayLogs, setTodayLogs] = useState([]);
   const [checked, setChecked] = useState(()=>JSON.parse(localStorage.getItem("today_actions")||"{}"));
   const todayKey = formatDateStr(new Date());
@@ -651,7 +652,10 @@ function HomeScreen({goalData, onGoalSaved}) {
         <span style=${{fontSize:13,fontWeight:800,color:"rgba(255,255,255,0.9)",letterSpacing:"1px"}}>JIROKU</span>
       </div>
       <div style=${{fontSize:13,color:"rgba(255,255,255,0.75)",marginBottom:4}}>${today} · ${greeting}</div>
-      <div style=${{fontSize:28,fontWeight:800,color:"#fff",letterSpacing:"-.5px",marginBottom:16}}>${CURRENT_USER.name}</div>
+      <div style=${{display:"flex",alignItems:"center",gap:10,marginBottom:16}}>
+        <div style=${{width:40,height:40,borderRadius:"50%",background:"rgba(255,255,255,0.2)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:22,flexShrink:0}}>${profile?.avatar||"🦊"}</div>
+        <div style=${{fontSize:28,fontWeight:800,color:"#fff",letterSpacing:"-.5px"}}>${profile?.nickname||CURRENT_USER.name}</div>
+      </div>
       ${game&&(()=>{
         const rank=getRank(game.level);
         const xpInLv=getXpInLevel(game.xp), xpForNxt=getXpForNextLevel(game.xp);
@@ -682,7 +686,15 @@ function HomeScreen({goalData, onGoalSaved}) {
           </span>
         </div>
       `}
+      <button onClick=${()=>setShowCommunity(true)}
+        style=${{display:"flex",alignItems:"center",gap:8,marginTop:8,background:"rgba(255,255,255,0.15)",borderRadius:12,padding:"9px 14px",backdropFilter:"blur(4px)",border:"none",width:"100%",cursor:"pointer",textAlign:"left"}}>
+        <span style=${{fontSize:16}}>👥</span>
+        <span style=${{fontSize:12.5,color:"rgba(255,255,255,0.9)",fontWeight:600,flex:1}}>みんなの頑張りを見る</span>
+        <span style=${{fontSize:14,color:"rgba(255,255,255,0.7)"}}>›</span>
+      </button>
     </div>
+
+    ${showCommunity&&html`<${CommunityOverlay} onClose=${()=>setShowCommunity(false)}/>`}
 
     <!-- Goals -->
     ${goalsArr.length>0&&html`
@@ -797,6 +809,78 @@ function HomeScreen({goalData, onGoalSaved}) {
       </div>
     `}
   </div>`;
+}
+
+// ── みんなの頑張り ──
+function CommunityOverlay({onClose}) {
+  const [list,setList]=useState(null);
+  const [achievements,setAchievements]=useState(null);
+  const [message,setMessage]=useState("");
+  const [sending,setSending]=useState(false);
+
+  const load=()=>{
+    gasApi("getCommunity").then(r=>{ if(r.ok) setList(r.data); });
+    gasApi("getAchievements").then(r=>{ if(r.ok) setAchievements(r.data); });
+  };
+  useEffect(()=>{ load(); },[]);
+
+  const share=async()=>{
+    const msg=message.trim();
+    if(!msg||sending) return;
+    setSending(true);
+    await gasPost("shareAchievement",{message:msg});
+    setMessage("");
+    setTimeout(load,800);
+    setSending(false);
+  };
+
+  return html`
+    <div style=${{position:"fixed",inset:0,background:"var(--bg)",zIndex:300,overflowY:"auto"}}>
+      <div style=${{position:"sticky",top:0,background:"var(--bg)",borderBottom:"1px solid var(--border)",padding:"14px 16px",display:"flex",alignItems:"center",gap:10,zIndex:1}}>
+        <button onClick=${onClose} style=${{background:"none",border:"none",fontSize:20,color:"var(--text)",cursor:"pointer",padding:"0 4px"}}>‹</button>
+        <div style=${{fontSize:16,fontWeight:800,color:"var(--text)"}}>みんなの頑張り</div>
+      </div>
+
+      <div style=${{padding:16}}>
+        <div style=${{background:"var(--card)",borderRadius:16,border:"1px solid var(--border)",overflow:"hidden",marginBottom:16}}>
+          <div style=${{padding:"14px 16px",borderBottom:"1px solid var(--border)",fontSize:12,fontWeight:700,color:"var(--text)"}}>直近7日のランキング</div>
+          ${list===null&&html`<div style=${{padding:20,textAlign:"center",color:"var(--sub)",fontSize:13}}>読み込み中...</div>`}
+          ${list&&list.map((u,i)=>html`
+            <div key=${i} style=${{display:"flex",alignItems:"center",gap:10,padding:"11px 16px",borderBottom:i<list.length-1?"1px solid var(--border)":"none",background:u.isMe?"var(--bg)":"transparent"}}>
+              <div style=${{fontSize:13,fontWeight:700,color:"var(--sub)",width:20,textAlign:"center",flexShrink:0}}>${i+1}</div>
+              <div style=${{width:32,height:32,borderRadius:"50%",background:"var(--bg)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:17,flexShrink:0}}>${u.avatar}</div>
+              <div style=${{flex:1,minWidth:0}}>
+                <div style=${{fontSize:14,fontWeight:600,color:"var(--text)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>${u.nickname}${u.isMe?" (あなた)":""}</div>
+                <div style=${{fontSize:11,color:"var(--sub)"}}>${u.blocks}記録・${u.activeDays}日活動${u.streak>0?` · 🔥${u.streak}日`:""}</div>
+              </div>
+            </div>
+          `)}
+          ${list&&list.length===0&&html`<div style=${{padding:20,textAlign:"center",color:"var(--sub)",fontSize:13}}>まだデータがありません</div>`}
+        </div>
+
+        <div style=${{background:"var(--card)",borderRadius:16,border:"1px solid var(--border)",padding:16,marginBottom:16}}>
+          <div style=${{fontSize:12,fontWeight:700,color:"var(--text)",marginBottom:10}}>頑張りをシェアする（任意）</div>
+          <textarea class="txa" placeholder="達成できたことをシェアしてみんなに応援してもらおう！" value=${message}
+            onChange=${e=>setMessage(e.target.value)} style=${{minHeight:60,marginBottom:10}}/>
+          <button class="btn" onClick=${share} disabled=${sending||!message.trim()}>${sending?"送信中...":"シェアする"}</button>
+        </div>
+
+        <div style=${{background:"var(--card)",borderRadius:16,border:"1px solid var(--border)",overflow:"hidden"}}>
+          <div style=${{padding:"14px 16px",borderBottom:"1px solid var(--border)",fontSize:12,fontWeight:700,color:"var(--text)"}}>みんなのシェア</div>
+          ${achievements&&achievements.map((a,i)=>html`
+            <div key=${i} style=${{display:"flex",gap:10,padding:"12px 16px",borderBottom:i<achievements.length-1?"1px solid var(--border)":"none"}}>
+              <div style=${{width:30,height:30,borderRadius:"50%",background:"var(--bg)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,flexShrink:0}}>${a.avatar}</div>
+              <div style=${{flex:1,minWidth:0}}>
+                <div style=${{fontSize:12,fontWeight:700,color:"var(--text)"}}>${a.nickname} <span style=${{fontWeight:400,color:"var(--sub)"}}>· ${a.date}</span></div>
+                <div style=${{fontSize:13,color:"var(--text)",marginTop:2,lineHeight:1.5,whiteSpace:"pre-wrap"}}>${a.message}</div>
+              </div>
+            </div>
+          `)}
+          ${achievements&&achievements.length===0&&html`<div style=${{padding:20,textAlign:"center",color:"var(--sub)",fontSize:13}}>まだシェアがありません</div>`}
+        </div>
+      </div>
+    </div>
+  `;
 }
 
 // ── Log ──
@@ -1640,7 +1724,18 @@ function FAQSection(){
 }
 
 // ── Settings ──
-function SettingsScreen({onToast,onLogout,onGoalSaved}) {
+function SettingsScreen({onToast,onLogout,onGoalSaved,profile,onProfileSaved}) {
+  const [nickname,setNickname]=useState(profile?.nickname||CURRENT_USER.name);
+  const [avatar,setAvatar]=useState(profile?.avatar||"🦊");
+  const saveProfile=async()=>{
+    if(!nickname.trim()){ onToast("ニックネームを入力してください"); return; }
+    const nn=nickname.trim();
+    await gasPost("saveSettings",{nickname:nn,avatar});
+    const u={...CURRENT_USER,nickname:nn,avatar};
+    CURRENT_USER=u; localStorage.setItem("edventure_user",JSON.stringify(u));
+    onProfileSaved({nickname:nn,avatar});
+    onToast("プロフィールを保存しました");
+  };
   const saved=JSON.parse(localStorage.getItem("notifySettings")||'{"start":7,"end":23,"interval":2}');
   const savedGoals=JSON.parse(localStorage.getItem("jiroku_goals")||'[{"goal":"","deadline":""}]');
   const savedLogHours=getLogHours();
@@ -1747,11 +1842,31 @@ function SettingsScreen({onToast,onLogout,onGoalSaved}) {
         <span style=${{fontSize:13,fontWeight:800,color:"rgba(255,255,255,0.9)",letterSpacing:"1px"}}>JIROKU</span>
       </div>
       <div style=${{fontSize:12,color:"rgba(255,255,255,0.7)",marginBottom:6,letterSpacing:".05em"}}>ACCOUNT</div>
-      <div style=${{fontSize:24,fontWeight:800,color:"#fff",marginBottom:2}}>${CURRENT_USER.name}</div>
+      <div style=${{display:"flex",alignItems:"center",gap:10,marginBottom:2}}>
+        <div style=${{width:36,height:36,borderRadius:"50%",background:"rgba(255,255,255,0.2)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:19,flexShrink:0}}>${profile?.avatar||"🦊"}</div>
+        <div style=${{fontSize:24,fontWeight:800,color:"#fff"}}>${profile?.nickname||CURRENT_USER.name}</div>
+      </div>
       <div style=${{fontSize:13,color:"rgba(255,255,255,0.7)"}}>${CURRENT_USER.email}</div>
     </div>
 
     <div style=${{padding:"16px 16px 0"}}>
+
+      <!-- プロフィール -->
+      <div style=${{background:"var(--card)",borderRadius:16,border:"1px solid var(--border)",padding:"18px",marginBottom:12}}>
+        <${SectionHeader} icon="🙂" title="プロフィール"/>
+        <label class="form-lbl" style=${{fontSize:11}}>ニックネーム（他の人に表示される名前）</label>
+        <input class="inp" value=${nickname} maxLength=${20} onChange=${e=>setNickname(e.target.value)} style=${{marginBottom:14}}/>
+        <div class="form-lbl" style=${{fontSize:11,marginBottom:8}}>アバター</div>
+        <div style=${{display:"grid",gridTemplateColumns:"repeat(5, 1fr)",gap:8,marginBottom:14}}>
+          ${AVATAR_OPTIONS.map(a=>html`
+            <button key=${a} onClick=${()=>setAvatar(a)}
+              style=${{fontSize:22,padding:"8px 0",borderRadius:12,border:`2px solid ${avatar===a?"var(--accent)":"var(--border)"}`,background:avatar===a?"var(--accent-bg, rgba(8,145,178,0.1))":"transparent",cursor:"pointer"}}>
+              ${a}
+            </button>
+          `)}
+        </div>
+        <button class="btn" onClick=${saveProfile}>保存する</button>
+      </div>
 
       <!-- 目標 -->
       <div style=${{background:"var(--card)",borderRadius:16,border:"1px solid var(--border)",padding:"18px",marginBottom:12}}>
@@ -1902,6 +2017,7 @@ function SettingsScreen({onToast,onLogout,onGoalSaved}) {
 }
 
 const TABS=[{id:"home",l:"ホーム",n:"home"},{id:"timer",l:"タイマー",n:"timer"},{id:"log",l:"記録",n:"clock"},{id:"report",l:"レポート",n:"chart"},{id:"settings",l:"設定",n:"gear"}];
+const AVATAR_OPTIONS=["🦊","🐱","🐶","🐻","🐼","🐸","🦉","🐧","🦁","🐢"];
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
@@ -1919,13 +2035,15 @@ function parseJwt(token) {
 }
 
 function LoginScreen({onLogin}) {
-  const [step,setStep]=useState("top"); // "top" | "goal" | "line"
+  const [step,setStep]=useState("top"); // "top" | "profile" | "goal" | "line"
   const [goals,setGoals]=useState([{goal:"",deadline:""}]);
   const addGoal=()=>{ if(goals.length<3) setGoals([...goals,{goal:"",deadline:""}]); };
   const updateGoal=(i,field,val)=>{ const g=[...goals]; g[i]={...g[i],[field]:val}; setGoals(g); };
   const [loading,setLoading]=useState(false);
   const [error,setError]=useState("");
   const [pendingUser,setPendingUser]=useState(null);
+  const [nickname,setNickname]=useState("");
+  const [avatar,setAvatar]=useState(AVATAR_OPTIONS[0]);
 
   // Googleリダイレクト後のid_tokenを検出
   useEffect(()=>{
@@ -1961,17 +2079,24 @@ function LoginScreen({onLogin}) {
       const r=await fetch(url).then(res=>res.json());
       if(r.ok&&r.data){
         // 既存ユーザー → ログイン
-        const u={email,name:r.data.name||name,coachName:r.data.coachName||"コーチ",coachEmail:r.data.coach_email||""};
+        const u={email,name:r.data.name||name,nickname:r.data.nickname||r.data.name||name,avatar:r.data.avatar||"🦊",coachName:r.data.coachName||"コーチ",coachEmail:r.data.coach_email||""};
         localStorage.setItem("edventure_user",JSON.stringify(u));
         if(!localStorage.getItem("line_prompted")){ setPendingUser(u); setStep("line"); }
         else { CURRENT_USER=u; onLogin(u); }
       } else {
-        // 新規ユーザー → 目標入力へ
+        // 新規ユーザー → プロフィール入力へ
         setPendingUser({email, name});
-        setStep("goal");
+        setNickname(name);
+        setStep("profile");
       }
     }catch{ setError("接続エラーが発生しました"); }
     setLoading(false);
+  };
+
+  const confirmProfile=()=>{
+    if(!nickname.trim()){ setError("ニックネームを入力してください"); return; }
+    setError("");
+    setStep("goal");
   };
 
   const register=async()=>{
@@ -1982,6 +2107,8 @@ function LoginScreen({onLogin}) {
       url.searchParams.set("action","registerUser");
       url.searchParams.set("studentEmail",email);
       url.searchParams.set("name",name);
+      url.searchParams.set("nickname",nickname.trim());
+      url.searchParams.set("avatar",avatar);
       url.searchParams.set("goal",goals[0]?.goal.trim()||"");
       url.searchParams.set("goal_deadline",goals[0]?.deadline||"");
       url.searchParams.set("goal2",goals[1]?.goal.trim()||"");
@@ -1990,7 +2117,7 @@ function LoginScreen({onLogin}) {
       url.searchParams.set("goal_deadline3",goals[2]?.deadline||"");
       const r=await fetch(url).then(res=>res.json());
       if(r.ok||r.error==="already_registered"){
-        const u={email,name,coachName:"コーチ",coachEmail:""};
+        const u={email,name,nickname:nickname.trim(),avatar,coachName:"コーチ",coachEmail:""};
         const validGoals=goals.filter(g=>g.goal.trim());
         if(validGoals.length) localStorage.setItem("jiroku_goals",JSON.stringify(validGoals));
         localStorage.setItem("edventure_user",JSON.stringify(u));
@@ -2048,11 +2175,38 @@ function LoginScreen({onLogin}) {
     </div>
   `;
 
+  if(step==="profile") return html`
+    <div class="login-wrap" style=${{justifyContent:"flex-start",paddingTop:48}}>
+      <div class="login-logo"><svg width="72" height="72" viewBox="0 0 72 72" xmlns="http://www.w3.org/2000/svg"><circle cx="36" cy="36" r="36" fill="#0891B2"/><circle cx="36" cy="36" r="25" fill="none" stroke="rgba(255,255,255,0.2)" stroke-width="4.5"/><path d="M36 11 A25 25 0 1 1 14.5 50" fill="none" stroke="#fff" stroke-width="4.5" stroke-linecap="round"/><circle cx="36" cy="36" r="15" fill="none" stroke="rgba(255,255,255,0.6)" stroke-width="2"/><line x1="36" y1="36" x2="36" y2="25" stroke="#fff" stroke-width="2.2" stroke-linecap="round"/><line x1="36" y1="36" x2="43" y2="41" stroke="#fff" stroke-width="2" stroke-linecap="round"/><circle cx="36" cy="36" r="2" fill="#fff"/></svg></div>
+      <div class="login-title">はじめまして 👋</div>
+      <div class="login-sub" style=${{marginBottom:24}}>${pendingUser?.name}さん、プロフィールを設定しましょう</div>
+      <div class="login-box">
+        <div style=${{background:"var(--card)",borderRadius:12,padding:"14px",border:"1px solid var(--border)"}}>
+          <div style=${{fontSize:11,color:"var(--sub)",marginBottom:5}}>ニックネーム（他の人にはこちらが表示されます）</div>
+          <input class="login-inp" value=${nickname} maxLength=${20} placeholder="例：じろう" onChange=${e=>setNickname(e.target.value)}/>
+        </div>
+        <div style=${{background:"var(--card)",borderRadius:12,padding:"14px",border:"1px solid var(--border)"}}>
+          <div style=${{fontSize:11,color:"var(--sub)",marginBottom:8}}>アバターを選ぶ</div>
+          <div style=${{display:"grid",gridTemplateColumns:"repeat(5, 1fr)",gap:8}}>
+            ${AVATAR_OPTIONS.map(a=>html`
+              <button key=${a} onClick=${()=>setAvatar(a)}
+                style=${{fontSize:24,padding:"8px 0",borderRadius:12,border:`2px solid ${avatar===a?"var(--accent)":"var(--border)"}`,background:avatar===a?"var(--accent-bg, rgba(8,145,178,0.1))":"transparent",cursor:"pointer"}}>
+                ${a}
+              </button>
+            `)}
+          </div>
+        </div>
+        ${error&&html`<div class="login-err">${error}</div>`}
+        <button class="btn" onClick=${confirmProfile}>次へ</button>
+      </div>
+    </div>
+  `;
+
   if(step==="goal") return html`
     <div class="login-wrap" style=${{justifyContent:"flex-start",paddingTop:48}}>
       <div class="login-logo"><svg width="72" height="72" viewBox="0 0 72 72" xmlns="http://www.w3.org/2000/svg"><circle cx="36" cy="36" r="36" fill="#0891B2"/><circle cx="36" cy="36" r="25" fill="none" stroke="rgba(255,255,255,0.2)" stroke-width="4.5"/><path d="M36 11 A25 25 0 1 1 14.5 50" fill="none" stroke="#fff" stroke-width="4.5" stroke-linecap="round"/><circle cx="36" cy="36" r="15" fill="none" stroke="rgba(255,255,255,0.6)" stroke-width="2"/><line x1="36" y1="36" x2="36" y2="25" stroke="#fff" stroke-width="2.2" stroke-linecap="round"/><line x1="36" y1="36" x2="43" y2="41" stroke="#fff" stroke-width="2" stroke-linecap="round"/><circle cx="36" cy="36" r="2" fill="#fff"/></svg></div>
       <div class="login-title">はじめまして 👋</div>
-      <div class="login-sub" style=${{marginBottom:24}}>${pendingUser?.name}さん、目標を教えてください（最大3つ）</div>
+      <div class="login-sub" style=${{marginBottom:24}}>${nickname}さん、目標を教えてください（最大3つ）</div>
       <div class="login-box">
         ${goals.map((g,i)=>html`
           <div key=${i} style=${{background:"var(--card)",borderRadius:12,padding:"14px",border:"1px solid var(--border)"}}>
@@ -2129,6 +2283,7 @@ function App() {
     const old=localStorage.getItem("jiroku_goal"); if(old) try{const p=JSON.parse(old); if(p.goal) return [p];}catch(e){}
     return [];
   });
+  const [profile,setProfile]=useState(()=>({nickname:CURRENT_USER?.nickname||CURRENT_USER?.name||"",avatar:CURRENT_USER?.avatar||"🦊"}));
   const logout=()=>{
     localStorage.removeItem("edventure_user");
     localStorage.removeItem("line_prompted");
@@ -2147,8 +2302,9 @@ function App() {
     fetch(url,{signal:ctrl.signal}).then(r=>r.json()).then(r=>{
       clearTimeout(timeout);
       if(r.ok&&r.data){
-        const u={...CURRENT_USER, name:r.data.name||CURRENT_USER.name, coachName:r.data.coachName||"コーチ", coachEmail:r.data.coach_email||""};
+        const u={...CURRENT_USER, name:r.data.name||CURRENT_USER.name, nickname:r.data.nickname||CURRENT_USER.name, avatar:r.data.avatar||"🦊", coachName:r.data.coachName||"コーチ", coachEmail:r.data.coach_email||""};
         CURRENT_USER=u; localStorage.setItem("edventure_user",JSON.stringify(u)); setUser(u);
+        setProfile({nickname:u.nickname,avatar:u.avatar});
       } else {
         // スプレッドシートに存在しない → キャッシュ削除してログイン画面へ
         localStorage.removeItem("edventure_user");
@@ -2165,11 +2321,11 @@ function App() {
   return html`
     <div style=${{height:"100%",position:"relative"}}>
       <div class="screen">
-        <div style=${{display:tab==="home"?"block":"none"}}><${HomeScreen} goalData=${goalData} onGoalSaved=${setGoalData}/></div>
+        <div style=${{display:tab==="home"?"block":"none"}}><${HomeScreen} goalData=${goalData} onGoalSaved=${setGoalData} profile=${profile}/></div>
         <div style=${{display:tab==="log"?"block":"none"}}><${LogScreen} onToast=${setToast} isActive=${tab==="log"}/></div>
         <div style=${{display:tab==="report"?"block":"none"}}><${ReportScreen}/></div>
         <div style=${{display:tab==="timer"?"block":"none",height:"100%"}}><${TimerScreen} onToast=${setToast} isActive=${tab==="timer"}/></div>
-        <div style=${{display:tab==="settings"?"block":"none"}}><${SettingsScreen} onToast=${setToast} onLogout=${logout} onGoalSaved=${setGoalData}/></div>
+        <div style=${{display:tab==="settings"?"block":"none"}}><${SettingsScreen} onToast=${setToast} onLogout=${logout} onGoalSaved=${setGoalData} profile=${profile} onProfileSaved=${setProfile}/></div>
       </div>
       <nav class="nav">
         ${TABS.map(t=>html`
