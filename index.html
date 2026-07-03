@@ -1086,7 +1086,7 @@ function ScoreTrend({list}) {
   return html`
     <div class="card" style=${{marginBottom:8}}>
       <div style=${{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:4}}>
-        <div class="card-label" style=${{marginBottom:0}}>スコア推移（直近${pts.length}回）</div>
+        <div class="card-label" style=${{marginBottom:0}}>レポートスコア推移（直近${pts.length}回）</div>
         <div style=${{fontSize:11,color:"var(--sub)"}}>平均 <b style=${{color:"var(--text)"}}>${avg}</b>点
           <span style=${{marginLeft:8,color:diff>0?"var(--green)":diff<0?"var(--red)":"var(--sub)",fontWeight:600}}>${diff>0?"↑":diff<0?"↓":"→"}${Math.abs(diff)}</span>
         </div>
@@ -1225,6 +1225,13 @@ const BREAKDOWN_LABELS = {
   goal:        {en:"GOAL",   jp:"目標"},
   consistency: {en:"STEADY", jp:"継続"},
 };
+const BREAKDOWN_TIPS = {
+  records:     {icon:"📝", text:"ちょっとした時間もこまめに記録するとスコアが上がります。"},
+  memo:        {icon:"💭", text:"感じたこと・気づいたことを一言メモに添えると質が上がります。"},
+  focus:       {icon:"🎯", text:"集中しやすい時間帯や環境を見つけて自己評価を高めましょう。"},
+  goal:        {icon:"🚀", text:"目標に関連する作業の記録を増やすとスコアが伸びます。"},
+  consistency: {icon:"🔥", text:"直近30日でどれだけ記録した日があるかで決まります。毎日1つでも記録を。"},
+};
 
 function BreakdownRadar({breakdown}) {
   const N = BREAKDOWN_CATS.length;
@@ -1344,6 +1351,18 @@ function ReportScreen() {
                     })}
                   </div>
                 </div>
+                ${(()=>{
+                  const weakestKey = BREAKDOWN_CATS.map(([key])=>key).sort((a,b)=>Number(overallBreakdown[a]||0)-Number(overallBreakdown[b]||0))[0];
+                  const tip = BREAKDOWN_TIPS[weakestKey];
+                  return html`
+                    <div style=${{display:"flex",gap:8,alignItems:"flex-start",marginTop:14,paddingTop:14,borderTop:"1px solid var(--border)"}}>
+                      <span style=${{fontSize:15,flexShrink:0}}>${tip.icon}</span>
+                      <div style=${{fontSize:12,color:"var(--sub)",lineHeight:1.6}}>
+                        <b style=${{color:"var(--text)"}}>${BREAKDOWN_LABELS[weakestKey].jp}</b>を伸ばすヒント：${tip.text}
+                      </div>
+                    </div>
+                  `;
+                })()}
               </div>
             `}
             <${ScoreTrend} list=${reportList}/>
