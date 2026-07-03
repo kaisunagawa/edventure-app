@@ -1002,6 +1002,26 @@ function ScoreTrend({list}) {
 }
 
 // 振り返り（数値化＋事実の整理＋自分の日記）
+// この日の数値サマリー（レポートのスコアの直下に置く）
+function JournalStats({logs}) {
+  const goalBlocks=logs.filter(l=>l.goal_related==="true"||l.goal_related===true).length;
+  const goalPct=logs.length?Math.round(goalBlocks/logs.length*100):0;
+  const focusNums=logs.map(l=>parseInt(l.focus_level)||0).filter(n=>n>0);
+  const avgFocus=focusNums.length?(focusNums.reduce((a,b)=>a+b,0)/focusNums.length).toFixed(1):"−";
+  const memoCount=logs.filter(l=>l.memo&&l.memo.trim()).length;
+  return html`<div class="card">
+    <div class="card-label">この日の数値</div>
+    <div style=${{display:"flex",gap:8}}>
+      ${[["記録",logs.length+"時間"],["目標関連",goalBlocks+"時間 ("+goalPct+"%)"],["平均集中",avgFocus+" / 5"],["メモ",memoCount+"個"]].map(([l,v])=>html`
+        <div key=${l} style=${{flex:1,background:"var(--bg)",borderRadius:10,padding:"10px 6px",textAlign:"center"}}>
+          <div style=${{fontSize:13,fontWeight:800,color:"var(--accent)",lineHeight:1.3}}>${v}</div>
+          <div style=${{fontSize:10,color:"var(--sub)",marginTop:3}}>${l}</div>
+        </div>
+      `)}
+    </div>
+  </div>`;
+}
+
 function JournalSection({date, logs}) {
   const [diary,setDiary]=useState("");
   const [loaded,setLoaded]=useState(false);
@@ -1023,29 +1043,10 @@ function JournalSection({date, logs}) {
     setSaving(false);
   };
 
-  // 数値化（事実ベース）
-  const goalBlocks=logs.filter(l=>l.goal_related==="true"||l.goal_related===true).length;
-  const goalPct=logs.length?Math.round(goalBlocks/logs.length*100):0;
-  const focusNums=logs.map(l=>parseInt(l.focus_level)||0).filter(n=>n>0);
-  const avgFocus=focusNums.length?(focusNums.reduce((a,b)=>a+b,0)/focusNums.length).toFixed(1):"−";
-  const memos=logs.filter(l=>l.memo&&l.memo.trim());
   // 予定と記録の対比（タイトルの部分一致で「記録あり」判定）
   const isDone=(ev)=>logs.some(l=>l.task&&(l.task.includes(ev.title)||ev.title.includes(l.task)));
 
   return html`<div>
-    <!-- 数値サマリー -->
-    <div class="card">
-      <div class="card-label">この日の数値</div>
-      <div style=${{display:"flex",gap:8}}>
-        ${[["記録",logs.length+"時間"],["目標関連",goalBlocks+"時間 ("+goalPct+"%)"],["平均集中",avgFocus+" / 5"],["メモ",memos.length+"個"]].map(([l,v])=>html`
-          <div key=${l} style=${{flex:1,background:"var(--bg)",borderRadius:10,padding:"10px 6px",textAlign:"center"}}>
-            <div style=${{fontSize:13,fontWeight:800,color:"var(--accent)",lineHeight:1.3}}>${v}</div>
-            <div style=${{fontSize:10,color:"var(--sub)",marginTop:3}}>${l}</div>
-          </div>
-        `)}
-      </div>
-    </div>
-
     <!-- 予定と実績 -->
     ${events&&events.length>0&&html`
       <div class="card">
@@ -1055,19 +1056,6 @@ function JournalSection({date, logs}) {
             <div style=${{fontSize:11,fontWeight:600,color:"var(--sub)",minWidth:42,flexShrink:0}}>${ev.time}</div>
             <div style=${{flex:1,fontSize:13,color:"var(--text)"}}>${ev.title}</div>
             <div style=${{fontSize:11,fontWeight:600,flexShrink:0,color:isDone(ev)?"var(--green)":"var(--sub)"}}>${isDone(ev)?"✓ 記録あり":"記録なし"}</div>
-          </div>
-        `)}
-      </div>
-    `}
-
-    <!-- メモまとめ -->
-    ${memos.length>0&&html`
-      <div class="card">
-        <div class="card-label">この日のメモ</div>
-        ${memos.map((l,i)=>html`
-          <div key=${i} style=${{padding:"8px 0",borderBottom:i<memos.length-1?"1px solid var(--border)":"none"}}>
-            <div style=${{fontSize:11,color:"var(--sub)",marginBottom:2}}>${l.time_block} · ${l.task}</div>
-            <div style=${{fontSize:13,color:"var(--text)",lineHeight:1.7}}>${l.memo}</div>
           </div>
         `)}
       </div>
@@ -1173,6 +1161,7 @@ function ReportScreen() {
             <div class="report-score">${report.score}</div>
             <div class="report-pts">/ 100点</div>
           </div>
+          ${logs.length>0&&html`<${JournalStats} logs=${logs}/>`}
           ${report.breakdown&&html`
             <div class="card">
               <div class="card-label">採点の内訳</div>
