@@ -1040,8 +1040,13 @@ function LogScreen({onToast, isActive}) {
     if(!res.ok){ onToast("保存に失敗しました。もう一度お試しください"); setSaving(false); return; }
     if(res.xp_gained){ const lv=res.level_up?`  →  Lv.${res.level} へ！`:""; onToast(`+${res.xp_gained} XP 獲得${lv}`); }
     else onToast(res.updated?"記録を上書きしました":"保存しました");
-    const r=await gasApi("getLogs",{date});
-    if(r.ok) setLogs(r.data);
+    // 保存内容が分かっているので再取得せず、ローカルの一覧をその場で更新する
+    // （サーバーへの往復が倍になり保存が重く感じられるのを防ぐ）
+    const saved = {time_block:block, task:task.trim(), focus_level:focus, memo:memo.trim(), goal_related:goalRelated?"true":"false"};
+    setLogs(prev=>{
+      const exists = prev.some(l=>l.time_block===block);
+      return exists ? prev.map(l=>l.time_block===block?{...l,...saved}:l) : [...prev, saved].sort((a,b)=>a.time_block>b.time_block?1:-1);
+    });
     setSaving(false);
   };
 

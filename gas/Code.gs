@@ -220,8 +220,32 @@ function getReportList(studentEmail) {
 
 // 「現在のステータス」用。AIレポートのbreakdown保存を待たず、
 // 記録済みのDailyLogから直接いま時点の5軸スコアを計算する。
+// student_emailで先に絞り込んでから必要な列だけ取り出す（getLogsと同じ理由）
 function getStatusSummary(studentEmail) {
-  const logs = sheetToObjects(getSheet("DailyLog")).filter(l => l.student_email === studentEmail);
+  const sheet = getSheet("DailyLog");
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0];
+  const emailIdx = headers.indexOf("student_email");
+  const idx = {
+    date: headers.indexOf("date"),
+    memo: headers.indexOf("memo"),
+    focus_level: headers.indexOf("focus_level"),
+    goal_related: headers.indexOf("goal_related"),
+  };
+  const logs = [];
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][emailIdx]) !== studentEmail) continue;
+    const rawDate = data[i][idx.date];
+    const rowDate = rawDate instanceof Date
+      ? Utilities.formatDate(rawDate, "Asia/Tokyo", "yyyy-MM-dd")
+      : String(rawDate);
+    logs.push({
+      date: rowDate,
+      memo: String(data[i][idx.memo] || ""),
+      focus_level: String(data[i][idx.focus_level] || ""),
+      goal_related: String(data[i][idx.goal_related] || ""),
+    });
+  }
   if (logs.length === 0) return { ok: true, data: null };
 
   const days = {};
@@ -285,12 +309,43 @@ function appendReportRow(targetDate, studentEmail, report) {
   }
 }
 
+// student_email・dateで先に絞り込んでから必要な行だけをオブジェクト化する。
+// sheetToObjects()でシート全体を毎回フル変換すると、記録数が増えるほど
+// 遅くなるため、対象外の行の変換コストを避けている。
 function getLogs(studentEmail, body) {
-  const rows = sheetToObjects(getSheet("DailyLog"));
+  const sheet = getSheet("DailyLog");
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0];
+  const emailIdx = headers.indexOf("student_email");
+  const dateIdx = headers.indexOf("date");
+  const idx = {
+    log_id: headers.indexOf("log_id"),
+    time_block: headers.indexOf("time_block"),
+    task: headers.indexOf("task"),
+    focus_level: headers.indexOf("focus_level"),
+    memo: headers.indexOf("memo"),
+    goal_related: headers.indexOf("goal_related"),
+  };
   const targetDate = (body && body.date) ? body.date : formatDate(new Date());
-  const logs = rows.filter(r => r.student_email === studentEmail && r.date === targetDate)
-    .sort((a, b) => a.time_block > b.time_block ? 1 : -1)
-    .map(r => ({ log_id: r.log_id, time_block: r.time_block, task: r.task, focus_level: r.focus_level, memo: r.memo, goal_related: r.goal_related || "false" }));
+
+  const logs = [];
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][emailIdx]) !== studentEmail) continue;
+    const rawDate = data[i][dateIdx];
+    const rowDate = rawDate instanceof Date
+      ? Utilities.formatDate(rawDate, "Asia/Tokyo", "yyyy-MM-dd")
+      : String(rawDate);
+    if (rowDate !== targetDate) continue;
+    logs.push({
+      log_id: String(data[i][idx.log_id] || ""),
+      time_block: String(data[i][idx.time_block] || ""),
+      task: String(data[i][idx.task] || ""),
+      focus_level: String(data[i][idx.focus_level] || ""),
+      memo: String(data[i][idx.memo] || ""),
+      goal_related: String(data[i][idx.goal_related] || "false"),
+    });
+  }
+  logs.sort((a, b) => a.time_block > b.time_block ? 1 : -1);
   return { ok: true, data: logs };
 }
 
