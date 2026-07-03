@@ -1237,8 +1237,6 @@ function SettingsScreen({onToast,onLogout,onGoalSaved}) {
   const saved=JSON.parse(localStorage.getItem("notifySettings")||'{"start":7,"end":23,"interval":2}');
   const savedGoals=JSON.parse(localStorage.getItem("jiroku_goals")||'[{"goal":"","deadline":""}]');
   const savedLogHours=getLogHours();
-  const [start,setStart]=useState(saved.start);
-  const [end,setEnd]=useState(saved.end);
   const [interval,setInterval]=useState(saved.interval||2);
   const [logStart,setLogStart]=useState(savedLogHours.start);
   const [logEnd,setLogEnd]=useState(savedLogHours.end);
@@ -1265,7 +1263,6 @@ function SettingsScreen({onToast,onLogout,onGoalSaved}) {
   const removeGoal=(i)=>{ if(goals.length>1) setGoals(goals.filter((_,j)=>j!==i)); };
   const [calLinked,setCalLinked]=useState(!!localStorage.getItem("cal_linked"));
   const [calLoading,setCalLoading]=useState(false);
-  const hours=Array.from({length:24},(_,i)=>i);
 
   const linkCalendar=()=>{
     if(!window.google||!google.accounts) return;
@@ -1291,15 +1288,13 @@ function SettingsScreen({onToast,onLogout,onGoalSaved}) {
     client.requestAccessToken();
   };
 
-  const saveNotify=()=>{
-    localStorage.setItem("notifySettings",JSON.stringify({start,end,interval}));
-    gasPost("saveSettings",{notify_start:start,notify_end:end,notify_interval:interval});
-    onToast("通知設定を保存しました");
-  };
-  const saveLogHours=()=>{
+  // 記録時間帯とLINE通知を同時に保存（両者は常に連動）
+  const saveTimeSettings=()=>{
     if(logEnd<=logStart){onToast("終了時間は開始より後にしてください");return;}
     localStorage.setItem("jiroku_log_hours",JSON.stringify({start:logStart,end:logEnd}));
-    onToast("記録時間帯を保存しました");
+    localStorage.setItem("notifySettings",JSON.stringify({start:logStart,end:logEnd,interval}));
+    gasPost("saveSettings",{notify_start:logStart,notify_end:logEnd,notify_interval:interval});
+    onToast("時間帯と通知設定を保存しました");
   };
   const saveGoal=()=>{
     if(!goals[0]?.goal.trim()){onToast("目標1を入力してください");return;}
@@ -1404,10 +1399,10 @@ function SettingsScreen({onToast,onLogout,onGoalSaved}) {
         <button class="btn" onClick=${saveTimerSettings}>保存する</button>
       </div>
 
-      <!-- 記録時間帯 -->
+      <!-- 時間帯と通知（記録画面の表示範囲とLINE通知が連動） -->
       <div style=${{background:"var(--card)",borderRadius:16,border:"1px solid var(--border)",padding:"18px",marginBottom:12}}>
-        <${SectionHeader} icon="🕐" title="記録する時間帯"/>
-        <div style=${{fontSize:12,color:"var(--sub)",marginBottom:14,lineHeight:1.6}}>記録画面に表示する時間ブロックの範囲</div>
+        <${SectionHeader} icon="🕐" title="時間帯と通知"/>
+        <div style=${{fontSize:12,color:"var(--sub)",marginBottom:14,lineHeight:1.6}}>記録する時間帯です。記録画面の表示とLINEリマインダーの両方に反映されます</div>
         <div style=${{display:"flex",alignItems:"center",gap:10,marginBottom:16}}>
           <div style=${{flex:1}}>
             <div style=${{fontSize:11,color:"var(--sub)",marginBottom:6,fontWeight:500}}>開始</div>
@@ -1423,28 +1418,7 @@ function SettingsScreen({onToast,onLogout,onGoalSaved}) {
             </select>
           </div>
         </div>
-        <button class="btn" onClick=${saveLogHours}>保存する</button>
-      </div>
-
-      <!-- LINE通知 -->
-      <div style=${{background:"var(--card)",borderRadius:16,border:"1px solid var(--border)",padding:"18px",marginBottom:12}}>
-        <${SectionHeader} icon="🔔" title="LINE通知時間"/>
-        <div style=${{display:"flex",alignItems:"center",gap:10,marginBottom:16}}>
-          <div style=${{flex:1}}>
-            <div style=${{fontSize:11,color:"var(--sub)",marginBottom:6,fontWeight:500}}>開始</div>
-            <select class="inp" style=${{padding:"10px 8px",textAlign:"center"}} value=${start} onChange=${e=>setStart(Number(e.target.value))}>
-              ${hours.map(h=>html`<option key=${h} value=${h}>${String(h).padStart(2,"0")}:00</option>`)}
-            </select>
-          </div>
-          <div style=${{color:"var(--sub)",marginTop:18,fontSize:18,fontWeight:300}}>→</div>
-          <div style=${{flex:1}}>
-            <div style=${{fontSize:11,color:"var(--sub)",marginBottom:6,fontWeight:500}}>終了</div>
-            <select class="inp" style=${{padding:"10px 8px",textAlign:"center"}} value=${end} onChange=${e=>setEnd(Number(e.target.value))}>
-              ${hours.map(h=>html`<option key=${h} value=${h}>${String(h).padStart(2,"0")}:00</option>`)}
-            </select>
-          </div>
-        </div>
-        <div style=${{fontSize:12,color:"var(--sub)",marginBottom:10,fontWeight:500}}>通知間隔</div>
+        <div style=${{fontSize:12,color:"var(--sub)",marginBottom:10,fontWeight:500}}>LINE通知の間隔</div>
         <div style=${{display:"flex",gap:6,flexWrap:"wrap",marginBottom:10}}>
           ${[[1,"1時間"],[2,"2時間"],[3,"3時間"],[6,"6時間"],[24,"1日1回"]].map(([v,label])=>html`
             <button key=${v} onClick=${()=>setInterval(v)}
@@ -1456,9 +1430,9 @@ function SettingsScreen({onToast,onLogout,onGoalSaved}) {
           `)}
         </div>
         <div style=${{fontSize:11,color:"var(--sub)",marginBottom:16,lineHeight:1.6,padding:"8px 10px",background:"var(--bg)",borderRadius:8}}>
-          ${interval===1?"毎時間リマインドが届きます":interval===24?"1日の開始時間に1回届きます":`${interval}時間ごとにリマインドが届きます`}
+          ${interval===1?"毎時間リマインドが届きます":interval===24?"1日の開始時間に1回届きます":`${interval}時間ごとにリマインドが届きます`}（21時以降はレポートのみ）
         </div>
-        <button class="btn" onClick=${saveNotify}>保存する</button>
+        <button class="btn" onClick=${saveTimeSettings}>保存する</button>
       </div>
 
       <!-- 階級システム -->
