@@ -515,15 +515,18 @@ function RankBadge({ level, size = 32 }) {
 }
 // 自己評価ピッカー（5つ横並び・数字＋短いラベル）
 const EVAL_SHORT = {"5":"完璧","4":"よくできた","3":"まあまあ","2":"もう少し","1":"だめだった"};
+const EVAL_COLORS = {"5":"#22C55E","4":"#6366F1","3":"#F59E0B","2":"#F97316","1":"#EF4444"};
 function EvalPicker({value, onChange}) {
   return html`<div style=${{display:"flex",gap:6}}>
     ${EVALS.map(f=>{
       const n=f.l.charAt(0);
       const on=value===f.l;
+      const c=EVAL_COLORS[n];
       return html`<button key=${f.l} onClick=${()=>onChange(f.l)}
-        class=${on?f.c:""}
         style=${{flex:1,padding:"9px 2px",borderRadius:10,cursor:"pointer",fontFamily:"inherit",textAlign:"center",transition:"all .12s",WebkitTapHighlightColor:"transparent",
-          ...(on?{border:"1px solid transparent"}:{border:"1px solid var(--border)",background:"var(--card)",color:"var(--sub)"})}}>
+          ...(on
+            ?{border:"1px solid transparent",background:c,color:"#fff",boxShadow:`0 2px 8px ${c}55`}
+            :{border:"1px solid var(--border)",background:"var(--card)",color:"var(--sub)"})}}>
         <div style=${{fontSize:16,fontWeight:800,lineHeight:1}}>${n}</div>
         <div style=${{fontSize:9,marginTop:3,fontWeight:600,letterSpacing:"-.2px"}}>${EVAL_SHORT[n]}</div>
       </button>`;
@@ -923,7 +926,7 @@ function LogScreen({onToast, isActive}) {
         `}
         <div class="form-grp">
           <label class="form-lbl">何をしましたか？</label>
-          <input class="inp" placeholder="例：数学の問題演習" value=${task} onInput=${e=>setTask(e.target.value)} />
+          <input class="inp" placeholder="例：資料作成、家事、勉強など" value=${task} onInput=${e=>setTask(e.target.value)} />
           ${task!==""&&task===autoFillRef.current&&html`
             <div style=${{fontSize:11,color:"var(--accent)",marginTop:5,display:"flex",alignItems:"center",gap:4}}>
               📅 カレンダーの予定から自動入力しました（編集できます）
@@ -931,11 +934,11 @@ function LogScreen({onToast, isActive}) {
           `}
         </div>
         <div class="form-grp">
-          <button onClick=${()=>setGoalRelated(!goalRelated)} style=${{display:"flex",alignItems:"center",gap:10,background:"none",border:`1.5px solid ${goalRelated?"var(--accent)":"var(--border)"}`,borderRadius:10,padding:"10px 14px",width:"100%",cursor:"pointer",transition:"all .15s",backgroundColor:goalRelated?"var(--accent-l)":"transparent"}}>
-            <div style=${{width:20,height:20,borderRadius:6,border:`2px solid ${goalRelated?"var(--accent)":"var(--border)"}`,background:goalRelated?"var(--accent)":"transparent",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,transition:"all .15s"}}>
-              ${goalRelated&&html`<svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="white" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`}
+          <button onClick=${()=>setGoalRelated(!goalRelated)} style=${{display:"flex",alignItems:"center",gap:8,background:"none",border:`1.5px solid ${goalRelated?"var(--accent)":"var(--border)"}`,borderRadius:9,padding:"7px 11px",width:"100%",cursor:"pointer",transition:"all .15s",backgroundColor:goalRelated?"var(--accent-l)":"transparent"}}>
+            <div style=${{width:16,height:16,borderRadius:5,border:`2px solid ${goalRelated?"var(--accent)":"var(--border)"}`,background:goalRelated?"var(--accent)":"transparent",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,transition:"all .15s"}}>
+              ${goalRelated&&html`<svg width="10" height="10" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="white" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`}
             </div>
-            <span style=${{fontSize:14,fontWeight:500,color:goalRelated?"var(--accent)":"var(--sub)"}}>この時間は目標に関連している</span>
+            <span style=${{fontSize:12.5,fontWeight:500,color:goalRelated?"var(--accent)":"var(--sub)"}}>この時間は目標に関連している</span>
           </button>
         </div>
         <div class="form-grp">
@@ -1466,7 +1469,7 @@ function TimerScreen({onToast, isActive}) {
       ${mode==="focus"&&html`
         <div class="form-grp" style=${{marginBottom:16}}>
           <label class="form-lbl">何に集中しますか？（任意）</label>
-          <input class="inp" placeholder="例：企画書の作成、架電対応..." value=${task}
+          <input class="inp" placeholder="例：資料作成、家事、勉強など" value=${task}
             onInput=${e=>setTask(e.target.value)} disabled=${isRunning}/>
         </div>
       `}
@@ -1540,14 +1543,14 @@ function TimerScreen({onToast, isActive}) {
           <div class="form-grp">
             <label class="form-lbl">何をしましたか？</label>
             <input class="inp" value=${task} onInput=${e=>setTask(e.target.value)}
-              placeholder="例：企画書の作成"/>
+              placeholder="例：資料作成"/>
           </div>
           <div class="form-grp">
-            <button onClick=${()=>setLogGoalRelated(!logGoalRelated)} style=${{display:"flex",alignItems:"center",gap:10,background:logGoalRelated?"var(--accent-l)":"none",border:`1.5px solid ${logGoalRelated?"var(--accent)":"var(--border)"}`,borderRadius:10,padding:"10px 14px",width:"100%",cursor:"pointer",transition:"all .15s"}}>
-              <div style=${{width:20,height:20,borderRadius:6,border:`2px solid ${logGoalRelated?"var(--accent)":"var(--border)"}`,background:logGoalRelated?"var(--accent)":"transparent",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,transition:"all .15s"}}>
-                ${logGoalRelated&&html`<svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="white" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`}
+            <button onClick=${()=>setLogGoalRelated(!logGoalRelated)} style=${{display:"flex",alignItems:"center",gap:8,background:logGoalRelated?"var(--accent-l)":"none",border:`1.5px solid ${logGoalRelated?"var(--accent)":"var(--border)"}`,borderRadius:9,padding:"7px 11px",width:"100%",cursor:"pointer",transition:"all .15s"}}>
+              <div style=${{width:16,height:16,borderRadius:5,border:`2px solid ${logGoalRelated?"var(--accent)":"var(--border)"}`,background:logGoalRelated?"var(--accent)":"transparent",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,transition:"all .15s"}}>
+                ${logGoalRelated&&html`<svg width="10" height="10" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="white" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`}
               </div>
-              <span style=${{fontSize:14,fontWeight:500,color:logGoalRelated?"var(--accent)":"var(--sub)"}}>この時間は目標に関連している</span>
+              <span style=${{fontSize:12.5,fontWeight:500,color:logGoalRelated?"var(--accent)":"var(--sub)"}}>この時間は目標に関連している</span>
             </button>
           </div>
           <div class="form-grp">
