@@ -593,35 +593,33 @@ function hourlyReminder() {
           const ctx = buildStudentContext(user.student_email, user);
           const recentMsgs = getRecentCoachMessages(user.student_email, 3);
 
-          const prompt = `あなたは${user.name}の教育コーチです。以下の情報をすべて把握した上で、記録を促す短いメッセージを送ってください。
+          const prompt = `あなたは${user.name}の教育コーチです。以下の情報を踏まえて、記録を促すごく短い一言を送ってください。
 
 ${ctx}
 【今日の状況】${todayLogSummary}
 ${recentMsgs}
 
 【スタイル】
-- 敬語とタメ語を自然に混ぜる
-- 今日すでに記録している場合は具体的な内容に一言触れてから次を促す
-- 今日まだ記録がない場合は責めずに軽く背中を押す
-- 直近のコーチメッセージと同じ言い回し・パターンは絶対に使わない
-- 「---」「【】」宛名は使わない。普通の会話文のみ
-- 2文以内。絵文字1個まで`;
+- 1文だけ・40文字以内。LINEの通知でパッと読める長さ
+- 今日の状況に即した一言（記録済みなら軽く承認、未記録なら軽く後押し）
+- 直近のコーチメッセージと同じ言い回しは使わない
+- 宛名・見出し・説明は一切なし。絵文字1個まで`;
 
           const res = UrlFetchApp.fetch("https://api.anthropic.com/v1/messages", {
             method: "POST",
             headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
-            payload: JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: 250, messages: [{ role: "user", content: prompt }] }),
+            payload: JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: 100, messages: [{ role: "user", content: prompt }] }),
             muteHttpExceptions: true
           });
           const result = JSON.parse(res.getContentText());
           if (result.content && result.content[0]) {
-            sendLineMessage(user.line_user_id, "🤖 習慣AIコーチより\n\n" + formatForLine(stripSalutation(result.content[0].text)) + "\n\n📝 " + timeBlock + " の記録はこちらから↓\nhttps://kaisunagawa.github.io/edventure-app/");
+            sendLineMessage(user.line_user_id, stripSalutation(result.content[0].text).trim() + "\n📝 https://kaisunagawa.github.io/edventure-app/");
             return;
           }
         } catch(e) { Logger.log("hourlyCoach error: " + e); }
       }
     }
-    sendLineMessage(user.line_user_id, "⏱ " + timeBlock + " の記録を入力しましょう！\nhttps://kaisunagawa.github.io/edventure-app/");
+    sendLineMessage(user.line_user_id, "⏱ " + timeBlock + " の記録タイム！\n📝 https://kaisunagawa.github.io/edventure-app/");
   });
 }
 
