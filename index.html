@@ -693,7 +693,7 @@ function HomeScreen({goalData, onGoalSaved, profile}) {
             <span style=${{fontSize:16,flexShrink:0}}>🏆</span>
             <span style=${{minWidth:0}}>
               <span style=${{display:"block",fontSize:10,color:"rgba(255,255,255,0.75)",fontWeight:600,whiteSpace:"nowrap"}}>本日</span>
-              <span style=${{display:"block",fontSize:13,color:"#fff",fontWeight:700,whiteSpace:"nowrap"}}>${ranking.total}人中<b style=${{fontSize:15}}>${ranking.rank}位</b></span>
+              <span style=${{display:"flex",alignItems:"baseline",gap:2,fontSize:13,color:"#fff",fontWeight:700,whiteSpace:"nowrap"}}>${ranking.total}人中<b style=${{fontSize:15}}>${ranking.rank}位</b></span>
             </span>
           </div>
         `}
