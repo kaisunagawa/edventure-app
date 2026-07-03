@@ -374,20 +374,28 @@ async function getCalendarToken(interactive){
   const ready=await waitForGis();
   if(!ready) return null;
   return new Promise((resolve)=>{
+    // サイレント認証（prompt:"none"）はサードパーティCookieがブロックされていると
+    // コールバックも呼ばれずに固まることがあり、そのままだとフォールバック（サーバーの
+    // 共有キャッシュ）にも進めなくなる。タイムアウトで必ず抜けられるようにする
+    let done=false;
+    const finish=(v)=>{ if(done) return; done=true; resolve(v); };
+    const timeout=setTimeout(()=>finish(null), interactive ? 20000 : 4000);
     try{
       const client=google.accounts.oauth2.initTokenClient({
         client_id: GOOGLE_CLIENT_ID,
         scope: "https://www.googleapis.com/auth/calendar.readonly",
+        use_fedcm_for_prompt: true,
         callback: (t)=>{
-          if(t.error){ resolve(null); return; }
+          clearTimeout(timeout);
+          if(t.error){ finish(null); return; }
           gcalToken=t.access_token;
           gcalTokenExp=Date.now()+(Number(t.expires_in)||3600)*1000;
-          resolve(gcalToken);
+          finish(gcalToken);
         },
-        error_callback: ()=>resolve(null),
+        error_callback: ()=>{ clearTimeout(timeout); finish(null); },
       });
       client.requestAccessToken({prompt: interactive ? "" : "none"});
-    }catch{ resolve(null); }
+    }catch{ clearTimeout(timeout); finish(null); }
   });
 }
 const gcalCache={}, gcalSynced={}, gcalInFlight={};
