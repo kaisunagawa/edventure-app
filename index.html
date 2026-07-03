@@ -390,7 +390,7 @@ async function getCalendarToken(interactive){
     }catch{ resolve(null); }
   });
 }
-const gcalCache={}, gcalSynced={};
+const gcalCache={}, gcalSynced={}, gcalInFlight={};
 const GCAL_LS="gcal_evs_";
 function cleanupGcalLS(){
   try{
@@ -401,8 +401,18 @@ function cleanupGcalLS(){
   }catch{}
 }
 // 取得戦略: メモリ → 端末キャッシュ → 本人認証で取得 → サーバーの共有キャッシュ
-// 一度どこかで取得できれば端末とサーバーの両方に残るので、以後は認証なしで自動表示される
+// 一度どこかで取得できれば端末とサーバーの両方に残るので、以後は認証なしで自動表示される。
+// ホーム・記録・日記など複数画面が同時にマウントされており、同じ日付を
+// ほぼ同時に呼び出すと、Googleへのサイレント認証リクエストが競合して
+// 片方が失敗することがあったため、同じ日付の取得は1つの実行を共有する
 async function fetchCalendarEvents(dateStr, interactive=false){
+  if(gcalCache[dateStr]) return gcalCache[dateStr];
+  if(gcalInFlight[dateStr]) return gcalInFlight[dateStr];
+  const p=fetchCalendarEventsUncached(dateStr, interactive);
+  gcalInFlight[dateStr]=p;
+  try{ return await p; } finally { delete gcalInFlight[dateStr]; }
+}
+async function fetchCalendarEventsUncached(dateStr, interactive=false){
   if(gcalCache[dateStr]) return gcalCache[dateStr];
   if(!interactive){
     try{
@@ -692,7 +702,7 @@ function HomeScreen({goalData, onGoalSaved, profile}) {
           <div style=${{flex:1,minWidth:0,display:"flex",alignItems:"center",gap:7,background:"rgba(255,255,255,0.15)",borderRadius:12,padding:"7px 12px",backdropFilter:"blur(4px)"}}>
             <span style=${{fontSize:16,flexShrink:0}}>🏆</span>
             <span style=${{minWidth:0}}>
-              <span style=${{display:"block",fontSize:10,color:"rgba(255,255,255,0.75)",fontWeight:600,whiteSpace:"nowrap"}}>昨日の評価順位</span>
+              <span style=${{display:"block",fontSize:10,color:"rgba(255,255,255,0.75)",fontWeight:600,whiteSpace:"nowrap"}}>昨日のランキング</span>
               <span style=${{display:"flex",alignItems:"baseline",gap:2,fontSize:13,color:"#fff",fontWeight:700,whiteSpace:"nowrap"}}>${ranking.total}人中<b style=${{fontSize:15}}>${ranking.rank}位</b></span>
             </span>
           </div>
@@ -1433,19 +1443,26 @@ function ReportScreen() {
           ${report.breakdown&&html`
             <div class="card">
               <div class="card-label">採点の内訳</div>
-              ${BREAKDOWN_CATS.map(([key,label])=>{
-                const v=Number(report.breakdown[key]||0);
-                const pct=Math.max(0,Math.min(100,v/20*100));
-                const color=v>=16?"var(--green)":v>=10?"var(--amber)":"var(--red)";
-                return html`<div key=${key} style=${{marginBottom:10}}>
-                  <div style=${{display:"flex",justifyContent:"space-between",fontSize:12,color:"var(--text)",marginBottom:4}}>
-                    <span>${label}</span><span style=${{fontWeight:700,color}}>${v} / 20</span>
-                  </div>
-                  <div style=${{height:6,background:"var(--bg)",borderRadius:99,overflow:"hidden"}}>
-                    <div style=${{height:"100%",width:pct+"%",background:color,borderRadius:99,transition:"width .5s ease"}}/>
-                  </div>
-                </div>`;
-              })}
+              <div style=${{display:"flex",flexDirection:"column",gap:14}}>
+                ${BREAKDOWN_CATS.map(([key,label])=>{
+                  const v=Number(report.breakdown[key]||0);
+                  const pct=Math.max(0,Math.min(100,v/20*100));
+                  const tip=BREAKDOWN_TIPS[key];
+                  const color=v>=16?"var(--green)":v>=10?"var(--amber)":"var(--red)";
+                  return html`<div key=${key} style=${{display:"flex",alignItems:"center",gap:10}}>
+                    <div style=${{width:34,height:34,borderRadius:11,background:"var(--bg)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,flexShrink:0}}>${tip.icon}</div>
+                    <div style=${{flex:1,minWidth:0}}>
+                      <div style=${{display:"flex",justifyContent:"space-between",alignItems:"baseline",fontSize:12.5,color:"var(--text)",fontWeight:600,marginBottom:5}}>
+                        <span>${label}</span>
+                        <span><b style=${{fontSize:14,color}}>${v}</b><span style=${{color:"var(--sub)",fontWeight:500}}>/20</span></span>
+                      </div>
+                      <div style=${{height:7,background:"var(--bg)",borderRadius:99,overflow:"hidden"}}>
+                        <div style=${{height:"100%",width:pct+"%",background:`linear-gradient(90deg, var(--hero1), ${color})`,borderRadius:99,transition:"width .5s ease"}}/>
+                      </div>
+                    </div>
+                  </div>`;
+                })}
+              </div>
             </div>
           `}
           <div class="card">
