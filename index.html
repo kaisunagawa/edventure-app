@@ -1462,25 +1462,25 @@ function TimerScreen({onToast, isActive}) {
 
 // ── 使い方 Q&A ──
 const FAQ_ITEMS = [
-  { q:"📝 記録のやり方は？",
+  { q:"記録のやり方は？",
     a:"記録タブで時間帯を選び、「何をしましたか？」と自己評価を入れて保存するだけです。\n同じ時間帯にもう一度保存すると上書きされるので、間違えても大丈夫。\nメモを書くと+5XPのボーナスがあります。" },
-  { q:"📅 Googleカレンダーと連携したい",
+  { q:"Googleカレンダーと連携したい",
     a:"設定の「Googleカレンダー連携」ボタンを押して、Googleアカウントでログインします。\n\n途中で「このアプリはGoogleで確認されていません」という警告が出ますが、これは小規模アプリに必ず表示されるものです。\n「詳細」→「kaisunagawa.github.io（安全ではないページ）に移動」→「許可」の順に進めば連携完了です。" },
-  { q:"📅 予定が記録に自動で入るって本当？",
+  { q:"予定が記録に自動で入るって本当？",
     a:"カレンダー連携済みなら、未記録の時間帯を選ぶとその時間の予定名が「何をしましたか？」に自動で入ります。\nあとは自己評価を選んで保存するだけ。もちろん自由に書き換えられます。\n\n予定が読み込めないときは「📅 タップしてカレンダーの予定を読み込む」ボタンが出るので押してください。" },
-  { q:"💬 LINE通知を受け取りたい",
+  { q:"LINE通知を受け取りたい",
     a:"公式LINEを友だち追加して、アプリに登録したGmailアドレスをトークで送るだけで連携完了です。\nリマインダー・毎晩のAIレポート・コーチからのメッセージが届くようになります。" },
-  { q:"🔔 通知の時間や回数を変えたい",
+  { q:"通知の時間や回数を変えたい",
     a:"設定の「時間帯と通知」で開始・終了時間と通知間隔を変えて保存してください。\n記録画面に表示される時間帯も同じ設定に連動します。\nなお21時以降はリマインダーの代わりにレポートとコーチメッセージが届きます。" },
-  { q:"📊 AIレポートはいつ届く？",
+  { q:"AIレポートはいつ届く？",
     a:"毎晩21時に、その日の記録をもとにスコアとフィードバックが届きます。22時にはコーチからの一言も。\n1件も記録がない日はレポートは作られず、XPが減ってしまうので、1日1記録を目指しましょう。" },
-  { q:"⭐ XPとレベルの仕組みは？",
+  { q:"XPとレベルの仕組みは？",
     a:"記録1件で+10XP、メモを書くと+5XP、その日最初の記録には連続日数ボーナスが付きます。\n既存の記録の「更新」や、過去の日付への後付け記録ではXPは増えません。\n記録なしの日はXPが減り、連続記録もリセットされます。" },
-  { q:"🗓 記録し忘れた日を後から入れたい",
+  { q:"記録し忘れた日を後から入れたい",
     a:"記録タブの日付の「‹」で過去の日に戻ると、追加・編集ができます。\nAIコーチはちゃんとその記録も見てくれます（ただしXPは付きません）。" },
-  { q:"⏱ タイマーの使い方は？",
+  { q:"タイマーの使い方は？",
     a:"タイマータブで集中時間を選んでスタート。終了すると記録画面が出て、そのまま記録できます。\n集中時間のプリセットと休憩の長さは設定で変更できます。\n他のアプリを開いてもタイマーは進み続けます。" },
-  { q:"🌙 ダークモードにしたい",
+  { q:"ダークモードにしたい",
     a:"スマホ本体のダークモード設定に自動で追従します。アプリ側での操作は不要です。" },
 ];
 function FAQSection(){
@@ -1634,7 +1634,7 @@ function SettingsScreen({onToast,onLogout,onGoalSaved}) {
             <textarea class="txa" placeholder=${i===0?"例：英検2級に合格する":"例：毎月売上100万円達成"} value=${g.goal}
               onChange=${e=>{updateGoal(i,"goal",e.target.value);e.target.style.height="auto";e.target.style.height=e.target.scrollHeight+"px";}}
               ref=${el=>{if(el){el.style.height="auto";el.style.height=el.scrollHeight+"px";}}}
-              style=${{minHeight:64,overflow:"hidden",resize:"none",marginBottom:8}}/>
+              style=${{minHeight:42,padding:"9px 12px",overflow:"hidden",resize:"none",marginBottom:8}}/>
             <label class="form-lbl" style=${{fontSize:11}}>達成期限</label>
             <input type="date" class="inp" value=${g.deadline} onChange=${e=>updateGoal(i,"deadline",e.target.value)}/>
           </div>
@@ -1734,10 +1734,10 @@ function SettingsScreen({onToast,onLogout,onGoalSaved}) {
         </div>
         <div style=${{display:"flex",flexDirection:"column",gap:6}}>
           ${RANK_RULES.map(r=>html`
-            <div key=${r.name} style=${{display:"flex",alignItems:"center",gap:10,padding:"9px 12px",borderRadius:10,background:r.bg,border:`1px solid ${r.color}25`}}>
-              <span style=${{fontSize:18,flexShrink:0}}>${r.emoji}</span>
+            <div key=${r.name} style=${{display:"flex",alignItems:"center",gap:10,padding:"9px 12px",borderRadius:10,background:"var(--bg)",border:"1px solid var(--border)"}}>
+              <span style=${{width:8,height:8,borderRadius:"50%",background:r.color,flexShrink:0}}/>
               <div style=${{flex:1}}>
-                <span style=${{fontSize:13,fontWeight:700,color:r.color}}>${r.name}</span>
+                <span style=${{fontSize:13,fontWeight:700,color:"var(--text)"}}>${r.name}</span>
                 <span style=${{fontSize:11,color:"var(--sub)",marginLeft:6}}>${r.sub}</span>
               </div>
               <span style=${{fontSize:11,fontWeight:700,color:r.color,flexShrink:0}}>${r.lv}</span>
