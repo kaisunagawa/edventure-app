@@ -1372,10 +1372,14 @@ function SettingsScreen({onToast,onLogout,onGoalSaved}) {
   const linkCalendar=()=>{
     if(!window.google||!google.accounts) return;
     setCalLoading(true);
+    // ポップアップが閉じられた/ブロックされた場合の保険（callbackが来ないと固まるため）
+    const safety=setTimeout(()=>setCalLoading(false), 45000);
     const client=google.accounts.oauth2.initTokenClient({
       client_id: GOOGLE_CLIENT_ID,
       scope: "https://www.googleapis.com/auth/calendar.readonly",
+      error_callback: ()=>{ clearTimeout(safety); setCalLoading(false); onToast("連携できませんでした。もう一度お試しください"); },
       callback: async(tokenResp)=>{
+        clearTimeout(safety);
         if(tokenResp.error){ setCalLoading(false); onToast("カレンダー連携に失敗しました"); return; }
         try{
           gcalToken=tokenResp.access_token;
