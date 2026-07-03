@@ -938,7 +938,91 @@ function getJournalSheet() {
 function getDiary(studentEmail, body) {
   const targetDate = (body && body.date) ? String(body.date) : formatDate(new Date());
   const row = sheetToObjects(getJournalSheet()).find(r => r.student_email === studentEmail && r.date === targetDate);
-  return { ok: true, data: { diary: row ? row.diary : "" } };
+  let autoSummary = row ? row.auto_summary : "";
+  if (!autoSummary) {
+    const logs = getLogs(studentEmail, { date: targetDate }).data;
+    if (logs.length > 0) {
+      const generated = generateDaySummary(studentEmail, targetDate, logs);
+      if (generated) { autoSummary = generated; saveAutoSummary(studentEmail, targetDate, generated); }
+    }
+  }
+  return { ok: true, data: { diary: row ? row.diary : "", autoSummary: autoSummary || "" } };
+}
+
+// 事実のみを整理する日次サマリー（時間ログ＋カレンダー予定を素材に、感想や推測を加えず時系列でまとめる）
+function generateDaySummary(studentEmail, targetDate, logs) {
+  const apiKey = PropertiesService.getScriptProperties().getProperty("CLAUDE_API_KEY");
+  if (!apiKey) return null;
+
+  let planText = "予定情報なし（カレンダー未連携）";
+  const rawCal = getCachedCalendar(studentEmail, targetDate);
+  if (rawCal) {
+    try {
+      const evs = JSON.parse(rawCal);
+      planText = evs.length > 0
+        ? evs.map(function(e){ return e.allDay ? ("終日 " + e.title) : (e.time + "〜 " + e.title); }).join("\n")
+        : "予定なし";
+    } catch (e) { planText = rawCal; }
+  }
+
+  const logsText = logs.map(l => l.time_block + " " + l.task + "（" + l.focus_level + (l.goal_related === "true" ? "・目標関連" : "") + (l.memo ? "・メモ：" + l.memo : "") + "）").join("\n");
+
+  const prompt = `以下は${targetDate}のカレンダー予定と実際の記録です。これらの事実だけをもとに、その日1日に何をしたかを時系列でまとめた文章を作成してください。
+
+【この日の予定（カレンダー）】
+${planText}
+
+【この日の記録（実際に行ったこと）】
+${logsText}
+
+【要件】
+- 主観的な感想・評価・推測・アドバイス・励ましは一切加えない。記録に書かれていることだけを事実として並べる
+- 「〜した」「〜を行った」のように淡々とした事実の記述にする
+- 箇条書きにせず、3〜5文の自然な文章にする
+- 宛名・見出し・前置きは不要。本文だけを出力する`;
+
+  try {
+    const res = UrlFetchApp.fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
+      payload: JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: 400, messages: [{ role: "user", content: prompt }] }),
+      muteHttpExceptions: true
+    });
+    const result = JSON.parse(res.getContentText());
+    if (!result.content || !result.content[0]) return null;
+    return stripSalutation(result.content[0].text).trim();
+  } catch (e) {
+    Logger.log("generateDaySummary error: " + e);
+    return null;
+  }
+}
+
+// Journalシートに「auto_summary」列を確保する（既存シートへの後付け対応）
+function ensureAutoSummaryCol(sheet) {
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  let idx = headers.indexOf("auto_summary");
+  if (idx === -1) { idx = headers.length; sheet.getRange(1, idx + 1).setValue("auto_summary"); }
+  return idx;
+}
+
+function saveAutoSummary(studentEmail, targetDate, summary) {
+  const sheet = getJournalSheet();
+  const colIdx = ensureAutoSummaryCol(sheet);
+  const data = sheet.getDataRange().getValues();
+  const now = new Date().toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" });
+  for (let i = 1; i < data.length; i++) {
+    const rowDate = data[i][0] instanceof Date
+      ? Utilities.formatDate(data[i][0], "Asia/Tokyo", "yyyy-MM-dd")
+      : String(data[i][0]);
+    if (String(data[i][1]) === studentEmail && rowDate === targetDate) {
+      sheet.getRange(i + 1, colIdx + 1).setValue(summary);
+      return;
+    }
+  }
+  const newRow = sheet.getLastRow() + 1;
+  sheet.appendRow(["", studentEmail, "", now]);
+  sheet.getRange(newRow, 1).setNumberFormat("@").setValue(targetDate);
+  sheet.getRange(newRow, colIdx + 1).setValue(summary);
 }
 
 function saveDiary(studentEmail, body) {
@@ -1353,7 +1437,7 @@ function setupSheets() {
     "Coaches": ["coach_email","coach_name","assigned_students"],
     "MonthlySummary": ["month","student_email","summary","created_at"],
     "CalendarCache": ["student_email","date","events","updated_at"],
-    "Journal": ["date","student_email","diary","updated_at"],
+    "Journal": ["date","student_email","diary","updated_at","auto_summary"],
     "TimerQueue": ["student_email","end_time","label","notified","created_at"]
   };
   Object.entries(sheets).forEach(([name, headers]) => {

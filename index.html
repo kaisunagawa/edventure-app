@@ -1024,13 +1024,18 @@ function JournalStats({logs}) {
 
 function JournalSection({date, logs}) {
   const [diary,setDiary]=useState("");
+  const [autoSummary,setAutoSummary]=useState("");
+  const [summaryLoading,setSummaryLoading]=useState(true);
   const [loaded,setLoaded]=useState(false);
   const [saving,setSaving]=useState(false);
   const [savedMsg,setSavedMsg]=useState(false);
   const [events,setEvents]=useState(null);
   useEffect(()=>{
-    setDiary(""); setLoaded(false); setEvents(null); setSavedMsg(false);
-    gasApi("getDiary",{date}).then(r=>{ if(r.ok&&r.data) setDiary(r.data.diary||""); setLoaded(true); });
+    setDiary(""); setAutoSummary(""); setSummaryLoading(true); setLoaded(false); setEvents(null); setSavedMsg(false);
+    gasApi("getDiary",{date}).then(r=>{
+      if(r.ok&&r.data){ setDiary(r.data.diary||""); setAutoSummary(r.data.autoSummary||""); }
+      setLoaded(true); setSummaryLoading(false);
+    });
     if(localStorage.getItem("cal_linked")) fetchCalendarEvents(date).then(setEvents);
   },[date]);
   const save=async()=>{
@@ -1053,9 +1058,50 @@ function JournalSection({date, logs}) {
   };
 
   return html`<div>
+    <!-- この日の数値 -->
+    ${logs.length>0&&html`<${JournalStats} logs=${logs}/>`}
+
+    <!-- 時間ログ＋カレンダーをもとにAIが事実だけを整理したまとめ -->
+    ${logs.length>0&&html`
+      <div class="card">
+        <div class="card-label">📋 この日の事実まとめ（AI）</div>
+        ${summaryLoading
+          ? html`<div style=${{display:"flex",justifyContent:"center",padding:16}}><div class="spin" style=${{borderColor:"var(--border)",borderTopColor:"var(--accent)",width:18,height:18,borderWidth:2}}/></div>`
+          : autoSummary
+            ? html`<p style=${{fontSize:14,lineHeight:1.8,color:"var(--text)"}}>${autoSummary}</p>`
+            : html`<div style=${{fontSize:12,color:"var(--sub)"}}>まとめを生成できませんでした</div>`
+        }
+      </div>
+    `}
+
+    <!-- 自分の日記 -->
+    <div class="card">
+      <div class="card-label">✍️ 日記</div>
+      <textarea class="txa" style=${{minHeight:110}} placeholder="この日を自由に振り返って書き残せます"
+        value=${diary} onInput=${e=>setDiary(e.target.value)} disabled=${!loaded}/>
+      <button class="btn" onClick=${save} disabled=${saving||!loaded} style=${{marginTop:10}}>
+        ${saving?html`<span class="spin"/>`:"日記を保存"}
+      </button>
+      ${savedMsg&&html`<div style=${{fontSize:12,color:"var(--green)",fontWeight:600,textAlign:"center",marginTop:8}}>保存しました ✓</div>`}
+    </div>
+
+    <!-- 時間ログ -->
+    ${logs.length>0&&html`
+      <div class="card">
+        <div class="card-label">時間ログ</div>
+        ${logs.map((l,i)=>{
+          const num=l.focus_level?.charAt(0);
+          return html`<div key=${i} class="log-row">
+            <div class="log-time">${l.time_block}</div>
+            <div><div class="log-task">${l.task}</div><div class="log-meta"><span class="dot" style=${{background:DOT[num]||"var(--sub)"}}/>${l.focus_level}${l.memo?` · ${l.memo}`:""}</div></div>
+          </div>`;
+        })}
+      </div>
+    `}
+
     <!-- 予定と実績 -->
     ${events&&events.length>0&&html`
-      <div class="card">
+      <div class="card" style=${{marginBottom:24}}>
         <div class="card-label">予定と実績</div>
         <div style=${{fontSize:11,color:"var(--sub)",marginBottom:10,lineHeight:1.6}}>予定の時間帯に記録があれば「記録あり」になります</div>
         ${events.map((ev,i)=>html`
@@ -1067,17 +1113,6 @@ function JournalSection({date, logs}) {
         `)}
       </div>
     `}
-
-    <!-- 自分の日記 -->
-    <div class="card" style=${{marginBottom:24}}>
-      <div class="card-label">✍️ 日記</div>
-      <textarea class="txa" style=${{minHeight:110}} placeholder="この日を自由に振り返って書き残せます"
-        value=${diary} onInput=${e=>setDiary(e.target.value)} disabled=${!loaded}/>
-      <button class="btn" onClick=${save} disabled=${saving||!loaded} style=${{marginTop:10}}>
-        ${saving?html`<span class="spin"/>`:"日記を保存"}
-      </button>
-      ${savedMsg&&html`<div style=${{fontSize:12,color:"var(--green)",fontWeight:600,textAlign:"center",marginTop:8}}>保存しました ✓</div>`}
-    </div>
   </div>`;
 }
 
@@ -1218,23 +1253,7 @@ function ReportScreen() {
         </div>`
     }
 
-    ${currentView==="diary"&&html`<div>
-          ${logs.length>0&&html`<${JournalStats} logs=${logs}/>`}
-          ${logs.length>0&&html`
-            <div class="card" style=${{marginBottom:24}}>
-              <div class="card-label">時間ログ</div>
-              ${logs.map((l,i)=>{
-                const num=l.focus_level?.charAt(0);
-                return html`<div key=${i} class="log-row">
-                  <div class="log-time">${l.time_block}</div>
-                  <div><div class="log-task">${l.task}</div><div class="log-meta"><span class="dot" style=${{background:DOT[num]||"var(--sub)"}}/>${l.focus_level}${l.memo?` · ${l.memo}`:""}</div></div>
-                </div>`;
-              })}
-            </div>
-          `}
-          <${JournalSection} date=${date} logs=${logs}/>
-        </div>`
-    }
+    ${currentView==="diary"&&html`<${JournalSection} date=${date} logs=${logs}/>`}
   </div>`;
 }
 
