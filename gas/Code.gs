@@ -62,6 +62,10 @@ function doGet(e) {
       case "getStudents":  result = getStudents(studentEmail); break;
       case "saveLog":      result = saveLog(studentEmail, e.parameter); break;
       case "saveLogMulti": result = saveLogMulti(studentEmail, e.parameter); break;
+      case "coachGetStudents":      result = coachGetStudents(e.parameter.coachEmail); break;
+      case "coachGetStudentDetail": result = coachGetStudentDetail(e.parameter.coachEmail, e.parameter.targetEmail); break;
+      case "coachSaveNote":         result = coachSaveNote(e.parameter.coachEmail, e.parameter); break;
+      case "coachPrepSummary":      result = coachPrepSummary(e.parameter.coachEmail, e.parameter.targetEmail); break;
       case "sendMessage":  result = sendMessage(studentEmail, e.parameter); break;
       case "saveSettings": result = saveSettings(studentEmail, e.parameter); break;
       case "syncCalendar": result = syncCalendar(studentEmail, e.parameter); break;
@@ -628,6 +632,177 @@ function getAchievements() {
     .slice(0, 30)
     .map(r => ({ nickname: r.nickname, avatar: r.avatar, message: r.message, date: r.date }));
   return { ok: true, data: rows };
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// コーチCRM（/coach/ 画面用API）
+// データは全て同じスプレッドシートを読む「別の窓口」。
+// コーチングノートはCoachingNotesシートに保存し、v1ではコーチ内部用のみ
+// （生徒には非表示）。ただしAIコーチのコンテキストには反映される。
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+// コーチ認可: Coachesシートに登録されたメールのみAPIを使える
+function verifyCoach(coachEmail) {
+  if (!coachEmail) return null;
+  return sheetToObjects(getSheet("Coaches")).find(c => c.coach_email === coachEmail) || null;
+}
+
+// 担当チェック: コーチは自分の担当生徒のデータしか見られない
+function coachOwnsStudent(coachEmail, studentEmail) {
+  const user = sheetToObjects(getSheet("Users")).find(u => u.student_email === studentEmail);
+  return user && user.coach_email === coachEmail ? user : null;
+}
+
+function getCoachingNotesSheet() {
+  let sheet = getSheet("CoachingNotes");
+  if (!sheet) {
+    sheet = SpreadsheetApp.openById(SPREADSHEET_ID).insertSheet("CoachingNotes");
+    sheet.appendRow(["note_id", "coach_email", "student_email", "date", "content", "next_theme", "promises", "created_at"]);
+  }
+  return sheet;
+}
+
+// 生徒一覧ダッシュボード: 担当生徒の状態を一目で
+function coachGetStudents(coachEmail) {
+  if (!verifyCoach(coachEmail)) return { ok: false, error: "not a coach" };
+  const students = sheetToObjects(getSheet("Users"))
+    .filter(u => u.coach_email === coachEmail && u.is_active.toUpperCase() === "TRUE");
+  const statuses = computeAllStatuses();
+  const allLogs = sheetToObjects(getSheet("DailyLog"));
+  const allReports = sheetToObjects(getSheet("Reports"));
+  const allNotes = sheetToObjects(getCoachingNotesSheet());
+
+  const data = students.map(u => {
+    const logs = allLogs.filter(l => l.student_email === u.student_email);
+    const lastLogDate = logs.length ? logs.map(l => l.date).sort().pop() : null;
+    const reports = allReports.filter(r => r.student_email === u.student_email).sort((a,b)=>b.date>a.date?1:-1);
+    const notes = allNotes.filter(n => n.student_email === u.student_email).sort((a,b)=>b.date>a.date?1:-1);
+    const status = statuses[u.student_email];
+    return {
+      email: u.student_email,
+      name: u.name,
+      nickname: u.nickname || u.name,
+      avatar: u.avatar || "🦊",
+      streak: Number(u.streak || 0),
+      lastLogDate: lastLogDate,
+      latestReport: reports[0] ? { date: reports[0].date, score: Number(reports[0].score) } : null,
+      statusScore: status ? status.score : 0,
+      lastCoachingDate: notes[0] ? notes[0].date : null,
+      goal: u.goal || ""
+    };
+  });
+  // 記録が止まっている生徒を上に（要フォロー順）
+  data.sort((a, b) => String(a.lastLogDate||"") > String(b.lastLogDate||"") ? 1 : -1);
+  return { ok: true, data: data };
+}
+
+// 生徒詳細: コーチング前の予習に必要な情報を時系列で
+function coachGetStudentDetail(coachEmail, studentEmail) {
+  if (!verifyCoach(coachEmail)) return { ok: false, error: "not a coach" };
+  const user = coachOwnsStudent(coachEmail, studentEmail);
+  if (!user) return { ok: false, error: "not your student" };
+
+  const fourteenDaysAgo = formatDate(new Date(Date.now() - 14 * 86400000));
+  const reports = sheetToObjects(getSheet("Reports"))
+    .filter(r => r.student_email === studentEmail)
+    .sort((a,b)=>b.date>a.date?1:-1).slice(0, 7)
+    .map(r => ({ date: r.date, score: Number(r.score), feedback: r.feedback, highlights: r.highlights, improvement: r.improvement, action: r.action }));
+  const diaries = sheetToObjects(getJournalSheet())
+    .filter(r => r.student_email === studentEmail && (r.diary || "").trim())
+    .sort((a,b)=>b.date>a.date?1:-1).slice(0, 7)
+    .map(r => ({ date: r.date, diary: r.diary }));
+  const logs = sheetToObjects(getSheet("DailyLog"))
+    .filter(l => l.student_email === studentEmail && l.date >= fourteenDaysAgo);
+  const logsByDay = {};
+  logs.forEach(l => { (logsByDay[l.date] = logsByDay[l.date] || []).push(l); });
+  const dailySummary = Object.keys(logsByDay).sort().reverse().map(d => ({
+    date: d,
+    blocks: logsByDay[d].length,
+    goalBlocks: logsByDay[d].filter(l => l.goal_related === "true").length,
+    memos: logsByDay[d].filter(l => l.memo && l.memo.trim()).map(l => l.time_block + " " + l.task + ": " + l.memo)
+  }));
+  const notes = sheetToObjects(getCoachingNotesSheet())
+    .filter(n => n.student_email === studentEmail)
+    .sort((a,b)=>b.date>a.date?1:-1).slice(0, 20);
+  const status = computeAllStatuses()[studentEmail] || null;
+
+  return { ok: true, data: {
+    name: user.name,
+    nickname: user.nickname || user.name,
+    avatar: user.avatar || "🦊",
+    streak: Number(user.streak || 0),
+    joined_at: user.joined_at || "",
+    goals: [
+      { goal: user.goal, deadline: user.goal_deadline },
+      { goal: user.goal2, deadline: user.goal_deadline2 },
+      { goal: user.goal3, deadline: user.goal_deadline3 }
+    ].filter(g => g.goal),
+    status: status,
+    reports: reports,
+    diaries: diaries,
+    dailySummary: dailySummary,
+    notes: notes
+  } };
+}
+
+function coachSaveNote(coachEmail, body) {
+  if (!verifyCoach(coachEmail)) return { ok: false, error: "not a coach" };
+  if (!coachOwnsStudent(coachEmail, String(body.targetEmail))) return { ok: false, error: "not your student" };
+  const content = String(body.content || "").trim();
+  if (!content) return { ok: false, error: "empty content" };
+  const sheet = getCoachingNotesSheet();
+  const now = new Date().toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" });
+  sheet.appendRow([
+    "cn_" + Date.now(),
+    coachEmail,
+    String(body.targetEmail),
+    String(body.date || formatDate(new Date())),
+    content.slice(0, 2000),
+    String(body.next_theme || "").slice(0, 500),
+    String(body.promises || "").slice(0, 500),
+    now
+  ]);
+  return { ok: true };
+}
+
+// AI予習サマリー: 前回コーチング（無ければ直近14日）からの変化を要約
+function coachPrepSummary(coachEmail, studentEmail) {
+  if (!verifyCoach(coachEmail)) return { ok: false, error: "not a coach" };
+  const user = coachOwnsStudent(coachEmail, studentEmail);
+  if (!user) return { ok: false, error: "not your student" };
+  const apiKey = PropertiesService.getScriptProperties().getProperty("CLAUDE_API_KEY");
+  if (!apiKey) return { ok: false, error: "no api key" };
+
+  const notes = sheetToObjects(getCoachingNotesSheet())
+    .filter(n => n.student_email === studentEmail)
+    .sort((a,b)=>b.date>a.date?1:-1);
+  const lastNote = notes[0] || null;
+  const ctx = buildStudentContext(studentEmail, user);
+  const lastNoteText = lastNote
+    ? `【前回のコーチング（${lastNote.date}）】\n内容: ${lastNote.content}\n次回テーマ: ${lastNote.next_theme || "なし"}\n約束事項: ${lastNote.promises || "なし"}`
+    : "【前回のコーチング】まだ記録なし（初回コーチング）";
+
+  const prompt = `あなたはコーチングの準備を手伝うアシスタントです。以下の生徒データを読み、コーチがセッション前に1分で把握できる予習サマリーを作ってください。
+
+${ctx}
+
+${lastNoteText}
+
+【出力形式】以下の4項目を、それぞれ2〜3行の簡潔な箇条書きで。見出しはこのまま使う:
+■ 前回からの変化
+■ 良い兆候
+■ 気になる点
+■ 今回話すべきこと（前回の約束の進捗確認を含む）`;
+
+  const res = UrlFetchApp.fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
+    payload: JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: 800, messages: [{ role: "user", content: prompt }] }),
+    muteHttpExceptions: true
+  });
+  const result = JSON.parse(res.getContentText());
+  if (!result.content || !result.content[0]) return { ok: false, error: "ai error" };
+  return { ok: true, data: { summary: result.content[0].text.trim(), lastCoachingDate: lastNote ? lastNote.date : null } };
 }
 
 function getMessages(studentEmail) {
@@ -1493,6 +1668,22 @@ function buildStudentContext(studentEmail, user) {
     } catch (e) { /* 旧テキスト形式はそのまま使う */ }
   }
 
+  // 直近のコーチングセッション（人間のコーチとの面談記録）。
+  // AIコーチはこれを踏まえてフォローアップする＝コーチングの続きを日々担う
+  let coachingText = "まだコーチング記録なし";
+  try {
+    const coachingNotes = sheetToObjects(getSheet("CoachingNotes") || getCoachingNotesSheet())
+      .filter(n => n.student_email === studentEmail)
+      .sort((a,b)=>b.date>a.date?1:-1).slice(0, 3);
+    if (coachingNotes.length > 0) {
+      coachingText = coachingNotes.map(n =>
+        `【${n.date}】${n.content}` +
+        (n.promises ? `\n  約束事項: ${n.promises}` : "") +
+        (n.next_theme ? `\n  次回テーマ: ${n.next_theme}` : "")
+      ).join("\n");
+    }
+  } catch (e) { /* シート未作成なら無視 */ }
+
   return `【生徒名】${user.name}
 【入会日】${user.joined_at || "不明"}
 【連続記録日数】${streak}日
@@ -1501,6 +1692,8 @@ function buildStudentContext(studentEmail, user) {
 【目標と期限】
 ${goalsText}
 【全期間スコアトレンド】${scoreTrend}
+【直近のコーチングセッション（担当コーチとの面談記録。約束事項のフォローアップを意識する）】
+${coachingText}
 【月次サマリー（入会〜先月まで）】
 ${summariesText}
 【直近30日のレポート履歴】
@@ -1742,7 +1935,8 @@ function setupSheets() {
     "CalendarCache": ["student_email","date","events","updated_at"],
     "Journal": ["date","student_email","diary","updated_at","auto_summary"],
     "TimerQueue": ["student_email","end_time","label","notified","created_at"],
-    "Achievements": ["date","student_email","nickname","avatar","message","created_at"]
+    "Achievements": ["date","student_email","nickname","avatar","message","created_at"],
+    "CoachingNotes": ["note_id","coach_email","student_email","date","content","next_theme","promises","created_at"]
   };
   Object.entries(sheets).forEach(([name, headers]) => {
     let s = ss.getSheetByName(name);

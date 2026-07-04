@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>JIROKU COACH</title>
+  <meta name="theme-color" content="#FAFAF9" media="(prefers-color-scheme: light)" />
+  <meta name="theme-color" content="#101417" media="(prefers-color-scheme: dark)" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/htm/dist/htm.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #FAFAF9; --card: #FFFFFF; --border: #E7E5E4;
+      --text: #1C1917; --sub: #78716C;
+      --accent: #0891B2; --accent-l: #ECFEFF;
+      --green: #16A34A; --amber: #D97706; --red: #DC2626;
+      --hero1: #0891B2; --hero2: #0e7490;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #101417; --card: #1A2025; --border: #2A3138;
+        --text: #F2F0EF; --sub: #9CA3AF;
+        --accent: #22B8D4; --accent-l: #103240;
+        --hero1: #0B4A5A; --hero2: #093642;
+      }
+    }
+    html, body { height: 100%; }
+    body { font-family: 'DM Sans', -apple-system, "Hiragino Sans", sans-serif; background: var(--bg); color: var(--text); }
+    #root { max-width: 640px; margin: 0 auto; min-height: 100%; }
+    .card { background: var(--card); border: 1px solid var(--border); border-radius: 16px; padding: 16px; margin: 0 16px 12px; }
+    .card-label { font-size: 12px; font-weight: 700; color: var(--sub); margin-bottom: 10px; letter-spacing: .02em; }
+    .btn { display: block; width: 100%; padding: 13px; border: none; border-radius: 12px; background: var(--accent); color: #fff; font-size: 15px; font-weight: 700; cursor: pointer; font-family: inherit; }
+    .btn:disabled { opacity: .5; }
+    .inp, .txa { width: 100%; padding: 11px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--card); color: var(--text); font-size: 14px; font-family: inherit; outline: none; }
+    .inp:focus, .txa:focus { border-color: var(--accent); }
+    .txa { resize: none; min-height: 80px; line-height: 1.6; }
+    .lbl { display: block; font-size: 12px; font-weight: 600; color: var(--sub); margin-bottom: 6px; }
+    .spin { width: 22px; height: 22px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+<div id="root"></div>
+<script>
+const html = htm.bind(React.createElement);
+const { useState, useEffect, useRef } = React;
+
+const GAS_URL = "https://script.google.com/macros/s/AKfycbzJ-QEpPVnmp-LFU5Jxww4VFP1qaseMtwCrzKxAA6ZULr1y3h_UeKzVdhHnl5ze57U/exec";
+const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
+
+let COACH_EMAIL = localStorage.getItem("jiroku_coach_email") || null;
+
+async function api(action, params = {}) {
+  const url = new URL(GAS_URL);
+  url.searchParams.set("action", action);
+  url.searchParams.set("coachEmail", COACH_EMAIL || "");
+  Object.entries(params).forEach(([k, v]) => { if (v != null) url.searchParams.set(k, String(v)); });
+  try { const r = await fetch(url.toString(), { redirect: "follow" }); return await r.json(); }
+  catch { return { ok: false, error: "network" }; }
+}
+
+const fmtDate = d => {
+  const dt = new Date(String(d).substring(0,10) + "T00:00:00");
+  return isNaN(dt) ? String(d) : dt.toLocaleDateString("ja-JP", { month: "numeric", day: "numeric", weekday: "short" });
+};
+const daysAgo = d => {
+  if (!d) return null;
+  const diff = Math.floor((new Date() - new Date(String(d).substring(0,10) + "T00:00:00")) / 86400000);
+  return diff;
+};
+
+// Googleログイン（ポップアップ式トークン取得 → userinfoでメール確認）
+function loginWithGoogle(onEmail, onError) {
+  if (!window.google?.accounts?.oauth2) { onError("Googleログインの読み込み中です。少し待ってからもう一度お試しください"); return; }
+  try {
+    const client = google.accounts.oauth2.initTokenClient({
+      client_id: GOOGLE_CLIENT_ID,
+      scope: "openid email profile",
+      callback: async (t) => {
+        if (t.error || !t.access_token) { onError("ログインに失敗しました"); return; }
+        try {
+          const info = await fetch("https://www.googleapis.com/oauth2/v3/userinfo", { headers: { Authorization: "Bearer " + t.access_token } }).then(r => r.json());
+          if (info.email) onEmail(info.email);
+          else onError("メールアドレスを取得できませんでした");
+        } catch { onError("ログインに失敗しました"); }
+      },
+      error_callback: () => onError("ログインがキャンセルされました"),
+    });
+    client.requestAccessToken();
+  } catch { onError("ログインに失敗しました"); }
+}
+
+function LoginScreen({ onLogin }) {
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+  const signIn = () => {
+    setLoading(true); setError("");
+    loginWithGoogle(async (email) => {
+      COACH_EMAIL = email;
+      const r = await api("coachGetStudents");
+      if (r.ok) {
+        localStorage.setItem("jiroku_coach_email", email);
+        onLogin(email, r.data);
+      } else {
+        COACH_EMAIL = null;
+        setError(r.error === "not a coach" ? "このアカウントはコーチとして登録されていません" : "確認に失敗しました。もう一度お試しください");
+      }
+      setLoading(false);
+    }, (msg) => { setError(msg); setLoading(false); });
+  };
+  return html`
+    <div style=${{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",minHeight:"100vh",padding:24,gap:16}}>
+      <svg width="72" height="72" viewBox="0 0 72 72" xmlns="http://www.w3.org/2000/svg"><circle cx="36" cy="36" r="36" fill="#0891B2"/><circle cx="36" cy="36" r="25" fill="none" stroke="rgba(255,255,255,0.2)" stroke-width="4.5"/><path d="M36 11 A25 25 0 1 1 14.5 50" fill="none" stroke="#fff" stroke-width="4.5" stroke-linecap="round"/><circle cx="36" cy="36" r="15" fill="none" stroke="rgba(255,255,255,0.6)" stroke-width="2"/><line x1="36" y1="36" x2="36" y2="25" stroke="#fff" stroke-width="2.2" stroke-linecap="round"/><line x1="36" y1="36" x2="43" y2="41" stroke="#fff" stroke-width="2" stroke-linecap="round"/><circle cx="36" cy="36" r="2" fill="#fff"/></svg>
+      <div style=${{fontSize:24,fontWeight:800,letterSpacing:"-.3px"}}>JIROKU <span style=${{color:"var(--accent)"}}>COACH</span></div>
+      <div style=${{fontSize:13,color:"var(--sub)"}}>コーチ専用の管理画面です</div>
+      ${loading
+        ? html`<div class="spin"/>`
+        : html`<button onClick=${signIn} style=${{display:"flex",alignItems:"center",gap:10,padding:"10px 20px",borderRadius:8,border:"1px solid #dadce0",background:"#fff",cursor:"pointer",fontSize:15,fontWeight:500,color:"#3c4043",width:280,justifyContent:"center"}}>
+            <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" width="18" height="18"/>
+            Googleでサインイン
+          </button>`}
+      ${error && html`<div style=${{color:"var(--red)",fontSize:13,textAlign:"center"}}>${error}</div>`}
+    </div>
+  `;
+}
+
+function Dashboard({ students, onSelect, onRefresh, onLogout }) {
+  return html`<div style=${{paddingBottom:40}}>
+    <div style=${{background:"linear-gradient(135deg, var(--hero1) 0%, var(--hero2) 100%)",padding:"32px 20px 24px",marginBottom:16}}>
+      <div style=${{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+        <div>
+          <div style=${{fontSize:12,color:"rgba(255,255,255,0.7)",letterSpacing:".05em",marginBottom:4}}>JIROKU COACH</div>
+          <div style=${{fontSize:22,fontWeight:800,color:"#fff"}}>担当生徒 ${students.length}人</div>
+        </div>
+        <button onClick=${onLogout} style=${{background:"rgba(255,255,255,0.15)",border:"none",borderRadius:8,color:"#fff",fontSize:12,padding:"6px 12px",cursor:"pointer",fontFamily:"inherit"}}>ログアウト</button>
+      </div>
+    </div>
+    ${students.map(s => {
+      const ago = daysAgo(s.lastLogDate);
+      const agoColor = ago === null ? "var(--red)" : ago <= 1 ? "var(--green)" : ago <= 3 ? "var(--amber)" : "var(--red)";
+      const agoText = ago === null ? "記録なし" : ago === 0 ? "今日記録あり" : ago + "日前が最終記録";
+      return html`
+        <button key=${s.email} onClick=${() => onSelect(s)}
+          style=${{display:"block",width:"calc(100% - 32px)",margin:"0 16px 10px",background:"var(--card)",border:"1px solid var(--border)",borderRadius:16,padding:"14px 16px",cursor:"pointer",textAlign:"left",fontFamily:"inherit"}}>
+          <div style=${{display:"flex",alignItems:"center",gap:12}}>
+            <div style=${{width:42,height:42,borderRadius:"50%",background:"var(--bg)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:22,flexShrink:0}}>${s.avatar}</div>
+            <div style=${{flex:1,minWidth:0}}>
+              <div style=${{fontSize:15,fontWeight:700,color:"var(--text)"}}>${s.name}</div>
+              <div style=${{fontSize:11,color:"var(--sub)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",marginTop:2}}>${s.goal || "目標未設定"}</div>
+            </div>
+            <div style=${{textAlign:"right",flexShrink:0}}>
+              <div style=${{fontSize:12,fontWeight:700,color:agoColor}}>${agoText}</div>
+              <div style=${{fontSize:11,color:"var(--sub)",marginTop:2}}>
+                ${s.latestReport ? "スコア" + s.latestReport.score : "レポなし"} · ST${s.statusScore}${s.streak > 0 ? " · 🔥" + s.streak : ""}
+              </div>
+            </div>
+          </div>
+          ${s.lastCoachingDate && html`<div style=${{fontSize:11,color:"var(--sub)",marginTop:8,paddingTop:8,borderTop:"1px solid var(--border)"}}>前回コーチング: ${fmtDate(s.lastCoachingDate)}（${daysAgo(s.lastCoachingDate)}日前）</div>`}
+        </button>
+      `;
+    })}
+  </div>`;
+}
+
+function StudentDetail({ student, onBack }) {
+  const [detail, setDetail] = useState(null);
+  const [prep, setPrep] = useState(null);
+  const [prepLoading, setPrepLoading] = useState(false);
+  const [content, setContent] = useState("");
+  const [nextTheme, setNextTheme] = useState("");
+  const [promises, setPromises] = useState("");
+  const [noteDate, setNoteDate] = useState(() => new Date().toISOString().substring(0,10));
+  const [saving, setSaving] = useState(false);
+  const [savedMsg, setSavedMsg] = useState("");
+
+  useEffect(() => {
+    api("coachGetStudentDetail", { targetEmail: student.email }).then(r => { if (r.ok) setDetail(r.data); });
+  }, [student.email]);
+
+  const loadPrep = () => {
+    setPrepLoading(true);
+    api("coachPrepSummary", { targetEmail: student.email }).then(r => {
+      setPrep(r.ok ? r.data.summary : "生成に失敗しました。もう一度お試しください");
+      setPrepLoading(false);
+    });
+  };
+
+  const saveNote = async () => {
+    if (!content.trim()) return;
+    setSaving(true);
+    const r = await api("coachSaveNote", { targetEmail: student.email, date: noteDate, content: content.trim(), next_theme: nextTheme.trim(), promises: promises.trim() });
+    if (r.ok) {
+      setSavedMsg("保存しました。AIコーチにも反映されます");
+      setContent(""); setNextTheme(""); setPromises("");
+      api("coachGetStudentDetail", { targetEmail: student.email }).then(rr => { if (rr.ok) setDetail(rr.data); });
+      setTimeout(() => setSavedMsg(""), 3000);
+    } else {
+      setSavedMsg("保存に失敗しました");
+      setTimeout(() => setSavedMsg(""), 3000);
+    }
+    setSaving(false);
+  };
+
+  return html`<div style=${{paddingBottom:48}}>
+    <div style=${{background:"linear-gradient(135deg, var(--hero1) 0%, var(--hero2) 100%)",padding:"24px 20px 20px",marginBottom:16}}>
+      <button onClick=${onBack} style=${{background:"none",border:"none",color:"rgba(255,255,255,0.85)",fontSize:14,cursor:"pointer",padding:0,fontFamily:"inherit",marginBottom:10}}>← 生徒一覧</button>
+      <div style=${{display:"flex",alignItems:"center",gap:12}}>
+        <div style=${{width:44,height:44,borderRadius:"50%",background:"rgba(255,255,255,0.2)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:24}}>${student.avatar}</div>
+        <div>
+          <div style=${{fontSize:20,fontWeight:800,color:"#fff"}}>${student.name}</div>
+          <div style=${{fontSize:12,color:"rgba(255,255,255,0.75)"}}>${student.email}</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" style=${{border:"1.5px solid var(--accent)"}}>
+      <div class="card-label">🤖 AI予習サマリー</div>
+      ${prep === null && !prepLoading && html`
+        <button class="btn" onClick=${loadPrep}>前回からの変化を1分で把握する</button>
+      `}
+      ${prepLoading && html`<div style=${{display:"flex",justifyContent:"center",padding:20}}><div class="spin"/></div>`}
+      ${prep !== null && !prepLoading && html`
+        <div style=${{fontSize:13.5,lineHeight:1.8,whiteSpace:"pre-wrap",color:"var(--text)"}}>${prep}</div>
+      `}
+    </div>
+
+    <div class="card">
+      <div class="card-label">📝 コーチングログを記録</div>
+      <label class="lbl">実施日</label>
+      <input type="date" class="inp" value=${noteDate} onChange=${e => setNoteDate(e.target.value)} style=${{marginBottom:12}}/>
+      <label class="lbl">話した内容・深掘りした内容</label>
+      <textarea class="txa" value=${content} onChange=${e => setContent(e.target.value)} placeholder="今日のコーチングで話したこと、気づいたこと" style=${{marginBottom:12}}/>
+      <label class="lbl">約束事項（AIコーチが日々フォローアップします）</label>
+      <input class="inp" value=${promises} onChange=${e => setPromises(e.target.value)} placeholder="例：テレアポを週4日、毎朝インスタ1投稿" style=${{marginBottom:12}}/>
+      <label class="lbl">次回のテーマ</label>
+      <input class="inp" value=${nextTheme} onChange=${e => setNextTheme(e.target.value)} placeholder="例：朝時間の設計を見直す" style=${{marginBottom:14}}/>
+      <button class="btn" onClick=${saveNote} disabled=${saving || !content.trim()}>${saving ? "保存中..." : "保存する"}</button>
+      ${savedMsg && html`<div style=${{fontSize:12,color:"var(--green)",marginTop:8,textAlign:"center"}}>${savedMsg}</div>`}
+    </div>
+
+    ${!detail && html`<div style=${{display:"flex",justifyContent:"center",padding:30}}><div class="spin"/></div>`}
+
+    ${detail && html`<div>
+      ${detail.notes.length > 0 && html`
+        <div class="card">
+          <div class="card-label">🗂 コーチング履歴</div>
+          ${detail.notes.map((n, i) => html`
+            <div key=${n.note_id} style=${{padding:"10px 0",borderBottom:i < detail.notes.length-1 ? "1px solid var(--border)" : "none"}}>
+              <div style=${{fontSize:12,fontWeight:700,color:"var(--accent)",marginBottom:4}}>${fmtDate(n.date)}</div>
+              <div style=${{fontSize:13,lineHeight:1.7,whiteSpace:"pre-wrap"}}>${n.content}</div>
+              ${n.promises && html`<div style=${{fontSize:12,color:"var(--sub)",marginTop:4}}>🤝 約束: ${n.promises}</div>`}
+              ${n.next_theme && html`<div style=${{fontSize:12,color:"var(--sub)",marginTop:2}}>▶ 次回: ${n.next_theme}</div>`}
+            </div>
+          `)}
+        </div>
+      `}
+
+      <div class="card">
+        <div class="card-label">🎯 目標</div>
+        ${detail.goals.length === 0 && html`<div style=${{fontSize:13,color:"var(--sub)"}}>未設定</div>`}
+        ${detail.goals.map((g, i) => html`
+          <div key=${i} style=${{fontSize:13.5,lineHeight:1.7,marginBottom:6}}>
+            ${g.goal}${g.deadline && html`<span style=${{color:"var(--sub)",fontSize:12}}>（期限 ${g.deadline}）</span>`}
+          </div>
+        `)}
+      </div>
+
+      <div class="card">
+        <div class="card-label">📊 直近のレポート</div>
+        ${detail.reports.length === 0 && html`<div style=${{fontSize:13,color:"var(--sub)"}}>まだありません</div>`}
+        ${detail.reports.map((r, i) => html`
+          <div key=${r.date} style=${{padding:"10px 0",borderBottom:i < detail.reports.length-1 ? "1px solid var(--border)" : "none"}}>
+            <div style=${{display:"flex",justifyContent:"space-between",marginBottom:4}}>
+              <span style=${{fontSize:12,fontWeight:700,color:"var(--accent)"}}>${fmtDate(r.date)}</span>
+              <span style=${{fontSize:14,fontWeight:800,color:r.score>=75?"var(--green)":r.score>=50?"var(--amber)":"var(--red)"}}>${r.score}点</span>
+            </div>
+            <div style=${{fontSize:12.5,lineHeight:1.7,color:"var(--text)"}}>${r.feedback}</div>
+          </div>
+        `)}
+      </div>
+
+      ${detail.diaries.length > 0 && html`
+        <div class="card">
+          <div class="card-label">✍️ 直近の日記</div>
+          ${detail.diaries.map((d, i) => html`
+            <div key=${d.date} style=${{padding:"10px 0",borderBottom:i < detail.diaries.length-1 ? "1px solid var(--border)" : "none"}}>
+              <div style=${{fontSize:12,fontWeight:700,color:"var(--accent)",marginBottom:4}}>${fmtDate(d.date)}</div>
+              <div style=${{fontSize:13,lineHeight:1.7,whiteSpace:"pre-wrap"}}>${d.diary}</div>
+            </div>
+          `)}
+        </div>
+      `}
+
+      <div class="card">
+        <div class="card-label">🗓 直近14日の記録とメモ</div>
+        ${detail.dailySummary.length === 0 && html`<div style=${{fontSize:13,color:"var(--sub)"}}>記録なし</div>`}
+        ${detail.dailySummary.map((d, i) => html`
+          <div key=${d.date} style=${{padding:"8px 0",borderBottom:i < detail.dailySummary.length-1 ? "1px solid var(--border)" : "none"}}>
+            <div style=${{fontSize:12.5,fontWeight:700}}>${fmtDate(d.date)} <span style=${{color:"var(--sub)",fontWeight:400}}>· ${d.blocks}記録（目標関連${d.goalBlocks}）</span></div>
+            ${d.memos.map((m, j) => html`<div key=${j} style=${{fontSize:12,color:"var(--sub)",marginTop:3,lineHeight:1.6}}>💭 ${m}</div>`)}
+          </div>
+        `)}
+      </div>
+    </div>`}
+  </div>`;
+}
+
+function App() {
+  const [coach, setCoach] = useState(COACH_EMAIL);
+  const [students, setStudents] = useState(null);
+  const [selected, setSelected] = useState(null);
+
+  useEffect(() => {
+    if (!COACH_EMAIL) return;
+    api("coachGetStudents").then(r => {
+      if (r.ok) setStudents(r.data);
+      else { localStorage.removeItem("jiroku_coach_email"); COACH_EMAIL = null; setCoach(null); }
+    });
+  }, []);
+
+  const logout = () => {
+    localStorage.removeItem("jiroku_coach_email");
+    COACH_EMAIL = null; setCoach(null); setStudents(null); setSelected(null);
+  };
+
+  if (!coach) return html`<${LoginScreen} onLogin=${(email, list) => { setCoach(email); setStudents(list); }}/>`;
+  if (!students) return html`<div style=${{display:"flex",justifyContent:"center",padding:60}}><div class="spin"/></div>`;
+  if (selected) return html`<${StudentDetail} student=${selected} onBack=${() => setSelected(null)}/>`;
+  return html`<${Dashboard} students=${students} onSelect=${setSelected} onLogout=${logout}/>`;
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(html`<${App}/>`);
+</script>
+</body>
+</html>
