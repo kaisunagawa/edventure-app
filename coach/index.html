@@ -30,13 +30,13 @@
       }
     }
     html, body { height: 100%; overflow: hidden; }
-    body { font-family: 'DM Sans', -apple-system, "Hiragino Sans", sans-serif; background: var(--bg); color: var(--text); font-size: 14px; }
+    body { font-family: 'DM Sans', -apple-system, "Hiragino Sans", sans-serif; background: var(--bg); color: var(--text); font-size: 14px; -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
     #root { height: 100%; }
     ::-webkit-scrollbar { width: 8px; height: 8px; }
     ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 99px; }
     .card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 18px; margin-bottom: 16px; }
-    .card-label { font-size: 12px; font-weight: 700; color: var(--sub); margin-bottom: 12px; letter-spacing: .02em; text-transform: uppercase; }
-    .btn { display: inline-block; padding: 10px 18px; border: none; border-radius: 10px; background: var(--accent); color: #fff; font-size: 13.5px; font-weight: 700; cursor: pointer; font-family: inherit; }
+    .card-label { font-size: 12px; font-weight: 600; color: var(--sub); margin-bottom: 12px; letter-spacing: .02em; text-transform: uppercase; }
+    .btn { display: inline-block; padding: 10px 18px; border: none; border-radius: 10px; background: var(--accent); color: #fff; font-size: 13.5px; font-weight: 600; cursor: pointer; font-family: inherit; }
     .btn:disabled { opacity: .5; cursor: default; }
     .btn.ghost { background: transparent; border: 1px solid var(--border); color: var(--text); }
     .inp, .txa, select.inp { width: 100%; padding: 9px 11px; border: 1px solid var(--border); border-radius: 9px; background: var(--bg); color: var(--text); font-size: 13.5px; font-family: inherit; outline: none; }
@@ -137,7 +137,7 @@ function LoginScreen({ onLogin }) {
   return html`
     <div style=${{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",height:"100%",gap:16}}>
       <svg width="72" height="72" viewBox="0 0 72 72" xmlns="http://www.w3.org/2000/svg"><circle cx="36" cy="36" r="36" fill="#0891B2"/><circle cx="36" cy="36" r="25" fill="none" stroke="rgba(255,255,255,0.2)" stroke-width="4.5"/><path d="M36 11 A25 25 0 1 1 14.5 50" fill="none" stroke="#fff" stroke-width="4.5" stroke-linecap="round"/><circle cx="36" cy="36" r="15" fill="none" stroke="rgba(255,255,255,0.6)" stroke-width="2"/><line x1="36" y1="36" x2="36" y2="25" stroke="#fff" stroke-width="2.2" stroke-linecap="round"/><line x1="36" y1="36" x2="43" y2="41" stroke="#fff" stroke-width="2" stroke-linecap="round"/><circle cx="36" cy="36" r="2" fill="#fff"/></svg>
-      <div style=${{fontSize:24,fontWeight:800,letterSpacing:"-.3px"}}>JIROKU <span style=${{color:"var(--accent)"}}>COACH</span></div>
+      <div style=${{fontSize:24,fontWeight:700,letterSpacing:"-.3px"}}>JIROKU <span style=${{color:"var(--accent)"}}>COACH</span></div>
       <div style=${{fontSize:13,color:"var(--sub)"}}>コーチ専用の管理画面です</div>
       ${loading
         ? html`<div class="spin"/>`
@@ -177,7 +177,7 @@ function Sidebar({ students, selectedEmail, onSelect, onLogout, coach, onAddClie
     <aside style=${{width:300,flexShrink:0,borderRight:"1px solid var(--border)",display:"flex",flexDirection:"column",height:"100%",background:"var(--card)"}}>
       <div style=${{padding:"18px 16px 14px",borderBottom:"1px solid var(--border)"}}>
         <div style=${{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
-          <div style=${{fontSize:16,fontWeight:800,letterSpacing:"-.2px"}}>JIROKU <span style=${{color:"var(--accent)"}}>COACH</span></div>
+          <div style=${{fontSize:16,fontWeight:700,letterSpacing:"-.2px"}}>JIROKU <span style=${{color:"var(--accent)"}}>COACH</span></div>
           <button onClick=${onLogout} title="ログアウト" style=${{background:"none",border:"none",color:"var(--sub)",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>ログアウト</button>
         </div>
         <div style=${{fontSize:11,color:"var(--sub)",marginBottom:10}}>${coach}</div>
@@ -209,11 +209,11 @@ function Sidebar({ students, selectedEmail, onSelect, onLogout, coach, onAddClie
               <div style=${{display:"flex",alignItems:"center",gap:10}}>
                 <div style=${{width:32,height:32,borderRadius:"50%",background:"var(--bg)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:17,flexShrink:0}}>${s.avatar}</div>
                 <div style=${{flex:1,minWidth:0}}>
-                  <div style=${{fontSize:13.5,fontWeight:700,color:"var(--text)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>${s.nickname||s.name}</div>
+                  <div style=${{fontSize:13.5,fontWeight:600,color:"var(--text)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>${s.nickname||s.name}</div>
                   <div style=${{fontSize:11,fontWeight:600,color:agoColor}}>${agoText}</div>
                 </div>
                 ${s.contractDaysLeft !== null && s.contractDaysLeft <= 30 && html`
-                  <div title="契約終了まで残り少ない" style=${{fontSize:9,fontWeight:700,color:"#fff",background:"var(--red)",borderRadius:20,padding:"2px 6px",flexShrink:0}}>残${s.contractDaysLeft}日</div>
+                  <div title="契約終了まで残り少ない" style=${{fontSize:9,fontWeight:600,color:"#fff",background:"var(--red)",borderRadius:20,padding:"2px 6px",flexShrink:0}}>残${s.contractDaysLeft}日</div>
                 `}
               </div>
             </button>
@@ -314,7 +314,7 @@ function StudentMain({ student, onNoteSaved }) {
         <div style=${{display:"flex",alignItems:"center",gap:12}}>
           <div style=${{width:40,height:40,borderRadius:"50%",background:"var(--bg)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:21}}>${student.avatar}</div>
           <div>
-            <div style=${{fontSize:17,fontWeight:800}}>${student.name}</div>
+            <div style=${{fontSize:17,fontWeight:700}}>${student.name}</div>
             <div style=${{fontSize:11.5,color:"var(--sub)"}}>${student.email}</div>
           </div>
         </div>
@@ -333,20 +333,20 @@ function StudentMain({ student, onNoteSaved }) {
           <div style=${{display:"grid",gridTemplateColumns:"1.3fr 1fr",gap:20,alignItems:"start"}}>
             <div>
               <div class="card" style=${{border:"1.5px solid var(--accent)"}}>
-                <div class="card-label">🤖 AI予習サマリー</div>
+                <div class="card-label">AI予習サマリー</div>
                 ${prep === null && !prepLoading && html`<button class="btn" onClick=${loadPrep}>前回からの変化を1分で把握する</button>`}
                 ${prepLoading && html`<div style=${{display:"flex",justifyContent:"center",padding:16}}><div class="spin"/></div>`}
                 ${prep !== null && !prepLoading && html`<div style=${{fontSize:13.5,lineHeight:1.8,whiteSpace:"pre-wrap"}}>${prep}</div>`}
               </div>
 
               <div class="card">
-                <div class="card-label">📊 直近のレポート</div>
+                <div class="card-label">直近のレポート</div>
                 ${detail.reports.length === 0 && html`<div style=${{fontSize:13,color:"var(--sub)"}}>まだありません</div>`}
                 ${detail.reports.slice(0,3).map((r, i) => html`
                   <div key=${r.date} style=${{padding:"10px 0",borderBottom:i < Math.min(3,detail.reports.length)-1 ? "1px solid var(--border)" : "none"}}>
                     <div style=${{display:"flex",justifyContent:"space-between",marginBottom:4}}>
-                      <span style=${{fontSize:12,fontWeight:700,color:"var(--accent)"}}>${fmtDate(r.date)}</span>
-                      <span style=${{fontSize:14,fontWeight:800,color:r.score>=75?"var(--green)":r.score>=50?"var(--amber)":"var(--red)"}}>${r.score}点</span>
+                      <span style=${{fontSize:12,fontWeight:600,color:"var(--accent)"}}>${fmtDate(r.date)}</span>
+                      <span style=${{fontSize:14,fontWeight:700,color:r.score>=75?"var(--green)":r.score>=50?"var(--amber)":"var(--red)"}}>${r.score}点</span>
                     </div>
                     <div style=${{fontSize:12.5,lineHeight:1.7}}>${r.feedback}</div>
                   </div>
@@ -355,10 +355,10 @@ function StudentMain({ student, onNoteSaved }) {
 
               ${detail.diaries.length > 0 && html`
                 <div class="card">
-                  <div class="card-label">✍️ 直近の日記</div>
+                  <div class="card-label">直近の日記</div>
                   ${detail.diaries.slice(0,3).map((d, i) => html`
                     <div key=${d.date} style=${{padding:"10px 0",borderBottom:i < Math.min(3,detail.diaries.length)-1 ? "1px solid var(--border)" : "none"}}>
-                      <div style=${{fontSize:12,fontWeight:700,color:"var(--accent)",marginBottom:4}}>${fmtDate(d.date)}</div>
+                      <div style=${{fontSize:12,fontWeight:600,color:"var(--accent)",marginBottom:4}}>${fmtDate(d.date)}</div>
                       <div style=${{fontSize:13,lineHeight:1.7,whiteSpace:"pre-wrap"}}>${d.diary}</div>
                     </div>
                   `)}
@@ -368,7 +368,7 @@ function StudentMain({ student, onNoteSaved }) {
 
             <div>
               <div class="card">
-                <div class="card-label">🎯 目標</div>
+                <div class="card-label">目標</div>
                 ${detail.goals.length === 0 && html`<div style=${{fontSize:13,color:"var(--sub)"}}>未設定</div>`}
                 ${detail.goals.map((g, i) => html`
                   <div key=${i} style=${{fontSize:13,lineHeight:1.7,marginBottom:8}}>
@@ -379,18 +379,18 @@ function StudentMain({ student, onNoteSaved }) {
 
               ${detail.status && html`
                 <div class="card">
-                  <div class="card-label">📈 ステータス</div>
-                  <div style=${{fontSize:26,fontWeight:800,marginBottom:10}}>${detail.status.score}<span style=${{fontSize:13,color:"var(--sub)",fontWeight:600}}> / 100</span></div>
+                  <div class="card-label">ステータス</div>
+                  <div style=${{fontSize:26,fontWeight:700,marginBottom:10}}>${detail.status.score}<span style=${{fontSize:13,color:"var(--sub)",fontWeight:600}}> / 100</span></div>
                   ${Object.entries({records:"記録",memo:"メモ",focus:"集中",goal:"目標",consistency:"継続"}).map(([k,label]) => html`
                     <div key=${k} style=${{display:"flex",justifyContent:"space-between",fontSize:12,marginBottom:5}}>
-                      <span style=${{color:"var(--sub)"}}>${label}</span><span style=${{fontWeight:700}}>${detail.status.breakdown[k]}/20</span>
+                      <span style=${{color:"var(--sub)"}}>${label}</span><span style=${{fontWeight:600}}>${detail.status.breakdown[k]}/20</span>
                     </div>
                   `)}
                 </div>
               `}
 
               <div class="card">
-                <div class="card-label">🔥 継続</div>
+                <div class="card-label">継続</div>
                 <div style=${{fontSize:13,lineHeight:1.8}}>
                   連続記録 ${student.streak}日<br/>
                   入会日: ${detail.joined_at || "不明"}
@@ -403,13 +403,13 @@ function StudentMain({ student, onNoteSaved }) {
         ${detail && tab==="history" && html`
           <div style=${{display:"grid",gridTemplateColumns:"1fr 1fr",gap:20}}>
             <div class="card">
-              <div class="card-label">📊 レポート全履歴</div>
+              <div class="card-label">レポート全履歴</div>
               ${detail.reports.length === 0 && html`<div style=${{fontSize:13,color:"var(--sub)"}}>まだありません</div>`}
               ${detail.reports.map((r, i) => html`
                 <div key=${r.date} style=${{padding:"10px 0",borderBottom:i < detail.reports.length-1 ? "1px solid var(--border)" : "none"}}>
                   <div style=${{display:"flex",justifyContent:"space-between",marginBottom:4}}>
-                    <span style=${{fontSize:12,fontWeight:700,color:"var(--accent)"}}>${fmtDate(r.date)}</span>
-                    <span style=${{fontSize:14,fontWeight:800,color:r.score>=75?"var(--green)":r.score>=50?"var(--amber)":"var(--red)"}}>${r.score}点</span>
+                    <span style=${{fontSize:12,fontWeight:600,color:"var(--accent)"}}>${fmtDate(r.date)}</span>
+                    <span style=${{fontSize:14,fontWeight:700,color:r.score>=75?"var(--green)":r.score>=50?"var(--amber)":"var(--red)"}}>${r.score}点</span>
                   </div>
                   <div style=${{fontSize:12.5,lineHeight:1.7,marginBottom:4}}>${r.feedback}</div>
                   ${r.improvement && html`<div style=${{fontSize:11.5,color:"var(--sub)"}}>改善: ${r.improvement}</div>`}
@@ -417,12 +417,12 @@ function StudentMain({ student, onNoteSaved }) {
               `)}
             </div>
             <div class="card">
-              <div class="card-label">🗓 直近14日の記録とメモ</div>
+              <div class="card-label">直近14日の記録とメモ</div>
               ${detail.dailySummary.length === 0 && html`<div style=${{fontSize:13,color:"var(--sub)"}}>記録なし</div>`}
               ${detail.dailySummary.map((d, i) => html`
                 <div key=${d.date} style=${{padding:"8px 0",borderBottom:i < detail.dailySummary.length-1 ? "1px solid var(--border)" : "none"}}>
-                  <div style=${{fontSize:12.5,fontWeight:700}}>${fmtDate(d.date)} <span style=${{color:"var(--sub)",fontWeight:400}}>· ${d.blocks}記録（目標関連${d.goalBlocks}）</span></div>
-                  ${d.memos.map((m, j) => html`<div key=${j} style=${{fontSize:11.5,color:"var(--sub)",marginTop:3,lineHeight:1.6}}>💭 ${m}</div>`)}
+                  <div style=${{fontSize:12.5,fontWeight:600}}>${fmtDate(d.date)} <span style=${{color:"var(--sub)",fontWeight:400}}>· ${d.blocks}記録（目標関連${d.goalBlocks}）</span></div>
+                  ${d.memos.map((m, j) => html`<div key=${j} style=${{fontSize:11.5,color:"var(--sub)",marginTop:3,lineHeight:1.6}}>${m}</div>`)}
                 </div>
               `)}
             </div>
@@ -441,7 +441,7 @@ function StudentMain({ student, onNoteSaved }) {
 
           ${importOpen && html`
             <div class="card" style=${{marginBottom:16}}>
-              <div class="card-label">📥 過去のコーチングログを一括インポート</div>
+              <div class="card-label">過去のコーチングログを一括インポート</div>
               <div style=${{fontSize:11.5,color:"var(--sub)",marginBottom:12}}>JIROKU導入前にコーチングしてきた履歴を、日付・内容ごとにまとめて登録できます。AIによる自動解析はせず、入力した内容がそのまま登録されます。</div>
               ${importRows.map((row, i) => html`
                 <div key=${i} style=${{display:"grid",gridTemplateColumns:"120px 1fr 1fr 1fr 28px",gap:8,marginBottom:8,alignItems:"start"}}>
@@ -462,7 +462,7 @@ function StudentMain({ student, onNoteSaved }) {
 
           <div style=${{display:"grid",gridTemplateColumns: sessionMode ? "1fr 1fr 1fr" : "1fr 1fr",gap:20,alignItems:"start"}}>
             <div class="card">
-              <div class="card-label">📝 コーチングログを記録</div>
+              <div class="card-label">コーチングログを記録</div>
               <label class="lbl">実施日</label>
               <input type="date" class="inp" value=${noteDate} onChange=${e => setNoteDate(e.target.value)} style=${{marginBottom:12}}/>
               <label class="lbl">話した内容・深掘りした内容</label>
@@ -477,7 +477,7 @@ function StudentMain({ student, onNoteSaved }) {
 
             ${sessionMode && html`
               <div class="card" style=${{border:"1.5px solid var(--accent)"}}>
-                <div class="card-label">🤖 AIコーチングアシスタント</div>
+                <div class="card-label">AIコーチングアシスタント</div>
                 <div style=${{fontSize:11.5,color:"var(--sub)",marginBottom:10}}>生徒の記録・前回の約束事項・今書いているメモをもとに、次に聞くとよい質問を提案します</div>
                 <button class="btn" onClick=${loadSuggestions} disabled=${suggestLoading}>${suggestLoading ? "考え中..." : (suggestedOnce ? "提案を更新" : "質問の提案をもらう")}</button>
                 ${suggestions.length > 0 && html`
@@ -489,13 +489,13 @@ function StudentMain({ student, onNoteSaved }) {
             `}
 
             <div class="card">
-              <div class="card-label">🗂 コーチング履歴</div>
+              <div class="card-label">コーチング履歴</div>
               ${detail.notes.length === 0 && html`<div style=${{fontSize:13,color:"var(--sub)"}}>まだ記録がありません</div>`}
               ${detail.notes.map((n, i) => html`
                 <div key=${n.note_id} style=${{padding:"10px 0",borderBottom:i < detail.notes.length-1 ? "1px solid var(--border)" : "none"}}>
-                  <div style=${{fontSize:12,fontWeight:700,color:"var(--accent)",marginBottom:4}}>${fmtDate(n.date)}</div>
+                  <div style=${{fontSize:12,fontWeight:600,color:"var(--accent)",marginBottom:4}}>${fmtDate(n.date)}</div>
                   <div style=${{fontSize:13,lineHeight:1.7,whiteSpace:"pre-wrap",marginBottom:4}}>${n.content}</div>
-                  ${n.promises && html`<div style=${{fontSize:11.5,color:"var(--sub)"}}>🤝 約束: ${n.promises}</div>`}
+                  ${n.promises && html`<div style=${{fontSize:11.5,color:"var(--sub)"}}>約束: ${n.promises}</div>`}
                   ${n.next_theme && html`<div style=${{fontSize:11.5,color:"var(--sub)"}}>▶ 次回: ${n.next_theme}</div>`}
                 </div>
               `)}
@@ -631,10 +631,10 @@ function ProfileTab({ student, detail, onReload }) {
   return html`
     <div style=${{display:"grid",gridTemplateColumns:"1fr 1fr",gap:20,alignItems:"start"}}>
       <div class="card">
-        <div class="card-label">👤 プロフィール</div>
+        <div class="card-label">プロフィール</div>
         <label class="lbl">名前</label>
         <input class="inp" value=${form.name} onChange=${e=>set("name", e.target.value)} placeholder="例：山田太郎" style=${{marginBottom:12}}/>
-        <label class="lbl">生年月日${age !== null && html` <span style=${{color:"var(--accent)",fontWeight:700}}>（${age}歳）</span>`}</label>
+        <label class="lbl">生年月日${age !== null && html` <span style=${{color:"var(--accent)",fontWeight:600}}>（${age}歳）</span>`}</label>
         <input type="date" class="inp" value=${form.birthdate} onChange=${e=>set("birthdate", e.target.value)} style=${{marginBottom:12}}/>
         <label class="lbl">性別</label>
         <select class="inp" value=${form.gender} onChange=${e=>set("gender", e.target.value)} style=${{marginBottom:12}}>
@@ -654,7 +654,7 @@ function ProfileTab({ student, detail, onReload }) {
 
       <div>
         <div class="card">
-          <div class="card-label">📄 契約情報</div>
+          <div class="card-label">契約情報</div>
           <div style=${{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:12}}>
             <div>
               <label class="lbl">契約開始日</label>
@@ -662,7 +662,7 @@ function ProfileTab({ student, detail, onReload }) {
             </div>
             <div>
               <label class="lbl">契約終了日${contractDaysLeft !== null && html`
-                <span style=${{color:contractDaysLeft<=30?"var(--red)":contractDaysLeft<=60?"var(--amber)":"var(--sub)",fontWeight:700}}> （残り${contractDaysLeft}日）</span>
+                <span style=${{color:contractDaysLeft<=30?"var(--red)":contractDaysLeft<=60?"var(--amber)":"var(--sub)",fontWeight:600}}> （残り${contractDaysLeft}日）</span>
               `}</label>
               <input type="date" class="inp" value=${form.contract_end} onChange=${e=>set("contract_end", e.target.value)}/>
             </div>
@@ -688,9 +688,9 @@ function ProfileTab({ student, detail, onReload }) {
         </div>
 
         <div class="card">
-          <div class="card-label">💳 Stripe決済状況</div>
+          <div class="card-label">Stripe決済状況</div>
           ${p.stripe_synced_at ? html`
-            <div style=${{fontSize:26,fontWeight:800,marginBottom:4}}>
+            <div style=${{fontSize:26,fontWeight:700,marginBottom:4}}>
               ${Number(p.stripe_total_paid || 0).toLocaleString()}<span style=${{fontSize:13,color:"var(--sub)",fontWeight:600}}> ${(p.stripe_currency||"jpy").toUpperCase()} 支払い済み</span>
             </div>
             <div style=${{fontSize:11,color:"var(--sub)",marginBottom:12}}>最終同期: ${p.stripe_synced_at}</div>
@@ -704,22 +704,22 @@ function ProfileTab({ student, detail, onReload }) {
         </div>
 
         <div class="card">
-          <div class="card-label">📎 契約書ファイル</div>
+          <div class="card-label">契約書ファイル</div>
           <input class="inp" value=${fileNote} onChange=${e=>setFileNote(e.target.value)} placeholder="ファイルのメモ（任意・例：初回契約書）" style=${{marginBottom:10}}/>
           <input ref=${fileInputRef} type="file" onChange=${onFileChosen} disabled=${uploading} style=${{fontSize:12.5,marginBottom:14}}/>
           ${uploading && html`<div style=${{fontSize:12,color:"var(--sub)"}}>アップロード中...</div>`}
-          ${extracting && html`<div style=${{fontSize:12,color:"var(--sub)"}}>🤖 AIが契約書の内容を読み取り中...</div>`}
+          ${extracting && html`<div style=${{fontSize:12,color:"var(--sub)"}}>AIが契約書の内容を読み取り中...</div>`}
           ${extractMsg && !extracting && html`<div style=${{fontSize:12,color:"var(--accent)",marginBottom:8}}>${extractMsg}</div>`}
           ${detail.files.length === 0 && html`<div style=${{fontSize:13,color:"var(--sub)"}}>まだファイルがありません</div>`}
           ${detail.files.map((f,i) => html`
             <div key=${f.file_id} style=${{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"9px 0",borderBottom:i<detail.files.length-1?"1px solid var(--border)":"none"}}>
               <div style=${{minWidth:0}}>
-                <a href=${f.file_url} target="_blank" style=${{fontSize:13,color:"var(--accent)",fontWeight:600,textDecoration:"none"}}>📄 ${f.file_name}</a>
+                <a href=${f.file_url} target="_blank" style=${{fontSize:13,color:"var(--accent)",fontWeight:600,textDecoration:"none"}}>${f.file_name}</a>
                 <div style=${{fontSize:11,color:"var(--sub)",marginTop:2}}>${f.note ? f.note + " · " : ""}${f.uploaded_at}</div>
               </div>
               <div style=${{display:"flex",gap:10,flexShrink:0,alignItems:"center"}}>
                 ${/\.pdf$/i.test(f.file_name) && html`
-                  <button onClick=${()=>extractFromExisting(f.file_id)} disabled=${extracting} style=${{background:"none",border:"none",color:"var(--accent)",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>🤖 AIに読み取らせる</button>
+                  <button onClick=${()=>extractFromExisting(f.file_id)} disabled=${extracting} style=${{background:"none",border:"none",color:"var(--accent)",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>AIに読み取らせる</button>
                 `}
                 <button onClick=${()=>deleteFile(f.file_id)} style=${{background:"none",border:"none",color:"var(--red)",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>削除</button>
               </div>
