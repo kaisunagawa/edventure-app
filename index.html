@@ -2351,6 +2351,8 @@ function LoginScreen({onLogin}) {
   };
 
   const [lineCopied,setLineCopied]=useState(false);
+  const [lineWarning,setLineWarning]=useState(false);
+  const [checkingLine,setCheckingLine]=useState(false);
 
   const copyEmail=()=>{
     navigator.clipboard.writeText(pendingUser?.email||"").then(()=>{ setLineCopied(true); setTimeout(()=>setLineCopied(false),2000); });
@@ -2360,9 +2362,25 @@ function LoginScreen({onLogin}) {
     window.open("https://lin.ee/5pElLYY","_blank");
   };
 
-  const finishLine=()=>{
+  const proceedWithoutLine=()=>{
     localStorage.setItem("line_prompted","1");
     CURRENT_USER=pendingUser; onLogin(pendingUser);
+  };
+
+  // 「アプリを開く」時点でLINE連携が完了しているかGASに確認する。
+  // 未連携のまま気づかずスキップしてしまう問題を防ぐため、未連携なら
+  // 一度警告を挟み、それでも進みたい場合だけ先へ進めるようにする
+  const finishLine=async()=>{
+    setCheckingLine(true);
+    try{
+      const url=new URL(GAS_URL); url.searchParams.set("action","getUser"); url.searchParams.set("studentEmail",pendingUser.email);
+      const r=await fetch(url).then(res=>res.json());
+      if(r.ok && r.data && !r.data.lineLinked && !lineWarning){
+        setCheckingLine(false); setLineWarning(true); return;
+      }
+    }catch(e){ /* 確認できなくても先に進めさせる */ }
+    setCheckingLine(false);
+    proceedWithoutLine();
   };
 
   if(step==="line") return html`
@@ -2392,8 +2410,14 @@ function LoginScreen({onLogin}) {
             ③ 連携完了のメッセージが届いたら↓をタップ
           </div>
         </div>
-        <button class="btn" style=${{marginTop:8}} onClick=${finishLine}>アプリを開く</button>
-        <button style=${{background:"none",border:"none",color:"var(--sub)",fontSize:13,cursor:"pointer",marginTop:4}} onClick=${finishLine}>あとで設定する →</button>
+        ${lineWarning && html`
+          <div style=${{background:"#fff3cd",border:"1px solid #ffe08a",borderRadius:10,padding:"12px 14px",marginTop:12,fontSize:12.5,lineHeight:1.7,color:"#8a6d1f"}}>
+            まだLINE連携が完了していないようです。このまま進むと、リマインダーやAIレポートが届きません。<br/>
+            上の手順でLINE連携を済ませてから「アプリを開く」を押すことをおすすめします。
+          </div>
+        `}
+        <button class="btn" style=${{marginTop:8}} onClick=${finishLine} disabled=${checkingLine}>${checkingLine?"確認中...":(lineWarning?"連携せずに進む":"アプリを開く")}</button>
+        ${!lineWarning && html`<button style=${{background:"none",border:"none",color:"var(--sub)",fontSize:13,cursor:"pointer",marginTop:4}} onClick=${finishLine}>あとで設定する →</button>`}
       </div>
     </div>
   `;
@@ -2502,12 +2526,38 @@ function LoginScreen({onLogin}) {
   `;
 }
 
+// LINE未連携の生徒に毎回の起動時に気づいてもらうためのバナー。
+// 登録直後の「line」ステップはスキップ可能なため、その後も本人が気づけるように
+// 連携が完了するまでホーム画面の上に毎回表示する（セッション内での「閉じる」は一時的）
+function LineLinkBanner({email, onDismiss}) {
+  const [copied,setCopied]=useState(false);
+  const copyEmail=()=>{
+    navigator.clipboard.writeText(email||"").then(()=>{ setCopied(true); setTimeout(()=>setCopied(false),2000); });
+  };
+  return html`
+    <div style=${{background:"#fff3cd",borderBottom:"1px solid #ffe08a",padding:"10px 16px",fontSize:12.5,color:"#8a6d1f",position:"relative",zIndex:50}}>
+      <div style=${{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
+        <div style=${{lineHeight:1.6}}>
+          LINE連携が未完了です。連携するとリマインダー・AIレポートが届くようになります。<br/>
+          <b>${email}</b>をコピーして、LINEボットに送ってください。
+        </div>
+        <button onClick=${onDismiss} style=${{background:"none",border:"none",color:"#8a6d1f",fontSize:16,cursor:"pointer",flexShrink:0}}>×</button>
+      </div>
+      <div style=${{display:"flex",gap:8,marginTop:8}}>
+        <button onClick=${copyEmail} style=${{padding:"6px 12px",borderRadius:7,border:"1px solid #ffe08a",background:"#fff",fontSize:12,cursor:"pointer",fontWeight:600,color:"#8a6d1f"}}>${copied?"✓コピー済み":"メールをコピー"}</button>
+        <button onClick=${()=>window.open("https://lin.ee/5pElLYY","_blank")} style=${{padding:"6px 12px",borderRadius:7,border:"none",background:"#06C755",color:"#fff",fontSize:12,cursor:"pointer",fontWeight:600}}>LINEを開く</button>
+      </div>
+    </div>
+  `;
+}
+
 function App() {
   // 起動を速くするため、ログイン済みキャッシュがあれば即アプリを表示する。
   // アカウントの存在確認はバックグラウンドで行い、消えていた場合だけログアウトさせる
   const [user,setUser]=useState(CURRENT_USER);
   const [tab,setTab]=useState("home");
   const [toast,setToast]=useState(null);
+  const [bannerDismissed,setBannerDismissed]=useState(false);
   const [goalData,setGoalData]=useState(()=>{
     const g=localStorage.getItem("jiroku_goals"); if(g) try{return JSON.parse(g);}catch(e){}
     const old=localStorage.getItem("jiroku_goal"); if(old) try{const p=JSON.parse(old); if(p.goal) return [p];}catch(e){}
@@ -2529,7 +2579,7 @@ function App() {
     url.searchParams.set("studentEmail",CURRENT_USER.email);
     fetch(url).then(r=>r.json()).then(r=>{
       if(r.ok&&r.data){
-        const u={...CURRENT_USER, name:r.data.name||CURRENT_USER.name, nickname:r.data.nickname||CURRENT_USER.name, avatar:r.data.avatar||"🦊", coachName:r.data.coachName||"コーチ", coachEmail:r.data.coach_email||""};
+        const u={...CURRENT_USER, name:r.data.name||CURRENT_USER.name, nickname:r.data.nickname||CURRENT_USER.name, avatar:r.data.avatar||"🦊", coachName:r.data.coachName||"コーチ", coachEmail:r.data.coach_email||"", lineLinked:!!r.data.lineLinked};
         CURRENT_USER=u; localStorage.setItem("edventure_user",JSON.stringify(u)); setUser(u);
         setProfile({nickname:u.nickname,avatar:u.avatar});
       } else if(r.error==="User not found"){
@@ -2545,6 +2595,7 @@ function App() {
   if(!user) return html`<${LoginScreen} onLogin=${setUser}/>`;
   return html`
     <div style=${{height:"100%",position:"relative"}}>
+      ${user.lineLinked===false && !bannerDismissed && html`<${LineLinkBanner} email=${user.email} onDismiss=${()=>setBannerDismissed(true)}/>`}
       <div class="screen">
         <div style=${{display:tab==="home"?"block":"none"}}><${HomeScreen} goalData=${goalData} onGoalSaved=${setGoalData} profile=${profile}/></div>
         <div style=${{display:tab==="log"?"block":"none"}}><${LogScreen} onToast=${setToast} isActive=${tab==="log"}/></div>

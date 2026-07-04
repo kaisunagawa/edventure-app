@@ -224,7 +224,8 @@ function getUser(studentEmail) {
     nickname: user.nickname || user.name,
     avatar: user.avatar || "🦊",
     coach_email: user.coach_email,
-    coachName: coach ? coach.name : "コーチ"
+    coachName: (coach && coach.coach_name) ? coach.coach_name : "コーチ",
+    lineLinked: !!user.line_user_id
   } };
 }
 
