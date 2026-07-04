@@ -140,6 +140,8 @@ function doPost(e) {
       case "coachUploadFile":      return jsonResponse(coachUploadFile(body.coachEmail, body));
       case "coachDeleteFile":      return jsonResponse(coachDeleteFile(body.coachEmail, body));
       case "coachExtractContractInfo": return jsonResponse(coachExtractContractInfo(body.coachEmail, body));
+      case "coachImportNotes":     return jsonResponse(coachImportNotes(body.coachEmail, body));
+      case "coachSessionSuggestions": return jsonResponse(coachSessionSuggestions(body.coachEmail, body));
       default: return jsonResponse({ ok: false, error: "Unknown action" });
     }
   } catch (err) {
@@ -874,6 +876,81 @@ function coachSaveNote(coachEmail, body) {
     now
   ]);
   return { ok: true };
+}
+
+// 過去のコーチングログをまとめてインポートする（JIROKU導入前の履歴の一括登録用）。
+// AIによる自動解析は使わず、コーチが入力した内容をそのまま複数件登録する
+function coachImportNotes(coachEmail, body) {
+  if (!verifyCoach(coachEmail)) return { ok: false, error: "not a coach" };
+  const targetEmail = String(body.targetEmail || "");
+  if (!coachOwnsStudent(coachEmail, targetEmail)) return { ok: false, error: "not your student" };
+  const notes = Array.isArray(body.notes) ? body.notes : [];
+  if (notes.length === 0) return { ok: false, error: "no notes" };
+
+  const sheet = getCoachingNotesSheet();
+  const now = new Date().toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" });
+  let imported = 0;
+  notes.forEach((n, i) => {
+    const content = String(n.content || "").trim();
+    if (!content) return;
+    sheet.appendRow([
+      "cn_" + Date.now() + "_" + i,
+      coachEmail,
+      targetEmail,
+      String(n.date || formatDate(new Date())),
+      content.slice(0, 2000),
+      String(n.next_theme || "").slice(0, 500),
+      String(n.promises || "").slice(0, 500),
+      now
+    ]);
+    imported++;
+  });
+  return { ok: true, data: { imported } };
+}
+
+// コーチングセッション中のAIアシスタント: 生徒データ・前回の約束事項・
+// 今入力中のメモをもとに、次に聞くべき質問を提案する
+function coachSessionSuggestions(coachEmail, body) {
+  if (!verifyCoach(coachEmail)) return { ok: false, error: "not a coach" };
+  const targetEmail = String(body.targetEmail || "");
+  const user = coachOwnsStudent(coachEmail, targetEmail);
+  if (!user) return { ok: false, error: "not your student" };
+  const apiKey = PropertiesService.getScriptProperties().getProperty("CLAUDE_API_KEY");
+  if (!apiKey) return { ok: false, error: "CLAUDE_API_KEY が未設定" };
+
+  const notes = sheetToObjects(getCoachingNotesSheet())
+    .filter(n => n.student_email === targetEmail)
+    .sort((a,b)=>b.date>a.date?1:-1);
+  const lastNote = notes[0] || null;
+  const ctx = buildStudentContext(targetEmail, user);
+  const lastNoteText = lastNote
+    ? `【前回のコーチング（${lastNote.date}）】\n内容: ${lastNote.content}\n次回テーマ: ${lastNote.next_theme || "なし"}\n約束事項: ${lastNote.promises || "なし"}`
+    : "【前回のコーチング】まだ記録なし（初回コーチング）";
+  const draftText = String(body.draftNotes || "").trim();
+  const draftSection = draftText
+    ? `【今回のセッションで今までにコーチが書いたメモ（進行中）】\n${draftText}`
+    : "【今回のセッションのメモ】まだ何も書かれていない（セッション開始直後）";
+
+  const prompt = `あなたはコーチングセッションに同席し、コーチをサポートするアシスタントです。以下の生徒データと今回のセッションの進行状況を読み、コーチが次に聞くとよい質問を3〜5個、提案してください。
+
+${ctx}
+
+${lastNoteText}
+
+${draftSection}
+
+【出力形式】質問だけを1行ずつ箇条書きで。前置きや説明文は不要。すでにメモに書かれている内容の繰り返しにはならないよう、まだ深掘りできていない点や前回の約束事項の進捗確認を優先すること`;
+
+  const res = UrlFetchApp.fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
+    payload: JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: 500, messages: [{ role: "user", content: prompt }] }),
+    muteHttpExceptions: true
+  });
+  const result = JSON.parse(res.getContentText());
+  if (!result.content || !result.content[0]) return { ok: false, error: "ai error" };
+  const lines = result.content[0].text.split("\n").map(l => l.replace(/^[-・0-9.\s]+/, "").trim()).filter(l => l.length > 2);
+  return { ok: true, data: { suggestions: lines } };
 }
 
 // AI予習サマリー: 前回コーチング（無ければ直近14日）からの変化を要約

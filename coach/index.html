@@ -237,11 +237,21 @@ function StudentMain({ student, onNoteSaved }) {
   const [noteDate, setNoteDate] = useState(() => new Date().toISOString().substring(0,10));
   const [saving, setSaving] = useState(false);
   const [savedMsg, setSavedMsg] = useState("");
+  const [sessionMode, setSessionMode] = useState(false);
+  const [suggestions, setSuggestions] = useState([]);
+  const [suggestLoading, setSuggestLoading] = useState(false);
+  const [suggestedOnce, setSuggestedOnce] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
+  const [importRows, setImportRows] = useState([{ date: "", content: "", next_theme: "", promises: "" }]);
+  const [importing, setImporting] = useState(false);
+  const [importMsg, setImportMsg] = useState("");
 
   const reloadDetail = () => api("coachGetStudentDetail", { targetEmail: student.email }).then(r => { if (r.ok) setDetail(r.data); });
 
   useEffect(() => {
     setDetail(null); setPrep(null); setTab("overview");
+    setSessionMode(false); setSuggestions([]); setSuggestedOnce(false);
+    setImportOpen(false); setImportRows([{ date: "", content: "", next_theme: "", promises: "" }]);
     reloadDetail();
   }, [student.email]);
 
@@ -251,6 +261,34 @@ function StudentMain({ student, onNoteSaved }) {
       setPrep(r.ok ? r.data.summary : "生成に失敗しました。もう一度お試しください");
       setPrepLoading(false);
     });
+  };
+
+  const loadSuggestions = async () => {
+    setSuggestLoading(true);
+    const r = await apiPost("coachSessionSuggestions", { targetEmail: student.email, draftNotes: content });
+    setSuggestions(r.ok ? r.data.suggestions : ["提案の生成に失敗しました。もう一度お試しください"]);
+    setSuggestedOnce(true);
+    setSuggestLoading(false);
+  };
+
+  const addImportRow = () => setImportRows(rows => [...rows, { date: "", content: "", next_theme: "", promises: "" }]);
+  const removeImportRow = (i) => setImportRows(rows => rows.filter((_, idx) => idx !== i));
+  const setImportField = (i, k, v) => setImportRows(rows => rows.map((r, idx) => idx === i ? { ...r, [k]: v } : r));
+
+  const submitImport = async () => {
+    const validRows = importRows.filter(r => r.content.trim());
+    if (validRows.length === 0) return;
+    setImporting(true);
+    const r = await apiPost("coachImportNotes", { targetEmail: student.email, notes: validRows });
+    if (r.ok) {
+      setImportMsg(`${r.data.imported}件をインポートしました`);
+      setImportRows([{ date: "", content: "", next_theme: "", promises: "" }]);
+      reloadDetail();
+    } else {
+      setImportMsg("インポートに失敗しました");
+    }
+    setImporting(false);
+    setTimeout(() => setImportMsg(""), 3000);
   };
 
   const saveNote = async () => {
@@ -392,7 +430,37 @@ function StudentMain({ student, onNoteSaved }) {
         `}
 
         ${detail && tab==="notes" && html`
-          <div style=${{display:"grid",gridTemplateColumns:"1fr 1fr",gap:20,alignItems:"start"}}>
+          <div style=${{display:"flex",gap:8,marginBottom:16}}>
+            ${!sessionMode
+              ? html`<button class="btn" onClick=${()=>{setSessionMode(true); setSuggestions([]); setSuggestedOnce(false);}}>▶ コーチングセッションを開始</button>`
+              : html`<button class="btn" style=${{background:"var(--sub)"}} onClick=${()=>setSessionMode(false)}>■ セッションを終了</button>`}
+            <button style=${{fontSize:12.5,background:"none",border:"1px solid var(--border)",borderRadius:8,padding:"0 14px",cursor:"pointer",fontFamily:"inherit"}} onClick=${()=>setImportOpen(o=>!o)}>
+              ${importOpen ? "一括インポートを閉じる" : "過去の記録をまとめてインポート"}
+            </button>
+          </div>
+
+          ${importOpen && html`
+            <div class="card" style=${{marginBottom:16}}>
+              <div class="card-label">📥 過去のコーチングログを一括インポート</div>
+              <div style=${{fontSize:11.5,color:"var(--sub)",marginBottom:12}}>JIROKU導入前にコーチングしてきた履歴を、日付・内容ごとにまとめて登録できます。AIによる自動解析はせず、入力した内容がそのまま登録されます。</div>
+              ${importRows.map((row, i) => html`
+                <div key=${i} style=${{display:"grid",gridTemplateColumns:"120px 1fr 1fr 1fr 28px",gap:8,marginBottom:8,alignItems:"start"}}>
+                  <input type="date" class="inp" value=${row.date} onChange=${e=>setImportField(i,"date",e.target.value)}/>
+                  <textarea class="txa" style=${{minHeight:38,marginBottom:0}} value=${row.content} onChange=${e=>setImportField(i,"content",e.target.value)} placeholder="話した内容"/>
+                  <input class="inp" value=${row.promises} onChange=${e=>setImportField(i,"promises",e.target.value)} placeholder="約束事項（任意）"/>
+                  <input class="inp" value=${row.next_theme} onChange=${e=>setImportField(i,"next_theme",e.target.value)} placeholder="次回テーマ（任意）"/>
+                  <button onClick=${()=>removeImportRow(i)} disabled=${importRows.length===1} title="削除" style=${{background:"none",border:"none",color:"var(--red)",cursor:"pointer",fontSize:16}}>×</button>
+                </div>
+              `)}
+              <div style=${{display:"flex",gap:8,marginTop:8}}>
+                <button style=${{fontSize:12.5,background:"none",border:"1px solid var(--border)",borderRadius:8,padding:"6px 14px",cursor:"pointer",fontFamily:"inherit"}} onClick=${addImportRow}>＋ 行を追加</button>
+                <button class="btn" onClick=${submitImport} disabled=${importing}>${importing ? "登録中..." : "まとめて登録する"}</button>
+                ${importMsg && html`<span style=${{fontSize:12,color:"var(--green)",alignSelf:"center"}}>${importMsg}</span>`}
+              </div>
+            </div>
+          `}
+
+          <div style=${{display:"grid",gridTemplateColumns: sessionMode ? "1fr 1fr 1fr" : "1fr 1fr",gap:20,alignItems:"start"}}>
             <div class="card">
               <div class="card-label">📝 コーチングログを記録</div>
               <label class="lbl">実施日</label>
@@ -406,6 +474,20 @@ function StudentMain({ student, onNoteSaved }) {
               <button class="btn" onClick=${saveNote} disabled=${saving || !content.trim()}>${saving ? "保存中..." : "保存する"}</button>
               ${savedMsg && html`<div style=${{fontSize:12,color:"var(--green)",marginTop:8}}>${savedMsg}</div>`}
             </div>
+
+            ${sessionMode && html`
+              <div class="card" style=${{border:"1.5px solid var(--accent)"}}>
+                <div class="card-label">🤖 AIコーチングアシスタント</div>
+                <div style=${{fontSize:11.5,color:"var(--sub)",marginBottom:10}}>生徒の記録・前回の約束事項・今書いているメモをもとに、次に聞くとよい質問を提案します</div>
+                <button class="btn" onClick=${loadSuggestions} disabled=${suggestLoading}>${suggestLoading ? "考え中..." : (suggestedOnce ? "提案を更新" : "質問の提案をもらう")}</button>
+                ${suggestions.length > 0 && html`
+                  <ul style=${{marginTop:12,paddingLeft:18,fontSize:13,lineHeight:1.9}}>
+                    ${suggestions.map((s, i) => html`<li key=${i}>${s}</li>`)}
+                  </ul>
+                `}
+              </div>
+            `}
+
             <div class="card">
               <div class="card-label">🗂 コーチング履歴</div>
               ${detail.notes.length === 0 && html`<div style=${{fontSize:13,color:"var(--sub)"}}>まだ記録がありません</div>`}
