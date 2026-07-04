@@ -1848,7 +1848,26 @@ function saveSettings(studentEmail, body) {
 // 自動トリガー
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+// 全生徒ループの前に5シートを1回だけ読み込み、生徒ごとの分をO(1)で取り出せる
+// 関数を返す。buildStudentContextを生徒数ぶん呼んでも各シートの再読み込みが
+// 発生しないようにするため（morningScheduleNotify/hourlyReminder/nightlyCoachMessage用）
+function preloadContextBundles() {
+  const logs = groupBy(sheetToObjects(getSheet("DailyLog")), "student_email");
+  const monthlySummaries = groupBy(sheetToObjects(getSheet("MonthlySummary")), "student_email");
+  const reports = groupBy(sheetToObjects(getSheet("Reports")), "student_email");
+  const coachingNotes = groupBy(sheetToObjects(getCoachingNotesSheet()), "student_email");
+  const chatworkMessages = groupBy(sheetToObjects(getChatworkMessagesSheet()), "student_email");
+  return (email) => ({
+    logs: logs.get(email) || [],
+    monthlySummaries: monthlySummaries.get(email) || [],
+    reports: reports.get(email) || [],
+    coachingNotes: coachingNotes.get(email) || [],
+    chatworkMessages: chatworkMessages.get(email) || []
+  });
+}
+
 function morningScheduleNotify() {
+  const getContextBundle = preloadContextBundles();
   sheetToObjects(getSheet("Users")).filter(u => u.is_active.toUpperCase() === "TRUE").forEach(user => {
     try {
       if (!user.line_user_id) return;
@@ -1856,7 +1875,7 @@ function morningScheduleNotify() {
       const apiKey = PropertiesService.getScriptProperties().getProperty("CLAUDE_API_KEY");
       if (!apiKey) return;
 
-      const ctx = buildStudentContext(user.student_email, user);
+      const ctx = buildStudentContext(user.student_email, user, getContextBundle(user.student_email));
       const recentMsgs = getRecentCoachMessages(user.student_email, 5);
       const hour = new Date().getHours();
 
@@ -1897,6 +1916,7 @@ function hourlyReminder() {
   // 21時以降はレポート・夜のコーチメッセージの時間帯なのでリマインダーは送らない
   if (hour >= 21) return;
   const timeBlock = String(hour).padStart(2, "0") + ":00";
+  const getContextBundle = preloadContextBundles();
   sheetToObjects(getSheet("Users")).filter(u => u.is_active.toUpperCase() === "TRUE").forEach(user => {
     const start = Number(user.notify_start) || 7;
     const end = Number(user.notify_end) || 23;
@@ -1934,7 +1954,7 @@ function hourlyReminder() {
             ? "今日はまだ1件も記録していない"
             : `今日すでに${todayLogs.length}件記録済み（${todayLogs.map(l => l.time_block + " " + l.task).join("、")}）、直近の記録から${hoursWithoutLog}時間経過`;
 
-          const ctx = buildStudentContext(user.student_email, user);
+          const ctx = buildStudentContext(user.student_email, user, getContextBundle(user.student_email));
           const recentMsgs = getRecentCoachMessages(user.student_email, 3);
 
           const prompt = `あなたは${user.name}の教育コーチです。以下の情報を踏まえて、記録を促すごく短い一言を送ってください。
@@ -2055,14 +2075,16 @@ function nightlyCoachMessage() {
   const apiKey = PropertiesService.getScriptProperties().getProperty("CLAUDE_API_KEY");
   if (!apiKey) return;
 
+  const getContextBundle = preloadContextBundles();
   sheetToObjects(getSheet("Users")).filter(u => u.is_active.toUpperCase() === "TRUE").forEach(user => {
     try {
       if (!user.line_user_id) return;
+      const bundle = getContextBundle(user.student_email);
       // 今日のレポートがある場合のみ送る
-      const report = sheetToObjects(getSheet("Reports")).find(r => r.student_email === user.student_email && r.date === today);
+      const report = bundle.reports.find(r => r.date === today);
       if (!report) return;
 
-      const ctx = buildStudentContext(user.student_email, user);
+      const ctx = buildStudentContext(user.student_email, user, bundle);
       const recentMsgs = getRecentCoachMessages(user.student_email, 5);
       const streak = Number(user.streak || 0);
       const coachPrompt = `あなたは${user.name}の友人でもある教育コーチです。1時間前にAIレポート（スコアと分析）は既に送信済みです。それとは別の、1日の終わりの人間らしい一言を送ってください。
@@ -2469,12 +2491,19 @@ function getCachedCalendar(studentEmail, dateStr) {
 // 生徒コンテキスト構築（全プロンプト共通）
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-function buildStudentContext(studentEmail, user) {
+// preloaded: { logs, monthlySummaries, reports, coachingNotes, chatworkMessages }（すべてsheetToObjects形式、
+// 対象生徒に絞り込み済みの配列）を呼び出し元が既に読み込んでいる場合はそれを渡すと、
+// このシート全体の再読み込みをスキップする。朝・夜・毎時のバッチ処理のように
+// 全生徒分をループする場面で、生徒ごとに5つのシートを読み直す（N×5回）のを防ぐため。
+// 単発呼び出し（コーチCRMのAI予習サマリー等）はpreloadedなしで従来通り動く
+function buildStudentContext(studentEmail, user, preloaded) {
   const today = formatDate(new Date());
 
   // 直近14日の生ログ
   const fourteenDaysAgo = formatDate(new Date(Date.now() - 14 * 86400000));
-  const allLogs = sheetToObjects(getSheet("DailyLog")).filter(l => l.student_email === studentEmail);
+  const allLogs = preloaded && preloaded.logs
+    ? preloaded.logs
+    : sheetToObjects(getSheet("DailyLog")).filter(l => l.student_email === studentEmail);
   const recentLogs = allLogs.filter(l => l.date >= fourteenDaysAgo);
   const logsByDay = {};
   recentLogs.forEach(l => {
@@ -2492,18 +2521,20 @@ function buildStudentContext(studentEmail, user) {
     .join("\n") || "記録なし";
 
   // 月次サマリー（全期間・古い順）
-  const monthlySummaries = sheetToObjects(getSheet("MonthlySummary"))
-    .filter(r => r.student_email === studentEmail)
-    .sort((a,b) => a.month > b.month ? 1 : -1);
+  const monthlySummaries = (preloaded && preloaded.monthlySummaries
+    ? preloaded.monthlySummaries
+    : sheetToObjects(getSheet("MonthlySummary")).filter(r => r.student_email === studentEmail)
+  ).sort((a,b) => a.month > b.month ? 1 : -1);
   const summariesText = monthlySummaries.length > 0
     ? monthlySummaries.map(r => `【${r.month}】\n${r.summary}`).join("\n\n")
     : "まだ月次サマリーなし（入会1ヶ月未満）";
 
   // 直近30日のレポート履歴（月次サマリーを補完）
   const thirtyDaysAgo = formatDate(new Date(Date.now() - 30 * 86400000));
-  const allReports = sheetToObjects(getSheet("Reports"))
-    .filter(r => r.student_email === studentEmail)
-    .sort((a,b) => b.date > a.date ? 1 : -1);
+  const allReports = (preloaded && preloaded.reports
+    ? preloaded.reports
+    : sheetToObjects(getSheet("Reports")).filter(r => r.student_email === studentEmail)
+  ).sort((a,b) => b.date > a.date ? 1 : -1);
   const recentReports = allReports.filter(r => r.date >= thirtyDaysAgo);
   const reportsText = recentReports.length > 0
     ? recentReports.map(r => `${r.date}: ${r.score}点 / 良：${r.highlights} / 改善：${r.improvement}`).join("\n")
@@ -2549,9 +2580,10 @@ function buildStudentContext(studentEmail, user) {
   // AIコーチはこれを踏まえてフォローアップする＝コーチングの続きを日々担う
   let coachingText = "まだコーチング記録なし";
   try {
-    const coachingNotes = sheetToObjects(getSheet("CoachingNotes") || getCoachingNotesSheet())
-      .filter(n => n.student_email === studentEmail)
-      .sort((a,b)=>b.date>a.date?1:-1).slice(0, 3);
+    const coachingNotes = (preloaded && preloaded.coachingNotes
+      ? preloaded.coachingNotes
+      : sheetToObjects(getSheet("CoachingNotes") || getCoachingNotesSheet()).filter(n => n.student_email === studentEmail)
+    ).sort((a,b)=>b.date>a.date?1:-1).slice(0, 3);
     if (coachingNotes.length > 0) {
       coachingText = coachingNotes.map(n =>
         `【${n.date}】${n.content}` +
@@ -2565,10 +2597,10 @@ function buildStudentContext(studentEmail, user) {
   // 面談記録だけでは拾えない、日常の言葉遣いや悩みの温度感をAIが把握するために使う
   let chatworkText = "まだ連携なし";
   try {
-    const messages = sheetToObjects(getChatworkMessagesSheet())
-      .filter(m => m.student_email === studentEmail)
-      .sort((a,b)=>b.send_time>a.send_time?1:-1).slice(0, 15)
-      .reverse();
+    const messages = (preloaded && preloaded.chatworkMessages
+      ? preloaded.chatworkMessages
+      : sheetToObjects(getChatworkMessagesSheet()).filter(m => m.student_email === studentEmail)
+    ).sort((a,b)=>b.send_time>a.send_time?1:-1).slice(0, 15).reverse();
     if (messages.length > 0) {
       chatworkText = messages.map(m => `${m.send_time} ${m.sender_name}: ${m.body}`).join("\n");
     }
