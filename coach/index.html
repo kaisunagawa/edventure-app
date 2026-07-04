@@ -68,6 +68,24 @@ async function api(action, params = {}) {
   try { const r = await fetch(url.toString(), { redirect: "follow" }); return await r.json(); }
   catch { return { ok: false, error: "network" }; }
 }
+// POSTはボディが大きくなり得る操作（ファイルアップロード等）用。
+// GAS未対応環境の負荷を避けるためtext/plainで送る
+async function apiPost(action, body = {}) {
+  try {
+    const r = await fetch(GAS_URL, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain" },
+      body: JSON.stringify({ action, coachEmail: COACH_EMAIL, ...body })
+    });
+    return await r.json();
+  } catch { return { ok: false, error: "network" }; }
+}
+const fileToBase64 = file => new Promise((resolve, reject) => {
+  const reader = new FileReader();
+  reader.onload = () => resolve(reader.result.split(",")[1]);
+  reader.onerror = reject;
+  reader.readAsDataURL(file);
+});
 
 const fmtDate = d => {
   const dt = new Date(String(d).substring(0,10) + "T00:00:00");
@@ -167,6 +185,9 @@ function Sidebar({ students, selectedEmail, onSelect, onLogout, coach }) {
                   <div style=${{fontSize:13.5,fontWeight:700,color:"var(--text)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>${s.nickname||s.name}</div>
                   <div style=${{fontSize:11,fontWeight:600,color:agoColor}}>${agoText}</div>
                 </div>
+                ${s.contractDaysLeft !== null && s.contractDaysLeft <= 30 && html`
+                  <div title="契約終了まで残り少ない" style=${{fontSize:9,fontWeight:700,color:"#fff",background:"var(--red)",borderRadius:20,padding:"2px 6px",flexShrink:0}}>残${s.contractDaysLeft}日</div>
+                `}
               </div>
             </button>
           `;
@@ -179,7 +200,7 @@ function Sidebar({ students, selectedEmail, onSelect, onLogout, coach }) {
 
 // ── メイン: 選択中の生徒の詳細（タブ切り替え） ──
 function StudentMain({ student, onNoteSaved }) {
-  const [tab, setTab] = useState("overview"); // overview | history | notes
+  const [tab, setTab] = useState("overview"); // overview | history | notes | profile
   const [detail, setDetail] = useState(null);
   const [prep, setPrep] = useState(null);
   const [prepLoading, setPrepLoading] = useState(false);
@@ -190,9 +211,11 @@ function StudentMain({ student, onNoteSaved }) {
   const [saving, setSaving] = useState(false);
   const [savedMsg, setSavedMsg] = useState("");
 
+  const reloadDetail = () => api("coachGetStudentDetail", { targetEmail: student.email }).then(r => { if (r.ok) setDetail(r.data); });
+
   useEffect(() => {
     setDetail(null); setPrep(null); setTab("overview");
-    api("coachGetStudentDetail", { targetEmail: student.email }).then(r => { if (r.ok) setDetail(r.data); });
+    reloadDetail();
   }, [student.email]);
 
   const loadPrep = () => {
@@ -234,6 +257,7 @@ function StudentMain({ student, onNoteSaved }) {
           <button class=${"tab"+(tab==="overview"?" on":"")} onClick=${()=>setTab("overview")}>概要</button>
           <button class=${"tab"+(tab==="history"?" on":"")} onClick=${()=>setTab("history")}>記録・レポート履歴</button>
           <button class=${"tab"+(tab==="notes"?" on":"")} onClick=${()=>setTab("notes")}>コーチングログ</button>
+          <button class=${"tab"+(tab==="profile"?" on":"")} onClick=${()=>setTab("profile")}>プロフィール・契約</button>
         </div>
       </div>
 
@@ -369,6 +393,143 @@ function StudentMain({ student, onNoteSaved }) {
             </div>
           </div>
         `}
+
+        ${detail && tab==="profile" && html`<${ProfileTab} student=${student} detail=${detail} onReload=${reloadDetail}/>`}
+      </div>
+    </div>
+  `;
+}
+
+// ── プロフィール・契約タブ ──
+const PAYMENT_TYPES = [{v:"lump",l:"一括払い"},{v:"installment",l:"分割払い"}];
+
+function ProfileTab({ student, detail, onReload }) {
+  const p = detail.profile || {};
+  const [form, setForm] = useState({
+    birthdate: p.birthdate || "", address: p.address || "", phone: p.phone || "",
+    occupation: p.occupation || "", profile_notes: p.profile_notes || "",
+    contract_start: p.contract_start || "", contract_end: p.contract_end || "",
+    payment_type: p.payment_type || "lump", contract_amount: p.contract_amount || "",
+    installment_count: p.installment_count || ""
+  });
+  const [saving, setSaving] = useState(false);
+  const [savedMsg, setSavedMsg] = useState("");
+  const [uploading, setUploading] = useState(false);
+  const [fileNote, setFileNote] = useState("");
+  const fileInputRef = useRef(null);
+
+  useEffect(() => {
+    setForm({
+      birthdate: p.birthdate || "", address: p.address || "", phone: p.phone || "",
+      occupation: p.occupation || "", profile_notes: p.profile_notes || "",
+      contract_start: p.contract_start || "", contract_end: p.contract_end || "",
+      payment_type: p.payment_type || "lump", contract_amount: p.contract_amount || "",
+      installment_count: p.installment_count || ""
+    });
+  }, [student.email]);
+
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+  const save = async () => {
+    setSaving(true);
+    const r = await apiPost("coachSaveProfile", { targetEmail: student.email, ...form });
+    setSavedMsg(r.ok ? "保存しました" : "保存に失敗しました");
+    if (r.ok) onReload();
+    setSaving(false);
+    setTimeout(() => setSavedMsg(""), 2500);
+  };
+
+  const age = form.birthdate ? Math.floor((Date.now() - new Date(form.birthdate)) / (365.25*86400000)) : null;
+  const contractDaysLeft = form.contract_end ? Math.ceil((new Date(form.contract_end) - new Date()) / 86400000) : null;
+
+  const onFileChosen = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    if (file.size > 15 * 1024 * 1024) { alert("15MBまでのファイルに対応しています"); return; }
+    setUploading(true);
+    try {
+      const base64 = await fileToBase64(file);
+      const r = await apiPost("coachUploadFile", { targetEmail: student.email, fileName: file.name, mimeType: file.type, fileData: base64, note: fileNote.trim() });
+      if (r.ok) { setFileNote(""); onReload(); }
+      else alert("アップロードに失敗しました: " + (r.error || ""));
+    } catch (err) { alert("アップロードに失敗しました"); }
+    setUploading(false);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
+  const deleteFile = async (fileId) => {
+    if (!confirm("このファイルを削除しますか？")) return;
+    const r = await apiPost("coachDeleteFile", { targetEmail: student.email, file_id: fileId });
+    if (r.ok) onReload();
+  };
+
+  return html`
+    <div style=${{display:"grid",gridTemplateColumns:"1fr 1fr",gap:20,alignItems:"start"}}>
+      <div class="card">
+        <div class="card-label">👤 プロフィール</div>
+        <label class="lbl">生年月日${age !== null && html` <span style=${{color:"var(--accent)",fontWeight:700}}>（${age}歳）</span>`}</label>
+        <input type="date" class="inp" value=${form.birthdate} onChange=${e=>set("birthdate", e.target.value)} style=${{marginBottom:12}}/>
+        <label class="lbl">お住まい</label>
+        <input class="inp" value=${form.address} onChange=${e=>set("address", e.target.value)} placeholder="例：東京都〇〇区" style=${{marginBottom:12}}/>
+        <label class="lbl">電話番号</label>
+        <input class="inp" value=${form.phone} onChange=${e=>set("phone", e.target.value)} placeholder="例：090-1234-5678" style=${{marginBottom:12}}/>
+        <label class="lbl">職業</label>
+        <input class="inp" value=${form.occupation} onChange=${e=>set("occupation", e.target.value)} placeholder="例：会社員、経営者、学生など" style=${{marginBottom:12}}/>
+        <label class="lbl">プロフィールメモ（性格・背景など自由記述）</label>
+        <textarea class="txa" value=${form.profile_notes} onChange=${e=>set("profile_notes", e.target.value)} placeholder="コーチングに役立つ背景情報を自由に" style=${{marginBottom:0}}/>
+      </div>
+
+      <div>
+        <div class="card">
+          <div class="card-label">📄 契約情報</div>
+          <div style=${{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:12}}>
+            <div>
+              <label class="lbl">契約開始日</label>
+              <input type="date" class="inp" value=${form.contract_start} onChange=${e=>set("contract_start", e.target.value)}/>
+            </div>
+            <div>
+              <label class="lbl">契約終了日${contractDaysLeft !== null && html`
+                <span style=${{color:contractDaysLeft<=30?"var(--red)":contractDaysLeft<=60?"var(--amber)":"var(--sub)",fontWeight:700}}> （残り${contractDaysLeft}日）</span>
+              `}</label>
+              <input type="date" class="inp" value=${form.contract_end} onChange=${e=>set("contract_end", e.target.value)}/>
+            </div>
+          </div>
+          <label class="lbl">支払い方法</label>
+          <select class="inp" value=${form.payment_type} onChange=${e=>set("payment_type", e.target.value)} style=${{marginBottom:12}}>
+            ${PAYMENT_TYPES.map(t => html`<option key=${t.v} value=${t.v}>${t.l}</option>`)}
+          </select>
+          <div style=${{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:14}}>
+            <div>
+              <label class="lbl">契約金額（円）</label>
+              <input class="inp" type="number" value=${form.contract_amount} onChange=${e=>set("contract_amount", e.target.value)} placeholder="例：480000"/>
+            </div>
+            ${form.payment_type === "installment" && html`
+              <div>
+                <label class="lbl">分割回数</label>
+                <input class="inp" type="number" value=${form.installment_count} onChange=${e=>set("installment_count", e.target.value)} placeholder="例：12"/>
+              </div>
+            `}
+          </div>
+          <button class="btn" onClick=${save} disabled=${saving}>${saving ? "保存中..." : "保存する"}</button>
+          ${savedMsg && html`<span style=${{fontSize:12,color:"var(--green)",marginLeft:10}}>${savedMsg}</span>`}
+        </div>
+
+        <div class="card">
+          <div class="card-label">📎 契約書ファイル</div>
+          <input class="inp" value=${fileNote} onChange=${e=>setFileNote(e.target.value)} placeholder="ファイルのメモ（任意・例：初回契約書）" style=${{marginBottom:10}}/>
+          <input ref=${fileInputRef} type="file" onChange=${onFileChosen} disabled=${uploading} style=${{fontSize:12.5,marginBottom:14}}/>
+          ${uploading && html`<div style=${{fontSize:12,color:"var(--sub)"}}>アップロード中...</div>`}
+          ${detail.files.length === 0 && html`<div style=${{fontSize:13,color:"var(--sub)"}}>まだファイルがありません</div>`}
+          ${detail.files.map((f,i) => html`
+            <div key=${f.file_id} style=${{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"9px 0",borderBottom:i<detail.files.length-1?"1px solid var(--border)":"none"}}>
+              <div style=${{minWidth:0}}>
+                <a href=${f.file_url} target="_blank" style=${{fontSize:13,color:"var(--accent)",fontWeight:600,textDecoration:"none"}}>📄 ${f.file_name}</a>
+                <div style=${{fontSize:11,color:"var(--sub)",marginTop:2}}>${f.note ? f.note + " · " : ""}${f.uploaded_at}</div>
+              </div>
+              <button onClick=${()=>deleteFile(f.file_id)} style=${{background:"none",border:"none",color:"var(--red)",fontSize:11,cursor:"pointer",fontFamily:"inherit",flexShrink:0}}>削除</button>
+            </div>
+          `)}
+        </div>
       </div>
     </div>
   `;

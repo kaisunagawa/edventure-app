@@ -134,6 +134,9 @@ function doPost(e) {
       case "saveSettings": return jsonResponse(saveSettings(studentEmail, body));
       case "saveDiary":    return jsonResponse(saveDiary(studentEmail, body));
       case "syncCalendar": return jsonResponse(syncCalendar(studentEmail, body));
+      case "coachSaveProfile":     return jsonResponse(coachSaveProfile(body.coachEmail, body));
+      case "coachUploadFile":      return jsonResponse(coachUploadFile(body.coachEmail, body));
+      case "coachDeleteFile":      return jsonResponse(coachDeleteFile(body.coachEmail, body));
       default: return jsonResponse({ ok: false, error: "Unknown action" });
     }
   } catch (err) {
@@ -671,6 +674,7 @@ function coachGetStudents(coachEmail) {
   const allLogs = sheetToObjects(getSheet("DailyLog"));
   const allReports = sheetToObjects(getSheet("Reports"));
   const allNotes = sheetToObjects(getCoachingNotesSheet());
+  const allProfiles = sheetToObjects(getStudentProfileSheet());
 
   const data = students.map(u => {
     const logs = allLogs.filter(l => l.student_email === u.student_email);
@@ -678,6 +682,9 @@ function coachGetStudents(coachEmail) {
     const reports = allReports.filter(r => r.student_email === u.student_email).sort((a,b)=>b.date>a.date?1:-1);
     const notes = allNotes.filter(n => n.student_email === u.student_email).sort((a,b)=>b.date>a.date?1:-1);
     const status = statuses[u.student_email];
+    const profile = allProfiles.find(p => p.student_email === u.student_email);
+    const contractEnd = profile ? profile.contract_end : "";
+    const daysToEnd = contractEnd ? Math.ceil((new Date(contractEnd) - new Date()) / 86400000) : null;
     return {
       email: u.student_email,
       name: u.name,
@@ -688,7 +695,9 @@ function coachGetStudents(coachEmail) {
       latestReport: reports[0] ? { date: reports[0].date, score: Number(reports[0].score) } : null,
       statusScore: status ? status.score : 0,
       lastCoachingDate: notes[0] ? notes[0].date : null,
-      goal: u.goal || ""
+      goal: u.goal || "",
+      contractEnd: contractEnd || "",
+      contractDaysLeft: daysToEnd
     };
   });
   // 記録が止まっている生徒を上に（要フォロー順）
@@ -725,11 +734,16 @@ function coachGetStudentDetail(coachEmail, studentEmail) {
     .filter(n => n.student_email === studentEmail)
     .sort((a,b)=>b.date>a.date?1:-1).slice(0, 20);
   const status = computeAllStatuses()[studentEmail] || null;
+  const profile = getStudentProfile(studentEmail);
+  const files = sheetToObjects(getContractFilesSheet())
+    .filter(f => f.student_email === studentEmail)
+    .sort((a,b)=>b.uploaded_at>a.uploaded_at?1:-1);
 
   return { ok: true, data: {
     name: user.name,
     nickname: user.nickname || user.name,
     avatar: user.avatar || "🦊",
+    email: user.student_email,
     streak: Number(user.streak || 0),
     joined_at: user.joined_at || "",
     goals: [
@@ -741,7 +755,9 @@ function coachGetStudentDetail(coachEmail, studentEmail) {
     reports: reports,
     diaries: diaries,
     dailySummary: dailySummary,
-    notes: notes
+    notes: notes,
+    profile: profile || {},
+    files: files
   } };
 }
 
@@ -803,6 +819,116 @@ ${lastNoteText}
   const result = JSON.parse(res.getContentText());
   if (!result.content || !result.content[0]) return { ok: false, error: "ai error" };
   return { ok: true, data: { summary: result.content[0].text.trim(), lastCoachingDate: lastNote ? lastNote.date : null } };
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// 生徒プロフィール・契約情報・契約書ファイル
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+function getStudentProfileSheet() {
+  let sheet = getSheet("StudentProfile");
+  if (!sheet) {
+    sheet = SpreadsheetApp.openById(SPREADSHEET_ID).insertSheet("StudentProfile");
+    sheet.appendRow(["student_email","birthdate","address","phone","occupation","profile_notes",
+      "contract_start","contract_end","payment_type","contract_amount","installment_count","updated_at"]);
+  }
+  return sheet;
+}
+
+function getContractFilesSheet() {
+  let sheet = getSheet("ContractFiles");
+  if (!sheet) {
+    sheet = SpreadsheetApp.openById(SPREADSHEET_ID).insertSheet("ContractFiles");
+    sheet.appendRow(["file_id","student_email","file_name","file_url","note","uploaded_at"]);
+  }
+  return sheet;
+}
+
+// 契約書などの生徒ファイルを保存するDriveフォルダ（無ければ作成）。
+// スプレッドシートと同じマイドライブ内に置き、コーチのGoogleアカウント
+// 権限で読める場所に集約する
+function getContractFolder() {
+  const folderName = "JIROKU_契約書";
+  const folders = DriveApp.getFoldersByName(folderName);
+  if (folders.hasNext()) return folders.next();
+  return DriveApp.createFolder(folderName);
+}
+
+function getStudentProfile(studentEmail) {
+  const rows = sheetToObjects(getStudentProfileSheet());
+  return rows.find(r => r.student_email === studentEmail) || null;
+}
+
+function coachSaveProfile(coachEmail, body) {
+  if (!verifyCoach(coachEmail)) return { ok: false, error: "not a coach" };
+  const targetEmail = String(body.targetEmail || "");
+  if (!coachOwnsStudent(coachEmail, targetEmail)) return { ok: false, error: "not your student" };
+
+  const sheet = getStudentProfileSheet();
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0];
+  const emailIdx = headers.indexOf("student_email");
+  const fields = ["birthdate","address","phone","occupation","profile_notes","contract_start","contract_end","payment_type","contract_amount","installment_count"];
+
+  const now = new Date().toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" });
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][emailIdx]) === targetEmail) {
+      fields.forEach(f => {
+        if (body[f] !== undefined) sheet.getRange(i + 1, headers.indexOf(f) + 1).setValue(body[f]);
+      });
+      sheet.getRange(i + 1, headers.indexOf("updated_at") + 1).setValue(now);
+      return { ok: true };
+    }
+  }
+  const row = headers.map(h => {
+    if (h === "student_email") return targetEmail;
+    if (h === "updated_at") return now;
+    return body[h] !== undefined ? body[h] : "";
+  });
+  sheet.appendRow(row);
+  return { ok: true };
+}
+
+// 契約書ファイルのアップロード（POST、base64）。GETのURLパラメータでは
+// ファイル本体を送れないためdoPost経由。Driveに保存しURLをシートに記録する
+function coachUploadFile(coachEmail, body) {
+  if (!verifyCoach(coachEmail)) return { ok: false, error: "not a coach" };
+  const targetEmail = String(body.targetEmail || "");
+  if (!coachOwnsStudent(coachEmail, targetEmail)) return { ok: false, error: "not your student" };
+  if (!body.fileData || !body.fileName) return { ok: false, error: "missing file" };
+
+  try {
+    const bytes = Utilities.base64Decode(body.fileData);
+    const blob = Utilities.newBlob(bytes, body.mimeType || "application/octet-stream", body.fileName);
+    const folder = getContractFolder();
+    const file = folder.createFile(blob);
+    file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+
+    const sheet = getContractFilesSheet();
+    const fileId = "file_" + Date.now();
+    const now = new Date().toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" });
+    sheet.appendRow([fileId, targetEmail, body.fileName, file.getUrl(), String(body.note || "").slice(0, 300), now]);
+    return { ok: true, data: { file_id: fileId, file_name: body.fileName, file_url: file.getUrl(), uploaded_at: now, note: body.note || "" } };
+  } catch (e) {
+    return { ok: false, error: "upload failed: " + e.toString() };
+  }
+}
+
+function coachDeleteFile(coachEmail, body) {
+  if (!verifyCoach(coachEmail)) return { ok: false, error: "not a coach" };
+  const targetEmail = String(body.targetEmail || "");
+  if (!coachOwnsStudent(coachEmail, targetEmail)) return { ok: false, error: "not your student" };
+  const sheet = getContractFilesSheet();
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0];
+  const idIdx = headers.indexOf("file_id");
+  for (let i = data.length - 1; i >= 1; i--) {
+    if (String(data[i][idIdx]) === String(body.file_id)) {
+      sheet.deleteRow(i + 1);
+      return { ok: true };
+    }
+  }
+  return { ok: false, error: "not found" };
 }
 
 function getMessages(studentEmail) {
@@ -1936,7 +2062,9 @@ function setupSheets() {
     "Journal": ["date","student_email","diary","updated_at","auto_summary"],
     "TimerQueue": ["student_email","end_time","label","notified","created_at"],
     "Achievements": ["date","student_email","nickname","avatar","message","created_at"],
-    "CoachingNotes": ["note_id","coach_email","student_email","date","content","next_theme","promises","created_at"]
+    "CoachingNotes": ["note_id","coach_email","student_email","date","content","next_theme","promises","created_at"],
+    "StudentProfile": ["student_email","birthdate","address","phone","occupation","profile_notes","contract_start","contract_end","payment_type","contract_amount","installment_count","updated_at"],
+    "ContractFiles": ["file_id","student_email","file_name","file_url","note","uploaded_at"]
   };
   Object.entries(sheets).forEach(([name, headers]) => {
     let s = ss.getSheetByName(name);
