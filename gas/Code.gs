@@ -7,6 +7,11 @@ const APP_URL = "https://kaisunagawa.github.io/edventure-app/";
 const CLAUDE_API_KEY = PropertiesService.getScriptProperties().getProperty("CLAUDE_API_KEY");
 const LINE_CHANNEL_TOKEN = PropertiesService.getScriptProperties().getProperty("LINE_CHANNEL_TOKEN");
 
+// 生徒向けメッセージ共通の文末・絵文字ルール（コーチの声のトーンを統一する）
+const EMOJI_STYLE = `- 文末は「。」で終えるより「！」「？」や絵文字で終える方が自然。硬い「。」止めを多用しない
+- 絵文字は次の中から優先して使う: 👍 🔥 👏 🙌 👊 💪 🫵 と、ポジティブな表情の絵文字（😊 😆 🤝 ✨ など）
+- 絵文字は文中ではなく文末に置く。1メッセージ1〜3個まで`;
+
 // XP閾値テーブル（非線形）: インデックス = レベル-1
 const XP_THRESHOLDS = [0, 500, 1200, 2200, 3500, 5200, 7500, 10000, 13000, 17000, 21000, 25500, 30500, 36000, 42000, 49000];
 
@@ -819,7 +824,8 @@ ${recentMsgs}
 - 全レポート履歴と直近14日のログを踏まえて、具体的なエピソードや数字に触れる
 - 過去の記録・メモ・出来事は積極的に引用し、目標と結びつけてコーチングする（本人の言葉を使うと刺さる）。ただし引用は元のメモの意味・文脈を正確に保つこと。意味を取り違えたり不自然なたとえになるくらいなら、その引用は使わない
 - 今日のカレンダー予定がある場合は、目標との関係を意識しつつ今日の過ごし方に軽く触れる
-- 3文以内。絵文字1個まで`;
+- 3文以内
+${EMOJI_STYLE}`;
 
       const res = UrlFetchApp.fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
@@ -895,7 +901,8 @@ ${recentMsgs}
 - 直近のコーチメッセージと同じ言い回しは使わない
 - 「〇〇さんへ」「〇〇へのメッセージ案：」のような宛名・見出し・ラベル・説明は一切書かない。生徒にそのまま送るLINE本文だけを出力する
 - URLやリンクは本文に含めない（アプリ側で自動的に案内が付くため）
-- 絵文字1個まで`;
+${EMOJI_STYLE}
+- ただし1文だけの短文なので絵文字は1個まで`;
 
           const res = UrlFetchApp.fetch("https://api.anthropic.com/v1/messages", {
             method: "POST",
@@ -1023,7 +1030,8 @@ ${recentMsgs}
 - 敬語とタメ語を自然に混ぜる。友人が寝る前に送るLINEのような温度感
 - 「---」「【】」「〇〇さんへ」などの見出し・宛名は絶対使わない
 - 直近のコーチメッセージと同じ言い回し・構成は絶対に繰り返さない
-- 2文以内。絵文字1個まで`;
+- 2文以内
+${EMOJI_STYLE}`;
 
       const res = UrlFetchApp.fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
@@ -1111,6 +1119,7 @@ ${logsText}
 - 「〇〇さん」「お疲れ様です」などの宛名・挨拶は絶対に書かない。本文から始める
 - 毎日同じ書き出しにならないよう、直近レポートと違う切り口で書く
 - 抽象的な褒め言葉より、今日のログの具体的な内容・数字に触れる
+- 励ましの文末は「。」より「！」の方が自然。highlightsとactionには 👍 🔥 👏 🙌 👊 💪 🫵 やポジティブな表情の絵文字を文末に1個添えてよい（全フィールド合計2個まで）
 
 以下のJSON形式のみで返してください（説明文不要）。breakdownの5項目の合計は必ずscoreと一致させること：
 {
