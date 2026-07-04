@@ -1865,12 +1865,14 @@ function preloadContextBundles() {
   const reports = groupBy(sheetToObjects(getSheet("Reports")), "student_email");
   const coachingNotes = groupBy(sheetToObjects(getCoachingNotesSheet()), "student_email");
   const chatworkMessages = groupBy(sheetToObjects(getChatworkMessagesSheet()), "student_email");
+  const messages = groupBy(sheetToObjects(getSheet("Messages")), "student_email");
   return (email) => ({
     logs: logs.get(email) || [],
     monthlySummaries: monthlySummaries.get(email) || [],
     reports: reports.get(email) || [],
     coachingNotes: coachingNotes.get(email) || [],
-    chatworkMessages: chatworkMessages.get(email) || []
+    chatworkMessages: chatworkMessages.get(email) || [],
+    messages: messages.get(email) || []
   });
 }
 
@@ -1883,8 +1885,9 @@ function morningScheduleNotify() {
       const apiKey = PropertiesService.getScriptProperties().getProperty("CLAUDE_API_KEY");
       if (!apiKey) return;
 
-      const ctx = buildStudentContext(user.student_email, user, getContextBundle(user.student_email));
-      const recentMsgs = getRecentCoachMessages(user.student_email, 5);
+      const bundle = getContextBundle(user.student_email);
+      const ctx = buildStudentContext(user.student_email, user, bundle);
+      const recentMsgs = getRecentCoachMessages(user.student_email, 5, bundle.messages);
       const hour = new Date().getHours();
 
       const prompt = `あなたは${user.name}の友人でもある教育コーチです。以下の情報をすべて把握した上で、今朝の個別メッセージを送ってください。
@@ -1914,7 +1917,9 @@ ${EMOJI_STYLE}`;
       });
       const result = JSON.parse(res.getContentText());
       if (!result.content || !result.content[0]) return;
-      sendLineMessage(user.line_user_id, "🌅 おはようございます、" + (user.nickname || user.name) + "さん！\n\n" + formatForLine(stripSalutation(result.content[0].text)));
+      const bodyText = stripSalutation(result.content[0].text);
+      logCoachMessage(user.student_email, bodyText);
+      sendLineMessage(user.line_user_id, "🌅 おはようございます、" + (user.nickname || user.name) + "さん！\n\n" + formatForLine(bodyText));
     } catch (err) { Logger.log("morningCoach error: " + err); }
   });
 }
@@ -1962,8 +1967,9 @@ function hourlyReminder() {
             ? "今日はまだ1件も記録していない"
             : `今日すでに${todayLogs.length}件記録済み（${todayLogs.map(l => l.time_block + " " + l.task).join("、")}）、直近の記録から${hoursWithoutLog}時間経過`;
 
-          const ctx = buildStudentContext(user.student_email, user, getContextBundle(user.student_email));
-          const recentMsgs = getRecentCoachMessages(user.student_email, 3);
+          const bundle = getContextBundle(user.student_email);
+          const ctx = buildStudentContext(user.student_email, user, bundle);
+          const recentMsgs = getRecentCoachMessages(user.student_email, 3, bundle.messages);
 
           const prompt = `あなたは${user.name}の教育コーチです。以下の情報を踏まえて、記録を促すごく短い一言を送ってください。
 
@@ -1992,7 +1998,9 @@ ${EMOJI_STYLE}
           });
           const result = JSON.parse(res.getContentText());
           if (result.content && result.content[0]) {
-            sendLineMessage(user.line_user_id, stripSalutation(result.content[0].text).trim() + "\n📝 " + APP_URL);
+            const bodyText = stripSalutation(result.content[0].text).trim();
+            logCoachMessage(user.student_email, bodyText);
+            sendLineMessage(user.line_user_id, bodyText + "\n📝 " + APP_URL);
             return;
           }
         } catch(e) { Logger.log("hourlyCoach error: " + e); }
@@ -2093,7 +2101,7 @@ function nightlyCoachMessage() {
       if (!report) return;
 
       const ctx = buildStudentContext(user.student_email, user, bundle);
-      const recentMsgs = getRecentCoachMessages(user.student_email, 5);
+      const recentMsgs = getRecentCoachMessages(user.student_email, 5, bundle.messages);
       const streak = Number(user.streak || 0);
       const coachPrompt = `あなたは${user.name}の友人でもある教育コーチです。1時間前にAIレポート（スコアと分析）は既に送信済みです。それとは別の、1日の終わりの人間らしい一言を送ってください。
 
@@ -2123,7 +2131,9 @@ ${EMOJI_STYLE}`;
       });
       const result = JSON.parse(res.getContentText());
       if (result.content && result.content[0]) {
-        sendLineMessage(user.line_user_id, "🤖 習慣AIコーチより\n\n" + formatForLine(stripSalutation(result.content[0].text)));
+        const bodyText = stripSalutation(result.content[0].text);
+        logCoachMessage(user.student_email, bodyText);
+        sendLineMessage(user.line_user_id, "🤖 習慣AIコーチより\n\n" + formatForLine(bodyText));
       }
     } catch(e) { Logger.log("nightlyCoachMessage error: " + e); }
   });
@@ -2744,11 +2754,26 @@ function formatForLine(text) {
     .trim();
 }
 
-// 直近N件のLINEメッセージ（コーチ→生徒）を取得して繰り返し防止に使う
-function getRecentCoachMessages(studentEmail, limit) {
+// 朝・夜・毎時の自動メッセージをMessagesシートに記録する。
+// これを記録しないと getRecentCoachMessages が常に空を返し、プロンプトの
+// 「直近のメッセージと被らないように」という指示が効かず、毎回似た文面に
+// なってしまう（実際に「まずは1つ記録してみようか」が数時間おきに繰り返された）
+function logCoachMessage(studentEmail, content) {
+  try {
+    const sheet = getSheet("Messages");
+    const msgId = "msg_" + Date.now();
+    const now = new Date().toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" });
+    sheet.appendRow([msgId, studentEmail, content, "コーチ", "", "coach", now, "false"]);
+  } catch (e) { Logger.log("logCoachMessage error: " + e); }
+}
+
+// 直近N件のLINEメッセージ（コーチ→生徒）を取得して繰り返し防止に使う。
+// preloadedMessagesを渡せばMessagesシートの再読み込みをスキップする
+function getRecentCoachMessages(studentEmail, limit, preloadedMessages) {
   limit = limit || 5;
-  const msgs = sheetToObjects(getSheet("Messages"))
-    .filter(m => m.student_email === studentEmail && m.sender_role === "coach")
+  const allMsgs = preloadedMessages || sheetToObjects(getSheet("Messages")).filter(m => m.student_email === studentEmail);
+  const msgs = allMsgs
+    .filter(m => m.sender_role === "coach")
     .sort((a, b) => b.message_id > a.message_id ? 1 : -1)
     .slice(0, limit)
     .map(m => m.content);
