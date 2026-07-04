@@ -67,6 +67,7 @@ function doGet(e) {
       case "coachSaveNote":         result = coachSaveNote(e.parameter.coachEmail, e.parameter); break;
       case "coachPrepSummary":      result = coachPrepSummary(e.parameter.coachEmail, e.parameter.targetEmail); break;
       case "coachSyncStripeOne":    result = coachSyncStripeOne(e.parameter.coachEmail, e.parameter); break;
+      case "coachAddClient":       result = coachAddClient(e.parameter.coachEmail, e.parameter); break;
       case "sendMessage":  result = sendMessage(studentEmail, e.parameter); break;
       case "saveSettings": result = saveSettings(studentEmail, e.parameter); break;
       case "syncCalendar": result = syncCalendar(studentEmail, e.parameter); break;
@@ -652,10 +653,27 @@ function verifyCoach(coachEmail) {
   return sheetToObjects(getSheet("Coaches")).find(c => c.coach_email === coachEmail) || null;
 }
 
-// 担当チェック: コーチは自分の担当生徒のデータしか見られない
+// 担当チェック: コーチは自分の担当生徒のデータしか見られない。
+// JIROKUに登録済みならUsersシートで判定。まだ未登録でもコーチが手動で
+// クライアントとして追加していれば（StudentProfile.coach_email）担当と認める
 function coachOwnsStudent(coachEmail, studentEmail) {
   const user = sheetToObjects(getSheet("Users")).find(u => u.student_email === studentEmail);
-  return user && user.coach_email === coachEmail ? user : null;
+  if (user && user.coach_email === coachEmail) return user;
+
+  const profile = getStudentProfile(studentEmail);
+  if (profile && profile.coach_email === coachEmail) {
+    return {
+      student_email: studentEmail,
+      name: profile.name || studentEmail,
+      nickname: profile.name || studentEmail,
+      avatar: "🦊",
+      streak: 0,
+      goal: "", goal_deadline: "", goal2: "", goal_deadline2: "", goal3: "", goal_deadline3: "",
+      joined_at: "",
+      coach_email: coachEmail
+    };
+  }
+  return null;
 }
 
 function getCoachingNotesSheet() {
@@ -667,18 +685,21 @@ function getCoachingNotesSheet() {
   return sheet;
 }
 
-// 生徒一覧ダッシュボード: 担当生徒の状態を一目で
+// 生徒一覧ダッシュボード: 担当生徒の状態を一目で。
+// JIROKU利用中の生徒に加え、まだJIROKUに登録していないがコーチが
+// 手動で追加したクライアント（契約書・Stripe情報のみ）も一覧に含める
 function coachGetStudents(coachEmail) {
   if (!verifyCoach(coachEmail)) return { ok: false, error: "not a coach" };
-  const students = sheetToObjects(getSheet("Users"))
+  const jirokuUsers = sheetToObjects(getSheet("Users"))
     .filter(u => u.coach_email === coachEmail && u.is_active.toUpperCase() === "TRUE");
   const statuses = computeAllStatuses();
   const allLogs = sheetToObjects(getSheet("DailyLog"));
   const allReports = sheetToObjects(getSheet("Reports"));
   const allNotes = sheetToObjects(getCoachingNotesSheet());
   const allProfiles = sheetToObjects(getStudentProfileSheet());
+  const jirokuEmails = new Set(jirokuUsers.map(u => u.student_email));
 
-  const data = students.map(u => {
+  const data = jirokuUsers.map(u => {
     const logs = allLogs.filter(l => l.student_email === u.student_email);
     const lastLogDate = logs.length ? logs.map(l => l.date).sort().pop() : null;
     const reports = allReports.filter(r => r.student_email === u.student_email).sort((a,b)=>b.date>a.date?1:-1);
@@ -699,12 +720,82 @@ function coachGetStudents(coachEmail) {
       lastCoachingDate: notes[0] ? notes[0].date : null,
       goal: u.goal || "",
       contractEnd: contractEnd || "",
-      contractDaysLeft: daysToEnd
+      contractDaysLeft: daysToEnd,
+      joinedJiroku: true
     };
   });
+
+  // JIROKU未登録だがコーチが手動追加したクライアント
+  allProfiles
+    .filter(p => p.coach_email === coachEmail && !jirokuEmails.has(p.student_email))
+    .forEach(p => {
+      const notes = allNotes.filter(n => n.student_email === p.student_email).sort((a,b)=>b.date>a.date?1:-1);
+      const contractEnd = p.contract_end || "";
+      const daysToEnd = contractEnd ? Math.ceil((new Date(contractEnd) - new Date()) / 86400000) : null;
+      data.push({
+        email: p.student_email,
+        name: p.name || p.student_email,
+        nickname: p.name || p.student_email,
+        avatar: "🦊",
+        streak: 0,
+        lastLogDate: null,
+        latestReport: null,
+        statusScore: 0,
+        lastCoachingDate: notes[0] ? notes[0].date : null,
+        goal: "",
+        contractEnd: contractEnd || "",
+        contractDaysLeft: daysToEnd,
+        joinedJiroku: false
+      });
+    });
+
   // 記録が止まっている生徒を上に（要フォロー順）
   data.sort((a, b) => String(a.lastLogDate||"") > String(b.lastLogDate||"") ? 1 : -1);
   return { ok: true, data: data };
+}
+
+// JIROKU未登録のクライアントを手動でCRMに追加する（契約書・Stripe情報だけ先に管理したい場合）
+function coachAddClient(coachEmail, body) {
+  if (!verifyCoach(coachEmail)) return { ok: false, error: "not a coach" };
+  const email = String(body.email || "").trim().toLowerCase();
+  const name = String(body.name || "").trim();
+  if (!email || !name) return { ok: false, error: "email/name required" };
+
+  const existingUser = sheetToObjects(getSheet("Users")).find(u => u.student_email === email);
+  if (existingUser && existingUser.coach_email && existingUser.coach_email !== coachEmail) {
+    return { ok: false, error: "既に別のコーチが担当しています" };
+  }
+
+  const sheet = getStudentProfileSheet();
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0];
+  const emailIdx = headers.indexOf("student_email");
+  const coachIdx = headers.indexOf("coach_email");
+  const nameIdx = headers.indexOf("name");
+  const now = new Date().toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" });
+
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][emailIdx]) === email) {
+      const existingCoach = String(data[i][coachIdx] || "");
+      if (existingCoach && existingCoach !== coachEmail) {
+        return { ok: false, error: "既に別のコーチが担当しています" };
+      }
+      sheet.getRange(i + 1, coachIdx + 1).setValue(coachEmail);
+      if (!data[i][nameIdx]) sheet.getRange(i + 1, nameIdx + 1).setValue(name);
+      sheet.getRange(i + 1, headers.indexOf("updated_at") + 1).setValue(now);
+      return { ok: true };
+    }
+  }
+
+  const row = headers.map(h => {
+    if (h === "student_email") return email;
+    if (h === "coach_email") return coachEmail;
+    if (h === "name") return name;
+    if (h === "updated_at") return now;
+    return "";
+  });
+  sheet.appendRow(row);
+  return { ok: true };
 }
 
 // 生徒詳細: コーチング前の予習に必要な情報を時系列で
@@ -740,6 +831,7 @@ function coachGetStudentDetail(coachEmail, studentEmail) {
   const files = sheetToObjects(getContractFilesSheet())
     .filter(f => f.student_email === studentEmail)
     .sort((a,b)=>b.uploaded_at>a.uploaded_at?1:-1);
+  const joinedJiroku = !!sheetToObjects(getSheet("Users")).find(u => u.student_email === studentEmail);
 
   return { ok: true, data: {
     name: user.name,
@@ -748,6 +840,7 @@ function coachGetStudentDetail(coachEmail, studentEmail) {
     email: user.student_email,
     streak: Number(user.streak || 0),
     joined_at: user.joined_at || "",
+    joinedJiroku: joinedJiroku,
     goals: [
       { goal: user.goal, deadline: user.goal_deadline },
       { goal: user.goal2, deadline: user.goal_deadline2 },
@@ -831,9 +924,9 @@ function getStudentProfileSheet() {
   let sheet = getSheet("StudentProfile");
   if (!sheet) {
     sheet = SpreadsheetApp.openById(SPREADSHEET_ID).insertSheet("StudentProfile");
-    sheet.appendRow(["student_email","name","birthdate","gender","family","address","phone","occupation","profile_notes",
+    sheet.appendRow(["student_email","coach_email","name","birthdate","gender","family","address","phone","occupation","profile_notes",
       "contract_start","contract_end","payment_type","contract_amount","installment_count","updated_at",
-      "stripe_total_paid","stripe_currency","stripe_synced_at"]);
+      "stripe_email","stripe_total_paid","stripe_currency","stripe_synced_at"]);
   }
   return sheet;
 }
@@ -871,7 +964,7 @@ function coachSaveProfile(coachEmail, body) {
   const data = sheet.getDataRange().getValues();
   const headers = data[0];
   const emailIdx = headers.indexOf("student_email");
-  const fields = ["name","birthdate","gender","family","address","phone","occupation","profile_notes","contract_start","contract_end","payment_type","contract_amount","installment_count"];
+  const fields = ["name","birthdate","gender","family","address","phone","occupation","profile_notes","contract_start","contract_end","payment_type","contract_amount","installment_count","stripe_email"];
 
   const now = new Date().toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" });
   for (let i = 1; i < data.length; i++) {
@@ -1011,28 +1104,41 @@ function fetchStripeTotalPaid(email) {
   return { total, currency, customerId };
 }
 
-// 全生徒分をまとめてStripeと同期し、StudentProfileシートに記録する（日次トリガー）
+// 全生徒・全クライアント分をまとめてStripeと同期し、StudentProfileシートに記録する（日次トリガー）。
+// JIROKU利用者に加え、コーチが手動追加しただけ（coach_emailのみ設定）のクライアントも対象にする
 function syncStripeTotals() {
   const apiKey = PropertiesService.getScriptProperties().getProperty("STRIPE_SECRET_KEY");
   if (!apiKey) { Logger.log("STRIPE_SECRET_KEY が未設定"); return; }
 
-  const users = sheetToObjects(getSheet("Users")).filter(u => String(u.is_active).toUpperCase() === "TRUE");
+  const activeUserEmails = sheetToObjects(getSheet("Users")).filter(u => String(u.is_active).toUpperCase() === "TRUE").map(u => u.student_email);
   const sheet = getStudentProfileSheet();
   const data = sheet.getDataRange().getValues();
   const headers = data[0];
   const emailIdx = headers.indexOf("student_email");
+  const coachIdx = headers.indexOf("coach_email");
+  const stripeEmailIdx = headers.indexOf("stripe_email");
   const now = new Date().toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" });
 
-  users.forEach(u => {
+  const targets = new Set(activeUserEmails);
+  for (let i = 1; i < data.length; i++) {
+    if (data[i][coachIdx]) targets.add(String(data[i][emailIdx]));
+  }
+
+  targets.forEach(email => {
     try {
-      const result = fetchStripeTotalPaid(u.student_email);
-      if (!result) return;
       let rowIdx = -1;
+      let stripeSearchEmail = email;
       for (let i = 1; i < data.length; i++) {
-        if (String(data[i][emailIdx]) === u.student_email) { rowIdx = i + 1; break; }
+        if (String(data[i][emailIdx]) === email) {
+          rowIdx = i + 1;
+          if (data[i][stripeEmailIdx]) stripeSearchEmail = String(data[i][stripeEmailIdx]);
+          break;
+        }
       }
+      const result = fetchStripeTotalPaid(stripeSearchEmail);
+      if (!result) return;
       if (rowIdx === -1) {
-        const row = headers.map(h => h === "student_email" ? u.student_email : "");
+        const row = headers.map(h => h === "student_email" ? email : "");
         sheet.appendRow(row);
         rowIdx = sheet.getLastRow();
       }
@@ -1040,19 +1146,22 @@ function syncStripeTotals() {
       sheet.getRange(rowIdx, headers.indexOf("stripe_currency") + 1).setValue(result.currency);
       sheet.getRange(rowIdx, headers.indexOf("stripe_synced_at") + 1).setValue(now);
     } catch (e) {
-      Logger.log("Stripe同期失敗 (" + u.student_email + "): " + e.toString());
+      Logger.log("Stripe同期失敗 (" + email + "): " + e.toString());
     }
   });
   Logger.log("Stripe同期完了");
 }
 
-// コーチ画面から1人分だけ即時同期する（新規契約直後などの手動更新用）
+// コーチ画面から1人分だけ即時同期する（新規契約直後などの手動更新用）。
+// プロフィールに「stripe_email」（上書き用メール）が設定されていればそちらで検索する
 function coachSyncStripeOne(coachEmail, params) {
   if (!verifyCoach(coachEmail)) return { ok: false, error: "not a coach" };
   const targetEmail = String(params.targetEmail || "");
   if (!coachOwnsStudent(coachEmail, targetEmail)) return { ok: false, error: "not your student" };
 
-  const result = fetchStripeTotalPaid(targetEmail);
+  const profile = getStudentProfile(targetEmail);
+  const stripeSearchEmail = (profile && profile.stripe_email) ? profile.stripe_email : targetEmail;
+  const result = fetchStripeTotalPaid(stripeSearchEmail);
   if (!result) return { ok: false, error: "Stripeに顧客が見つかりませんでした" };
 
   const sheet = getStudentProfileSheet();
@@ -2224,7 +2333,7 @@ function setupSheets() {
     "TimerQueue": ["student_email","end_time","label","notified","created_at"],
     "Achievements": ["date","student_email","nickname","avatar","message","created_at"],
     "CoachingNotes": ["note_id","coach_email","student_email","date","content","next_theme","promises","created_at"],
-    "StudentProfile": ["student_email","name","birthdate","gender","family","address","phone","occupation","profile_notes","contract_start","contract_end","payment_type","contract_amount","installment_count","updated_at","stripe_total_paid","stripe_currency","stripe_synced_at"],
+    "StudentProfile": ["student_email","coach_email","name","birthdate","gender","family","address","phone","occupation","profile_notes","contract_start","contract_end","payment_type","contract_amount","installment_count","updated_at","stripe_email","stripe_total_paid","stripe_currency","stripe_synced_at"],
     "ContractFiles": ["file_id","student_email","file_name","file_url","note","uploaded_at"]
   };
   Object.entries(sheets).forEach(([name, headers]) => {
