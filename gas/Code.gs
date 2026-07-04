@@ -108,6 +108,10 @@ function doPost(e) {
         if (event.type === "message" && event.message.type === "text") {
           const lineUserId = event.source.userId;
           const text = event.message.text.trim().toLowerCase();
+          // 既に連携済みなら、案内メッセージの再送はしない（雑談等の通常メッセージのため）
+          const alreadyLinked = sheetToObjects(getSheet("Users")).find(u => u.line_user_id === lineUserId);
+          if (alreadyLinked) return;
+
           // メールアドレス形式なら連携処理
           if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(text)) {
             const sheet = getSheet("Users");
@@ -124,6 +128,9 @@ function doPost(e) {
               }
             }
             sendLineMessage(lineUserId, "❌ このメールアドレスは見つかりませんでした。\nアプリで登録したGmailアドレスを確認して、もう一度送ってください。");
+          } else {
+            // メール以外のメッセージ（雑談等）が送られた場合、無反応にせず連携方法を再案内する
+            sendLineMessage(lineUserId, "まだ連携が完了していません🙏\nJIROKUアプリに登録した「Gmailアドレス」だけをこのトークに送ってください。それだけで連携が完了します！\n\n（例：yourname@gmail.com）");
           }
         }
       });
