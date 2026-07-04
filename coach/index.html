@@ -402,11 +402,13 @@ function StudentMain({ student, onNoteSaved }) {
 
 // ── プロフィール・契約タブ ──
 const PAYMENT_TYPES = [{v:"lump",l:"一括払い"},{v:"installment",l:"分割払い"}];
+const GENDER_TYPES = [{v:"",l:"未設定"},{v:"male",l:"男性"},{v:"female",l:"女性"},{v:"other",l:"その他"}];
 
 function ProfileTab({ student, detail, onReload }) {
   const p = detail.profile || {};
   const [form, setForm] = useState({
-    birthdate: p.birthdate || "", address: p.address || "", phone: p.phone || "",
+    birthdate: p.birthdate || "", gender: p.gender || "", family: p.family || "",
+    address: p.address || "", phone: p.phone || "",
     occupation: p.occupation || "", profile_notes: p.profile_notes || "",
     contract_start: p.contract_start || "", contract_end: p.contract_end || "",
     payment_type: p.payment_type || "lump", contract_amount: p.contract_amount || "",
@@ -420,7 +422,8 @@ function ProfileTab({ student, detail, onReload }) {
 
   useEffect(() => {
     setForm({
-      birthdate: p.birthdate || "", address: p.address || "", phone: p.phone || "",
+      birthdate: p.birthdate || "", gender: p.gender || "", family: p.family || "",
+      address: p.address || "", phone: p.phone || "",
       occupation: p.occupation || "", profile_notes: p.profile_notes || "",
       contract_start: p.contract_start || "", contract_end: p.contract_end || "",
       payment_type: p.payment_type || "lump", contract_amount: p.contract_amount || "",
@@ -469,6 +472,12 @@ function ProfileTab({ student, detail, onReload }) {
         <div class="card-label">👤 プロフィール</div>
         <label class="lbl">生年月日${age !== null && html` <span style=${{color:"var(--accent)",fontWeight:700}}>（${age}歳）</span>`}</label>
         <input type="date" class="inp" value=${form.birthdate} onChange=${e=>set("birthdate", e.target.value)} style=${{marginBottom:12}}/>
+        <label class="lbl">性別</label>
+        <select class="inp" value=${form.gender} onChange=${e=>set("gender", e.target.value)} style=${{marginBottom:12}}>
+          ${GENDER_TYPES.map(t => html`<option key=${t.v} value=${t.v}>${t.l}</option>`)}
+        </select>
+        <label class="lbl">家族構成</label>
+        <input class="inp" value=${form.family} onChange=${e=>set("family", e.target.value)} placeholder="例：配偶者・子2人" style=${{marginBottom:12}}/>
         <label class="lbl">お住まい</label>
         <input class="inp" value=${form.address} onChange=${e=>set("address", e.target.value)} placeholder="例：東京都〇〇区" style=${{marginBottom:12}}/>
         <label class="lbl">電話番号</label>

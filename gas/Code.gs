@@ -829,7 +829,7 @@ function getStudentProfileSheet() {
   let sheet = getSheet("StudentProfile");
   if (!sheet) {
     sheet = SpreadsheetApp.openById(SPREADSHEET_ID).insertSheet("StudentProfile");
-    sheet.appendRow(["student_email","birthdate","address","phone","occupation","profile_notes",
+    sheet.appendRow(["student_email","birthdate","gender","family","address","phone","occupation","profile_notes",
       "contract_start","contract_end","payment_type","contract_amount","installment_count","updated_at"]);
   }
   return sheet;
@@ -868,7 +868,7 @@ function coachSaveProfile(coachEmail, body) {
   const data = sheet.getDataRange().getValues();
   const headers = data[0];
   const emailIdx = headers.indexOf("student_email");
-  const fields = ["birthdate","address","phone","occupation","profile_notes","contract_start","contract_end","payment_type","contract_amount","installment_count"];
+  const fields = ["birthdate","gender","family","address","phone","occupation","profile_notes","contract_start","contract_end","payment_type","contract_amount","installment_count"];
 
   const now = new Date().toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" });
   for (let i = 1; i < data.length; i++) {
@@ -2063,7 +2063,7 @@ function setupSheets() {
     "TimerQueue": ["student_email","end_time","label","notified","created_at"],
     "Achievements": ["date","student_email","nickname","avatar","message","created_at"],
     "CoachingNotes": ["note_id","coach_email","student_email","date","content","next_theme","promises","created_at"],
-    "StudentProfile": ["student_email","birthdate","address","phone","occupation","profile_notes","contract_start","contract_end","payment_type","contract_amount","installment_count","updated_at"],
+    "StudentProfile": ["student_email","birthdate","gender","family","address","phone","occupation","profile_notes","contract_start","contract_end","payment_type","contract_amount","installment_count","updated_at"],
     "ContractFiles": ["file_id","student_email","file_name","file_url","note","uploaded_at"]
   };
   Object.entries(sheets).forEach(([name, headers]) => {
