@@ -68,6 +68,7 @@ function doGet(e) {
       case "coachPrepSummary":      result = coachPrepSummary(e.parameter.coachEmail, e.parameter.targetEmail); break;
       case "coachSyncStripeOne":    result = coachSyncStripeOne(e.parameter.coachEmail, e.parameter); break;
       case "coachAddClient":       result = coachAddClient(e.parameter.coachEmail, e.parameter); break;
+      case "coachListChatworkContacts": result = coachListChatworkContacts(e.parameter.coachEmail); break;
       case "sendMessage":  result = sendMessage(studentEmail, e.parameter); break;
       case "saveSettings": result = saveSettings(studentEmail, e.parameter); break;
       case "syncCalendar": result = syncCalendar(studentEmail, e.parameter); break;
@@ -900,6 +901,9 @@ function coachAddClient(coachEmail, body) {
   const nameIdx = headers.indexOf("name");
   const now = new Date().toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" });
 
+  const chatworkId = String(body.chatwork_id || "");
+  const chatworkRoomId = String(body.chatwork_room_id || "");
+
   for (let i = 1; i < data.length; i++) {
     if (String(data[i][emailIdx]) === email) {
       const existingCoach = String(data[i][coachIdx] || "");
@@ -908,6 +912,8 @@ function coachAddClient(coachEmail, body) {
       }
       sheet.getRange(i + 1, coachIdx + 1).setValue(coachEmail);
       if (!data[i][nameIdx]) sheet.getRange(i + 1, nameIdx + 1).setValue(name);
+      if (chatworkId) sheet.getRange(i + 1, headers.indexOf("chatwork_id") + 1).setValue(chatworkId);
+      if (chatworkRoomId) sheet.getRange(i + 1, headers.indexOf("chatwork_room_id") + 1).setValue(chatworkRoomId);
       sheet.getRange(i + 1, headers.indexOf("updated_at") + 1).setValue(now);
       return { ok: true };
     }
@@ -918,10 +924,49 @@ function coachAddClient(coachEmail, body) {
     if (h === "coach_email") return coachEmail;
     if (h === "name") return name;
     if (h === "updated_at") return now;
+    if (h === "chatwork_id") return chatworkId;
+    if (h === "chatwork_room_id") return chatworkRoomId;
     return "";
   });
   sheet.appendRow(row);
   return { ok: true };
+}
+
+// Chatworkの連絡先一覧を取得し、まだCRMに取り込んでいない相手だけを返す。
+// Chatwork APIはメールアドレスを返さないため、氏名・Chatwork ID・ルームIDのみ取得し、
+// メールアドレスはコーチが取り込み時に手入力する運用とする
+function coachListChatworkContacts(coachEmail) {
+  if (!verifyCoach(coachEmail)) return { ok: false, error: "not a coach" };
+  const token = PropertiesService.getScriptProperties().getProperty("CHATWORK_API_TOKEN");
+  if (!token) return { ok: false, error: "CHATWORK_API_TOKEN が未設定" };
+
+  try {
+    const res = UrlFetchApp.fetch("https://api.chatwork.com/v2/contacts", {
+      headers: { "X-ChatWorkToken": token },
+      muteHttpExceptions: true
+    });
+    if (res.getResponseCode() !== 200) {
+      return { ok: false, error: "Chatwork API error: " + res.getResponseCode() };
+    }
+    const contacts = JSON.parse(res.getContentText());
+    const alreadyImported = new Set(
+      sheetToObjects(getStudentProfileSheet())
+        .filter(p => p.chatwork_id)
+        .map(p => p.chatwork_id)
+    );
+    const data = contacts
+      .filter(c => !alreadyImported.has(String(c.account_id)))
+      .map(c => ({
+        chatwork_id: String(c.account_id),
+        room_id: String(c.room_id),
+        name: c.name || "",
+        organization_name: c.organization_name || "",
+        avatar_image_url: c.avatar_image_url || ""
+      }));
+    return { ok: true, data: data };
+  } catch (e) {
+    return { ok: false, error: "chatwork fetch failed: " + e.toString() };
+  }
 }
 
 // 生徒詳細: コーチング前の予習に必要な情報を時系列で
@@ -1127,7 +1172,8 @@ function getStudentProfileSheet() {
     sheet = SpreadsheetApp.openById(SPREADSHEET_ID).insertSheet("StudentProfile");
     sheet.appendRow(["student_email","coach_email","name","birthdate","gender","family","address","phone","occupation","profile_notes",
       "contract_start","contract_end","payment_type","contract_amount","installment_count","updated_at",
-      "stripe_email","stripe_total_paid","stripe_currency","stripe_synced_at"]);
+      "stripe_email","stripe_total_paid","stripe_currency","stripe_synced_at",
+      "chatwork_id","chatwork_room_id"]);
   }
   return sheet;
 }
@@ -2560,7 +2606,7 @@ function setupSheets() {
     "TimerQueue": ["student_email","end_time","label","notified","created_at"],
     "Achievements": ["date","student_email","nickname","avatar","message","created_at"],
     "CoachingNotes": ["note_id","coach_email","student_email","date","content","next_theme","promises","created_at"],
-    "StudentProfile": ["student_email","coach_email","name","birthdate","gender","family","address","phone","occupation","profile_notes","contract_start","contract_end","payment_type","contract_amount","installment_count","updated_at","stripe_email","stripe_total_paid","stripe_currency","stripe_synced_at"],
+    "StudentProfile": ["student_email","coach_email","name","birthdate","gender","family","address","phone","occupation","profile_notes","contract_start","contract_end","payment_type","contract_amount","installment_count","updated_at","stripe_email","stripe_total_paid","stripe_currency","stripe_synced_at","chatwork_id","chatwork_room_id"],
     "ContractFiles": ["file_id","student_email","file_name","file_url","note","uploaded_at"]
   };
   Object.entries(sheets).forEach(([name, headers]) => {
