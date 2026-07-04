@@ -126,7 +126,7 @@ function LoginScreen({ onLogin }) {
       const r = await api("coachGetStudents");
       if (r.ok) {
         localStorage.setItem("jiroku_coach_email", email);
-        onLogin(email, r.data);
+        onLogin(email, r.data, r.isAdmin);
       } else {
         COACH_EMAIL = null;
         setError(r.error === "not a coach" ? "このアカウントはコーチとして登録されていません" : "確認に失敗しました。もう一度お試しください");
@@ -151,7 +151,7 @@ function LoginScreen({ onLogin }) {
 }
 
 // ── サイドバー: 生徒一覧（検索・要フォロー順） ──
-function Sidebar({ students, selectedEmail, onSelect, onLogout, coach, onAddClient, onOpenChatworkImport }) {
+function Sidebar({ students, selectedEmail, onSelect, onLogout, coach, onAddClient, onOpenChatworkImport, isAdmin, showAdmin, onShowAdmin }) {
   const [q, setQ] = useState("");
   const [adding, setAdding] = useState(false);
   const [newName, setNewName] = useState("");
@@ -196,6 +196,12 @@ function Sidebar({ students, selectedEmail, onSelect, onLogout, coach, onAddClie
             </div>
           `}
         <button style=${{fontSize:12.5,background:"none",border:"1px solid var(--border)",borderRadius:8,padding:"8px 0",cursor:"pointer",fontFamily:"inherit",width:"100%",marginTop:6}} onClick=${onOpenChatworkImport}>Chatworkから取り込む</button>
+        ${isAdmin && html`
+          <button onClick=${onShowAdmin}
+            style=${{fontSize:12.5,border:"1px solid var(--border)",borderRadius:8,padding:"8px 0",cursor:"pointer",fontFamily:"inherit",width:"100%",marginTop:6,background:showAdmin?"var(--accent-l)":"none",color:showAdmin?"var(--accent)":"var(--text)",fontWeight:600}}>
+            管理者ダッシュボード
+          </button>
+        `}
       </div>
       <div style=${{overflowY:"auto",flex:1}}>
         <div style=${{padding:"10px 16px 4px",fontSize:11,color:"var(--sub)",fontWeight:600}}>担当生徒 ${filtered.length}人</div>
@@ -827,21 +833,123 @@ function ChatworkImportModal({ onClose, onAddClient }) {
   `;
 }
 
+// ── 管理者ダッシュボード: 全コーチ・全生徒を横断した数字 ──
+function AdminOverview() {
+  const [data, setData] = useState(null);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    api("adminGetOverview").then(r => {
+      if (r.ok) setData(r.data);
+      else setError(r.error || "取得に失敗しました");
+    });
+  }, []);
+
+  if (error) return html`<div style=${{padding:28,color:"var(--red)",fontSize:13}}>${error}</div>`;
+  if (!data) return html`<div style=${{display:"flex",justifyContent:"center",padding:60}}><div class="spin"/></div>`;
+
+  return html`
+    <div style=${{height:"100%",overflowY:"auto",padding:"20px 28px"}}>
+      <div style=${{fontSize:17,fontWeight:700,marginBottom:16}}>管理者ダッシュボード</div>
+
+      <div style=${{display:"grid",gridTemplateColumns:"repeat(4, 1fr)",gap:16,marginBottom:20}}>
+        <div class="card">
+          <div class="card-label">累計売上</div>
+          <div style=${{fontSize:22,fontWeight:700}}>${data.totalRevenue.toLocaleString()}<span style=${{fontSize:12,color:"var(--sub)"}}> ${data.revenueCurrency.toUpperCase()}</span></div>
+        </div>
+        <div class="card">
+          <div class="card-label">在籍生徒数</div>
+          <div style=${{fontSize:22,fontWeight:700}}>${data.activeStudentCount}<span style=${{fontSize:12,color:"var(--sub)"}}> 人</span></div>
+        </div>
+        <div class="card">
+          <div class="card-label">コーチ数</div>
+          <div style=${{fontSize:22,fontWeight:700}}>${data.coachCount}<span style=${{fontSize:12,color:"var(--sub)"}}> 人</span></div>
+        </div>
+        <div class="card">
+          <div class="card-label">平均レポートスコア</div>
+          <div style=${{fontSize:22,fontWeight:700}}>${data.avgScore !== null ? data.avgScore : "―"}<span style=${{fontSize:12,color:"var(--sub)"}}> / 100</span></div>
+        </div>
+      </div>
+
+      <div class="card" style=${{marginBottom:20}}>
+        <div class="card-label">順調な生徒の割合（参考値）</div>
+        <div style=${{fontSize:11.5,color:"var(--sub)",marginBottom:10}}>アプリに「目標達成」を直接記録する仕組みがないため、直近レポートスコア75点以上を「順調」の目安として計算しています。厳密な達成率ではありません。</div>
+        <div style=${{fontSize:22,fontWeight:700}}>${data.onTrackRate !== null ? data.onTrackRate + "%" : "―"}
+          <span style=${{fontSize:12,color:"var(--sub)",fontWeight:400}}> (${data.onTrackCount}/${data.scoredCount}人)</span>
+        </div>
+      </div>
+
+      <div class="card" style=${{marginBottom:20}}>
+        <div class="card-label">コーチ別の状況</div>
+        ${data.coachStats.length === 0 && html`<div style=${{fontSize:13,color:"var(--sub)"}}>コーチが登録されていません</div>`}
+        <table style=${{width:"100%",borderCollapse:"collapse",fontSize:12.5}}>
+          <thead>
+            <tr style=${{textAlign:"left",color:"var(--sub)",fontSize:11}}>
+              <th style=${{padding:"6px 8px",fontWeight:600}}>コーチ</th>
+              <th style=${{padding:"6px 8px",fontWeight:600}}>担当生徒数</th>
+              <th style=${{padding:"6px 8px",fontWeight:600}}>平均スコア</th>
+              <th style=${{padding:"6px 8px",fontWeight:600}}>売上</th>
+              <th style=${{padding:"6px 8px",fontWeight:600}}>最終コーチングログ</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${data.coachStats.map(c => html`
+              <tr key=${c.coachEmail} style=${{borderTop:"1px solid var(--border)"}}>
+                <td style=${{padding:"8px"}}>${c.coachName}</td>
+                <td style=${{padding:"8px"}}>${c.studentCount}人</td>
+                <td style=${{padding:"8px"}}>${c.avgScore !== null ? c.avgScore + "点" : "―"}</td>
+                <td style=${{padding:"8px"}}>${c.revenue.toLocaleString()}円</td>
+                <td style=${{padding:"8px",color:"var(--sub)"}}>${c.lastCoachingDate ? fmtDate(c.lastCoachingDate) : "なし"}</td>
+              </tr>
+            `)}
+          </tbody>
+        </table>
+      </div>
+
+      <div class="card">
+        <div class="card-label">生徒別の状況（ステータススコア順）</div>
+        <table style=${{width:"100%",borderCollapse:"collapse",fontSize:12.5}}>
+          <thead>
+            <tr style=${{textAlign:"left",color:"var(--sub)",fontSize:11}}>
+              <th style=${{padding:"6px 8px",fontWeight:600}}>生徒</th>
+              <th style=${{padding:"6px 8px",fontWeight:600}}>担当コーチ</th>
+              <th style=${{padding:"6px 8px",fontWeight:600}}>ステータス</th>
+              <th style=${{padding:"6px 8px",fontWeight:600}}>直近スコア</th>
+              <th style=${{padding:"6px 8px",fontWeight:600}}>最終記録</th>
+              <th style=${{padding:"6px 8px",fontWeight:600}}>支払い済み</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${data.students.map(s => html`
+              <tr key=${s.email} style=${{borderTop:"1px solid var(--border)"}}>
+                <td style=${{padding:"8px"}}>${s.name}</td>
+                <td style=${{padding:"8px",color:"var(--sub)"}}>${s.coachEmail || "未割当"}</td>
+                <td style=${{padding:"8px"}}>${s.statusScore}/100</td>
+                <td style=${{padding:"8px"}}>${s.latestScore !== null ? s.latestScore + "点" : "―"}</td>
+                <td style=${{padding:"8px",color:"var(--sub)"}}>${s.lastLogDate ? fmtDate(s.lastLogDate) : "記録なし"}</td>
+                <td style=${{padding:"8px"}}>${s.stripeTotalPaid.toLocaleString()}円</td>
+              </tr>
+            `)}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
+
 function App() {
   const [coach, setCoach] = useState(COACH_EMAIL);
   const [students, setStudents] = useState(null);
+  const [isAdmin, setIsAdmin] = useState(false);
   const [selected, setSelected] = useState(null);
+  const [showAdmin, setShowAdmin] = useState(false);
   const [chatworkImportOpen, setChatworkImportOpen] = useState(false);
 
-  const refreshStudents = () => api("coachGetStudents").then(r => { if (r.ok) setStudents(r.data); });
+  const refreshStudents = () => api("coachGetStudents").then(r => { if (r.ok) { setStudents(r.data); setIsAdmin(!!r.isAdmin); } });
 
   useEffect(() => {
     if (!COACH_EMAIL) return;
     refreshStudents().then(() => {}).catch(()=>{});
-    api("coachGetStudents").then(r => {
-      if (r.ok) setStudents(r.data);
-      else { localStorage.removeItem("jiroku_coach_email"); COACH_EMAIL = null; setCoach(null); }
-    });
   }, []);
 
   const logout = () => {
@@ -855,16 +963,21 @@ function App() {
     return r;
   };
 
-  if (!coach) return html`<${LoginScreen} onLogin=${(email, list) => { setCoach(email); setStudents(list); }}/>`;
+  if (!coach) return html`<${LoginScreen} onLogin=${(email, list, admin) => { setCoach(email); setStudents(list); setIsAdmin(!!admin); }}/>`;
   if (!students) return html`<div style=${{display:"flex",justifyContent:"center",alignItems:"center",height:"100%"}}><div class="spin"/></div>`;
 
   return html`
     <div style=${{display:"flex",height:"100%"}}>
-      <${Sidebar} students=${students} selectedEmail=${selected?.email} onSelect=${setSelected} onLogout=${logout} coach=${coach} onAddClient=${addClient} onOpenChatworkImport=${()=>setChatworkImportOpen(true)}/>
+      <${Sidebar} students=${students} selectedEmail=${selected?.email}
+        onSelect=${(s)=>{setSelected(s); setShowAdmin(false);}} onLogout=${logout} coach=${coach}
+        onAddClient=${addClient} onOpenChatworkImport=${()=>setChatworkImportOpen(true)}
+        isAdmin=${isAdmin} showAdmin=${showAdmin} onShowAdmin=${()=>{setShowAdmin(true); setSelected(null);}}/>
       <main style=${{flex:1,overflow:"hidden",background:"var(--bg)"}}>
-        ${selected
-          ? html`<${StudentMain} key=${selected.email} student=${selected} onNoteSaved=${refreshStudents}/>`
-          : html`<div style=${{display:"flex",alignItems:"center",justifyContent:"center",height:"100%",color:"var(--sub)",fontSize:14}}>左の一覧から生徒を選択してください</div>`}
+        ${showAdmin
+          ? html`<${AdminOverview}/>`
+          : selected
+            ? html`<${StudentMain} key=${selected.email} student=${selected} onNoteSaved=${refreshStudents}/>`
+            : html`<div style=${{display:"flex",alignItems:"center",justifyContent:"center",height:"100%",color:"var(--sub)",fontSize:14}}>左の一覧から生徒を選択してください</div>`}
       </main>
       ${chatworkImportOpen && html`<${ChatworkImportModal} onClose=${()=>setChatworkImportOpen(false)} onAddClient=${addClient}/>`}
     </div>

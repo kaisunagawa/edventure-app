@@ -70,6 +70,7 @@ function doGet(e) {
       case "coachAddClient":       result = coachAddClient(e.parameter.coachEmail, e.parameter); break;
       case "coachListChatworkContacts": result = coachListChatworkContacts(e.parameter.coachEmail); break;
       case "coachSyncChatworkOne": result = coachSyncChatworkOne(e.parameter.coachEmail, e.parameter); break;
+      case "adminGetOverview":     result = adminGetOverview(e.parameter.coachEmail); break;
       case "sendMessage":  result = sendMessage(studentEmail, e.parameter); break;
       case "saveSettings": result = saveSettings(studentEmail, e.parameter); break;
       case "syncCalendar": result = syncCalendar(studentEmail, e.parameter); break;
@@ -879,7 +880,7 @@ function coachGetStudents(coachEmail) {
 
   // 記録が止まっている生徒を上に（要フォロー順）
   data.sort((a, b) => String(a.lastLogDate||"") > String(b.lastLogDate||"") ? 1 : -1);
-  return { ok: true, data: data };
+  return { ok: true, data: data, isAdmin: verifyAdmin(coachEmail) };
 }
 
 // JIROKU未登録のクライアントを手動でCRMに追加する（契約書・Stripe情報だけ先に管理したい場合）
@@ -931,6 +932,90 @@ function coachAddClient(coachEmail, body) {
   });
   sheet.appendRow(row);
   return { ok: true };
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// 管理者ダッシュボード（全コーチ・全生徒を横断した数字を見る）
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+function verifyAdmin(email) {
+  const admin = adminEmail();
+  return !!admin && !!email && email === admin;
+}
+
+// 全体のサマリー（累計売上・平均スコア・コーチ別/生徒別の内訳）を返す。
+// 「目標達成率」はアプリ側に達成フラグがないため、直近レポートスコア75点以上を
+// 「順調」の目安として代用している（正確な達成率ではなく参考値である旨に注意）
+function adminGetOverview(email) {
+  if (!verifyAdmin(email)) return { ok: false, error: "not admin" };
+
+  const allUsers = sheetToObjects(getSheet("Users")).filter(u => String(u.is_active).toUpperCase() === "TRUE");
+  const coaches = sheetToObjects(getSheet("Coaches"));
+  const profiles = sheetToObjects(getStudentProfileSheet());
+  const profileByEmail = new Map(profiles.map(p => [p.student_email, p]));
+  const allReports = sheetToObjects(getSheet("Reports"));
+  const reportsByEmail = groupBy(allReports, "student_email");
+  const allLogs = sheetToObjects(getSheet("DailyLog"));
+  const logsByEmail = groupBy(allLogs, "student_email");
+  const statuses = computeAllStatuses(allLogs);
+  const allNotes = sheetToObjects(getCoachingNotesSheet());
+  const notesByCoach = groupBy(allNotes, "coach_email");
+
+  let totalRevenue = 0;
+  let revenueCurrency = "jpy";
+  profiles.forEach(p => {
+    if (p.stripe_total_paid) {
+      totalRevenue += Number(p.stripe_total_paid) || 0;
+      if (p.stripe_currency) revenueCurrency = p.stripe_currency;
+    }
+  });
+
+  const students = allUsers.map(u => {
+    const reports = (reportsByEmail.get(u.student_email) || []).sort((a,b)=>b.date>a.date?1:-1);
+    const logs = logsByEmail.get(u.student_email) || [];
+    const lastLogDate = logs.length ? logs.map(l => l.date).sort().pop() : null;
+    const profile = profileByEmail.get(u.student_email);
+    const status = statuses[u.student_email];
+    return {
+      email: u.student_email,
+      name: u.name,
+      coachEmail: u.coach_email || "",
+      latestScore: reports[0] ? Number(reports[0].score) : null,
+      statusScore: status ? status.score : 0,
+      lastLogDate: lastLogDate,
+      stripeTotalPaid: profile ? Number(profile.stripe_total_paid || 0) : 0
+    };
+  });
+
+  const scored = students.filter(s => s.latestScore !== null);
+  const avgScore = scored.length ? Math.round(scored.reduce((sum,s) => sum + s.latestScore, 0) / scored.length) : null;
+  const onTrackCount = scored.filter(s => s.latestScore >= 75).length;
+  const onTrackRate = scored.length ? Math.round(onTrackCount / scored.length * 100) : null;
+
+  const coachStats = coaches.map(c => {
+    const mine = students.filter(s => s.coachEmail === c.coach_email);
+    const revenue = mine.reduce((sum,s) => sum + s.stripeTotalPaid, 0);
+    const scoredMine = mine.filter(s => s.latestScore !== null);
+    const avg = scoredMine.length ? Math.round(scoredMine.reduce((sum,s)=>sum+s.latestScore,0) / scoredMine.length) : null;
+    const lastNote = (notesByCoach.get(c.coach_email) || []).sort((a,b)=>b.date>a.date?1:-1)[0];
+    return {
+      coachEmail: c.coach_email,
+      coachName: c.coach_name || c.coach_email,
+      studentCount: mine.length,
+      avgScore: avg,
+      revenue: revenue,
+      lastCoachingDate: lastNote ? lastNote.date : null
+    };
+  }).sort((a,b) => b.studentCount - a.studentCount);
+
+  return { ok: true, data: {
+    totalRevenue, revenueCurrency,
+    activeStudentCount: allUsers.length,
+    coachCount: coaches.length,
+    avgScore, onTrackRate, onTrackCount, scoredCount: scored.length,
+    coachStats: coachStats,
+    students: students.sort((a,b) => b.statusScore - a.statusScore)
+  } };
 }
 
 // Chatworkの連絡先一覧を取得し、まだCRMに取り込んでいない相手だけを返す。
