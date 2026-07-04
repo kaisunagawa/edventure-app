@@ -1014,17 +1014,18 @@ function LogScreen({onToast, isActive}) {
     if(task==="" || task===autoFillRef.current){ setTask(suggestion); autoFillRef.current=suggestion; }
   },[block, dayEvents, logs]);
 
-  // ブロック切替時に既存ログを読み込んでフォームに反映
+  // ブロック切替時に既存ログを読み込んでフォームに反映。
+  // lastLoadedRefには「フォームに最後に流し込んだ値」を控えておき、
+  // 裏で取得した最新データを反映してよいか（=ユーザーが編集を始めて
+  // いないか）の判定に使う
+  const lastLoadedRef = useRef({task:"",focus:"",memo:"",goalRelated:false});
   const loadBlockData = (b, currentLogs) => {
     const existing = currentLogs.find(l => l.time_block === b);
-    if (existing) {
-      setTask(existing.task || "");
-      setFocus(existing.focus_level || "");
-      setMemo(existing.memo || "");
-      setGoalRelated(existing.goal_related === "true" || existing.goal_related === true);
-    } else {
-      setTask(""); setFocus(""); setMemo(""); setGoalRelated(false);
-    }
+    const v = existing
+      ? {task:existing.task||"", focus:existing.focus_level||"", memo:existing.memo||"", goalRelated:existing.goal_related==="true"||existing.goal_related===true}
+      : {task:"", focus:"", memo:"", goalRelated:false};
+    setTask(v.task); setFocus(v.focus); setMemo(v.memo); setGoalRelated(v.goalRelated);
+    lastLoadedRef.current = v;
   };
 
   const handleBlockSelect = (b) => {
@@ -1032,19 +1033,41 @@ function LogScreen({onToast, isActive}) {
     loadBlockData(b, logs);
   };
 
-  // 日付が変わった時、またはタブを開き直した時（今日表示中は現在時刻の
-  // ブロックに合わせ直したいので）に取得する。以前は[date]用と[isActive]用の
-  // 2つのeffectが同じgetLogsを二重に呼んでおり、記録タブを開くたびに
-  // 通信が2回走って読み込みが遅く感じられる原因になっていた
+  // 現在のフォーム値・選択ブロックを非同期コールバックから読むためのミラー
+  const formRef = useRef(null);
+  formRef.current = {task, focus, memo, goalRelated};
+  const curBlockRef = useRef(block);
+  curBlockRef.current = block;
+
+  // 記録タブの読み込み: まず端末キャッシュで即座に画面を組み立て（体感ゼロ秒）、
+  // 最新データはGASから裏で取得して静かに差し替える。以前はGASの応答
+  // （数百ms〜数秒）を待ってから画面を作っていたため遅く感じられていた
+  const LOGS_LS="jiroku_logs_";
   useEffect(()=>{
     if(!isActive) return;
+    let cached=null;
+    try{ cached=JSON.parse(localStorage.getItem(LOGS_LS+date)||"null"); }catch(e){}
+    const base = cached||[];
+    setLogs(base);
+    const def = isToday(date) ? getCurrentBlock() : (base[0]?.time_block || timeBlocks[0]);
+    setBlock(def);
+    loadBlockData(def, base);
+    setTimeout(()=>{ const el=timeRef.current?.querySelector(".chip.on"); if(el) el.scrollIntoView({inline:"center",behavior:"smooth"}); },100);
+
     gasApi("getLogs",{date}).then(r=>{
-      const data = r.ok ? r.data : [];
+      if(!r.ok) return;
+      const data = r.data;
+      try{
+        localStorage.setItem(LOGS_LS+date, JSON.stringify(data));
+        const limit=addDays(formatDateStr(new Date()),-7);
+        Object.keys(localStorage).forEach(k=>{ if(k.startsWith(LOGS_LS)&&k.slice(LOGS_LS.length)<limit) localStorage.removeItem(k); });
+      }catch(e){}
       setLogs(data);
-      const def = isToday(date) ? getCurrentBlock() : (data[0]?.time_block || timeBlocks[0]);
-      setBlock(def);
-      loadBlockData(def, data);
-      setTimeout(()=>{ const el=timeRef.current?.querySelector(".chip.on"); if(el) el.scrollIntoView({inline:"center",behavior:"smooth"}); },100);
+      // ユーザーがまだ入力を始めていない場合だけ、選択中ブロックのフォームも最新化
+      const f=formRef.current, l=lastLoadedRef.current;
+      if(f.task===l.task && f.focus===l.focus && f.memo===l.memo && f.goalRelated===l.goalRelated){
+        loadBlockData(curBlockRef.current, data);
+      }
     });
   },[date, isActive]);
 
@@ -1064,10 +1087,10 @@ function LogScreen({onToast, isActive}) {
     // 保存内容が分かっているので再取得せず、ローカルの一覧をその場で更新する
     // （サーバーへの往復が倍になり保存が重く感じられるのを防ぐ）
     const saved = {time_block:block, task:task.trim(), focus_level:focus, memo:memo.trim(), goal_related:goalRelated?"true":"false"};
-    setLogs(prev=>{
-      const exists = prev.some(l=>l.time_block===block);
-      return exists ? prev.map(l=>l.time_block===block?{...l,...saved}:l) : [...prev, saved].sort((a,b)=>a.time_block>b.time_block?1:-1);
-    });
+    const exists = logs.some(l=>l.time_block===block);
+    const next = exists ? logs.map(l=>l.time_block===block?{...l,...saved}:l) : [...logs, saved].sort((a,b)=>a.time_block>b.time_block?1:-1);
+    setLogs(next);
+    try{ localStorage.setItem(LOGS_LS+date, JSON.stringify(next)); }catch(e){}
     setSaving(false);
   };
 
