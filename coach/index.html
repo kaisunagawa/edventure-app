@@ -573,7 +573,7 @@ function App() {
       <${Sidebar} students=${students} selectedEmail=${selected?.email} onSelect=${setSelected} onLogout=${logout} coach=${coach}/>
       <main style=${{flex:1,overflow:"hidden",background:"var(--bg)"}}>
         ${selected
-          ? html`<${StudentMain} student=${selected} onNoteSaved=${refreshStudents}/>`
+          ? html`<${StudentMain} key=${selected.email} student=${selected} onNoteSaved=${refreshStudents}/>`
           : html`<div style=${{display:"flex",alignItems:"center",justifyContent:"center",height:"100%",color:"var(--sub)",fontSize:14}}>左の一覧から生徒を選択してください</div>`}
       </main>
     </div>
