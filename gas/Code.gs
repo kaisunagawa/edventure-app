@@ -1362,14 +1362,26 @@ ${lastNoteText}
 // 生徒プロフィール・契約情報・契約書ファイル
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+const STUDENT_PROFILE_HEADERS = ["student_email","coach_email","name","birthdate","gender","family","address","phone","occupation","profile_notes",
+  "contract_start","contract_end","payment_type","contract_amount","installment_count","updated_at",
+  "stripe_email","stripe_total_paid","stripe_currency","stripe_synced_at",
+  "chatwork_id","chatwork_room_id"];
+
+// StudentProfileシートを取得する。既存シートに後から追加された列
+// （chatwork_idなど）が無い場合は自動で追加する（スキーマの自己修復）。
+// 新しい列を追加するたびに既存シートを手動で直す必要がないようにするため
 function getStudentProfileSheet() {
   let sheet = getSheet("StudentProfile");
   if (!sheet) {
     sheet = SpreadsheetApp.openById(SPREADSHEET_ID).insertSheet("StudentProfile");
-    sheet.appendRow(["student_email","coach_email","name","birthdate","gender","family","address","phone","occupation","profile_notes",
-      "contract_start","contract_end","payment_type","contract_amount","installment_count","updated_at",
-      "stripe_email","stripe_total_paid","stripe_currency","stripe_synced_at",
-      "chatwork_id","chatwork_room_id"]);
+    sheet.appendRow(STUDENT_PROFILE_HEADERS);
+    return sheet;
+  }
+  const lastCol = sheet.getLastColumn();
+  const currentHeaders = lastCol > 0 ? sheet.getRange(1, 1, 1, lastCol).getValues()[0] : [];
+  const missing = STUDENT_PROFILE_HEADERS.filter(h => !currentHeaders.includes(h));
+  if (missing.length > 0) {
+    sheet.getRange(1, currentHeaders.length + 1, 1, missing.length).setValues([missing]);
   }
   return sheet;
 }
