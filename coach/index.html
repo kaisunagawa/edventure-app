@@ -420,6 +420,8 @@ function ProfileTab({ student, detail, onReload }) {
   const [extracting, setExtracting] = useState(false);
   const [extractMsg, setExtractMsg] = useState("");
   const [fileNote, setFileNote] = useState("");
+  const [syncingStripe, setSyncingStripe] = useState(false);
+  const [stripeMsg, setStripeMsg] = useState("");
   const fileInputRef = useRef(null);
 
   useEffect(() => {
@@ -491,6 +493,16 @@ function ProfileTab({ student, detail, onReload }) {
     if (r.ok) onReload();
   };
 
+  const syncStripe = async () => {
+    setSyncingStripe(true);
+    setStripeMsg("");
+    const r = await api("coachSyncStripeOne", { targetEmail: student.email });
+    setStripeMsg(r.ok ? "更新しました" : "同期に失敗しました: " + (r.error || ""));
+    if (r.ok) onReload();
+    setSyncingStripe(false);
+    setTimeout(() => setStripeMsg(""), 3000);
+  };
+
   return html`
     <div style=${{display:"grid",gridTemplateColumns:"1fr 1fr",gap:20,alignItems:"start"}}>
       <div class="card">
@@ -548,6 +560,20 @@ function ProfileTab({ student, detail, onReload }) {
           </div>
           <button class="btn" onClick=${save} disabled=${saving}>${saving ? "保存中..." : "保存する"}</button>
           ${savedMsg && html`<span style=${{fontSize:12,color:"var(--green)",marginLeft:10}}>${savedMsg}</span>`}
+        </div>
+
+        <div class="card">
+          <div class="card-label">💳 Stripe決済状況</div>
+          ${p.stripe_synced_at ? html`
+            <div style=${{fontSize:26,fontWeight:800,marginBottom:4}}>
+              ${Number(p.stripe_total_paid || 0).toLocaleString()}<span style=${{fontSize:13,color:"var(--sub)",fontWeight:600}}> ${(p.stripe_currency||"jpy").toUpperCase()} 支払い済み</span>
+            </div>
+            <div style=${{fontSize:11,color:"var(--sub)",marginBottom:12}}>最終同期: ${p.stripe_synced_at}</div>
+          ` : html`
+            <div style=${{fontSize:13,color:"var(--sub)",marginBottom:12}}>まだ同期されていません</div>
+          `}
+          <button class="btn" onClick=${syncStripe} disabled=${syncingStripe}>${syncingStripe ? "同期中..." : "今すぐ同期"}</button>
+          ${stripeMsg && html`<span style=${{fontSize:12,color:"var(--accent)",marginLeft:10}}>${stripeMsg}</span>`}
         </div>
 
         <div class="card">

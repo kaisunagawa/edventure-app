@@ -66,6 +66,7 @@ function doGet(e) {
       case "coachGetStudentDetail": result = coachGetStudentDetail(e.parameter.coachEmail, e.parameter.targetEmail); break;
       case "coachSaveNote":         result = coachSaveNote(e.parameter.coachEmail, e.parameter); break;
       case "coachPrepSummary":      result = coachPrepSummary(e.parameter.coachEmail, e.parameter.targetEmail); break;
+      case "coachSyncStripeOne":    result = coachSyncStripeOne(e.parameter.coachEmail, e.parameter); break;
       case "sendMessage":  result = sendMessage(studentEmail, e.parameter); break;
       case "saveSettings": result = saveSettings(studentEmail, e.parameter); break;
       case "syncCalendar": result = syncCalendar(studentEmail, e.parameter); break;
@@ -831,7 +832,8 @@ function getStudentProfileSheet() {
   if (!sheet) {
     sheet = SpreadsheetApp.openById(SPREADSHEET_ID).insertSheet("StudentProfile");
     sheet.appendRow(["student_email","name","birthdate","gender","family","address","phone","occupation","profile_notes",
-      "contract_start","contract_end","payment_type","contract_amount","installment_count","updated_at"]);
+      "contract_start","contract_end","payment_type","contract_amount","installment_count","updated_at",
+      "stripe_total_paid","stripe_currency","stripe_synced_at"]);
   }
   return sheet;
 }
@@ -967,6 +969,110 @@ function coachExtractContractInfo(coachEmail, body) {
   } catch (e) {
     return { ok: false, error: "extract failed: " + e.toString() };
   }
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Stripe連携（生徒ごとの累計支払額を把握）
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+// メールアドレスからStripe顧客を検索し、成功した支払いの合計額を返す。
+// 見つからない場合はnullを返す（Stripeに未登録の生徒として扱う）
+function fetchStripeTotalPaid(email) {
+  const apiKey = PropertiesService.getScriptProperties().getProperty("STRIPE_SECRET_KEY");
+  if (!apiKey) return null;
+  const authHeader = "Basic " + Utilities.base64Encode(apiKey + ":");
+
+  const custRes = UrlFetchApp.fetch(
+    "https://api.stripe.com/v1/customers/search?query=" + encodeURIComponent(`email:'${email}'`),
+    { headers: { Authorization: authHeader }, muteHttpExceptions: true }
+  );
+  const custData = JSON.parse(custRes.getContentText());
+  if (!custData.data || custData.data.length === 0) return null;
+  const customerId = custData.data[0].id;
+
+  let total = 0;
+  let currency = "jpy";
+  let startingAfter = null;
+  for (let i = 0; i < 10; i++) { // 最大1000件（100件×10ページ）まで
+    let url = `https://api.stripe.com/v1/charges?customer=${customerId}&limit=100`;
+    if (startingAfter) url += `&starting_after=${startingAfter}`;
+    const res = UrlFetchApp.fetch(url, { headers: { Authorization: authHeader }, muteHttpExceptions: true });
+    const data = JSON.parse(res.getContentText());
+    if (!data.data) break;
+    data.data.forEach(charge => {
+      if (charge.paid && !charge.refunded) {
+        total += charge.amount - (charge.amount_refunded || 0);
+        currency = charge.currency;
+      }
+    });
+    if (!data.has_more || data.data.length === 0) break;
+    startingAfter = data.data[data.data.length - 1].id;
+  }
+  return { total, currency, customerId };
+}
+
+// 全生徒分をまとめてStripeと同期し、StudentProfileシートに記録する（日次トリガー）
+function syncStripeTotals() {
+  const apiKey = PropertiesService.getScriptProperties().getProperty("STRIPE_SECRET_KEY");
+  if (!apiKey) { Logger.log("STRIPE_SECRET_KEY が未設定"); return; }
+
+  const users = sheetToObjects(getSheet("Users")).filter(u => String(u.is_active).toUpperCase() === "TRUE");
+  const sheet = getStudentProfileSheet();
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0];
+  const emailIdx = headers.indexOf("student_email");
+  const now = new Date().toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" });
+
+  users.forEach(u => {
+    try {
+      const result = fetchStripeTotalPaid(u.student_email);
+      if (!result) return;
+      let rowIdx = -1;
+      for (let i = 1; i < data.length; i++) {
+        if (String(data[i][emailIdx]) === u.student_email) { rowIdx = i + 1; break; }
+      }
+      if (rowIdx === -1) {
+        const row = headers.map(h => h === "student_email" ? u.student_email : "");
+        sheet.appendRow(row);
+        rowIdx = sheet.getLastRow();
+      }
+      sheet.getRange(rowIdx, headers.indexOf("stripe_total_paid") + 1).setValue(result.total);
+      sheet.getRange(rowIdx, headers.indexOf("stripe_currency") + 1).setValue(result.currency);
+      sheet.getRange(rowIdx, headers.indexOf("stripe_synced_at") + 1).setValue(now);
+    } catch (e) {
+      Logger.log("Stripe同期失敗 (" + u.student_email + "): " + e.toString());
+    }
+  });
+  Logger.log("Stripe同期完了");
+}
+
+// コーチ画面から1人分だけ即時同期する（新規契約直後などの手動更新用）
+function coachSyncStripeOne(coachEmail, params) {
+  if (!verifyCoach(coachEmail)) return { ok: false, error: "not a coach" };
+  const targetEmail = String(params.targetEmail || "");
+  if (!coachOwnsStudent(coachEmail, targetEmail)) return { ok: false, error: "not your student" };
+
+  const result = fetchStripeTotalPaid(targetEmail);
+  if (!result) return { ok: false, error: "Stripeに顧客が見つかりませんでした" };
+
+  const sheet = getStudentProfileSheet();
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0];
+  const emailIdx = headers.indexOf("student_email");
+  const now = new Date().toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" });
+  let rowIdx = -1;
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][emailIdx]) === targetEmail) { rowIdx = i + 1; break; }
+  }
+  if (rowIdx === -1) {
+    const row = headers.map(h => h === "student_email" ? targetEmail : "");
+    sheet.appendRow(row);
+    rowIdx = sheet.getLastRow();
+  }
+  sheet.getRange(rowIdx, headers.indexOf("stripe_total_paid") + 1).setValue(result.total);
+  sheet.getRange(rowIdx, headers.indexOf("stripe_currency") + 1).setValue(result.currency);
+  sheet.getRange(rowIdx, headers.indexOf("stripe_synced_at") + 1).setValue(now);
+  return { ok: true, data: { total: result.total, currency: result.currency, synced_at: now } };
 }
 
 function coachDeleteFile(coachEmail, body) {
@@ -2118,7 +2224,7 @@ function setupSheets() {
     "TimerQueue": ["student_email","end_time","label","notified","created_at"],
     "Achievements": ["date","student_email","nickname","avatar","message","created_at"],
     "CoachingNotes": ["note_id","coach_email","student_email","date","content","next_theme","promises","created_at"],
-    "StudentProfile": ["student_email","name","birthdate","gender","family","address","phone","occupation","profile_notes","contract_start","contract_end","payment_type","contract_amount","installment_count","updated_at"],
+    "StudentProfile": ["student_email","name","birthdate","gender","family","address","phone","occupation","profile_notes","contract_start","contract_end","payment_type","contract_amount","installment_count","updated_at","stripe_total_paid","stripe_currency","stripe_synced_at"],
     "ContractFiles": ["file_id","student_email","file_name","file_url","note","uploaded_at"]
   };
   Object.entries(sheets).forEach(([name, headers]) => {
@@ -2140,7 +2246,8 @@ function setupTriggers() {
   ScriptApp.newTrigger("generateMonthlySummaries").timeBased().onMonthDay(1).atHour(3).create();
   ScriptApp.newTrigger("checkTimerQueue").timeBased().everyMinutes(1).create();
   ScriptApp.newTrigger("hourlyReminder").timeBased().everyHours(1).create();
-  console.log("トリガーを設定しました（合計6個）");
+  ScriptApp.newTrigger("syncStripeTotals").timeBased().everyDays(1).atHour(4).create();
+  console.log("トリガーを設定しました（合計7個）");
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
