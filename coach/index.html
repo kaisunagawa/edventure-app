@@ -246,6 +246,8 @@ function StudentMain({ student, onNoteSaved }) {
   const [importRows, setImportRows] = useState([{ date: "", content: "", next_theme: "", promises: "" }]);
   const [importing, setImporting] = useState(false);
   const [importMsg, setImportMsg] = useState("");
+  const [syncingChatwork, setSyncingChatwork] = useState(false);
+  const [chatworkSyncMsg, setChatworkSyncMsg] = useState("");
 
   const reloadDetail = () => api("coachGetStudentDetail", { targetEmail: student.email }).then(r => { if (r.ok) setDetail(r.data); });
 
@@ -307,6 +309,20 @@ function StudentMain({ student, onNoteSaved }) {
       setTimeout(() => setSavedMsg(""), 3000);
     }
     setSaving(false);
+  };
+
+  const syncChatwork = async () => {
+    setSyncingChatwork(true);
+    setChatworkSyncMsg("");
+    const r = await api("coachSyncChatworkOne", { targetEmail: student.email });
+    if (r.ok) {
+      setChatworkSyncMsg(`${r.data.imported}件の新着を取り込みました`);
+      reloadDetail();
+    } else {
+      setChatworkSyncMsg(r.error || "同期に失敗しました");
+    }
+    setSyncingChatwork(false);
+    setTimeout(() => setChatworkSyncMsg(""), 3000);
   };
 
   return html`
@@ -424,6 +440,28 @@ function StudentMain({ student, onNoteSaved }) {
                 <div key=${d.date} style=${{padding:"8px 0",borderBottom:i < detail.dailySummary.length-1 ? "1px solid var(--border)" : "none"}}>
                   <div style=${{fontSize:12.5,fontWeight:600}}>${fmtDate(d.date)} <span style=${{color:"var(--sub)",fontWeight:400}}>· ${d.blocks}記録（目標関連${d.goalBlocks}）</span></div>
                   ${d.memos.map((m, j) => html`<div key=${j} style=${{fontSize:11.5,color:"var(--sub)",marginTop:3,lineHeight:1.6}}>${m}</div>`)}
+                </div>
+              `)}
+            </div>
+          </div>
+
+          <div class="card" style=${{marginTop:20}}>
+            <div style=${{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+              <div class="card-label" style=${{marginBottom:0}}>Chatworkのやり取り</div>
+              <div style=${{display:"flex",alignItems:"center",gap:10}}>
+                ${chatworkSyncMsg && html`<span style=${{fontSize:11.5,color:"var(--sub)"}}>${chatworkSyncMsg}</span>`}
+                <button class="btn" style=${{fontSize:11.5,padding:"6px 12px"}} onClick=${syncChatwork} disabled=${syncingChatwork}>${syncingChatwork ? "同期中..." : "今すぐ同期"}</button>
+              </div>
+            </div>
+            ${(!detail.chatworkMessages || detail.chatworkMessages.length === 0) && html`<div style=${{fontSize:13,color:"var(--sub)"}}>まだ連携されたメッセージがありません</div>`}
+            <div style=${{maxHeight:320,overflowY:"auto"}}>
+              ${(detail.chatworkMessages || []).map((m, i) => html`
+                <div key=${m.message_id} style=${{padding:"8px 0",borderBottom:i < detail.chatworkMessages.length-1 ? "1px solid var(--border)" : "none"}}>
+                  <div style=${{display:"flex",justifyContent:"space-between",marginBottom:2}}>
+                    <span style=${{fontSize:11.5,fontWeight:600}}>${m.sender_name}</span>
+                    <span style=${{fontSize:10.5,color:"var(--sub)"}}>${m.send_time}</span>
+                  </div>
+                  <div style=${{fontSize:12.5,lineHeight:1.6,whiteSpace:"pre-wrap"}}>${m.body}</div>
                 </div>
               `)}
             </div>

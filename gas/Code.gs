@@ -69,6 +69,7 @@ function doGet(e) {
       case "coachSyncStripeOne":    result = coachSyncStripeOne(e.parameter.coachEmail, e.parameter); break;
       case "coachAddClient":       result = coachAddClient(e.parameter.coachEmail, e.parameter); break;
       case "coachListChatworkContacts": result = coachListChatworkContacts(e.parameter.coachEmail); break;
+      case "coachSyncChatworkOne": result = coachSyncChatworkOne(e.parameter.coachEmail, e.parameter); break;
       case "sendMessage":  result = sendMessage(studentEmail, e.parameter); break;
       case "saveSettings": result = saveSettings(studentEmail, e.parameter); break;
       case "syncCalendar": result = syncCalendar(studentEmail, e.parameter); break;
@@ -969,6 +970,112 @@ function coachListChatworkContacts(coachEmail) {
   }
 }
 
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Chatworkメッセージの自動連携（過去のやり取り・今後の会話をCRMに取り込む）
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+function getChatworkMessagesSheet() {
+  let sheet = getSheet("ChatworkMessages");
+  if (!sheet) {
+    sheet = SpreadsheetApp.openById(SPREADSHEET_ID).insertSheet("ChatworkMessages");
+    sheet.appendRow(["message_id", "room_id", "student_email", "account_id", "sender_name", "body", "send_time", "synced_at"]);
+  }
+  return sheet;
+}
+
+// Chatwork API v2は「未読メッセージの取得」が基本で、任意の過去日付までの
+// ページングには対応していない。force=1で直近の最新メッセージ（最大100件）を
+// 既読状態に関わらず取得できるので、それを定期的に呼び続けて差分（新規message_id）
+// だけ蓄積していく。初回実行時にその時点の直近100件が「過去分」として取り込まれる
+function fetchChatworkRoomMessages(roomId, token) {
+  const res = UrlFetchApp.fetch(`https://api.chatwork.com/v2/rooms/${roomId}/messages?force=1`, {
+    headers: { "X-ChatWorkToken": token },
+    muteHttpExceptions: true
+  });
+  const code = res.getResponseCode();
+  if (code === 204) return []; // 新着なし
+  if (code !== 200) throw new Error("Chatwork API error: " + code);
+  return JSON.parse(res.getContentText());
+}
+
+// 全生徒分のChatworkメッセージをまとめて同期する（定期トリガー）
+function syncChatworkMessages() {
+  const token = PropertiesService.getScriptProperties().getProperty("CHATWORK_API_TOKEN");
+  if (!token) { Logger.log("CHATWORK_API_TOKEN が未設定"); return; }
+
+  const profiles = sheetToObjects(getStudentProfileSheet()).filter(p => p.chatwork_room_id);
+  if (profiles.length === 0) return;
+
+  const sheet = getChatworkMessagesSheet();
+  const existingIds = new Set(sheetToObjects(sheet).map(m => m.message_id));
+  const now = new Date().toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" });
+  const newRows = [];
+
+  profiles.forEach(p => {
+    try {
+      const messages = fetchChatworkRoomMessages(p.chatwork_room_id, token);
+      messages.forEach(m => {
+        const messageId = String(m.message_id);
+        if (existingIds.has(messageId)) return;
+        existingIds.add(messageId);
+        newRows.push([
+          messageId, String(p.chatwork_room_id), p.student_email,
+          String(m.account.account_id), m.account.name || "",
+          String(m.body || "").slice(0, 2000),
+          new Date(Number(m.send_time) * 1000).toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" }),
+          now
+        ]);
+      });
+    } catch (e) {
+      Logger.log("Chatwork同期失敗 (" + p.student_email + "): " + e.toString());
+    }
+  });
+
+  if (newRows.length > 0) {
+    const startRow = sheet.getLastRow() + 1;
+    sheet.getRange(startRow, 1, newRows.length, newRows[0].length).setValues(newRows);
+  }
+  Logger.log("Chatworkメッセージ同期完了: " + newRows.length + "件追加");
+}
+
+// コーチ画面から1人分だけ即時同期する（取り込み直後の確認用）
+function coachSyncChatworkOne(coachEmail, params) {
+  if (!verifyCoach(coachEmail)) return { ok: false, error: "not a coach" };
+  const targetEmail = String(params.targetEmail || "");
+  if (!coachOwnsStudent(coachEmail, targetEmail)) return { ok: false, error: "not your student" };
+  const token = PropertiesService.getScriptProperties().getProperty("CHATWORK_API_TOKEN");
+  if (!token) return { ok: false, error: "CHATWORK_API_TOKEN が未設定" };
+
+  const profile = getStudentProfile(targetEmail);
+  if (!profile || !profile.chatwork_room_id) return { ok: false, error: "Chatworkのルームが紐付いていません" };
+
+  try {
+    const sheet = getChatworkMessagesSheet();
+    const existingIds = new Set(sheetToObjects(sheet).map(m => m.message_id));
+    const messages = fetchChatworkRoomMessages(profile.chatwork_room_id, token);
+    const now = new Date().toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" });
+    const newRows = [];
+    messages.forEach(m => {
+      const messageId = String(m.message_id);
+      if (existingIds.has(messageId)) return;
+      newRows.push([
+        messageId, String(profile.chatwork_room_id), targetEmail,
+        String(m.account.account_id), m.account.name || "",
+        String(m.body || "").slice(0, 2000),
+        new Date(Number(m.send_time) * 1000).toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" }),
+        now
+      ]);
+    });
+    if (newRows.length > 0) {
+      const startRow = sheet.getLastRow() + 1;
+      sheet.getRange(startRow, 1, newRows.length, newRows[0].length).setValues(newRows);
+    }
+    return { ok: true, data: { imported: newRows.length } };
+  } catch (e) {
+    return { ok: false, error: "sync failed: " + e.toString() };
+  }
+}
+
 // 生徒詳細: コーチング前の予習に必要な情報を時系列で
 function coachGetStudentDetail(coachEmail, studentEmail) {
   if (!verifyCoach(coachEmail)) return { ok: false, error: "not a coach" };
@@ -1003,6 +1110,9 @@ function coachGetStudentDetail(coachEmail, studentEmail) {
     .filter(f => f.student_email === studentEmail)
     .sort((a,b)=>b.uploaded_at>a.uploaded_at?1:-1);
   const joinedJiroku = !!sheetToObjects(getSheet("Users")).find(u => u.student_email === studentEmail);
+  const chatworkMessages = sheetToObjects(getChatworkMessagesSheet())
+    .filter(m => m.student_email === studentEmail)
+    .sort((a,b)=>b.send_time>a.send_time?1:-1).slice(0, 50);
 
   return { ok: true, data: {
     name: user.name,
@@ -1023,7 +1133,8 @@ function coachGetStudentDetail(coachEmail, studentEmail) {
     dailySummary: dailySummary,
     notes: notes,
     profile: profile || {},
-    files: files
+    files: files,
+    chatworkMessages: chatworkMessages
   } };
 }
 
@@ -2353,6 +2464,19 @@ function buildStudentContext(studentEmail, user) {
     }
   } catch (e) { /* シート未作成なら無視 */ }
 
+  // Chatworkでの直近のやり取り（コーチ・本人双方の生の会話）。
+  // 面談記録だけでは拾えない、日常の言葉遣いや悩みの温度感をAIが把握するために使う
+  let chatworkText = "まだ連携なし";
+  try {
+    const messages = sheetToObjects(getChatworkMessagesSheet())
+      .filter(m => m.student_email === studentEmail)
+      .sort((a,b)=>b.send_time>a.send_time?1:-1).slice(0, 15)
+      .reverse();
+    if (messages.length > 0) {
+      chatworkText = messages.map(m => `${m.send_time} ${m.sender_name}: ${m.body}`).join("\n");
+    }
+  } catch (e) { /* シート未作成なら無視 */ }
+
   return `【生徒名】${user.name}
 【入会日】${user.joined_at || "不明"}
 【連続記録日数】${streak}日
@@ -2363,6 +2487,8 @@ ${goalsText}
 【全期間スコアトレンド】${scoreTrend}
 【直近のコーチングセッション（担当コーチとの面談記録。約束事項のフォローアップを意識する）】
 ${coachingText}
+【Chatworkでの直近のやり取り】
+${chatworkText}
 【月次サマリー（入会〜先月まで）】
 ${summariesText}
 【直近30日のレポート履歴】
@@ -2607,7 +2733,8 @@ function setupSheets() {
     "Achievements": ["date","student_email","nickname","avatar","message","created_at"],
     "CoachingNotes": ["note_id","coach_email","student_email","date","content","next_theme","promises","created_at"],
     "StudentProfile": ["student_email","coach_email","name","birthdate","gender","family","address","phone","occupation","profile_notes","contract_start","contract_end","payment_type","contract_amount","installment_count","updated_at","stripe_email","stripe_total_paid","stripe_currency","stripe_synced_at","chatwork_id","chatwork_room_id"],
-    "ContractFiles": ["file_id","student_email","file_name","file_url","note","uploaded_at"]
+    "ContractFiles": ["file_id","student_email","file_name","file_url","note","uploaded_at"],
+    "ChatworkMessages": ["message_id","room_id","student_email","account_id","sender_name","body","send_time","synced_at"]
   };
   Object.entries(sheets).forEach(([name, headers]) => {
     let s = ss.getSheetByName(name);
@@ -2629,7 +2756,8 @@ function setupTriggers() {
   ScriptApp.newTrigger("checkTimerQueue").timeBased().everyMinutes(1).create();
   ScriptApp.newTrigger("hourlyReminder").timeBased().everyHours(1).create();
   ScriptApp.newTrigger("syncStripeTotals").timeBased().everyDays(1).atHour(4).create();
-  console.log("トリガーを設定しました（合計7個）");
+  ScriptApp.newTrigger("syncChatworkMessages").timeBased().everyHours(1).create();
+  console.log("トリガーを設定しました（合計8個）");
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
