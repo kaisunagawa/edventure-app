@@ -635,10 +635,11 @@ function HomeScreen({goalData, onGoalSaved, profile}) {
     : null;
 
   // actionテキストを行に分割（カスタムがあればそちらを優先）。
-  // 「。」で分割すると1つのタスクの説明文が途中で2つに割れてしまうため、
-  // 改行と箇条書きの「・」だけを区切りとして扱う
+  // GAS側でアクションは「1件=1行」の改行区切りとして保存されるため、
+  // 分割は改行のみで行う。「・」や「。」で分割すると「企画・撮影・編集」の
+  // ような複合語や説明文の途中で1つのタスクが千切れてしまう
   const aiItems = report?.action
-    ? report.action.split(/[\n・]/).map(s=>s.trim().replace(/。$/,"")).filter(s=>s.length>2)
+    ? report.action.split(/\n+/).map(s=>s.trim().replace(/^[・\-\s]+/,"").replace(/。$/,"")).filter(s=>s.length>2)
     : [];
   const actionItems = customActions !== null ? customActions : aiItems;
 

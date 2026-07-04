@@ -1097,9 +1097,10 @@ ${logsText}
   "feedback": "<目標の現在地と今日の取り組みへの共感・承認を含む2-3文>",
   "highlights": "<今日の具体的な良かった点を1文で称える>",
   "improvement": "<責めずに前向きな改善提案または継続すべき点を1文で>",
-  "action": "<目標達成に向けた明日の具体的アクション。1〜3個。複数ある場合は必ず「・」で区切り、1つのアクションは途中で区切らず1つにまとめる>",
+  "actions": ["<明日実行する具体的アクションを、それ単体で意味が通る完結した1文で>", "<必要なら2つ目>", "<必要なら3つ目>"],
   "trend": "<全レポート履歴から見える成長・変化のトレンドを1文で>"
-}`;
+}
+actionsは1〜3個の配列。各要素はチェックリストの1項目としてそのまま表示されるため、他の要素に依存せず独立して意味が通る完結した1文にすること。`;
 
   const res = UrlFetchApp.fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
@@ -1120,7 +1121,14 @@ ${logsText}
     Logger.log("Claudeテキスト: " + text.substring(0, 500));
     const m = text.match(/\{[\s\S]*\}/);
     if (!m) { Logger.log("JSONが見つかりません"); return null; }
-    return JSON.parse(m[0]);
+    const parsed = JSON.parse(m[0]);
+    // actionsは配列で受け取り、改行区切りの文字列に変換して保存する。
+    // アプリ側は改行だけで分割するため、文中の「・」や「。」で
+    // 1つのアクションが途中で千切れることがなくなる
+    if (Array.isArray(parsed.actions)) {
+      parsed.action = parsed.actions.map(a => String(a).trim()).filter(Boolean).join("\n");
+    }
+    return parsed;
   } catch (e) { Logger.log("JSONパースエラー: " + e.toString()); return null; }
 }
 
