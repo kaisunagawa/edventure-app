@@ -558,6 +558,18 @@ function ProfileTab({ student, detail, onReload }) {
   const age = form.birthdate ? Math.floor((Date.now() - new Date(form.birthdate)) / (365.25*86400000)) : null;
   const contractDaysLeft = form.contract_end ? Math.ceil((new Date(form.contract_end) - new Date()) / 86400000) : null;
 
+  const applyExtracted = (ex) => {
+    setForm(f => ({
+      ...f,
+      name: ex.name || f.name, birthdate: ex.birthdate || f.birthdate,
+      address: ex.address || f.address, phone: ex.phone || f.phone,
+      contract_start: ex.contract_start || f.contract_start, contract_end: ex.contract_end || f.contract_end,
+      payment_type: ex.payment_type || f.payment_type,
+      contract_amount: ex.contract_amount || f.contract_amount,
+      installment_count: ex.installment_count || f.installment_count
+    }));
+  };
+
   const onFileChosen = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -573,16 +585,7 @@ function ProfileTab({ student, detail, onReload }) {
           setExtractMsg("");
           const er = await apiPost("coachExtractContractInfo", { targetEmail: student.email, fileData: base64, mimeType: file.type });
           if (er.ok) {
-            const ex = er.data;
-            setForm(f => ({
-              ...f,
-              name: ex.name || f.name, birthdate: ex.birthdate || f.birthdate,
-              address: ex.address || f.address, phone: ex.phone || f.phone,
-              contract_start: ex.contract_start || f.contract_start, contract_end: ex.contract_end || f.contract_end,
-              payment_type: ex.payment_type || f.payment_type,
-              contract_amount: ex.contract_amount || f.contract_amount,
-              installment_count: ex.installment_count || f.installment_count
-            }));
+            applyExtracted(er.data);
             setExtractMsg("AIが契約書から読み取った内容をフォームに反映しました。内容を確認してから保存してください");
           } else {
             setExtractMsg("契約書の自動読み取りに失敗しました（手動で入力してください）");
@@ -594,6 +597,19 @@ function ProfileTab({ student, detail, onReload }) {
     } catch (err) { alert("アップロードに失敗しました"); }
     setUploading(false);
     if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
+  const extractFromExisting = async (fileId) => {
+    setExtracting(true);
+    setExtractMsg("");
+    const er = await apiPost("coachExtractFromExistingFile", { targetEmail: student.email, file_id: fileId });
+    if (er.ok) {
+      applyExtracted(er.data);
+      setExtractMsg("AIが契約書から読み取った内容をフォームに反映しました。内容を確認してから保存してください");
+    } else {
+      setExtractMsg("契約書の読み取りに失敗しました: " + (er.error || ""));
+    }
+    setExtracting(false);
   };
 
   const deleteFile = async (fileId) => {
@@ -701,7 +717,12 @@ function ProfileTab({ student, detail, onReload }) {
                 <a href=${f.file_url} target="_blank" style=${{fontSize:13,color:"var(--accent)",fontWeight:600,textDecoration:"none"}}>📄 ${f.file_name}</a>
                 <div style=${{fontSize:11,color:"var(--sub)",marginTop:2}}>${f.note ? f.note + " · " : ""}${f.uploaded_at}</div>
               </div>
-              <button onClick=${()=>deleteFile(f.file_id)} style=${{background:"none",border:"none",color:"var(--red)",fontSize:11,cursor:"pointer",fontFamily:"inherit",flexShrink:0}}>削除</button>
+              <div style=${{display:"flex",gap:10,flexShrink:0,alignItems:"center"}}>
+                ${/\.pdf$/i.test(f.file_name) && html`
+                  <button onClick=${()=>extractFromExisting(f.file_id)} disabled=${extracting} style=${{background:"none",border:"none",color:"var(--accent)",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>🤖 AIに読み取らせる</button>
+                `}
+                <button onClick=${()=>deleteFile(f.file_id)} style=${{background:"none",border:"none",color:"var(--red)",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>削除</button>
+              </div>
             </div>
           `)}
         </div>

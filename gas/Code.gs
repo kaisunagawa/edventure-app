@@ -140,6 +140,7 @@ function doPost(e) {
       case "coachUploadFile":      return jsonResponse(coachUploadFile(body.coachEmail, body));
       case "coachDeleteFile":      return jsonResponse(coachDeleteFile(body.coachEmail, body));
       case "coachExtractContractInfo": return jsonResponse(coachExtractContractInfo(body.coachEmail, body));
+      case "coachExtractFromExistingFile": return jsonResponse(coachExtractFromExistingFile(body.coachEmail, body));
       case "coachImportNotes":     return jsonResponse(coachImportNotes(body.coachEmail, body));
       case "coachSessionSuggestions": return jsonResponse(coachSessionSuggestions(body.coachEmail, body));
       default: return jsonResponse({ ok: false, error: "Unknown action" });
@@ -1094,7 +1095,33 @@ function coachExtractContractInfo(coachEmail, body) {
   const targetEmail = String(body.targetEmail || "");
   if (!coachOwnsStudent(coachEmail, targetEmail)) return { ok: false, error: "not your student" };
   if (!body.fileData) return { ok: false, error: "missing file" };
+  return extractContractInfoFromBase64(body.fileData, body.mimeType || "application/pdf");
+}
 
+// 既にアップロード済みの契約書ファイルから、後からAI抽出を行う（機能追加前に
+// アップロードされていた契約書など、抽出のタイミングを逃したファイル向け）
+function coachExtractFromExistingFile(coachEmail, body) {
+  if (!verifyCoach(coachEmail)) return { ok: false, error: "not a coach" };
+  const targetEmail = String(body.targetEmail || "");
+  if (!coachOwnsStudent(coachEmail, targetEmail)) return { ok: false, error: "not your student" };
+
+  const file = sheetToObjects(getContractFilesSheet())
+    .find(f => f.file_id === String(body.file_id) && f.student_email === targetEmail);
+  if (!file) return { ok: false, error: "file not found" };
+
+  try {
+    const idMatch = String(file.file_url).match(/[-\w]{25,}/);
+    if (!idMatch) return { ok: false, error: "invalid file url" };
+    const driveFile = DriveApp.getFileById(idMatch[0]);
+    const blob = driveFile.getBlob();
+    const base64 = Utilities.base64Encode(blob.getBytes());
+    return extractContractInfoFromBase64(base64, blob.getContentType() || "application/pdf");
+  } catch (e) {
+    return { ok: false, error: "extract failed: " + e.toString() };
+  }
+}
+
+function extractContractInfoFromBase64(base64Data, mimeType) {
   const apiKey = PropertiesService.getScriptProperties().getProperty("CLAUDE_API_KEY");
   if (!apiKey) return { ok: false, error: "CLAUDE_API_KEY が未設定" };
 
@@ -1122,7 +1149,7 @@ function coachExtractContractInfo(coachEmail, body) {
         messages: [{
           role: "user",
           content: [
-            { type: "document", source: { type: "base64", media_type: body.mimeType || "application/pdf", data: body.fileData } },
+            { type: "document", source: { type: "base64", media_type: mimeType || "application/pdf", data: base64Data } },
             { type: "text", text: prompt }
           ]
         }]
