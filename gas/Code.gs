@@ -780,6 +780,7 @@ function morningScheduleNotify() {
 
       const ctx = buildStudentContext(user.student_email, user);
       const recentMsgs = getRecentCoachMessages(user.student_email, 5);
+      const hour = new Date().getHours();
 
       const prompt = `あなたは${user.name}の友人でもある教育コーチです。以下の情報をすべて把握した上で、今朝の個別メッセージを送ってください。
 
@@ -791,10 +792,13 @@ ${recentMsgs}
 - ユーモアを1つ忍ばせて、読んでクスッとできる温度感
 - 「---」「【】」「〇〇へのメッセージ」「〇〇案：」「〇〇さんへ」などの見出し・宛名・区切りは絶対使わない
 - 本文だけをそのまま書く。前置きや説明・宛名は一切不要
+- 挨拶（おはよう等）は絶対に書かない。冒頭のヘッダーで挨拶済みのため、本文からいきなり始める
+- 現在は${hour}時。すでに過ぎた時間帯についての行動指示（「朝起きたらまず」等）はせず、今この時間から実行できる提案にする
 - 直近のコーチメッセージと同じ言い回し・内容・切り口は絶対に繰り返さない。毎回違う角度から話す
 - 全レポート履歴と直近14日のログを踏まえて、具体的なエピソードや数字に触れる
+- 過去の記録・メモからの引用やたとえ話は、話の流れに自然につながる場合だけ。趣味の話を無理やり目標達成論に結びつけない
 - 今日のカレンダー予定がある場合は、目標との関係を意識しつつ今日の過ごし方に軽く触れる
-- 3文以内。絵文字1個まで。「おはようございます」は不要（冒頭に入れるため）`;
+- 3文以内。絵文字1個まで`;
 
       const res = UrlFetchApp.fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
@@ -804,7 +808,7 @@ ${recentMsgs}
       });
       const result = JSON.parse(res.getContentText());
       if (!result.content || !result.content[0]) return;
-      sendLineMessage(user.line_user_id, "🌅 おはようございます、" + user.name + "さん！\n\n" + formatForLine(stripSalutation(result.content[0].text)));
+      sendLineMessage(user.line_user_id, "🌅 おはようございます、" + (user.nickname || user.name) + "さん！\n\n" + formatForLine(stripSalutation(result.content[0].text)));
     } catch (err) { Logger.log("morningCoach error: " + err); }
   });
 }
@@ -1592,6 +1596,19 @@ function stripSalutation(text) {
   if (!text) return text;
   let lines = text.split('\n');
   while (lines.length > 0 && lines[0].trim() === '') lines.shift();
+
+  // ケース0: 冒頭の「挨拶だけの行」「絵文字だけの行」を除去。
+  // 固定ヘッダー側で挨拶を付けるため、AI本文側の挨拶は重複になる
+  // （プロンプトで禁止していてもAIが書いてしまうことがある）
+  while (lines.length > 0) {
+    const t = lines[0].trim();
+    const isGreeting = /^(おはよう(ございます)?|こんにちは|こんばんは|お疲れ様です?|お疲れさまです?|おつかれさまです?|やっほー?|ハロー)[！!？?。～〜ー♪☀🌅✨\s]*$/.test(t);
+    const isEmojiOnly = t.length > 0 && t.length <= 4 && !/[ぁ-んァ-ヶ一-龠a-zA-Z0-9]/.test(t);
+    if (!isGreeting && !isEmojiOnly) break;
+    lines.shift();
+    while (lines.length > 0 && lines[0].trim() === '') lines.shift();
+  }
+
   let first = (lines[0] || '').trim();
 
   // ケース1: 短い行（30文字未満）で「へ」「さんへ」「さん、」「さん,」で終わるなら宛名のみの行として除去
