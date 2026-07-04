@@ -417,6 +417,8 @@ function ProfileTab({ student, detail, onReload }) {
   const [saving, setSaving] = useState(false);
   const [savedMsg, setSavedMsg] = useState("");
   const [uploading, setUploading] = useState(false);
+  const [extracting, setExtracting] = useState(false);
+  const [extractMsg, setExtractMsg] = useState("");
   const [fileNote, setFileNote] = useState("");
   const fileInputRef = useRef(null);
 
@@ -453,7 +455,30 @@ function ProfileTab({ student, detail, onReload }) {
     try {
       const base64 = await fileToBase64(file);
       const r = await apiPost("coachUploadFile", { targetEmail: student.email, fileName: file.name, mimeType: file.type, fileData: base64, note: fileNote.trim() });
-      if (r.ok) { setFileNote(""); onReload(); }
+      if (r.ok) {
+        setFileNote(""); onReload();
+        if (file.type === "application/pdf") {
+          setExtracting(true);
+          setExtractMsg("");
+          const er = await apiPost("coachExtractContractInfo", { targetEmail: student.email, fileData: base64, mimeType: file.type });
+          if (er.ok) {
+            const ex = er.data;
+            setForm(f => ({
+              ...f,
+              name: ex.name || f.name, birthdate: ex.birthdate || f.birthdate,
+              address: ex.address || f.address, phone: ex.phone || f.phone,
+              contract_start: ex.contract_start || f.contract_start, contract_end: ex.contract_end || f.contract_end,
+              payment_type: ex.payment_type || f.payment_type,
+              contract_amount: ex.contract_amount || f.contract_amount,
+              installment_count: ex.installment_count || f.installment_count
+            }));
+            setExtractMsg("AIが契約書から読み取った内容をフォームに反映しました。内容を確認してから保存してください");
+          } else {
+            setExtractMsg("契約書の自動読み取りに失敗しました（手動で入力してください）");
+          }
+          setExtracting(false);
+        }
+      }
       else alert("アップロードに失敗しました: " + (r.error || ""));
     } catch (err) { alert("アップロードに失敗しました"); }
     setUploading(false);
@@ -530,6 +555,8 @@ function ProfileTab({ student, detail, onReload }) {
           <input class="inp" value=${fileNote} onChange=${e=>setFileNote(e.target.value)} placeholder="ファイルのメモ（任意・例：初回契約書）" style=${{marginBottom:10}}/>
           <input ref=${fileInputRef} type="file" onChange=${onFileChosen} disabled=${uploading} style=${{fontSize:12.5,marginBottom:14}}/>
           ${uploading && html`<div style=${{fontSize:12,color:"var(--sub)"}}>アップロード中...</div>`}
+          ${extracting && html`<div style=${{fontSize:12,color:"var(--sub)"}}>🤖 AIが契約書の内容を読み取り中...</div>`}
+          ${extractMsg && !extracting && html`<div style=${{fontSize:12,color:"var(--accent)",marginBottom:8}}>${extractMsg}</div>`}
           ${detail.files.length === 0 && html`<div style=${{fontSize:13,color:"var(--sub)"}}>まだファイルがありません</div>`}
           ${detail.files.map((f,i) => html`
             <div key=${f.file_id} style=${{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"9px 0",borderBottom:i<detail.files.length-1?"1px solid var(--border)":"none"}}>

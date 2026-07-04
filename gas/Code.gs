@@ -137,6 +137,7 @@ function doPost(e) {
       case "coachSaveProfile":     return jsonResponse(coachSaveProfile(body.coachEmail, body));
       case "coachUploadFile":      return jsonResponse(coachUploadFile(body.coachEmail, body));
       case "coachDeleteFile":      return jsonResponse(coachDeleteFile(body.coachEmail, body));
+      case "coachExtractContractInfo": return jsonResponse(coachExtractContractInfo(body.coachEmail, body));
       default: return jsonResponse({ ok: false, error: "Unknown action" });
     }
   } catch (err) {
@@ -911,6 +912,60 @@ function coachUploadFile(coachEmail, body) {
     return { ok: true, data: { file_id: fileId, file_name: body.fileName, file_url: file.getUrl(), uploaded_at: now, note: body.note || "" } };
   } catch (e) {
     return { ok: false, error: "upload failed: " + e.toString() };
+  }
+}
+
+// 契約書PDFをAIに読ませてプロフィール項目を抽出する。
+// 抽出結果はフォームへの仮入力にのみ使い、保存はコーチの確認後に行う
+function coachExtractContractInfo(coachEmail, body) {
+  if (!verifyCoach(coachEmail)) return { ok: false, error: "not a coach" };
+  const targetEmail = String(body.targetEmail || "");
+  if (!coachOwnsStudent(coachEmail, targetEmail)) return { ok: false, error: "not your student" };
+  if (!body.fileData) return { ok: false, error: "missing file" };
+
+  const apiKey = PropertiesService.getScriptProperties().getProperty("CLAUDE_API_KEY");
+  if (!apiKey) return { ok: false, error: "CLAUDE_API_KEY が未設定" };
+
+  const prompt = `これは生徒との契約書です。以下の項目をこの書類から読み取り、JSON形式のみで出力してください。読み取れない項目は空文字にしてください。値の正確性が重要なので、書類に明記されていないことは推測せず空にすること。
+
+{
+  "name": "<氏名>",
+  "birthdate": "<生年月日、YYYY-MM-DD形式>",
+  "address": "<住所>",
+  "phone": "<電話番号>",
+  "contract_start": "<契約開始日、YYYY-MM-DD形式>",
+  "contract_end": "<契約終了日、YYYY-MM-DD形式>",
+  "payment_type": "<lump（一括）/card_installment（クレカ分割）/transfer_installment（振込分割）のいずれか>",
+  "contract_amount": "<契約金額、数字のみ>",
+  "installment_count": "<分割回数、数字のみ。一括の場合は空>"
+}`;
+
+  try {
+    const res = UrlFetchApp.fetch("https://api.anthropic.com/v1/messages", {
+      method: "post",
+      headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
+      payload: JSON.stringify({
+        model: "claude-haiku-4-5-20251001",
+        max_tokens: 800,
+        messages: [{
+          role: "user",
+          content: [
+            { type: "document", source: { type: "base64", media_type: body.mimeType || "application/pdf", data: body.fileData } },
+            { type: "text", text: prompt }
+          ]
+        }]
+      }),
+      muteHttpExceptions: true
+    });
+    const data = JSON.parse(res.getContentText());
+    const text = data.content && data.content[0] && data.content[0].text;
+    if (!text) return { ok: false, error: "AI応答が空でした" };
+    const m = text.match(/\{[\s\S]*\}/);
+    if (!m) return { ok: false, error: "AI応答の解析に失敗しました" };
+    const parsed = JSON.parse(m[0]);
+    return { ok: true, data: parsed };
+  } catch (e) {
+    return { ok: false, error: "extract failed: " + e.toString() };
   }
 }
 
