@@ -975,6 +975,10 @@ function LogScreen({onToast, isActive}) {
   };
 
   const [block, setBlock] = useState(getCurrentBlock);
+  // まとめて記録: multiModeがONの間は、チップのタップで追加の時間帯を
+  // 選択でき、1回の保存で全ブロックに同じ内容を書き込む
+  const [multiMode, setMultiMode] = useState(false);
+  const [extraBlocks, setExtraBlocks] = useState([]);
 
   const [task, setTask] = useState("");
   const [focus, setFocus] = useState("");
@@ -1034,6 +1038,16 @@ function LogScreen({onToast, isActive}) {
     loadBlockData(b, logs);
   };
 
+  // チップタップ: 通常は選択切り替え。まとめて記録モード中は追加選択のON/OFF
+  const handleChipTap = (b) => {
+    if(!multiMode){ handleBlockSelect(b); return; }
+    if(b===block) return; // 基準ブロックは外せない
+    setExtraBlocks(prev => prev.includes(b) ? prev.filter(x=>x!==b) : [...prev, b]);
+  };
+  const toggleMultiMode = () => {
+    setMultiMode(v=>{ if(v) setExtraBlocks([]); return !v; });
+  };
+
   // 現在のフォーム値・選択ブロックを非同期コールバックから読むためのミラー
   const formRef = useRef(null);
   formRef.current = {task, focus, memo, goalRelated};
@@ -1052,6 +1066,7 @@ function LogScreen({onToast, isActive}) {
     setLogs(base);
     const def = isToday(date) ? getCurrentBlock() : (base[0]?.time_block || timeBlocks[0]);
     setBlock(def);
+    setMultiMode(false); setExtraBlocks([]);
     loadBlockData(def, base);
     setTimeout(()=>{ const el=timeRef.current?.querySelector(".chip.on"); if(el) el.scrollIntoView({inline:"center",behavior:"smooth"}); },100);
 
@@ -1076,22 +1091,32 @@ function LogScreen({onToast, isActive}) {
     if(!task.trim()) return;
     setSaving(true);
     const url=new URL(GAS_URL);
-    url.searchParams.set("action","saveLog"); url.searchParams.set("studentEmail",CURRENT_USER.email);
+    // まとめて記録: 選択された全ブロックを1回のリクエストで保存する
+    const blocks = [block, ...extraBlocks].sort((a,b)=>a>b?1:-1);
+    url.searchParams.set("action", blocks.length>1 ? "saveLogMulti" : "saveLog");
+    url.searchParams.set("studentEmail",CURRENT_USER.email);
     url.searchParams.set("date",date);
-    url.searchParams.set("time_block",block); url.searchParams.set("task",task.trim());
+    if(blocks.length>1) url.searchParams.set("time_blocks", blocks.join(","));
+    else url.searchParams.set("time_block", block);
+    url.searchParams.set("task",task.trim());
     url.searchParams.set("focus_level",focus); url.searchParams.set("memo",memo.trim());
     url.searchParams.set("goal_related", goalRelated ? "true" : "false");
     const res=await fetch(url).then(r=>r.json()).catch(()=>({ok:false}));
     if(!res.ok){ onToast("保存に失敗しました。もう一度お試しください"); setSaving(false); return; }
     if(res.xp_gained){ const lv=res.level_up?`  →  Lv.${res.level} へ！`:""; onToast(`+${res.xp_gained} XP 獲得${lv}`); }
-    else onToast(res.updated?"記録を上書きしました":"保存しました");
+    else onToast(res.updated?"記録を上書きしました":(blocks.length>1?blocks.length+"個の時間帯に保存しました":"保存しました"));
     // 保存内容が分かっているので再取得せず、ローカルの一覧をその場で更新する
     // （サーバーへの往復が倍になり保存が重く感じられるのを防ぐ）
-    const saved = {time_block:block, task:task.trim(), focus_level:focus, memo:memo.trim(), goal_related:goalRelated?"true":"false"};
-    const exists = logs.some(l=>l.time_block===block);
-    const next = exists ? logs.map(l=>l.time_block===block?{...l,...saved}:l) : [...logs, saved].sort((a,b)=>a.time_block>b.time_block?1:-1);
+    let next = [...logs];
+    blocks.forEach(b=>{
+      const saved = {time_block:b, task:task.trim(), focus_level:focus, memo:memo.trim(), goal_related:goalRelated?"true":"false"};
+      const i = next.findIndex(l=>l.time_block===b);
+      if(i>=0) next[i] = {...next[i], ...saved}; else next.push(saved);
+    });
+    next.sort((a,b)=>a.time_block>b.time_block?1:-1);
     setLogs(next);
     try{ localStorage.setItem(LOGS_LS+date, JSON.stringify(next)); }catch(e){}
+    if(blocks.length>1){ setMultiMode(false); setExtraBlocks([]); }
     setSaving(false);
   };
 
@@ -1110,12 +1135,20 @@ function LogScreen({onToast, isActive}) {
     <div>
       <div ref=${timeRef} class="time-bar">
         ${timeBlocks.map(t=>html`<button key=${t}
-          class=${"chip"+(block===t?" on":"")+(recorded.has(t)?" done":"")}
-          onClick=${()=>handleBlockSelect(t)}>${t}</button>`)}
+          class=${"chip"+((block===t||extraBlocks.includes(t))?" on":"")+(recorded.has(t)?" done":"")}
+          onClick=${()=>handleChipTap(t)}>${t}</button>`)}
       </div>
       <div class="form-wrap">
-        <div style=${{fontSize:12,color:"var(--sub)",marginBottom:8}}>
-          ${!isToday(date) ? "🗓 過去の記録を追加・編集できます（XPは付きません）" : recorded.has(block) ? "✏️ 記録済み（編集できます）" : "📝 未記録"}
+        <div style=${{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8,gap:8}}>
+          <div style=${{fontSize:12,color:"var(--sub)"}}>
+            ${multiMode
+              ? `⧉ ${1+extraBlocks.length}個の時間帯を選択中（チップをタップで追加）`
+              : !isToday(date) ? "🗓 過去の記録を追加・編集できます（XPは付きません）" : recorded.has(block) ? "✏️ 記録済み（編集できます）" : "📝 未記録"}
+          </div>
+          <button onClick=${toggleMultiMode}
+            style=${{flexShrink:0,padding:"4px 10px",borderRadius:20,border:`1.5px solid ${multiMode?"var(--accent)":"var(--border)"}`,background:multiMode?"var(--accent)":"transparent",color:multiMode?"#fff":"var(--sub)",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>
+            ${multiMode?"選択をやめる":"⧉ まとめて記録"}
+          </button>
         </div>
         ${calNeedsTap&&html`
           <button onClick=${loadCalByTap} style=${{display:"flex",alignItems:"center",gap:8,width:"100%",padding:"10px 14px",marginBottom:12,borderRadius:10,border:"1.5px dashed var(--accent)",background:"var(--accent-l)",color:"var(--accent)",fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>

@@ -56,6 +56,7 @@ function doGet(e) {
       case "getSchedule":  result = getSchedule(studentEmail); break;
       case "getStudents":  result = getStudents(studentEmail); break;
       case "saveLog":      result = saveLog(studentEmail, e.parameter); break;
+      case "saveLogMulti": result = saveLogMulti(studentEmail, e.parameter); break;
       case "sendMessage":  result = sendMessage(studentEmail, e.parameter); break;
       case "saveSettings": result = saveSettings(studentEmail, e.parameter); break;
       case "syncCalendar": result = syncCalendar(studentEmail, e.parameter); break;
@@ -434,6 +435,26 @@ function saveLog(studentEmail, body) {
   updateStreak(studentEmail);
   const xpResult = addXP(studentEmail, body.memo);
   return { ok: true, log_id: logId, ...xpResult };
+}
+
+// 複数の時間帯に同じ内容を一括保存する（2時間の会議などを1回の入力で記録）。
+// 1ブロックずつ個別に呼ぶとGAS往復がブロック数ぶん発生して遅いため、
+// 1リクエストでまとめて処理する。XP・ストリークは通常の保存と同じ扱い。
+function saveLogMulti(studentEmail, body) {
+  const blocks = String(body.time_blocks || "").split(",").map(s => s.trim()).filter(Boolean);
+  if (blocks.length === 0) return { ok: false, error: "no blocks" };
+  let totalXp = 0, levelUp = false, level = 0, updatedAny = false;
+  blocks.forEach(b => {
+    const merged = {};
+    Object.keys(body).forEach(k => { merged[k] = body[k]; });
+    merged.time_block = b;
+    const r = saveLog(studentEmail, merged);
+    if (r.xp_gained) totalXp += r.xp_gained;
+    if (r.level_up) levelUp = true;
+    if (r.level) level = r.level;
+    if (r.updated) updatedAny = true;
+  });
+  return { ok: true, xp_gained: totalXp, level_up: levelUp, level: level, updated: updatedAny, count: blocks.length };
 }
 
 function addXP(studentEmail, memo) {
