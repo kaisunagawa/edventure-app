@@ -401,13 +401,13 @@ function StudentMain({ student, onNoteSaved }) {
 }
 
 // ── プロフィール・契約タブ ──
-const PAYMENT_TYPES = [{v:"lump",l:"一括払い"},{v:"installment",l:"分割払い"}];
+const PAYMENT_TYPES = [{v:"lump",l:"一括払い"},{v:"card_installment",l:"クレカ分割"},{v:"transfer_installment",l:"振込分割"}];
 const GENDER_TYPES = [{v:"",l:"未設定"},{v:"male",l:"男性"},{v:"female",l:"女性"},{v:"other",l:"その他"}];
 
 function ProfileTab({ student, detail, onReload }) {
   const p = detail.profile || {};
   const [form, setForm] = useState({
-    birthdate: p.birthdate || "", gender: p.gender || "", family: p.family || "",
+    name: p.name || student.name || "", birthdate: p.birthdate || "", gender: p.gender || "", family: p.family || "",
     address: p.address || "", phone: p.phone || "",
     occupation: p.occupation || "", profile_notes: p.profile_notes || "",
     contract_start: p.contract_start || "", contract_end: p.contract_end || "",
@@ -422,7 +422,7 @@ function ProfileTab({ student, detail, onReload }) {
 
   useEffect(() => {
     setForm({
-      birthdate: p.birthdate || "", gender: p.gender || "", family: p.family || "",
+      name: p.name || student.name || "", birthdate: p.birthdate || "", gender: p.gender || "", family: p.family || "",
       address: p.address || "", phone: p.phone || "",
       occupation: p.occupation || "", profile_notes: p.profile_notes || "",
       contract_start: p.contract_start || "", contract_end: p.contract_end || "",
@@ -470,6 +470,8 @@ function ProfileTab({ student, detail, onReload }) {
     <div style=${{display:"grid",gridTemplateColumns:"1fr 1fr",gap:20,alignItems:"start"}}>
       <div class="card">
         <div class="card-label">👤 プロフィール</div>
+        <label class="lbl">名前</label>
+        <input class="inp" value=${form.name} onChange=${e=>set("name", e.target.value)} placeholder="例：山田太郎" style=${{marginBottom:12}}/>
         <label class="lbl">生年月日${age !== null && html` <span style=${{color:"var(--accent)",fontWeight:700}}>（${age}歳）</span>`}</label>
         <input type="date" class="inp" value=${form.birthdate} onChange=${e=>set("birthdate", e.target.value)} style=${{marginBottom:12}}/>
         <label class="lbl">性別</label>
@@ -512,7 +514,7 @@ function ProfileTab({ student, detail, onReload }) {
               <label class="lbl">契約金額（円）</label>
               <input class="inp" type="number" value=${form.contract_amount} onChange=${e=>set("contract_amount", e.target.value)} placeholder="例：480000"/>
             </div>
-            ${form.payment_type === "installment" && html`
+            ${form.payment_type !== "lump" && html`
               <div>
                 <label class="lbl">分割回数</label>
                 <input class="inp" type="number" value=${form.installment_count} onChange=${e=>set("installment_count", e.target.value)} placeholder="例：12"/>
