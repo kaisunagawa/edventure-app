@@ -244,32 +244,34 @@ function getReportList(studentEmail) {
 // 全ユーザー分のDailyLogを読み、student_email別に累計ステータス
 // {score, breakdown} を計算する。getStatusSummary・getCommunityの
 // 両方から使う共通ロジック（基準がズレないよう一本化している）。
-function computeAllStatuses() {
-  const sheet = getSheet("DailyLog");
-  const data = sheet.getDataRange().getValues();
-  const headers = data[0];
-  const idx = {
-    student_email: headers.indexOf("student_email"),
-    date: headers.indexOf("date"),
-    memo: headers.indexOf("memo"),
-    focus_level: headers.indexOf("focus_level"),
-    goal_related: headers.indexOf("goal_related"),
-  };
-  const byUser = {};
-  for (let i = 1; i < data.length; i++) {
-    const email = String(data[i][idx.student_email]);
-    if (!email) continue;
-    const rawDate = data[i][idx.date];
-    const rowDate = rawDate instanceof Date
-      ? Utilities.formatDate(rawDate, "Asia/Tokyo", "yyyy-MM-dd")
-      : String(rawDate);
-    (byUser[email] = byUser[email] || []).push({
-      date: rowDate,
-      memo: String(data[i][idx.memo] || ""),
-      focus_level: String(data[i][idx.focus_level] || ""),
-      goal_related: String(data[i][idx.goal_related] || ""),
-    });
+// preloadedLogObjects: 呼び出し元が既にDailyLogを sheetToObjects() で読み込んで
+// いる場合、その配列をそのまま渡せば再読み込みしない（coachGetStudentsなど）。
+// 渡されなかった場合のみ、5分間のCacheServiceキャッシュを使う（ステータスは
+// 日単位で減衰するスコアなので、数分の遅延は実害がない）
+// ログ保存直後にステータスキャッシュを無効化する（次回計算時に最新のDailyLogで再計算される）
+function invalidateStatusCache() {
+  try { CacheService.getScriptCache().remove("all_statuses_v1"); } catch (e) { /* ignore */ }
+}
+
+function computeAllStatuses(preloadedLogObjects) {
+  const CACHE_KEY = "all_statuses_v1";
+  if (!preloadedLogObjects) {
+    const cached = CacheService.getScriptCache().get(CACHE_KEY);
+    if (cached) return JSON.parse(cached);
   }
+
+  const allLogs = preloadedLogObjects || sheetToObjects(getSheet("DailyLog"));
+  const byUser = {};
+  allLogs.forEach(l => {
+    const email = String(l.student_email || "");
+    if (!email) return;
+    (byUser[email] = byUser[email] || []).push({
+      date: l.date,
+      memo: String(l.memo || ""),
+      focus_level: String(l.focus_level || ""),
+      goal_related: String(l.goal_related || ""),
+    });
+  });
 
   // ステータスは筋肉のように「やった分だけ増え、やらない期間が続くと
   // 落ちる」設計。半減期21日の指数減衰で日々の実績を積み上げる
@@ -332,6 +334,10 @@ function computeAllStatuses() {
     const score = breakdown.records + breakdown.memo + breakdown.focus + breakdown.goal + breakdown.consistency;
     result[email] = { score, breakdown };
   });
+
+  if (!preloadedLogObjects) {
+    try { CacheService.getScriptCache().put(CACHE_KEY, JSON.stringify(result), 300); } catch (e) { /* サイズ超過時は無視してキャッシュなしで返す */ }
+  }
   return result;
 }
 
@@ -423,6 +429,20 @@ function saveLog(studentEmail, body) {
   const emailIdx = headers.indexOf("student_email");
   const dateIdx = headers.indexOf("date");
   const timeIdx = headers.indexOf("time_block");
+
+  // 今日分のログ件数・バッジ判定用の集計をここで一度だけ行う（addXP/checkBadgesの
+  // ストリークボーナス・バッジ判定用。DailyLogをこの後もう一度読み直さずに済ませる）
+  const memoIdx = headers.indexOf("memo");
+  let todaysLogCount = 0, totalLogs = 0, memoCount = 0;
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][emailIdx]) !== studentEmail) continue;
+    totalLogs++;
+    if (String(data[i][memoIdx] || "").trim()) memoCount++;
+    const raw = data[i][dateIdx];
+    const rowDate = raw instanceof Date ? Utilities.formatDate(raw, "Asia/Tokyo", "yyyy-MM-dd") : String(raw);
+    if (rowDate === today) todaysLogCount++;
+  }
+
   for (let i = 1; i < data.length; i++) {
     const rawDate = data[i][dateIdx];
     const rowDate = rawDate instanceof Date
@@ -437,7 +457,7 @@ function saveLog(studentEmail, body) {
       let grIdx = headers.indexOf("goal_related");
       if(grIdx === -1){ grIdx = headers.length; sheet.getRange(1, grIdx+1).setValue("goal_related"); }
       sheet.getRange(i+1, grIdx+1).setValue(body.goal_related || "false");
-      if (!isPast) updateStreak(studentEmail);
+      if (!isPast) { updateStreak(studentEmail); invalidateStatusCache(); }
       return { ok: true, log_id: String(data[i][0]), updated: true, xp_gained: 0 };
     }
   }
@@ -451,31 +471,107 @@ function saveLog(studentEmail, body) {
   if (isPast) return { ok: true, log_id: logId, xp_gained: 0 };
 
   updateStreak(studentEmail);
-  const xpResult = addXP(studentEmail, body.memo);
+  invalidateStatusCache();
+  // +1 = 今追加した1件（totalLogs/memoCountにも反映）
+  const xpResult = addXP(studentEmail, body.memo, todaysLogCount + 1, {
+    totalLogs: totalLogs + 1,
+    memoCount: memoCount + ((body.memo || "").trim() ? 1 : 0)
+  });
   return { ok: true, log_id: logId, ...xpResult };
 }
 
 // 複数の時間帯に同じ内容を一括保存する（2時間の会議などを1回の入力で記録）。
-// 1ブロックずつ個別に呼ぶとGAS往復がブロック数ぶん発生して遅いため、
-// 1リクエストでまとめて処理する。XP・ストリークは通常の保存と同じ扱い。
+// DailyLogの読み込み・書き込みをこの関数内で1回にまとめ、ストリーク・XPも
+// ブロック数ぶん繰り返さずリクエスト全体で1回だけ計算する
 function saveLogMulti(studentEmail, body) {
   const blocks = String(body.time_blocks || "").split(",").map(s => s.trim()).filter(Boolean);
   if (blocks.length === 0) return { ok: false, error: "no blocks" };
-  let totalXp = 0, levelUp = false, level = 0, updatedAny = false;
+
+  const sheet = getSheet("DailyLog");
+  const data = sheet.getDataRange().getValues(); // 読み込みはここ1回だけ
+  let headers = data[0];
+  const idx = {
+    email: headers.indexOf("student_email"), date: headers.indexOf("date"),
+    time: headers.indexOf("time_block"), task: headers.indexOf("task"),
+    focus: headers.indexOf("focus_level"), memo: headers.indexOf("memo"),
+    logId: headers.indexOf("log_id"), timestamp: headers.indexOf("timestamp")
+  };
+  let goalIdx = headers.indexOf("goal_related");
+  if (goalIdx === -1) {
+    goalIdx = headers.length;
+    sheet.getRange(1, goalIdx + 1).setValue("goal_related");
+    headers = headers.concat(["goal_related"]);
+  }
+
+  const today = formatDate(new Date());
+  const targetDate = (body.date && /^\d{4}-\d{2}-\d{2}$/.test(String(body.date)) && String(body.date) <= today)
+    ? String(body.date) : today;
+  const isPast = targetDate !== today;
+  const now = new Date().toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" });
+
+  // 「日付|時間帯」をキーにインデックス化して既存行をO(1)で検索できるようにする。
+  // 同時に今日分の件数・バッジ判定用の集計もこの1パスで済ませる
+  const rowIndexByKey = {};
+  let todaysLogCount = 0, totalLogs = 0, memoCount = 0;
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][idx.email]) !== studentEmail) continue;
+    totalLogs++;
+    if (String(data[i][idx.memo] || "").trim()) memoCount++;
+    const raw = data[i][idx.date];
+    const rowDate = raw instanceof Date ? Utilities.formatDate(raw, "Asia/Tokyo", "yyyy-MM-dd") : String(raw);
+    if (rowDate === today) todaysLogCount++;
+    rowIndexByKey[rowDate + "|" + String(data[i][idx.time])] = i;
+  }
+
+  const newRows = [];
+  let updatedAny = false;
   blocks.forEach(b => {
-    const merged = {};
-    Object.keys(body).forEach(k => { merged[k] = body[k]; });
-    merged.time_block = b;
-    const r = saveLog(studentEmail, merged);
-    if (r.xp_gained) totalXp += r.xp_gained;
-    if (r.level_up) levelUp = true;
-    if (r.level) level = r.level;
-    if (r.updated) updatedAny = true;
+    const dataIdx = rowIndexByKey[targetDate + "|" + b];
+    if (dataIdx !== undefined) {
+      // 列の並びに依存しないよう、行全体を1回のsetValuesで書き換える
+      const updatedRow = data[dataIdx].slice();
+      updatedRow[idx.task] = body.task;
+      updatedRow[idx.focus] = body.focus_level;
+      updatedRow[idx.memo] = body.memo || "";
+      updatedRow[goalIdx] = body.goal_related || "false";
+      sheet.getRange(dataIdx + 1, 1, 1, updatedRow.length).setValues([updatedRow]);
+      updatedAny = true;
+    } else {
+      const row = new Array(headers.length).fill("");
+      row[idx.logId] = "log_" + Date.now() + "_" + Math.random().toString(36).slice(2, 6);
+      row[idx.email] = studentEmail;
+      row[idx.date] = targetDate;
+      row[idx.time] = b;
+      row[idx.task] = body.task;
+      row[idx.focus] = body.focus_level;
+      row[idx.memo] = body.memo || "";
+      row[idx.timestamp] = now;
+      row[goalIdx] = body.goal_related || "false";
+      newRows.push(row);
+      totalLogs++;
+      if ((body.memo || "").trim()) memoCount++;
+      if (!isPast) todaysLogCount++;
+    }
   });
-  return { ok: true, xp_gained: totalXp, level_up: levelUp, level: level, updated: updatedAny, count: blocks.length };
+
+  if (newRows.length > 0) {
+    // 新規行はまとめて1回のsetValuesで末尾に追加（appendRowをブロック数ぶん呼ばない）
+    const startRow = sheet.getLastRow() + 1;
+    sheet.getRange(startRow, 1, newRows.length, headers.length).setValues(newRows);
+    sheet.getRange(startRow, idx.time + 1, newRows.length, 1).setNumberFormat("@");
+  }
+
+  if (isPast) return { ok: true, xp_gained: 0, updated: updatedAny, count: blocks.length };
+
+  updateStreak(studentEmail); // ブロック数ぶんではなく1回だけ
+  invalidateStatusCache();
+  const xpResult = addXP(studentEmail, body.memo, todaysLogCount, { totalLogs, memoCount }); // DailyLogの再読み込みなし
+  return { ok: true, xp_gained: xpResult.xp_gained, level_up: xpResult.level_up, level: xpResult.level, updated: updatedAny, count: blocks.length };
 }
 
-function addXP(studentEmail, memo) {
+// todaysLogCount: 呼び出し元（saveLog/saveLogMulti）がこのリクエストで確定させた
+// 「今日この生徒が記録した件数」。ここでDailyLogを再度読み込まずに済ませるための引数
+function addXP(studentEmail, memo, todaysLogCount, logSummary) {
   const usersSheet = getSheet("Users");
   const data = usersSheet.getDataRange().getValues();
   const headers = data[0];
@@ -494,9 +590,7 @@ function addXP(studentEmail, memo) {
     const streak = Number(data[i][headers.indexOf("streak")] || 0);
 
     // ストリークボーナスは1日1回のみ
-    const today = formatDate(new Date());
-    const todayLogs = sheetToObjects(getSheet("DailyLog")).filter(l => l.student_email === studentEmail && l.date === today);
-    const isFirstLogToday = todayLogs.length <= 1;
+    const isFirstLogToday = (todaysLogCount || 1) <= 1;
 
     let gained = 10;
     if (memo && memo.trim()) gained += 5;
@@ -510,7 +604,7 @@ function addXP(studentEmail, memo) {
     usersSheet.getRange(i+1, xpIdx+1).setValue(newXP);
 
     // バッジ判定
-    const newBadges = checkBadges(studentEmail, currentBadges, newXP, streak);
+    const newBadges = checkBadges(studentEmail, currentBadges, newXP, streak, logSummary);
     if (newBadges !== currentBadges) {
       usersSheet.getRange(i+1, badgesIdx+1).setValue(newBadges);
     }
@@ -520,13 +614,21 @@ function addXP(studentEmail, memo) {
   return { xp_gained: 0, total_xp: 0, level: 1, level_up: false, badges: "" };
 }
 
-function checkBadges(studentEmail, currentBadges, xp, streak) {
+// logSummary: 呼び出し元が既に読み込み済みのDailyLogデータから集計した
+// { totalLogs, memoCount }。渡されなければ従来通りここでDailyLogを読み込む
+// （バッチ処理など、事前集計を用意していない呼び出し元との互換性のため）
+function checkBadges(studentEmail, currentBadges, xp, streak, logSummary) {
   const badgeList = currentBadges ? currentBadges.split(",").filter(Boolean) : [];
 
-  const today = formatDate(new Date());
-  const logs = sheetToObjects(getSheet("DailyLog")).filter(l => l.student_email === studentEmail);
-  const memoCount = logs.filter(l => l.memo && l.memo.trim()).length;
-  const totalLogs = logs.length;
+  let totalLogs, memoCount;
+  if (logSummary) {
+    totalLogs = logSummary.totalLogs;
+    memoCount = logSummary.memoCount;
+  } else {
+    const logs = sheetToObjects(getSheet("DailyLog")).filter(l => l.student_email === studentEmail);
+    memoCount = logs.filter(l => l.memo && l.memo.trim()).length;
+    totalLogs = logs.length;
+  }
 
   const checks = [
     { id: "first",   condition: totalLogs >= 1,   label: "🌱 はじめての記録" },
@@ -691,24 +793,45 @@ function getCoachingNotesSheet() {
 // 生徒一覧ダッシュボード: 担当生徒の状態を一目で。
 // JIROKU利用中の生徒に加え、まだJIROKUに登録していないがコーチが
 // 手動で追加したクライアント（契約書・Stripe情報のみ）も一覧に含める
+// 生徒メールアドレスをキーに配列をグルーピングするための汎用ヘルパー。
+// ループ内で毎回 .filter() するO(M×N)の検索を、事前構築したMapのO(1)参照に置き換える
+function groupBy(arr, key) {
+  const map = new Map();
+  arr.forEach(item => {
+    const k = item[key];
+    if (!map.has(k)) map.set(k, []);
+    map.get(k).push(item);
+  });
+  return map;
+}
+
 function coachGetStudents(coachEmail) {
   if (!verifyCoach(coachEmail)) return { ok: false, error: "not a coach" };
-  const jirokuUsers = sheetToObjects(getSheet("Users"))
-    .filter(u => u.coach_email === coachEmail && u.is_active.toUpperCase() === "TRUE");
-  const statuses = computeAllStatuses();
+
+  // 各シートの読み込みは1回ずつ。DailyLogはcomputeAllStatusesにもそのまま渡し、
+  // 内部でもう一度読み直させない
+  const allUsers = sheetToObjects(getSheet("Users"));
+  const jirokuUsers = allUsers.filter(u => u.coach_email === coachEmail && u.is_active.toUpperCase() === "TRUE");
   const allLogs = sheetToObjects(getSheet("DailyLog"));
+  const statuses = computeAllStatuses(allLogs);
   const allReports = sheetToObjects(getSheet("Reports"));
   const allNotes = sheetToObjects(getCoachingNotesSheet());
   const allProfiles = sheetToObjects(getStudentProfileSheet());
   const jirokuEmails = new Set(jirokuUsers.map(u => u.student_email));
 
+  // メールアドレスでグルーピングして、生徒ごとのループ内でO(1)参照できるようにする
+  const logsByEmail = groupBy(allLogs, "student_email");
+  const reportsByEmail = groupBy(allReports, "student_email");
+  const notesByEmail = groupBy(allNotes, "student_email");
+  const profileByEmail = new Map(allProfiles.map(p => [p.student_email, p]));
+
   const data = jirokuUsers.map(u => {
-    const logs = allLogs.filter(l => l.student_email === u.student_email);
+    const logs = logsByEmail.get(u.student_email) || [];
     const lastLogDate = logs.length ? logs.map(l => l.date).sort().pop() : null;
-    const reports = allReports.filter(r => r.student_email === u.student_email).sort((a,b)=>b.date>a.date?1:-1);
-    const notes = allNotes.filter(n => n.student_email === u.student_email).sort((a,b)=>b.date>a.date?1:-1);
+    const reports = (reportsByEmail.get(u.student_email) || []).sort((a,b)=>b.date>a.date?1:-1);
+    const notes = (notesByEmail.get(u.student_email) || []).sort((a,b)=>b.date>a.date?1:-1);
     const status = statuses[u.student_email];
-    const profile = allProfiles.find(p => p.student_email === u.student_email);
+    const profile = profileByEmail.get(u.student_email);
     const contractEnd = profile ? profile.contract_end : "";
     const daysToEnd = contractEnd ? Math.ceil((new Date(contractEnd) - new Date()) / 86400000) : null;
     return {
@@ -732,7 +855,7 @@ function coachGetStudents(coachEmail) {
   allProfiles
     .filter(p => p.coach_email === coachEmail && !jirokuEmails.has(p.student_email))
     .forEach(p => {
-      const notes = allNotes.filter(n => n.student_email === p.student_email).sort((a,b)=>b.date>a.date?1:-1);
+      const notes = (notesByEmail.get(p.student_email) || []).sort((a,b)=>b.date>a.date?1:-1);
       const contractEnd = p.contract_end || "";
       const daysToEnd = contractEnd ? Math.ceil((new Date(contractEnd) - new Date()) / 86400000) : null;
       data.push({
