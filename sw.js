@@ -1,4 +1,25 @@
-const CACHE = "jiroku-v2";
+const CACHE = "jiroku-v3";
+
+// タイマー終了などをバックグラウンドでも通知するためのFirebase Cloud Messaging。
+// 別ファイル（firebase-messaging-sw.js）として登録すると、同じスコープ('/')の
+// Service Workerはどちらか一方しか制御できず、このキャッシュ用sw.jsが上書きされて
+// オフライン起動・高速表示が壊れてしまうため、同じsw.js内にまとめて登録する
+importScripts("https://www.gstatic.com/firebasejs/12.15.0/firebase-app-compat.js");
+importScripts("https://www.gstatic.com/firebasejs/12.15.0/firebase-messaging-compat.js");
+firebase.initializeApp({
+  apiKey: "AIzaSyCfOKqEbdGBIHA0s_CQAYvr0oViRaK9uE4",
+  authDomain: "jiroku-77bbf.firebaseapp.com",
+  projectId: "jiroku-77bbf",
+  storageBucket: "jiroku-77bbf.firebasestorage.app",
+  messagingSenderId: "156734910749",
+  appId: "1:156734910749:web:5a16619bbde59718d2b1f4"
+});
+const messaging = firebase.messaging();
+messaging.onBackgroundMessage((payload) => {
+  const title = (payload.notification && payload.notification.title) || "JIROKU";
+  const body = (payload.notification && payload.notification.body) || "";
+  self.registration.showNotification(title, { body, icon: "icon-192.png", badge: "icon-192.png" });
+});
 
 self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', e => {

@@ -336,7 +336,8 @@ let CURRENT_USER = JSON.parse(localStorage.getItem("edventure_user") || "null");
 
 // タイマー終了などをバックグラウンド（アプリを閉じている間）でも通知するためのFirebase Cloud Messaging設定。
 // ここのapiKey等はWebクライアント向けの公開設定値であり秘密情報ではない（GAS側のサービスアカウント鍵とは別物）。
-// firebase-messaging-sw.js側にも同じ設定を書く必要がある（Service Workerは別スコープで読み込むため共有できない）
+// sw.js側にも同じ設定を書く必要がある（Service Workerは別スコープで読み込むため共有できない。
+// 別ファイルとして登録すると同じスコープのsw.jsと競合しキャッシュが壊れるため、あえてsw.js自体に統合している）
 const FIREBASE_CONFIG = {
   apiKey: "AIzaSyCfOKqEbdGBIHA0s_CQAYvr0oViRaK9uE4",
   authDomain: "jiroku-77bbf.firebaseapp.com",
@@ -376,7 +377,9 @@ async function enablePushNotifications() {
     await loadFirebaseSdk();
     if (!firebase.apps.length) firebase.initializeApp(FIREBASE_CONFIG);
     const messaging = firebase.messaging();
-    const reg = await navigator.serviceWorker.register("firebase-messaging-sw.js");
+    // sw.js（キャッシュ用と共通）の登録が終わるのを待って使う。別ファイルとして
+    // 登録するとスコープが競合しキャッシュ用sw.jsが上書きされてしまうため
+    const reg = await navigator.serviceWorker.ready;
     const token = await messaging.getToken({ vapidKey: FCM_VAPID_KEY, serviceWorkerRegistration: reg });
     if (!token) return { ok: false, error: "通知トークンの取得に失敗しました" };
     const res = await gasPost("registerPushToken", { token });
@@ -1562,7 +1565,7 @@ function ReportScreen() {
       : reportList.length === 0
         ? html`<div class="empty">
             <div class="empty-title">レポートはまだありません</div>
-            <div class="empty-body">記録を入力すると<br/>毎晩21時にAIがレポートを生成します</div>
+            <div class="empty-body">記録を入力すると<br/>毎晩23時にAIがレポートを生成します</div>
           </div>`
         : html`<div>
             <${ScoreTrend} list=${reportList}/>
@@ -2375,7 +2378,7 @@ function SettingsScreen({onToast,onLogout,onGoalSaved,profile,onProfileSaved,onC
           `)}
         </div>
         <div style=${{fontSize:11,color:"var(--sub)",marginBottom:16,lineHeight:1.6,padding:"8px 10px",background:"var(--bg)",borderRadius:8}}>
-          ${interval===1?"毎時間リマインドが届きます":interval===24?"1日の開始時間に1回届きます":`${interval}時間ごとにリマインドが届きます`}（21時以降はレポートのみ）
+          ${interval===1?"毎時間リマインドが届きます":interval===24?"1日の開始時間に1回届きます":`${interval}時間ごとにリマインドが届きます`}（23時以降はレポートのみ）
         </div>
         <button class="btn" onClick=${saveTimeSettings}>保存する</button>
       </div>
