@@ -717,6 +717,9 @@ function getGameStatus(studentEmail) {
 // 本日のランキング: 各ユーザーの最新レポートのスコアで順位付けする。
 // レポートは毎晩21時生成のため、日中は前日分のスコアで競う形になる。
 // ホーム画面で毎回呼ばれるため、computeAllStatusesと同様に5分キャッシュする
+// 「みんなの頑張り」のレポートランキングと基準を完全に一致させる。
+// 生徒ごとにレポート生成日がずれるため、同じ日に最新レポートが出た人だけを対象にし、
+// show_in_communityがFALSEの生徒（ランキング非表示を選んだ人）は分母からも除外する
 function getRanking(studentEmail) {
   const CACHE_KEY = "ranking_scores_v1";
   let scores;
@@ -724,7 +727,9 @@ function getRanking(studentEmail) {
   if (cached) {
     scores = JSON.parse(cached);
   } else {
-    const users = sheetToObjects(getSheet("Users")).filter(u => u.is_active.toUpperCase() === "TRUE");
+    const users = sheetToObjects(getSheet("Users")).filter(u =>
+      u.is_active.toUpperCase() === "TRUE" && String(u.show_in_community || "").toUpperCase() !== "FALSE"
+    );
     const active = new Set(users.map(u => u.student_email));
 
     const latest = {};
@@ -733,7 +738,12 @@ function getRanking(studentEmail) {
       if (!latest[r.student_email] || r.date > latest[r.student_email].date) latest[r.student_email] = r;
     });
 
-    scores = Object.keys(latest).map(email => ({ email, score: Number(latest[email].score) || 0 }));
+    let latestDate = null;
+    Object.values(latest).forEach(r => { if (!latestDate || r.date > latestDate) latestDate = r.date; });
+
+    scores = Object.keys(latest)
+      .filter(email => latest[email].date === latestDate)
+      .map(email => ({ email, score: Number(latest[email].score) || 0 }));
     scores.sort((a, b) => b.score - a.score);
     try { CacheService.getScriptCache().put(CACHE_KEY, JSON.stringify(scores), 300); } catch (e) { /* サイズ超過時は無視 */ }
   }
