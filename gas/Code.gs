@@ -2822,14 +2822,28 @@ function stripSalutation(text) {
   return lines.join('\n').trim();
 }
 
+// 送信結果を必ず確認してログに残す。muteHttpExceptions:trueだけだと
+// レート制限・無料枠超過・ブロック等での失敗が完全に無音で握りつぶされ、
+// 「送信にムラがある」原因の切り分けが一切できなくなるため
 function sendLineMessage(lineUserId, text) {
-  if (!lineUserId || !LINE_CHANNEL_TOKEN) return;
-  UrlFetchApp.fetch("https://api.line.me/v2/bot/message/push", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "Authorization": "Bearer " + LINE_CHANNEL_TOKEN },
-    payload: JSON.stringify({ to: lineUserId, messages: [{ type: "text", text }] }),
-    muteHttpExceptions: true
-  });
+  if (!lineUserId || !LINE_CHANNEL_TOKEN) return false;
+  try {
+    const res = UrlFetchApp.fetch("https://api.line.me/v2/bot/message/push", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": "Bearer " + LINE_CHANNEL_TOKEN },
+      payload: JSON.stringify({ to: lineUserId, messages: [{ type: "text", text }] }),
+      muteHttpExceptions: true
+    });
+    const code = res.getResponseCode();
+    if (code !== 200) {
+      Logger.log("LINE送信失敗 code=" + code + " lineUserId=" + lineUserId + " body=" + res.getContentText());
+      return false;
+    }
+    return true;
+  } catch (e) {
+    Logger.log("LINE送信例外 lineUserId=" + lineUserId + " error=" + e.toString());
+    return false;
+  }
 }
 
 function notifyCoachOnMessage(studentEmail, studentName, content) {
