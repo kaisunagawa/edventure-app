@@ -2614,61 +2614,87 @@ function CalendarLinkBanner({onGoToSettings, onDismiss}) {
 // 初回ホーム画面表示時に一度だけ出す、アプリの使い方チュートリアル。
 // 「あとで見る」で閉じてもFAQに同じ内容があるので実害はない
 // ミニプレビュー用の共通フレーム（スマホ画面風の枠にダミー画面を入れる）
-function TutorialMiniScreen({children}) {
+// 実際のアプリ画面の縮小版プレビュー。本物のCSSクラス（.chip/.card/.report-score等）と
+// EvalPickerなど実コンポーネントをそのまま流用し、見た目が実画面と乖離しないようにする
+function TutorialMiniScreen({children, noPad}) {
   return html`
-    <div style=${{width:220,height:180,background:"var(--card)",border:"1px solid var(--border)",borderRadius:16,padding:14,boxShadow:"0 8px 24px rgba(0,0,0,.08)",display:"flex",flexDirection:"column",gap:8,overflow:"hidden"}}>
-      ${children}
+    <div style=${{width:236,height:190,background:"var(--card)",border:"1px solid var(--border)",borderRadius:16,boxShadow:"0 8px 24px rgba(0,0,0,.08)",display:"flex",flexDirection:"column",overflow:"hidden",transform:"scale(1)"}}>
+      <div style=${{flex:1,display:"flex",flexDirection:"column",padding:noPad?0:"12px 12px 0",gap:8,overflow:"hidden"}}>
+        ${children}
+      </div>
     </div>
   `;
 }
 function TutorialMiniWelcome() {
   return html`<${TutorialMiniScreen}>
-    <div style=${{fontSize:26,textAlign:"center",marginTop:10}}>🦊</div>
-    <div style=${{fontSize:12,fontWeight:800,color:"var(--text)",textAlign:"center"}}>JIROKU</div>
-    <div style=${{fontSize:9.5,color:"var(--sub)",textAlign:"center",lineHeight:1.6}}>時間管理 × AIコーチング</div>
+    <div style=${{flex:1,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:6}}>
+      <div style=${{fontSize:30}}>🦊</div>
+      <div style=${{fontSize:13,fontWeight:800,color:"var(--text)"}}>JIROKU</div>
+      <div style=${{fontSize:9.5,color:"var(--sub)"}}>時間管理 × AIコーチング</div>
+    </div>
   <//>`;
 }
 function TutorialMiniLog() {
-  return html`<${TutorialMiniScreen}>
-    <div style=${{fontSize:10,fontWeight:700,color:"var(--text)"}}>14:00 - 15:00</div>
-    <div style=${{background:"var(--bg)",border:"1px solid var(--border)",borderRadius:8,padding:"6px 8px",fontSize:9.5,color:"var(--sub)"}}>レポート作成</div>
-    <div style=${{display:"flex",gap:5}}>
-      ${[1,2,3,4,5].map(i=>html`<div key=${i} style=${{flex:1,height:16,borderRadius:5,background:i<=4?"var(--accent-l)":"var(--bg)",border:"1px solid var(--border)"}}/>`)}
+  return html`<${TutorialMiniScreen} noPad=${true}>
+    <div style=${{display:"flex",gap:5,overflow:"hidden",padding:"9px 10px 0",borderBottom:"1px solid var(--border)",paddingBottom:8}}>
+      ${["13:00-14:00","14:00-15:00","15:00-16:00"].map((t,i)=>html`
+        <div key=${t} class=${"chip"+(i===1?" on":"")} style=${{fontSize:9,padding:"5px 8px",flexShrink:0}}>${t}</div>
+      `)}
     </div>
-    <div style=${{marginTop:"auto",background:"var(--accent)",borderRadius:8,padding:"6px 0",textAlign:"center",fontSize:10,fontWeight:700,color:"#fff"}}>保存する</div>
+    <div style=${{padding:"0 10px",display:"flex",flexDirection:"column",gap:7}}>
+      <div style=${{background:"var(--bg)",border:"1px solid var(--border)",borderRadius:8,padding:"6px 8px",fontSize:9.5,color:"var(--text)"}}>レポート作成</div>
+      <div style=${{display:"flex",gap:4}}>
+        ${[["5","#22C55E"],["4","#6366F1"],["3","#F59E0B"]].map(([n,c],i)=>html`
+          <div key=${n} style=${{flex:1,borderRadius:7,textAlign:"center",padding:"5px 0",fontSize:11,fontWeight:800,
+            background:i===1?c:"var(--card)",color:i===1?"#fff":"var(--sub)",border:i===1?"none":"1px solid var(--border)"}}>${n}</div>
+        `)}
+      </div>
+      <div style=${{background:"var(--accent)",borderRadius:8,padding:"7px 0",textAlign:"center",fontSize:10,fontWeight:700,color:"#fff",marginBottom:10}}>保存する</div>
+    </div>
   <//>`;
 }
 function TutorialMiniMulti() {
-  return html`<${TutorialMiniScreen}>
-    <div style=${{fontSize:10,fontWeight:700,color:"var(--text)"}}>まとめて記録</div>
-    ${["13:00","14:00","15:00"].map(t=>html`
-      <div key=${t} style=${{display:"flex",alignItems:"center",gap:6,background:"var(--bg)",border:"1px solid var(--border)",borderRadius:7,padding:"5px 8px"}}>
-        <div style=${{width:12,height:12,borderRadius:4,background:"var(--accent)"}}/>
-        <div style=${{fontSize:9,color:"var(--sub)"}}>${t} 移動</div>
+  return html`<${TutorialMiniScreen} noPad=${true}>
+    <div style=${{padding:"9px 10px 8px",borderBottom:"1px solid var(--border)"}}>
+      <div style=${{fontSize:10,color:"var(--accent)",fontWeight:700,marginBottom:6}}>⧉ 3個の時間帯を選択中</div>
+      <div style=${{display:"flex",gap:5}}>
+        ${["13:00-14:00","14:00-15:00","15:00-16:00"].map(t=>html`<div key=${t} class="chip on" style=${{fontSize:8.5,padding:"5px 7px",flexShrink:0}}>${t}</div>`)}
       </div>
-    `)}
+    </div>
+    <div style=${{padding:"0 10px"}}>
+      <div style=${{background:"var(--bg)",border:"1px solid var(--border)",borderRadius:8,padding:"6px 8px",fontSize:9.5,color:"var(--text)",marginBottom:10}}>移動・休憩</div>
+    </div>
   <//>`;
 }
 function TutorialMiniCalendar() {
   return html`<${TutorialMiniScreen}>
-    <div style=${{fontSize:10,fontWeight:700,color:"var(--text)"}}>📅 カレンダー連携</div>
-    <div style=${{background:"var(--bg)",border:"1px solid var(--border)",borderRadius:7,padding:"6px 8px",fontSize:9,color:"var(--text)"}}>10:00 定例ミーティング</div>
-    <div style=${{background:"var(--bg)",border:"1px solid var(--border)",borderRadius:7,padding:"6px 8px",fontSize:9,color:"var(--text)"}}>13:00 資料作成</div>
-    <div style=${{marginTop:"auto",fontSize:8.5,color:"var(--accent)",fontWeight:700}}>→ 記録に自動で反映</div>
+    <div style=${{fontSize:11,fontWeight:700,color:"var(--text)"}}>設定</div>
+    <div style=${{display:"flex",alignItems:"center",gap:8,background:"var(--bg)",border:"1px solid var(--border)",borderRadius:9,padding:"8px 10px"}}>
+      <div style=${{fontSize:14}}>📅</div>
+      <div style=${{fontSize:9.5,color:"var(--text)",flex:1}}>Googleカレンダー連携</div>
+      <div style=${{width:30,height:17,borderRadius:99,background:"var(--accent)",position:"relative",flexShrink:0}}>
+        <div style=${{width:13,height:13,borderRadius:"50%",background:"#fff",position:"absolute",top:2,right:2}}/>
+      </div>
+    </div>
+    <div style=${{background:"var(--accent-l)",border:"1.5px dashed var(--accent)",borderRadius:9,padding:"7px 9px",fontSize:8.5,color:"var(--accent)",fontWeight:600}}>
+      10:00 定例ミーティング → 自動入力
+    </div>
   <//>`;
 }
 function TutorialMiniReport() {
   return html`<${TutorialMiniScreen}>
-    <div style=${{fontSize:10,fontWeight:700,color:"var(--text)"}}>今日のレポート</div>
-    <div style=${{display:"flex",alignItems:"baseline",gap:4}}>
-      <div style=${{fontSize:22,fontWeight:800,color:"var(--accent)"}}>82</div>
-      <div style=${{fontSize:9,color:"var(--sub)"}}>点</div>
+    <div style=${{textAlign:"center",paddingTop:2}}>
+      <div style=${{fontSize:34,fontWeight:800,letterSpacing:"-1.5px",color:"var(--text)",lineHeight:1}}>82</div>
+      <div style=${{fontSize:9,color:"var(--sub)"}}>/ 100点</div>
     </div>
-    ${[["記録",18],["フォーカス",16],["継続",14]].map(([l,v])=>html`
+    ${[["📝","記録数",18],["🎯","集中度",15]].map(([icon,l,v])=>html`
       <div key=${l} style=${{display:"flex",alignItems:"center",gap:6}}>
-        <div style=${{fontSize:8.5,color:"var(--sub)",width:38}}>${l}</div>
-        <div style=${{flex:1,height:6,borderRadius:99,background:"var(--bg)",border:"1px solid var(--border)"}}>
-          <div style=${{width:`${v*5}%`,height:"100%",borderRadius:99,background:"var(--accent)"}}/>
+        <div style=${{width:20,height:20,borderRadius:6,background:"var(--bg)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:10,flexShrink:0}}>${icon}</div>
+        <div style=${{flex:1,minWidth:0}}>
+          <div style=${{fontSize:8.5,color:"var(--sub)",marginBottom:2}}>${l}</div>
+          <div style=${{height:5,background:"var(--bg)",borderRadius:99}}>
+            <div style=${{width:`${v/20*100}%`,height:"100%",borderRadius:99,background:"var(--accent)"}}/>
+          </div>
         </div>
       </div>
     `)}
@@ -2676,9 +2702,9 @@ function TutorialMiniReport() {
 }
 function TutorialMiniLine() {
   return html`<${TutorialMiniScreen}>
-    <div style=${{fontSize:10,fontWeight:700,color:"var(--text)"}}>💬 LINE連携</div>
-    <div style=${{alignSelf:"flex-end",background:"var(--accent)",color:"#fff",borderRadius:"10px 10px 2px 10px",padding:"5px 9px",fontSize:9,maxWidth:"75%"}}>yourname@gmail.com</div>
-    <div style=${{alignSelf:"flex-start",background:"var(--bg)",border:"1px solid var(--border)",borderRadius:"10px 10px 10px 2px",padding:"5px 9px",fontSize:9,color:"var(--text)",maxWidth:"85%"}}>連携が完了しました🎉</div>
+    <div style=${{fontSize:11,fontWeight:700,color:"var(--text)"}}>LINE連携</div>
+    <div style=${{alignSelf:"flex-end",background:"var(--accent)",color:"#fff",borderRadius:"10px 10px 2px 10px",padding:"6px 10px",fontSize:9.5,maxWidth:"78%"}}>yourname@gmail.com</div>
+    <div style=${{alignSelf:"flex-start",background:"var(--bg)",border:"1px solid var(--border)",borderRadius:"10px 10px 10px 2px",padding:"6px 10px",fontSize:9.5,color:"var(--text)",maxWidth:"88%"}}>連携が完了しました🎉</div>
   <//>`;
 }
 const TUTORIAL_STEPS = [
