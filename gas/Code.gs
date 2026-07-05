@@ -79,6 +79,7 @@ function doGet(e) {
       case "getCalendar":  result = getCalendar(studentEmail, e.parameter); break;
       case "getDiary":     result = getDiary(studentEmail, e.parameter); break;
       case "saveDiary":    result = saveDiary(studentEmail, e.parameter); break;
+      case "getWeeklySummary": result = getWeeklySummary(studentEmail); break;
       case "scheduleTimerEnd": result = scheduleTimerEnd(studentEmail, e.parameter); break;
       case "cancelTimerEnd":   result = cancelTimerEnd(studentEmail); break;
       case "registerPushToken": result = registerPushToken(studentEmail, e.parameter); break;
@@ -3116,6 +3117,120 @@ function testGenerateMonthlySummary() {
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// 週次サマリー（毎週月曜の朝に、直前の月〜日を振り返って生成）
+// 日次レポートだけだと「今週どうだったか」が見えないという要望から追加
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+function getWeeklySummarySheet() {
+  let sheet = getSheet("WeeklySummary");
+  if (!sheet) {
+    sheet = SpreadsheetApp.openById(SPREADSHEET_ID).insertSheet("WeeklySummary");
+    sheet.appendRow(["week_start", "week_end", "student_email", "summary", "avg_score", "total_blocks", "goal_related_pct", "streak_end", "created_at"]);
+  }
+  return sheet;
+}
+
+function generateWeeklySummaries() {
+  // 直前に終わった月〜日の週を対象にする（今日が月曜日の朝に実行される想定）
+  const now = new Date();
+  const weekEnd = addDaysToDate(now, -1);       // 昨日（日曜）
+  const weekStart = addDaysToDate(now, -7);     // 先週の月曜
+  const weekStartStr = formatDate(weekStart);
+  const weekEndStr = formatDate(weekEnd);
+
+  const apiKey = PropertiesService.getScriptProperties().getProperty("CLAUDE_API_KEY");
+  if (!apiKey) return;
+
+  const summarySheet = getWeeklySummarySheet();
+
+  sheetToObjects(getSheet("Users")).filter(u => u.is_active.toUpperCase() === "TRUE").forEach(user => {
+    try {
+      // 既に今週分があればスキップ（重複防止）
+      const existing = sheetToObjects(summarySheet).find(r => r.student_email === user.student_email && r.week_start === weekStartStr);
+      if (existing) return;
+
+      const weekLogs = sheetToObjects(getSheet("DailyLog"))
+        .filter(l => l.student_email === user.student_email && l.date >= weekStartStr && l.date <= weekEndStr)
+        .sort((a,b) => a.date > b.date ? 1 : -1);
+      if (weekLogs.length === 0) return; // この週は活動なし → 生成しない（レポート同様、無理に作らない）
+
+      const weekReports = sheetToObjects(getSheet("Reports"))
+        .filter(r => r.student_email === user.student_email && r.date >= weekStartStr && r.date <= weekEndStr)
+        .sort((a,b) => a.date > b.date ? 1 : -1);
+
+      const activeDays = new Set(weekLogs.map(l => l.date)).size;
+      const totalBlocks = weekLogs.length;
+      const goalRelatedCount = weekLogs.filter(l => l.goal_related === "true").length;
+      const goalRelatedPct = totalBlocks ? Math.round(goalRelatedCount / totalBlocks * 100) : 0;
+      const avgScore = weekReports.length > 0
+        ? Math.round(weekReports.reduce((s,r)=>s+Number(r.score),0)/weekReports.length)
+        : null;
+      const taskCounts = weekLogs.reduce((acc, l) => { if (l.task) acc[l.task] = (acc[l.task] || 0) + 1; return acc; }, {});
+      const topTasks = Object.entries(taskCounts).sort((a,b)=>b[1]-a[1]).slice(0,5).map(([t,c])=>`${t}(${c}回)`).join("、");
+      const latestUser = sheetToObjects(getSheet("Users")).find(u => u.student_email === user.student_email);
+      const streakEnd = Number(latestUser?.streak || 0);
+
+      const logsText = weekLogs.map(l => l.date + " " + l.time_block + " " + l.task + "（" + l.focus_level + (l.goal_related === "true" ? "・目標関連" : "") + (l.memo ? "・" + l.memo : "") + "）").join("\n");
+
+      const prompt = `以下は${user.name}の直近1週間（${weekStartStr}〜${weekEndStr}）の記録です。今週の振り返りコメントを生成してください。
+
+【今週の統計】
+- 記録日数: ${activeDays}日 / ${totalBlocks}時間帯
+- 目標関連の記録: ${goalRelatedPct}%
+- よく取り組んだこと: ${topTasks || "特になし"}
+- レポート平均スコア: ${avgScore !== null ? avgScore + "点" : "データなし"}
+- 現在の連続記録日数: ${streakEnd}日
+
+【今週の全ログ】
+${logsText}
+
+【要件】
+- 「〇〇さん」等の宛名・挨拶・見出しは書かない。本文からいきなり始める
+- 3〜4文程度。今週何に取り組んだか、良かった点、来週に向けて意識するとよいことに触れる
+- 抽象的な褒め言葉より、具体的な内容・数字に触れる
+- 前向きで励みになるトーンにする。文末に絵文字は1個まで`;
+
+      const res = UrlFetchApp.fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
+        payload: JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: 400, messages: [{ role: "user", content: prompt }] }),
+        muteHttpExceptions: true
+      });
+      const result = JSON.parse(res.getContentText());
+      if (!result.content || !result.content[0]) return;
+
+      summarySheet.appendRow([
+        weekStartStr, weekEndStr, user.student_email, result.content[0].text,
+        avgScore !== null ? avgScore : "", totalBlocks, goalRelatedPct, streakEnd,
+        new Date().toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" })
+      ]);
+      Logger.log(user.student_email + ": " + weekStartStr + "〜" + weekEndStr + " 週次サマリー生成完了");
+    } catch(err) { Logger.log("weeklySummary error: " + err); }
+  });
+}
+
+function addDaysToDate(date, n) {
+  const d = new Date(date);
+  d.setDate(d.getDate() + n);
+  return d;
+}
+
+// 生徒アプリから呼ばれる: 直近の週次サマリーを1件返す
+function getWeeklySummary(studentEmail) {
+  const rows = getFilteredRows("WeeklySummary", "student_email", studentEmail)
+    .sort((a, b) => b.week_start > a.week_start ? 1 : -1);
+  if (rows.length === 0) return { ok: true, data: null };
+  const r = rows[0];
+  return { ok: true, data: {
+    weekStart: r.week_start, weekEnd: r.week_end, summary: r.summary,
+    avgScore: r.avg_score !== "" ? Number(r.avg_score) : null,
+    totalBlocks: Number(r.total_blocks) || 0,
+    goalRelatedPct: Number(r.goal_related_pct) || 0,
+    streakEnd: Number(r.streak_end) || 0
+  } };
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // LINE
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -3299,6 +3414,7 @@ function setupSheets() {
     "Messages": ["message_id","student_email","content","sender_name","sender_photo","sender_role","timestamp","is_read"],
     "Coaches": ["coach_email","coach_name","assigned_students"],
     "MonthlySummary": ["month","student_email","summary","created_at"],
+    "WeeklySummary": ["week_start","week_end","student_email","summary","avg_score","total_blocks","goal_related_pct","streak_end","created_at"],
     "CalendarCache": ["student_email","date","events","updated_at"],
     "Journal": ["date","student_email","diary","updated_at","auto_summary"],
     "TimerQueue": ["student_email","end_time","label","notified","created_at"],
@@ -3325,11 +3441,12 @@ function setupTriggers() {
   ScriptApp.newTrigger("nightlyReport").timeBased().everyDays(1).atHour(23).create();
   ScriptApp.newTrigger("nightlyCoachMessage").timeBased().everyDays(1).atHour(23).nearMinute(30).create();
   ScriptApp.newTrigger("generateMonthlySummaries").timeBased().onMonthDay(1).atHour(3).create();
+  ScriptApp.newTrigger("generateWeeklySummaries").timeBased().everyWeeks(1).onWeekDay(ScriptApp.WeekDay.MONDAY).atHour(8).create();
   ScriptApp.newTrigger("checkTimerQueue").timeBased().everyMinutes(1).create();
   ScriptApp.newTrigger("hourlyReminder").timeBased().everyHours(1).create();
   ScriptApp.newTrigger("syncStripeTotals").timeBased().everyDays(1).atHour(4).create();
   ScriptApp.newTrigger("syncChatworkMessages").timeBased().everyHours(1).create();
-  console.log("トリガーを設定しました（合計8個）");
+  console.log("トリガーを設定しました（合計9個）");
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
