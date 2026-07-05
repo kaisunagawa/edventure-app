@@ -2604,25 +2604,94 @@ function CalendarLinkBanner({onGoToSettings, onDismiss}) {
 
 // 初回ホーム画面表示時に一度だけ出す、アプリの使い方チュートリアル。
 // 「あとで見る」で閉じてもFAQに同じ内容があるので実害はない
+// ミニプレビュー用の共通フレーム（スマホ画面風の枠にダミー画面を入れる）
+function TutorialMiniScreen({children}) {
+  return html`
+    <div style=${{width:220,height:180,background:"var(--card)",border:"1px solid var(--border)",borderRadius:16,padding:14,boxShadow:"0 8px 24px rgba(0,0,0,.08)",display:"flex",flexDirection:"column",gap:8,overflow:"hidden"}}>
+      ${children}
+    </div>
+  `;
+}
+function TutorialMiniWelcome() {
+  return html`<${TutorialMiniScreen}>
+    <div style=${{fontSize:26,textAlign:"center",marginTop:10}}>🦊</div>
+    <div style=${{fontSize:12,fontWeight:800,color:"var(--text)",textAlign:"center"}}>JIROKU</div>
+    <div style=${{fontSize:9.5,color:"var(--sub)",textAlign:"center",lineHeight:1.6}}>時間管理 × AIコーチング</div>
+  <//>`;
+}
+function TutorialMiniLog() {
+  return html`<${TutorialMiniScreen}>
+    <div style=${{fontSize:10,fontWeight:700,color:"var(--text)"}}>14:00 - 15:00</div>
+    <div style=${{background:"var(--bg)",border:"1px solid var(--border)",borderRadius:8,padding:"6px 8px",fontSize:9.5,color:"var(--sub)"}}>レポート作成</div>
+    <div style=${{display:"flex",gap:5}}>
+      ${[1,2,3,4,5].map(i=>html`<div key=${i} style=${{flex:1,height:16,borderRadius:5,background:i<=4?"var(--accent-l)":"var(--bg)",border:"1px solid var(--border)"}}/>`)}
+    </div>
+    <div style=${{marginTop:"auto",background:"var(--accent)",borderRadius:8,padding:"6px 0",textAlign:"center",fontSize:10,fontWeight:700,color:"#fff"}}>保存する</div>
+  <//>`;
+}
+function TutorialMiniMulti() {
+  return html`<${TutorialMiniScreen}>
+    <div style=${{fontSize:10,fontWeight:700,color:"var(--text)"}}>まとめて記録</div>
+    ${["13:00","14:00","15:00"].map(t=>html`
+      <div key=${t} style=${{display:"flex",alignItems:"center",gap:6,background:"var(--bg)",border:"1px solid var(--border)",borderRadius:7,padding:"5px 8px"}}>
+        <div style=${{width:12,height:12,borderRadius:4,background:"var(--accent)"}}/>
+        <div style=${{fontSize:9,color:"var(--sub)"}}>${t} 移動</div>
+      </div>
+    `)}
+  <//>`;
+}
+function TutorialMiniCalendar() {
+  return html`<${TutorialMiniScreen}>
+    <div style=${{fontSize:10,fontWeight:700,color:"var(--text)"}}>📅 カレンダー連携</div>
+    <div style=${{background:"var(--bg)",border:"1px solid var(--border)",borderRadius:7,padding:"6px 8px",fontSize:9,color:"var(--text)"}}>10:00 定例ミーティング</div>
+    <div style=${{background:"var(--bg)",border:"1px solid var(--border)",borderRadius:7,padding:"6px 8px",fontSize:9,color:"var(--text)"}}>13:00 資料作成</div>
+    <div style=${{marginTop:"auto",fontSize:8.5,color:"var(--accent)",fontWeight:700}}>→ 記録に自動で反映</div>
+  <//>`;
+}
+function TutorialMiniReport() {
+  return html`<${TutorialMiniScreen}>
+    <div style=${{fontSize:10,fontWeight:700,color:"var(--text)"}}>今日のレポート</div>
+    <div style=${{display:"flex",alignItems:"baseline",gap:4}}>
+      <div style=${{fontSize:22,fontWeight:800,color:"var(--accent)"}}>82</div>
+      <div style=${{fontSize:9,color:"var(--sub)"}}>点</div>
+    </div>
+    ${[["記録",18],["フォーカス",16],["継続",14]].map(([l,v])=>html`
+      <div key=${l} style=${{display:"flex",alignItems:"center",gap:6}}>
+        <div style=${{fontSize:8.5,color:"var(--sub)",width:38}}>${l}</div>
+        <div style=${{flex:1,height:6,borderRadius:99,background:"var(--bg)",border:"1px solid var(--border)"}}>
+          <div style=${{width:`${v*5}%`,height:"100%",borderRadius:99,background:"var(--accent)"}}/>
+        </div>
+      </div>
+    `)}
+  <//>`;
+}
+function TutorialMiniLine() {
+  return html`<${TutorialMiniScreen}>
+    <div style=${{fontSize:10,fontWeight:700,color:"var(--text)"}}>💬 LINE連携</div>
+    <div style=${{alignSelf:"flex-end",background:"var(--accent)",color:"#fff",borderRadius:"10px 10px 2px 10px",padding:"5px 9px",fontSize:9,maxWidth:"75%"}}>yourname@gmail.com</div>
+    <div style=${{alignSelf:"flex-start",background:"var(--bg)",border:"1px solid var(--border)",borderRadius:"10px 10px 10px 2px",padding:"5px 9px",fontSize:9,color:"var(--text)",maxWidth:"85%"}}>連携が完了しました🎉</div>
+  <//>`;
+}
 const TUTORIAL_STEPS = [
-  { icon:"👋", title:"JIROKUへようこそ", body:"時間の使い方を記録して、AIコーチと一緒に振り返る習慣化アプリです。まずは基本の使い方を簡単にご案内します。" },
-  { icon:"📝", title:"記録タブで時間帯を記録", body:"時間帯を選んで「何をしましたか？」と自己評価を入れて保存するだけ。メモを書くとXPボーナスがもらえます。" },
-  { icon:"⧉", title:"まとめて記録も可能", body:"会議や移動など、同じ内容が続いた時は「まとめて記録」で複数の時間帯に一括保存できます。" },
-  { icon:"📅", title:"カレンダー連携で自動入力", body:"設定でGoogleカレンダーと連携すると、予定が記録に自動で入るので、選んで保存するだけになります。" },
-  { icon:"📊", title:"AIレポートとステータス", body:"毎晩、その日の記録をもとにAIがスコアとフィードバックを届けます。ホーム画面の「ステータス」は、続けるほど伸びる指標です。" },
-  { icon:"💬", title:"LINE連携でリマインダーを受け取る", body:"LINE公式アカウントを友だち追加し、登録したGmailアドレスを送ると連携完了。リマインダーやレポートが届くようになります。" },
+  { mock:TutorialMiniWelcome, title:"JIROKUへようこそ", body:"時間の使い方を記録して、AIコーチと一緒に振り返る習慣化アプリです。まずは基本の使い方を簡単にご案内します。" },
+  { mock:TutorialMiniLog, title:"記録タブで時間帯を記録", body:"時間帯を選んで「何をしましたか？」と自己評価を入れて保存するだけ。メモを書くとXPボーナスがもらえます。" },
+  { mock:TutorialMiniMulti, title:"まとめて記録も可能", body:"会議や移動など、同じ内容が続いた時は「まとめて記録」で複数の時間帯に一括保存できます。" },
+  { mock:TutorialMiniCalendar, title:"カレンダー連携で自動入力", body:"設定でGoogleカレンダーと連携すると、予定が記録に自動で入るので、選んで保存するだけになります。" },
+  { mock:TutorialMiniReport, title:"AIレポートとステータス", body:"毎晩、その日の記録をもとにAIがスコアとフィードバックを届けます。ホーム画面の「ステータス」は、続けるほど伸びる指標です。" },
+  { mock:TutorialMiniLine, title:"LINE連携でリマインダーを受け取る", body:"LINE公式アカウントを友だち追加し、登録したGmailアドレスを送ると連携完了。リマインダーやレポートが届くようになります。" },
 ];
 function TutorialOverlay({onDone}) {
   const [step,setStep]=useState(0);
   const isLast = step === TUTORIAL_STEPS.length - 1;
   const s = TUTORIAL_STEPS[step];
+  const Mock = s.mock;
   return html`
     <div style=${{position:"fixed",inset:0,background:"var(--bg)",zIndex:400,display:"flex",flexDirection:"column"}}>
       <div style=${{display:"flex",justifyContent:"flex-end",padding:"14px 16px"}}>
         <button onClick=${onDone} style=${{background:"none",border:"none",color:"var(--sub)",fontSize:13,cursor:"pointer",fontFamily:"inherit"}}>スキップ</button>
       </div>
       <div style=${{flex:1,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"0 28px",textAlign:"center"}}>
-        <div style=${{fontSize:48,marginBottom:20}}>${s.icon}</div>
+        <div style=${{marginBottom:22}}><${Mock}/></div>
         <div style=${{fontSize:19,fontWeight:800,color:"var(--text)",marginBottom:14}}>${s.title}</div>
         <div style=${{fontSize:14,lineHeight:1.9,color:"var(--sub)",maxWidth:320}}>${s.body}</div>
       </div>
