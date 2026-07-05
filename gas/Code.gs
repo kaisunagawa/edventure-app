@@ -495,6 +495,7 @@ function saveLog(studentEmail, body) {
         const xpResult = addXP(studentEmail, body.memo, todaysLogCount, {
           totalLogs, memoCount: memoCount + ((body.memo || "").trim() ? 1 : 0)
         });
+        if (String(body.goal_related) === "true") incrementGoalBlocksAndNotify(studentEmail, 1);
         return { ok: true, log_id: String(data[i][0]), updated: true, ...xpResult };
       }
       return { ok: true, log_id: String(data[i][0]), updated: true, xp_gained: 0 };
@@ -516,6 +517,7 @@ function saveLog(studentEmail, body) {
     totalLogs: totalLogs + 1,
     memoCount: memoCount + ((body.memo || "").trim() ? 1 : 0)
   });
+  if (String(body.goal_related) === "true") incrementGoalBlocksAndNotify(studentEmail, 1);
   return { ok: true, log_id: logId, ...xpResult };
 }
 
@@ -565,12 +567,16 @@ function saveLogMulti(studentEmail, body) {
   const newRows = [];
   let updatedAny = false;
   let xpEligible = false; // 新規ブロック、または「未評価→評価あり」に変わった更新がある場合のみXP対象にする
+  let xpEligibleGoalCount = 0; // うち目標関連としてXP対象になったブロック数（マイルストーン判定用）
   blocks.forEach(b => {
     const dataIdx = rowIndexByKey[targetDate + "|" + b];
     if (dataIdx !== undefined) {
       const prevFocus = String(data[dataIdx][idx.focus] || "").trim();
       const newFocus = String(body.focus_level || "").trim();
-      if (!prevFocus && newFocus) xpEligible = true;
+      if (!prevFocus && newFocus) {
+        xpEligible = true;
+        if (String(body.goal_related) === "true") xpEligibleGoalCount++;
+      }
       // 列の並びに依存しないよう、行全体を1回のsetValuesで書き換える
       const updatedRow = data[dataIdx].slice();
       updatedRow[idx.task] = body.task;
@@ -581,6 +587,7 @@ function saveLogMulti(studentEmail, body) {
       updatedAny = true;
     } else {
       xpEligible = true;
+      if (String(body.goal_related) === "true") xpEligibleGoalCount++;
       const row = new Array(headers.length).fill("");
       row[idx.logId] = "log_" + Date.now() + "_" + Math.random().toString(36).slice(2, 6);
       row[idx.email] = studentEmail;
@@ -612,6 +619,7 @@ function saveLogMulti(studentEmail, body) {
   // 既に評価済みの記録をただ再編集しただけ（新規ブロックも評価追加もない）場合はXPを与えない
   if (!xpEligible) return { ok: true, xp_gained: 0, updated: updatedAny, count: blocks.length };
   const xpResult = addXP(studentEmail, body.memo, todaysLogCount, { totalLogs, memoCount }); // DailyLogの再読み込みなし
+  if (xpEligibleGoalCount > 0) incrementGoalBlocksAndNotify(studentEmail, xpEligibleGoalCount);
   return { ok: true, xp_gained: xpResult.xp_gained, level_up: xpResult.level_up, level: xpResult.level, updated: updatedAny, count: blocks.length };
 }
 
@@ -848,15 +856,50 @@ function shareAchievement(studentEmail, body) {
 // show_in_communityがFALSEの生徒（ランキング非表示を選んだ人）は対象外にする
 const HIGH_SCORE_ACHIEVEMENT_THRESHOLD = 88;
 const HIGH_SCORE_MESSAGES = ["今日はとても絶好調でした🔥", "充実した一日を過ごせました🌟", "いい流れに乗れています✨", "今日は自分史上ベストな一日でした💪"];
-function postHighScoreAchievement(studentEmail, score) {
-  if (Number(score) < HIGH_SCORE_ACHIEVEMENT_THRESHOLD) return;
+// 達成シェア欄への投稿を共通化（show_in_communityがFALSEの生徒は投稿しない）
+function postAchievementMessage(studentEmail, message) {
   const user = sheetToObjects(getSheet("Users")).find(u => u.student_email === studentEmail);
   if (!user || String(user.show_in_community || "").toUpperCase() === "FALSE") return;
   const sheet = getAchievementsSheet();
   const now = new Date().toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" });
   const id = "ach_" + Date.now() + "_" + Math.random().toString(36).slice(2, 6);
-  const message = HIGH_SCORE_MESSAGES[Math.floor(Math.random() * HIGH_SCORE_MESSAGES.length)];
   sheet.appendRow([id, formatDate(new Date()), studentEmail, user.nickname || "名無しさん", user.avatar || "🦊", message, now]);
+}
+
+function postHighScoreAchievement(studentEmail, score) {
+  if (Number(score) < HIGH_SCORE_ACHIEVEMENT_THRESHOLD) return;
+  const message = HIGH_SCORE_MESSAGES[Math.floor(Math.random() * HIGH_SCORE_MESSAGES.length)];
+  postAchievementMessage(studentEmail, message);
+}
+
+// 目標に関連した記録が節目（10・25・50…時間帯）に到達した時、LINEで祝福メッセージを
+// 送り、達成シェア欄にも投稿する。ブロック数はUsersシートの累計カウンタで管理し、
+// 記録全件を毎回スキャンしなくて済むようにしている
+const GOAL_MILESTONES = [10, 25, 50, 100, 200, 365, 500, 1000];
+function incrementGoalBlocksAndNotify(studentEmail, count) {
+  if (!count || count <= 0) return;
+  const sheet = getSheet("Users");
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0];
+  let colIdx = headers.indexOf("goal_blocks_total");
+  if (colIdx === -1) { colIdx = headers.length; sheet.getRange(1, colIdx + 1).setValue("goal_blocks_total"); }
+  const emailIdx = headers.indexOf("student_email");
+  const lineIdx = headers.indexOf("line_user_id");
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][emailIdx]) !== studentEmail) continue;
+    const before = Number(data[i][colIdx]) || 0;
+    const after = before + count;
+    sheet.getRange(i + 1, colIdx + 1).setValue(after);
+    const crossed = GOAL_MILESTONES.find(m => before < m && after >= m);
+    if (crossed) {
+      const lineUserId = data[i][lineIdx];
+      if (lineUserId) {
+        sendLineMessage(lineUserId, "🎯 目標に関連した記録が" + crossed + "時間帯に到達しました！\n積み重ねが着実に形になっています。この調子で続けましょう💪");
+      }
+      postAchievementMessage(studentEmail, "目標に向けた取り組みが" + crossed + "時間帯を達成しました🎯");
+    }
+    return;
+  }
 }
 
 // 直近の達成シェアを新しい順に返す（本人特定につながる情報はニックネーム・アバターのみ。点数等の具体的な中身は一切含めない）
@@ -971,6 +1014,7 @@ function coachGetStudents(coachEmail) {
       streak: Number(u.streak || 0),
       lastLogDate: lastLogDate,
       latestReport: reports[0] ? { date: reports[0].date, score: Number(reports[0].score) } : null,
+      prevReportScore: reports[1] ? Number(reports[1].score) : null,
       statusScore: status ? status.score : 0,
       lastCoachingDate: notes[0] ? notes[0].date : null,
       goal: u.goal || "",

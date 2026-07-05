@@ -1783,9 +1783,11 @@ function TimerScreen({onToast, isActive}) {
   const [task, setTask]               = useState(saved?.task ?? "");
   const [startTime, setStartTime]     = useState(saved?.startTime ? new Date(saved.startTime) : null);
   const [showModal, setShowModal]     = useState(false);
-  const [logFocus, setLogFocus]       = useState("");
+  // タイマー完了後の記録をワンタップで確定できるよう、自己評価は初期値を入れておく
+  // （毎回5段階から選び直す手間を減らす。もちろん自由に変更できる）
+  const [logFocus, setLogFocus]       = useState("4");
   const [logMemo, setLogMemo]         = useState("");
-  const [logGoalRelated, setLogGoalRelated] = useState(true);
+  const [logGoalRelated, setLogGoalRelated] = useState(()=>localStorage.getItem("jiroku_timer_goal_related")!=="false");
   const [saving, setSaving]           = useState(false);
 
   // 状態をlocalStorageに保存
@@ -2046,7 +2048,7 @@ function TimerScreen({onToast, isActive}) {
               placeholder="例：資料作成"/>
           </div>
           <div class="form-grp">
-            <button onClick=${()=>setLogGoalRelated(!logGoalRelated)} style=${{display:"flex",alignItems:"center",gap:8,background:logGoalRelated?"var(--accent-l)":"none",border:`1.5px solid ${logGoalRelated?"var(--accent)":"var(--border)"}`,borderRadius:9,padding:"7px 11px",width:"100%",cursor:"pointer",transition:"all .15s"}}>
+            <button onClick=${()=>{const v=!logGoalRelated;setLogGoalRelated(v);localStorage.setItem("jiroku_timer_goal_related",String(v));}} style=${{display:"flex",alignItems:"center",gap:8,background:logGoalRelated?"var(--accent-l)":"none",border:`1.5px solid ${logGoalRelated?"var(--accent)":"var(--border)"}`,borderRadius:9,padding:"7px 11px",width:"100%",cursor:"pointer",transition:"all .15s"}}>
               <div style=${{width:16,height:16,borderRadius:5,border:`2px solid ${logGoalRelated?"var(--accent)":"var(--border)"}`,background:logGoalRelated?"var(--accent)":"transparent",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,transition:"all .15s"}}>
                 ${logGoalRelated&&html`<svg width="10" height="10" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="white" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`}
               </div>

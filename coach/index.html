@@ -96,6 +96,21 @@ const daysAgo = d => {
   return Math.floor((new Date() - new Date(String(d).substring(0,10) + "T00:00:00")) / 86400000);
 };
 
+// 「要フォロー」の自動ピックアップ: 記録が数日途絶えている／スコアが下降傾向／
+// レポートスコアが低いままの生徒を、コーチが毎回全員分を目視確認しなくても
+// 気づけるようにする
+function getFollowupReason(s) {
+  if (!s.joinedJiroku) return null;
+  const ago = daysAgo(s.lastLogDate);
+  if (ago === null) return "まだ一度も記録がありません";
+  if (ago >= 3) return `${ago}日間記録がありません`;
+  if (s.latestReport && s.prevReportScore !== null && s.prevReportScore - s.latestReport.score >= 15) {
+    return `スコアが下降傾向です（${s.prevReportScore}→${s.latestReport.score}点）`;
+  }
+  if (s.latestReport && s.latestReport.score < 50) return `直近のレポートスコアが${s.latestReport.score}点と低めです`;
+  return null;
+}
+
 function loginWithGoogle(onEmail, onError) {
   if (!window.google?.accounts?.oauth2) { onError("Googleログインの読み込み中です。少し待ってからもう一度お試しください"); return; }
   try {
@@ -157,6 +172,10 @@ function Sidebar({ students, selectedEmail, onSelect, onLogout, coach, onAddClie
   const [newName, setNewName] = useState("");
   const [newEmail, setNewEmail] = useState("");
   const [addMsg, setAddMsg] = useState("");
+  const [showFollowup, setShowFollowup] = useState(false);
+  const followupList = useMemo(() =>
+    students.map(s => ({ s, reason: getFollowupReason(s) })).filter(x => x.reason),
+  [students]);
   const filtered = useMemo(() => {
     const query = q.trim().toLowerCase();
     if (!query) return students;
@@ -181,6 +200,26 @@ function Sidebar({ students, selectedEmail, onSelect, onLogout, coach, onAddClie
           <button onClick=${onLogout} title="ログアウト" style=${{background:"none",border:"none",color:"var(--sub)",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>ログアウト</button>
         </div>
         <div style=${{fontSize:11,color:"var(--sub)",marginBottom:10}}>${coach}</div>
+        ${followupList.length > 0 && html`
+          <div style=${{border:"1px solid #F59E0B55",background:"#F59E0B14",borderRadius:10,marginBottom:10,overflow:"hidden"}}>
+            <button onClick=${()=>setShowFollowup(!showFollowup)}
+              style=${{display:"flex",justifyContent:"space-between",alignItems:"center",width:"100%",background:"none",border:"none",padding:"9px 11px",cursor:"pointer",fontFamily:"inherit",textAlign:"left"}}>
+              <span style=${{fontSize:12,fontWeight:700,color:"#B45309"}}>⚠️ 要フォロー ${followupList.length}人</span>
+              <span style=${{fontSize:11,color:"#B45309"}}>${showFollowup?"▲":"▼"}</span>
+            </button>
+            ${showFollowup && html`
+              <div style=${{padding:"0 8px 8px"}}>
+                ${followupList.map(({s,reason}) => html`
+                  <button key=${s.email} onClick=${()=>onSelect(s)}
+                    style=${{display:"block",width:"100%",textAlign:"left",background:"var(--card)",border:"1px solid var(--border)",borderRadius:8,padding:"7px 10px",marginBottom:5,cursor:"pointer",fontFamily:"inherit"}}>
+                    <div style=${{fontSize:12,fontWeight:600,color:"var(--text)"}}>${s.nickname||s.name}</div>
+                    <div style=${{fontSize:10.5,color:"#B45309",marginTop:1}}>${reason}</div>
+                  </button>
+                `)}
+              </div>
+            `}
+          </div>
+        `}
         <input class="inp" placeholder="生徒名・目標で検索" value=${q} onInput=${e=>setQ(e.target.value)} style=${{marginBottom:8}}/>
         ${!adding
           ? html`<button class="btn" style=${{width:"100%",fontSize:12.5}} onClick=${()=>setAdding(true)}>＋ 新しいクライアントを追加</button>`
