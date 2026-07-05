@@ -1714,7 +1714,7 @@ function ReportScreen() {
 // 1グループ=短いビープを3回（ピピピ）、グループの間に少し間を空けて繰り返す
 const ALARM_STYLES = [
   { key:"soft",     label:"ソフト",     freq:1800, beepMs:110, gapMs:110, groups:2, groupGapMs:450, gain:0.45 },
-  { key:"standard", label:"スタンダード", freq:2400, beepMs:120, gapMs:120, groups:3, groupGapMs:450, gain:0.6 },
+  { key:"standard", label:"スタンダード", freq:2400, beepMs:120, gapMs:120, groups:2, groupGapMs:450, gain:0.6 },
   { key:"strong",   label:"しっかり",   freq:3000, beepMs:130, gapMs:100, groups:5, groupGapMs:350, gain:0.75 },
 ];
 const getAlarmStyle = () => ALARM_STYLES.find(s=>s.key===localStorage.getItem("timer_alarm_style")) || ALARM_STYLES[1];

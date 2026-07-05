@@ -271,11 +271,14 @@ function invalidateStatusCache() {
 }
 
 function computeAllStatuses(preloadedLogObjects) {
+  // 全生徒分のDailyLogを日毎の減衰計算まで含めて再計算するのは重いため、
+  // preloadedLogObjectsが渡された場合（coachGetStudents等、既に自前でシート読み込み
+  // 済みのケース）でも必ずキャッシュを先にチェックする。以前はpreloadedLogObjectsが
+  // ある時だけキャッシュを素通りしていたため、コーチCRMを開くたびに全生徒分の
+  // 重い再計算が走ってしまい、読み込みが遅くなっていた
   const CACHE_KEY = "all_statuses_v1";
-  if (!preloadedLogObjects) {
-    const cached = CacheService.getScriptCache().get(CACHE_KEY);
-    if (cached) return JSON.parse(cached);
-  }
+  const cached = CacheService.getScriptCache().get(CACHE_KEY);
+  if (cached) return JSON.parse(cached);
 
   const allLogs = preloadedLogObjects || sheetToObjects(getSheet("DailyLog"));
   const byUser = {};
@@ -352,9 +355,7 @@ function computeAllStatuses(preloadedLogObjects) {
     result[email] = { score, breakdown };
   });
 
-  if (!preloadedLogObjects) {
-    try { CacheService.getScriptCache().put(CACHE_KEY, JSON.stringify(result), 300); } catch (e) { /* サイズ超過時は無視してキャッシュなしで返す */ }
-  }
+  try { CacheService.getScriptCache().put(CACHE_KEY, JSON.stringify(result), 300); } catch (e) { /* サイズ超過時は無視してキャッシュなしで返す */ }
   return result;
 }
 
@@ -1433,16 +1434,15 @@ function coachGetStudentDetail(coachEmail, studentEmail) {
   if (!user) return { ok: false, error: "not your student" };
 
   const fourteenDaysAgo = formatDate(new Date(Date.now() - 14 * 86400000));
-  const reports = sheetToObjects(getSheet("Reports"))
-    .filter(r => r.student_email === studentEmail)
+  const reports = getFilteredRows("Reports", "student_email", studentEmail)
     .sort((a,b)=>b.date>a.date?1:-1).slice(0, 7)
     .map(r => ({ date: r.date, score: Number(r.score), feedback: r.feedback, highlights: r.highlights, improvement: r.improvement, action: r.action }));
   const diaries = sheetToObjects(getJournalSheet())
     .filter(r => r.student_email === studentEmail && (r.diary || "").trim())
     .sort((a,b)=>b.date>a.date?1:-1).slice(0, 7)
     .map(r => ({ date: r.date, diary: r.diary }));
-  const logs = sheetToObjects(getSheet("DailyLog"))
-    .filter(l => l.student_email === studentEmail && l.date >= fourteenDaysAgo);
+  const logs = getFilteredRows("DailyLog", "student_email", studentEmail)
+    .filter(l => l.date >= fourteenDaysAgo);
   const logsByDay = {};
   logs.forEach(l => { (logsByDay[l.date] = logsByDay[l.date] || []).push(l); });
   const dailySummary = Object.keys(logsByDay).sort().reverse().map(d => ({
