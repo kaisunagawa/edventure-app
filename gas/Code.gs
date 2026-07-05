@@ -51,7 +51,7 @@ function doGet(e) {
       case "getGameStatus": result = getGameStatus(studentEmail); break;
       case "getRanking":   result = getRanking(studentEmail); break;
       case "getCommunity": result = getCommunity(studentEmail); break;
-      case "getAchievements": result = getAchievements(); break;
+      case "getAchievements": result = getAchievements(studentEmail); break;
       case "shareAchievement": result = shareAchievement(studentEmail, e.parameter); break;
       case "getReport":    result = getReport(studentEmail, e.parameter); break;
       case "getReportList": result = getReportList(studentEmail); break;
@@ -790,6 +790,13 @@ function getCommunity(studentEmail) {
     u.is_active.toUpperCase() === "TRUE" &&
     (u.student_email === studentEmail || String(u.show_in_community || "").toUpperCase() !== "FALSE")
   );
+  // 「みんなの頑張り」を非表示にしている本人は、順位（数字）は見られてよいが、
+  // 他の生徒の名前までは見せない（非表示は一方通行ではなく、お互いに匿名化する）
+  const me = sheetToObjects(getSheet("Users")).find(u => u.student_email === studentEmail);
+  const callerHidden = !!me && String(me.show_in_community || "").toUpperCase() === "FALSE";
+  const maskName = (u, isMe) => (callerHidden && !isMe) ? "匿名さん" : (u.nickname || "名無しさん");
+  const maskAvatar = (u, isMe) => (callerHidden && !isMe) ? "🙈" : (u.avatar || "🦊");
+
   const statuses = computeAllStatuses();
   const allReports = sheetToObjects(getSheet("Reports"));
   const latestReportByEmail = new Map();
@@ -799,12 +806,13 @@ function getCommunity(studentEmail) {
   });
 
   const list = users.map(u => {
+    const isMe = u.student_email === studentEmail;
     const status = statuses[u.student_email];
     const latestReport = latestReportByEmail.get(u.student_email);
     return {
-      isMe: u.student_email === studentEmail,
-      nickname: u.nickname || "名無しさん",
-      avatar: u.avatar || "🦊",
+      isMe,
+      nickname: maskName(u, isMe),
+      avatar: maskAvatar(u, isMe),
       streak: Number(u.streak || 0),
       score: status ? status.score : 0,
       reportScore: latestReport ? Number(latestReport.score) : null
@@ -819,11 +827,12 @@ function getCommunity(studentEmail) {
 
   const reportRanking = users
     .map(u => {
+      const isMe = u.student_email === studentEmail;
       const r = latestReportByEmail.get(u.student_email);
       return {
-        isMe: u.student_email === studentEmail,
-        nickname: u.nickname || "名無しさん",
-        avatar: u.avatar || "🦊",
+        isMe,
+        nickname: maskName(u, isMe),
+        avatar: maskAvatar(u, isMe),
         reportScore: r ? Number(r.score) : null,
         reportDate: r ? r.date : null
       };
@@ -917,17 +926,26 @@ function incrementGoalBlocksAndNotify(studentEmail, count) {
 }
 
 // 直近の達成シェアを新しい順に返す（本人特定につながる情報はニックネーム・アバターのみ。点数等の具体的な中身は一切含めない）
-function getAchievements() {
+function getAchievements(studentEmail) {
+  const allUsers = sheetToObjects(getSheet("Users"));
   const hiddenEmails = new Set(
-    sheetToObjects(getSheet("Users"))
-      .filter(u => String(u.show_in_community || "").toUpperCase() === "FALSE")
-      .map(u => u.student_email)
+    allUsers.filter(u => String(u.show_in_community || "").toUpperCase() === "FALSE").map(u => u.student_email)
   );
+  // 「みんなの頑張り」を非表示にしている本人には、他の生徒の名前を見せない（お互いに匿名化する）
+  const callerHidden = hiddenEmails.has(studentEmail);
   const rows = sheetToObjects(getAchievementsSheet())
     .filter(r => !hiddenEmails.has(r.student_email))
     .sort((a, b) => b.created_at > a.created_at ? 1 : -1)
     .slice(0, 30)
-    .map(r => ({ id: r.achievement_id, nickname: r.nickname, avatar: r.avatar, message: r.message, date: r.date }));
+    .map(r => {
+      const isMe = r.student_email === studentEmail;
+      return {
+        id: r.achievement_id,
+        nickname: (callerHidden && !isMe) ? "匿名さん" : r.nickname,
+        avatar: (callerHidden && !isMe) ? "🙈" : r.avatar,
+        message: r.message, date: r.date
+      };
+    });
   return { ok: true, data: rows };
 }
 
