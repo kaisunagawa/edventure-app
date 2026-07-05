@@ -2579,7 +2579,9 @@ function App() {
     url.searchParams.set("studentEmail",CURRENT_USER.email);
     fetch(url).then(r=>r.json()).then(r=>{
       if(r.ok&&r.data){
-        const u={...CURRENT_USER, name:r.data.name||CURRENT_USER.name, nickname:r.data.nickname||CURRENT_USER.name, avatar:r.data.avatar||"🦊", coachName:r.data.coachName||"コーチ", coachEmail:r.data.coach_email||"", lineLinked:!!r.data.lineLinked};
+        // lineLinkedがレスポンスに無い場合（GAS未再デプロイ等）は「未連携」と誤判定してバナーを
+        // 誤表示しないよう、不明な場合は連携済み扱いにする（安全側に倒す）
+        const u={...CURRENT_USER, name:r.data.name||CURRENT_USER.name, nickname:r.data.nickname||CURRENT_USER.name, avatar:r.data.avatar||"🦊", coachName:r.data.coachName||"コーチ", coachEmail:r.data.coach_email||"", lineLinked:r.data.lineLinked===undefined?true:!!r.data.lineLinked};
         CURRENT_USER=u; localStorage.setItem("edventure_user",JSON.stringify(u)); setUser(u);
         setProfile({nickname:u.nickname,avatar:u.avatar});
       } else if(r.error==="User not found"){
