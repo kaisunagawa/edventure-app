@@ -1679,10 +1679,15 @@ function ReportScreen() {
 }
 
 // 完了チャイムはWeb Audio APIのGainNodeで増幅して鳴らす。倍率が高すぎると音が割れるため
-// 実際に聞こえる範囲で調整すること（<audio>のvolume上限1.0では小さすぎたための対応）
-const TIMER_DONE_GAIN = 4;
-// 単発チャイムだとアラームらしさが弱かったため、間隔を空けて繰り返す回数
-const TIMER_DONE_REPEAT = 3;
+// 実際に聞こえる範囲で調整すること（<audio>のvolume上限1.0では小さすぎたための対応）。
+// アラーム音の種類。同じ音源をゲイン・再生速度（ピッチ）・繰り返し回数だけ変えて
+// バリエーションを出す（音源ファイルを増やさずに済む簡易な方法）
+const ALARM_STYLES = [
+  { key:"soft",     label:"ソフト",     gain:2.5, repeat:2, rate:0.85 },
+  { key:"standard", label:"スタンダード", gain:4,   repeat:3, rate:1 },
+  { key:"strong",   label:"しっかり",   gain:5.5, repeat:5, rate:1.15 },
+];
+const getAlarmStyle = () => ALARM_STYLES.find(s=>s.key===localStorage.getItem("timer_alarm_style")) || ALARM_STYLES[1];
 let sharedAudioCtx = null;
 function getSharedAudioCtx() {
   if(!sharedAudioCtx) sharedAudioCtx = new (window.AudioContext||window.webkitAudioContext)();
@@ -1793,18 +1798,20 @@ function TimerScreen({onToast, isActive}) {
     // <audio>のvolumeは1.0が上限で、それでも小さくて聞こえなかったという報告があったため、
     // Web Audio APIのGainNodeで元の音量を大きく超えて増幅して鳴らす（失敗時は通常再生にフォールバック）。
     // 単発チャイムだとアラームらしさが弱いという声があったため、間隔を空けて複数回繰り返す
+    const style = getAlarmStyle();
     let boosted = false;
     try {
       const buf = getDoneBuffer();
       if(buf){
         const ctx = getSharedAudioCtx();
         if(ctx.state === "suspended") ctx.resume();
-        const gapSec = buf.duration + 0.35;
-        for(let i=0;i<TIMER_DONE_REPEAT;i++){
+        const gapSec = (buf.duration/style.rate) + 0.35;
+        for(let i=0;i<style.repeat;i++){
           const src = ctx.createBufferSource();
           src.buffer = buf;
+          src.playbackRate.value = style.rate;
           const gain = ctx.createGain();
-          gain.gain.value = TIMER_DONE_GAIN;
+          gain.gain.value = style.gain;
           src.connect(gain).connect(ctx.destination);
           src.start(ctx.currentTime + gapSec*i);
         }
@@ -1816,8 +1823,9 @@ function TimerScreen({onToast, isActive}) {
         let count = 0;
         const el = getDoneEl();
         el.volume = 1;
+        el.playbackRate = style.rate;
         const playOnce = () => {
-          if(count >= TIMER_DONE_REPEAT) return;
+          if(count >= style.repeat) return;
           count++;
           el.currentTime = 0;
           el.play().catch(()=>{});
@@ -2156,6 +2164,27 @@ function SettingsScreen({onToast,onLogout,onGoalSaved,profile,onProfileSaved,onC
   const PRESET_OPTIONS=[15,20,25,30,45,60,90];
   const [selectedPresets,setSelectedPresets]=useState(()=>JSON.parse(localStorage.getItem("timer_presets")||"[25,45,60]"));
   const [breakMin,setBreakMin]=useState(()=>Number(localStorage.getItem("timer_break")||"5"));
+  const [alarmStyle,setAlarmStyle]=useState(()=>localStorage.getItem("timer_alarm_style")||"standard");
+  const testAlarmStyle=(key)=>{
+    const style=ALARM_STYLES.find(s=>s.key===key)||ALARM_STYLES[1];
+    try {
+      const ctx=getSharedAudioCtx();
+      if(ctx.state==="suspended") ctx.resume();
+      decodeDoneBuffer();
+      setTimeout(()=>{
+        const buf=getDoneBuffer();
+        if(!buf) return;
+        const gapSec=(buf.duration/style.rate)+0.35;
+        for(let i=0;i<style.repeat;i++){
+          const src=ctx.createBufferSource();
+          src.buffer=buf; src.playbackRate.value=style.rate;
+          const gain=ctx.createGain(); gain.gain.value=style.gain;
+          src.connect(gain).connect(ctx.destination);
+          src.start(ctx.currentTime+gapSec*i);
+        }
+      },200);
+    } catch(e){}
+  };
   const togglePreset=(min)=>{
     if(selectedPresets.includes(min)){
       if(selectedPresets.length<=1){return;} // 最低1つ必須
@@ -2168,6 +2197,7 @@ function SettingsScreen({onToast,onLogout,onGoalSaved,profile,onProfileSaved,onC
   const saveTimerSettings=()=>{
     localStorage.setItem("timer_presets",JSON.stringify(selectedPresets));
     localStorage.setItem("timer_break",String(breakMin));
+    localStorage.setItem("timer_alarm_style",alarmStyle);
     onToast("タイマー設定を保存しました");
   };
   const [goals,setGoals]=useState(savedGoals.length?savedGoals:[{goal:"",deadline:""}]);
@@ -2351,6 +2381,22 @@ function SettingsScreen({onToast,onLogout,onGoalSaved,profile,onProfileSaved,onC
               fontSize:14,fontWeight:breakMin===min?700:400,cursor:"pointer",transition:"all .15s"}}>
               ${min}分
             </button>
+          `)}
+        </div>
+        <div style=${{fontSize:12,color:"var(--sub)",marginBottom:10,fontWeight:500}}>アラーム音の種類</div>
+        <div style=${{display:"flex",flexDirection:"column",gap:8,marginBottom:18}}>
+          ${ALARM_STYLES.map(s=>html`
+            <div key=${s.key} style=${{display:"flex",alignItems:"center",gap:8}}>
+              <button onClick=${()=>setAlarmStyle(s.key)}
+                style=${{flex:1,textAlign:"left",padding:"10px 14px",borderRadius:12,border:`1.5px solid ${alarmStyle===s.key?"var(--accent)":"var(--border)"}`,
+                background:alarmStyle===s.key?"var(--accent-l)":"transparent",
+                color:alarmStyle===s.key?"var(--accent)":"var(--text)",
+                fontSize:14,fontWeight:alarmStyle===s.key?700:400,cursor:"pointer",transition:"all .15s"}}>
+                ${s.label}
+              </button>
+              <button onClick=${()=>testAlarmStyle(s.key)}
+                style=${{padding:"10px 12px",borderRadius:12,border:"1px solid var(--border)",background:"none",color:"var(--sub)",fontSize:13,cursor:"pointer",flexShrink:0}}>🔊</button>
+            </div>
           `)}
         </div>
         <button class="btn" onClick=${saveTimerSettings}>保存する</button>
@@ -2801,6 +2847,12 @@ function AchievementBanner({onOpenCommunity}) {
     gasApi("getAchievements").then(r=>{
       if(!r.ok || !r.data || r.data.length===0) return;
       const latest=r.data[0];
+      // 「たった今の頑張り」として通知する以上、2日以上前のシェアは古すぎるので対象外にする
+      // （これにより既読管理が何らかの理由で効かない端末でも、いつまでも同じ古い通知が
+      // 出続けることはなくなる）
+      const today=formatDateStr(new Date());
+      const cutoff=addDays(today,-1);
+      if(latest.date < cutoff) return;
       const lastSeen=localStorage.getItem(ACHIEVEMENT_SEEN_KEY);
       if(achievementKey(latest)===lastSeen) return;
       setItem(latest);
