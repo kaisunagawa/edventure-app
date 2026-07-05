@@ -237,7 +237,8 @@ function getUser(studentEmail) {
     avatar: user.avatar || "🦊",
     coach_email: user.coach_email,
     coachName: (coach && coach.coach_name) ? coach.coach_name : "コーチ",
-    lineLinked: !!user.line_user_id
+    lineLinked: !!user.line_user_id,
+    showInCommunity: String(user.show_in_community || "").toUpperCase() !== "FALSE"
   } };
 }
 

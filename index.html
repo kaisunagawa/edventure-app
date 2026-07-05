@@ -619,7 +619,7 @@ const getTimeBlocks = () => { const {start,end}=getLogHours(); return ALL_TIME_B
 const TIME_BLOCKS = getTimeBlocks();
 
 // ── Home ──
-function HomeScreen({goalData, onGoalSaved, profile, isActive}) {
+function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity}) {
   const [report, setReport] = useState(null);
   const [schedule, setSchedule] = useState([]);
   const [game, setGame] = useState(null);
@@ -727,7 +727,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive}) {
 
   return html`<div style=${{paddingBottom:40}}>
 
-    <${AchievementBanner} onOpenCommunity=${()=>setShowCommunity(true)}/>
+    ${showInCommunity!==false && html`<${AchievementBanner} onOpenCommunity=${()=>setShowCommunity(true)}/>`}
 
     <!-- Hero Header -->
     <div style=${{background:"linear-gradient(135deg, var(--hero1) 0%, var(--hero2) 100%)",padding:"36px 20px 28px",position:"relative",overflow:"hidden"}}>
@@ -2772,6 +2772,9 @@ function CalendarLinkBanner({onGoToSettings, onDismiss}) {
 // まだ見ていない最新の1件だけをホーム上部に表示する。既読管理はlocalStorageのIDで行う
 // （プッシュ通知ではなく、アプリを開いた時に気づける「準リアルタイム」通知）
 const ACHIEVEMENT_SEEN_KEY = "jiroku_last_seen_achievement";
+// achievement_idが無い古いデータ（自己修復前に作られた行）でも「既読」判定できるよう、
+// idが無ければnickname・message・dateから代わりのキーを組み立てる
+function achievementKey(a) { return a.id || `${a.nickname}|${a.message}|${a.date}`; }
 function AchievementBanner({onOpenCommunity}) {
   const [item,setItem]=useState(null);
   useEffect(()=>{
@@ -2779,12 +2782,12 @@ function AchievementBanner({onOpenCommunity}) {
       if(!r.ok || !r.data || r.data.length===0) return;
       const latest=r.data[0];
       const lastSeen=localStorage.getItem(ACHIEVEMENT_SEEN_KEY);
-      if(latest.id && latest.id===lastSeen) return;
+      if(achievementKey(latest)===lastSeen) return;
       setItem(latest);
     });
   },[]);
   const dismiss=()=>{
-    if(item?.id) localStorage.setItem(ACHIEVEMENT_SEEN_KEY, item.id);
+    if(item) localStorage.setItem(ACHIEVEMENT_SEEN_KEY, achievementKey(item));
     setItem(null);
   };
   const open=()=>{ dismiss(); onOpenCommunity(); };
@@ -2968,7 +2971,7 @@ function App() {
       if(r.ok&&r.data){
         // lineLinkedがレスポンスに無い場合（GAS未再デプロイ等）は「未連携」と誤判定してバナーを
         // 誤表示しないよう、不明な場合は連携済み扱いにする（安全側に倒す）
-        const u={...CURRENT_USER, name:r.data.name||CURRENT_USER.name, nickname:r.data.nickname||CURRENT_USER.name, avatar:r.data.avatar||"🦊", coachName:r.data.coachName||"コーチ", coachEmail:r.data.coach_email||"", lineLinked:r.data.lineLinked===undefined?true:!!r.data.lineLinked};
+        const u={...CURRENT_USER, name:r.data.name||CURRENT_USER.name, nickname:r.data.nickname||CURRENT_USER.name, avatar:r.data.avatar||"🦊", coachName:r.data.coachName||"コーチ", coachEmail:r.data.coach_email||"", lineLinked:r.data.lineLinked===undefined?true:!!r.data.lineLinked, showInCommunity:r.data.showInCommunity===undefined?true:!!r.data.showInCommunity};
         CURRENT_USER=u; localStorage.setItem("edventure_user",JSON.stringify(u)); setUser(u);
         setProfile({nickname:u.nickname,avatar:u.avatar});
       } else if(r.error==="User not found"){
@@ -2989,7 +2992,7 @@ function App() {
       ${!calLinked && !calBannerDismissed && html`<${CalendarLinkBanner} onGoToSettings=${()=>setTab("settings")} onDismiss=${()=>setCalBannerDismissed(true)}/>`}
       <div style=${{position:"relative",flex:1,minHeight:0}}>
         <div class="screen">
-          <div style=${{display:tab==="home"?"block":"none"}}><${HomeScreen} goalData=${goalData} onGoalSaved=${setGoalData} profile=${profile} isActive=${tab==="home"}/></div>
+          <div style=${{display:tab==="home"?"block":"none"}}><${HomeScreen} goalData=${goalData} onGoalSaved=${setGoalData} profile=${profile} isActive=${tab==="home"} showInCommunity=${user.showInCommunity!==false}/></div>
           <div style=${{display:tab==="log"?"block":"none"}}><${LogScreen} onToast=${setToast} isActive=${tab==="log"}/></div>
           <div style=${{display:tab==="report"?"block":"none"}}><${ReportScreen}/></div>
           <div style=${{display:tab==="timer"?"block":"none",height:"100%"}}><${TimerScreen} onToast=${setToast} isActive=${tab==="timer"}/></div>
