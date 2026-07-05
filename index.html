@@ -690,7 +690,17 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity})
       }
       if(sched.ok) setSchedule(sched.data);
       if(logs.ok) setTodayLogs(logs.data);
-      if(rank.ok){ setRanking(rank.data); localStorage.setItem("cache_ranking", JSON.stringify(rank.data)); }
+      if(rank.ok){
+        // 前回確認時の順位と比較して、上がった/下がった/変わらないを矢印で表示する
+        const prevRank = Number(localStorage.getItem("jiroku_prev_rank")||"") || null;
+        let trend = null;
+        if(rank.data && prevRank !== null){
+          trend = rank.data.rank < prevRank ? "up" : rank.data.rank > prevRank ? "down" : "same";
+        }
+        setRanking(rank.data ? {...rank.data, trend} : null);
+        localStorage.setItem("cache_ranking", JSON.stringify(rank.data));
+        if(rank.data) localStorage.setItem("jiroku_prev_rank", String(rank.data.rank));
+      }
       if(status.ok && status.data){ setStatusSummary(status.data); localStorage.setItem("cache_status", JSON.stringify(status.data)); }
     });
 
@@ -795,7 +805,12 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity})
             <span style=${{fontSize:16,flexShrink:0}}>🏆</span>
             <span style=${{minWidth:0}}>
               <span style=${{display:"block",fontSize:10,color:"rgba(255,255,255,0.75)",fontWeight:600,whiteSpace:"nowrap"}}>最新レポートランキング</span>
-              <span style=${{display:"flex",alignItems:"baseline",gap:2,fontSize:13,color:"#fff",fontWeight:700,whiteSpace:"nowrap"}}>${ranking.total}人中<b style=${{fontSize:15}}>${ranking.rank}位</b></span>
+              <span style=${{display:"flex",alignItems:"baseline",gap:3,fontSize:13,color:"#fff",fontWeight:700,whiteSpace:"nowrap"}}>
+                ${ranking.total}人中<b style=${{fontSize:15}}>${ranking.rank}位</b>
+                ${ranking.trend==="up"&&html`<span style=${{fontSize:12,color:"#4ADE80",fontWeight:800}}>▲</span>`}
+                ${ranking.trend==="down"&&html`<span style=${{fontSize:12,color:"#F87171",fontWeight:800}}>▼</span>`}
+                ${ranking.trend==="same"&&html`<span style=${{fontSize:11,color:"rgba(255,255,255,0.6)",fontWeight:800}}>―</span>`}
+              </span>
             </span>
           </div>
         `}
