@@ -391,6 +391,7 @@ function appendReportRow(targetDate, studentEmail, report) {
     sheet.getRange(newRow, rIdx + 1).setValue(JSON.stringify(report.breakdown_reasons));
   }
   try { CacheService.getScriptCache().remove("ranking_scores_v1"); } catch (e) { /* ignore */ }
+  try { postHighScoreAchievement(studentEmail, report.score); } catch (e) { /* ignore */ }
 }
 
 // student_email・dateで先に絞り込んでから必要な行だけをオブジェクト化する。
@@ -806,7 +807,13 @@ function getAchievementsSheet() {
   let sheet = getSheet("Achievements");
   if (!sheet) {
     sheet = SpreadsheetApp.openById(SPREADSHEET_ID).insertSheet("Achievements");
-    sheet.appendRow(["date", "student_email", "nickname", "avatar", "message", "created_at"]);
+    sheet.appendRow(["achievement_id", "date", "student_email", "nickname", "avatar", "message", "created_at"]);
+  }
+  // 既存シートに古い形式（achievement_id列なし）が残っている場合の自己修復
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  if (headers.indexOf("achievement_id") === -1) {
+    sheet.insertColumnBefore(1);
+    sheet.getRange(1, 1).setValue("achievement_id");
   }
   return sheet;
 }
@@ -818,16 +825,39 @@ function shareAchievement(studentEmail, body) {
   if (!user) return { ok: false, error: "user not found" };
   const sheet = getAchievementsSheet();
   const now = new Date().toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" });
-  sheet.appendRow([formatDate(new Date()), studentEmail, user.nickname || "名無しさん", user.avatar || "🦊", message, now]);
+  const id = "ach_" + Date.now() + "_" + Math.random().toString(36).slice(2, 6);
+  sheet.appendRow([id, formatDate(new Date()), studentEmail, user.nickname || "名無しさん", user.avatar || "🦊", message, now]);
   return { ok: true };
 }
 
-// 直近の達成シェアを新しい順に返す（本人特定につながる情報はニックネーム・アバターのみ）
+// レポートで高スコア（絶好調）が出た生徒を、点数は伏せたままコミュニティのシェア欄へ自動投稿する。
+// 「みんなの頑張り」をもっとリアルタイムに賑やかにしたいという要望から追加。
+// show_in_communityがFALSEの生徒（ランキング非表示を選んだ人）は対象外にする
+const HIGH_SCORE_ACHIEVEMENT_THRESHOLD = 88;
+const HIGH_SCORE_MESSAGES = ["今日はとても絶好調でした🔥", "充実した一日を過ごせました🌟", "いい流れに乗れています✨", "今日は自分史上ベストな一日でした💪"];
+function postHighScoreAchievement(studentEmail, score) {
+  if (Number(score) < HIGH_SCORE_ACHIEVEMENT_THRESHOLD) return;
+  const user = sheetToObjects(getSheet("Users")).find(u => u.student_email === studentEmail);
+  if (!user || String(user.show_in_community || "").toUpperCase() === "FALSE") return;
+  const sheet = getAchievementsSheet();
+  const now = new Date().toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" });
+  const id = "ach_" + Date.now() + "_" + Math.random().toString(36).slice(2, 6);
+  const message = HIGH_SCORE_MESSAGES[Math.floor(Math.random() * HIGH_SCORE_MESSAGES.length)];
+  sheet.appendRow([id, formatDate(new Date()), studentEmail, user.nickname || "名無しさん", user.avatar || "🦊", message, now]);
+}
+
+// 直近の達成シェアを新しい順に返す（本人特定につながる情報はニックネーム・アバターのみ。点数等の具体的な中身は一切含めない）
 function getAchievements() {
+  const hiddenEmails = new Set(
+    sheetToObjects(getSheet("Users"))
+      .filter(u => String(u.show_in_community || "").toUpperCase() === "FALSE")
+      .map(u => u.student_email)
+  );
   const rows = sheetToObjects(getAchievementsSheet())
+    .filter(r => !hiddenEmails.has(r.student_email))
     .sort((a, b) => b.created_at > a.created_at ? 1 : -1)
     .slice(0, 30)
-    .map(r => ({ nickname: r.nickname, avatar: r.avatar, message: r.message, date: r.date }));
+    .map(r => ({ id: r.achievement_id, nickname: r.nickname, avatar: r.avatar, message: r.message, date: r.date }));
   return { ok: true, data: rows };
 }
 
@@ -3169,7 +3199,7 @@ function setupSheets() {
     "CalendarCache": ["student_email","date","events","updated_at"],
     "Journal": ["date","student_email","diary","updated_at","auto_summary"],
     "TimerQueue": ["student_email","end_time","label","notified","created_at"],
-    "Achievements": ["date","student_email","nickname","avatar","message","created_at"],
+    "Achievements": ["achievement_id","date","student_email","nickname","avatar","message","created_at"],
     "CoachingNotes": ["note_id","coach_email","student_email","date","content","next_theme","promises","created_at"],
     "StudentProfile": ["student_email","coach_email","name","birthdate","gender","family","address","phone","occupation","profile_notes","contract_start","contract_end","payment_type","contract_amount","installment_count","updated_at","stripe_email","stripe_total_paid","stripe_currency","stripe_synced_at","chatwork_id","chatwork_room_id"],
     "ContractFiles": ["file_id","student_email","file_name","file_url","note","uploaded_at"],
