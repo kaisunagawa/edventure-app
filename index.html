@@ -909,6 +909,16 @@ function RankingRow({rank, avatar, nickname, isMe, scoreValue, scoreUnit, sub, i
     </div>
   `;
 }
+// ランキングは全員載せると長くなり見づらいため上位のみに絞る。
+// ただし自分の順位は気になるはずなので、上位圏外なら自分の行だけ「…」区切りで下に添える
+const RANKING_TOP_N = 5;
+function trimRanking(list) {
+  if (!list || list.length <= RANKING_TOP_N) return { top: list||[], me: null, meRank: 0 };
+  const top = list.slice(0, RANKING_TOP_N);
+  const meIdx = list.findIndex(u => u.isMe);
+  if (meIdx === -1 || meIdx < RANKING_TOP_N) return { top, me: null, meRank: 0 };
+  return { top, me: list[meIdx], meRank: meIdx+1 };
+}
 function CommunityOverlay({onClose}) {
   const [list,setList]=useState(null);
   const [reportRanking,setReportRanking]=useState(null);
@@ -943,10 +953,20 @@ function CommunityOverlay({onClose}) {
         <div style=${{background:"var(--card)",borderRadius:16,border:"1px solid var(--border)",overflow:"hidden",marginBottom:16}}>
           <div style=${{padding:"14px 16px",borderBottom:"1px solid var(--border)",fontSize:12,fontWeight:700,color:"var(--text)"}}>ステータスランキング</div>
           ${list===null&&html`<div style=${{padding:20,textAlign:"center",color:"var(--sub)",fontSize:13}}>読み込み中...</div>`}
-          ${list&&list.map((u,i)=>html`
-            <${RankingRow} key=${i} rank=${i+1} avatar=${u.avatar} nickname=${u.nickname} isMe=${u.isMe}
-              scoreValue=${u.score} scoreUnit="点" sub=${u.streak>0?`🔥${u.streak}日連続`:null} isLast=${i===list.length-1}/>
-          `)}
+          ${list&&(()=>{
+            const {top,me,meRank}=trimRanking(list);
+            return html`
+              ${top.map((u,i)=>html`
+                <${RankingRow} key=${i} rank=${i+1} avatar=${u.avatar} nickname=${u.nickname} isMe=${u.isMe}
+                  scoreValue=${u.score} scoreUnit="点" sub=${u.streak>0?`🔥${u.streak}日連続`:null} isLast=${!me&&i===top.length-1}/>
+              `)}
+              ${me&&html`
+                <div style=${{textAlign:"center",fontSize:12,color:"var(--sub)",padding:"6px 0",borderBottom:"1px solid var(--border)"}}>⋮</div>
+                <${RankingRow} rank=${meRank} avatar=${me.avatar} nickname=${me.nickname} isMe=${true}
+                  scoreValue=${me.score} scoreUnit="点" sub=${me.streak>0?`🔥${me.streak}日連続`:null} isLast=${true}/>
+              `}
+            `;
+          })()}
           ${list&&list.length===0&&html`<div style=${{padding:20,textAlign:"center",color:"var(--sub)",fontSize:13}}>まだデータがありません</div>`}
         </div>
 
@@ -956,10 +976,20 @@ function CommunityOverlay({onClose}) {
             <div style=${{fontSize:10.5,color:"var(--sub)",marginTop:2}}>最新のレポートが届いた人同士で競います</div>
           </div>
           ${reportRanking===null&&html`<div style=${{padding:20,textAlign:"center",color:"var(--sub)",fontSize:13}}>読み込み中...</div>`}
-          ${reportRanking&&reportRanking.map((u,i)=>html`
-            <${RankingRow} key=${i} rank=${i+1} avatar=${u.avatar} nickname=${u.nickname} isMe=${u.isMe}
-              scoreValue=${u.reportScore} scoreUnit="点" isLast=${i===reportRanking.length-1}/>
-          `)}
+          ${reportRanking&&(()=>{
+            const {top,me,meRank}=trimRanking(reportRanking);
+            return html`
+              ${top.map((u,i)=>html`
+                <${RankingRow} key=${i} rank=${i+1} avatar=${u.avatar} nickname=${u.nickname} isMe=${u.isMe}
+                  scoreValue=${u.reportScore} scoreUnit="点" isLast=${!me&&i===top.length-1}/>
+              `)}
+              ${me&&html`
+                <div style=${{textAlign:"center",fontSize:12,color:"var(--sub)",padding:"6px 0",borderBottom:"1px solid var(--border)"}}>⋮</div>
+                <${RankingRow} rank=${meRank} avatar=${me.avatar} nickname=${me.nickname} isMe=${true}
+                  scoreValue=${me.reportScore} scoreUnit="点" isLast=${true}/>
+              `}
+            `;
+          })()}
           ${reportRanking&&reportRanking.length===0&&html`<div style=${{padding:20,textAlign:"center",color:"var(--sub)",fontSize:13}}>まだデータがありません</div>`}
         </div>
 
