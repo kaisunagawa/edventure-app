@@ -20,6 +20,9 @@
 | `ADMIN_EMAIL`         | 管理者ダッシュボードを見られるGoogleアカウントのメールアドレス | 必須（コーチCRMの管理者ダッシュボード用） |
 | `STRIPE_SECRET_KEY`   | Stripeの制限付きキー（読み取り専用推奨）     | 任意（生徒ごとの累計支払額の把握機能に使用。未設定でも他機能は動く） |
 | `CHATWORK_API_TOKEN`  | Chatworkの個人APIトークン                    | 任意（Chatworkの連絡先取り込み・メッセージ連携機能に使用） |
+| `FCM_PROJECT_ID`      | FirebaseプロジェクトID                       | 任意（タイマー終了のプッシュ通知に使用。未設定でも他機能は動く） |
+| `FCM_CLIENT_EMAIL`    | Firebaseサービスアカウントの`client_email`   | 任意（同上） |
+| `FCM_PRIVATE_KEY`     | Firebaseサービスアカウントの`private_key`    | 任意（同上。改行を含む値をそのまま貼り付けてよい） |
 
 ## 4. Webアプリとしてデプロイ
 
@@ -74,7 +77,33 @@ GASエディタで `setupTriggers` 関数を選択して「実行」ボタンを
 | `syncStripeTotals` | 毎日4時 | 生徒ごとのStripe累計支払額を同期 |
 | `syncChatworkMessages` | 毎時0分 | Chatworkメッセージを同期 |
 
-## 8. コーチCRM（coach/index.html）を使う
+## 8. タイマー終了のプッシュ通知（Firebase Cloud Messaging）を使う
+
+タイマーの音はアプリを開いている間しか鳴らないため、アプリを閉じていても
+気づけるようFirebase Cloud Messagingでのプッシュ通知に対応している（任意機能）。
+
+1. [Firebaseコンソール](https://console.firebase.google.com/)で新しいプロジェクトを作成する
+   （無料の Spark プランで十分）。
+2. 「プロジェクトの設定」→「全般」→「マイアプリ」で ウェブアプリ（`</>`）を追加し、
+   表示された `firebaseConfig`（`apiKey`・`authDomain`・`projectId`・
+   `messagingSenderId`・`appId`）をコピーする。
+3. 「プロジェクトの設定」→「Cloud Messaging」タブの「ウェブ構成」で
+   「鍵ペアを生成」して VAPID公開鍵 を取得する。
+4. 「プロジェクトの設定」→「サービスアカウント」→「新しい秘密鍵の生成」で
+   JSONファイルをダウンロードする（`client_email` と `private_key` を使う）。
+5. 手順3のスクリプトプロパティに `FCM_PROJECT_ID`（`project_id`）・
+   `FCM_CLIENT_EMAIL`（`client_email`）・`FCM_PRIVATE_KEY`（`private_key`）を設定する。
+6. `index.html` 冒頭の `FIREBASE_CONFIG` と `FCM_VAPID_KEY`、および
+   `firebase-messaging-sw.js` 内の `firebase.initializeApp({...})` の両方に、
+   手順2・3で取得した値（`apiKey`等）を貼り付ける
+   （`FIREBASE_CONFIG`の値は公開されて問題ないWebクライアント向け設定。
+   サービスアカウントの秘密鍵は絶対にフロントエンドに書かないこと）。
+
+設定後、生徒が設定画面から「プッシュ通知を有効にする」を押すと、通知の
+許可→FCMトークン取得→GASへの登録が行われる。以降はタイマー終了時に
+`checkTimerQueue`（毎分実行）がLINE通知と併せてプッシュ通知も送る。
+
+## 9. コーチCRM（coach/index.html）を使う
 
 - `coach/index.html` はGitHub Pagesなどでホストし、コーチはGoogleアカウントで
   ログインする。ログインできるのは `Coaches` シートに `coach_email` が

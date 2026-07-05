@@ -81,6 +81,7 @@ function doGet(e) {
       case "saveDiary":    result = saveDiary(studentEmail, e.parameter); break;
       case "scheduleTimerEnd": result = scheduleTimerEnd(studentEmail, e.parameter); break;
       case "cancelTimerEnd":   result = cancelTimerEnd(studentEmail); break;
+      case "registerPushToken": result = registerPushToken(studentEmail, e.parameter); break;
       default: result = { ok: false, error: "Unknown action: " + action };
     }
     return jsonResponse(result, callback);
@@ -2707,6 +2708,94 @@ function saveDiary(studentEmail, body) {
 // タイマー終了通知（アプリが閉じられていてもLINEで気づけるように）
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Firebase Cloud Messaging（バックグラウンドでもタイマー終了を通知するため）
+// スクリプトプロパティに FCM_PROJECT_ID / FCM_CLIENT_EMAIL / FCM_PRIVATE_KEY
+// （Firebaseのサービスアカウントキー）を設定して使う
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+function registerPushToken(studentEmail, body) {
+  const token = String(body.token || "").trim();
+  if (!token) return { ok: false, error: "missing token" };
+  const sheet = getSheet("Users");
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0];
+  let colIdx = headers.indexOf("fcm_token");
+  if (colIdx === -1) { colIdx = headers.length; sheet.getRange(1, colIdx + 1).setValue("fcm_token"); }
+  const emailIdx = headers.indexOf("student_email");
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][emailIdx]) === studentEmail) {
+      sheet.getRange(i + 1, colIdx + 1).setValue(token);
+      return { ok: true };
+    }
+  }
+  return { ok: false, error: "student not found" };
+}
+
+// サービスアカウントのJWTを署名してOAuth2アクセストークンと交換する。
+// トークンは55分だけキャッシュする（実際の有効期限は60分のため少し短めに）
+function getFcmAccessToken() {
+  const cache = CacheService.getScriptCache();
+  const cached = cache.get("fcm_access_token");
+  if (cached) return cached;
+
+  const clientEmail = PropertiesService.getScriptProperties().getProperty("FCM_CLIENT_EMAIL");
+  const privateKey = PropertiesService.getScriptProperties().getProperty("FCM_PRIVATE_KEY");
+  if (!clientEmail || !privateKey) return null;
+
+  const now = Math.floor(Date.now() / 1000);
+  const base64url = obj => Utilities.base64EncodeWebSafe(JSON.stringify(obj)).replace(/=+$/, "");
+  const header = { alg: "RS256", typ: "JWT" };
+  const claimSet = {
+    iss: clientEmail,
+    scope: "https://www.googleapis.com/auth/firebase.messaging",
+    aud: "https://oauth2.googleapis.com/token",
+    exp: now + 3600,
+    iat: now
+  };
+  const toSign = base64url(header) + "." + base64url(claimSet);
+  const signatureBytes = Utilities.computeRsaSha256Signature(toSign, privateKey.replace(/\\n/g, "\n"));
+  const signature = Utilities.base64EncodeWebSafe(signatureBytes).replace(/=+$/, "");
+  const jwt = toSign + "." + signature;
+
+  const res = UrlFetchApp.fetch("https://oauth2.googleapis.com/token", {
+    method: "post",
+    payload: { grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer", assertion: jwt },
+    muteHttpExceptions: true
+  });
+  const result = JSON.parse(res.getContentText());
+  if (!result.access_token) return null;
+  cache.put("fcm_access_token", result.access_token, 3300);
+  return result.access_token;
+}
+
+// FCM経由でWebプッシュ通知を1件送信する。失敗しても呼び出し元は無視してよい
+// （通知はあくまで補助であり、LINE通知が主）
+function sendFcmPush(token, title, body) {
+  try {
+    const projectId = PropertiesService.getScriptProperties().getProperty("FCM_PROJECT_ID");
+    const accessToken = getFcmAccessToken();
+    if (!projectId || !accessToken || !token) return false;
+    const payload = {
+      message: {
+        token: token,
+        notification: { title: title, body: body },
+        webpush: { fcm_options: { link: APP_URL } }
+      }
+    };
+    const res = UrlFetchApp.fetch("https://fcm.googleapis.com/v1/projects/" + projectId + "/messages:send", {
+      method: "post",
+      contentType: "application/json",
+      headers: { Authorization: "Bearer " + accessToken },
+      payload: JSON.stringify(payload),
+      muteHttpExceptions: true
+    });
+    return res.getResponseCode() === 200;
+  } catch (e) {
+    return false;
+  }
+}
+
 function getTimerQueueSheet() {
   let sheet = getSheet("TimerQueue");
   if (!sheet) {
@@ -2766,6 +2855,9 @@ function checkTimerQueue() {
       const user = users.find(u => u.student_email === studentEmail);
       if (user && user.line_user_id) {
         sendLineMessage(user.line_user_id, "⏰ " + label + "が終了しました！\n記録を忘れずに📝\n" + APP_URL);
+      }
+      if (user && user.fcm_token) {
+        sendFcmPush(user.fcm_token, "⏰ " + label, "終了しました！記録を忘れずに📝");
       }
       sheet.getRange(i + 1, 4).setValue(true);
     }
@@ -3190,7 +3282,7 @@ function formatDate(date) {
 function setupSheets() {
   const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
   const sheets = {
-    "Users": ["student_email","name","line_user_id","coach_email","coach_line_id","google_calendar_id","chatwork_room","is_active","joined_at","notify_start","notify_end","nickname","avatar","show_in_community"],
+    "Users": ["student_email","name","line_user_id","coach_email","coach_line_id","google_calendar_id","chatwork_room","is_active","joined_at","notify_start","notify_end","nickname","avatar","show_in_community","fcm_token"],
     "DailyLog": ["log_id","student_email","date","time_block","task","focus_level","memo","timestamp","goal_related"],
     "Reports": ["date","student_email","score","feedback","action","highlights","improvement","created_at","breakdown"],
     "Messages": ["message_id","student_email","content","sender_name","sender_photo","sender_role","timestamp","is_read"],

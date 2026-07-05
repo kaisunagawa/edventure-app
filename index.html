@@ -334,6 +334,59 @@ const html = htm.bind(React.createElement);
 const GAS_URL = "https://script.google.com/macros/s/AKfycbzJ-QEpPVnmp-LFU5Jxww4VFP1qaseMtwCrzKxAA6ZULr1y3h_UeKzVdhHnl5ze57U/exec";
 let CURRENT_USER = JSON.parse(localStorage.getItem("edventure_user") || "null");
 
+// タイマー終了などをバックグラウンド（アプリを閉じている間）でも通知するためのFirebase Cloud Messaging設定。
+// ここのapiKey等はWebクライアント向けの公開設定値であり秘密情報ではない（GAS側のサービスアカウント鍵とは別物）。
+// firebase-messaging-sw.js側にも同じ設定を書く必要がある（Service Workerは別スコープで読み込むため共有できない）
+const FIREBASE_CONFIG = {
+  apiKey: "YOUR_FIREBASE_API_KEY",
+  authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
+  projectId: "YOUR_PROJECT_ID",
+  messagingSenderId: "YOUR_SENDER_ID",
+  appId: "YOUR_APP_ID"
+};
+const FCM_VAPID_KEY = "YOUR_VAPID_PUBLIC_KEY";
+
+function loadFirebaseSdk() {
+  if (window.firebase) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const s1 = document.createElement("script");
+    s1.src = "https://www.gstatic.com/firebasejs/10.7.0/firebase-app-compat.js";
+    s1.onload = () => {
+      const s2 = document.createElement("script");
+      s2.src = "https://www.gstatic.com/firebasejs/10.7.0/firebase-messaging-compat.js";
+      s2.onload = resolve;
+      s2.onerror = reject;
+      document.head.appendChild(s2);
+    };
+    s1.onerror = reject;
+    document.head.appendChild(s1);
+  });
+}
+
+// プッシュ通知（バックグラウンド通知）を有効化する。通知許可→Firebase初期化→
+// Service Worker登録→FCMトークン取得→サーバーへ登録、の順で行う
+async function enablePushNotifications() {
+  if (!("Notification" in window) || !("serviceWorker" in navigator)) {
+    return { ok: false, error: "このブラウザはプッシュ通知に対応していません" };
+  }
+  const perm = await Notification.requestPermission();
+  if (perm !== "granted") return { ok: false, error: "通知が許可されませんでした" };
+  try {
+    await loadFirebaseSdk();
+    if (!firebase.apps.length) firebase.initializeApp(FIREBASE_CONFIG);
+    const messaging = firebase.messaging();
+    const reg = await navigator.serviceWorker.register("firebase-messaging-sw.js");
+    const token = await messaging.getToken({ vapidKey: FCM_VAPID_KEY, serviceWorkerRegistration: reg });
+    if (!token) return { ok: false, error: "通知トークンの取得に失敗しました" };
+    const res = await gasPost("registerPushToken", { token });
+    if (!res.ok) return { ok: false, error: res.error || "サーバーへの登録に失敗しました" };
+    localStorage.setItem("push_enabled", "1");
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: String(e.message || e) };
+  }
+}
+
 async function gasApi(action, params = {}) {
   if (!GAS_URL) return mockApi(action, params);
   const url = new URL(GAS_URL);
@@ -2103,6 +2156,15 @@ function SettingsScreen({onToast,onLogout,onGoalSaved,profile,onProfileSaved,onC
   const removeGoal=(i)=>{ if(goals.length>1) setGoals(goals.filter((_,j)=>j!==i)); };
   const [calLinked,setCalLinked]=useState(!!localStorage.getItem("cal_linked"));
   const [calLoading,setCalLoading]=useState(false);
+  const [pushEnabled,setPushEnabled]=useState(!!localStorage.getItem("push_enabled"));
+  const [pushLoading,setPushLoading]=useState(false);
+  const enablePush=async()=>{
+    setPushLoading(true);
+    const r=await enablePushNotifications();
+    setPushLoading(false);
+    if(r.ok) setPushEnabled(true);
+    else onToast(r.error||"プッシュ通知の設定に失敗しました");
+  };
 
   const linkCalendar=()=>{
     if(!window.google||!google.accounts) return;
@@ -2350,6 +2412,18 @@ function SettingsScreen({onToast,onLogout,onGoalSaved,profile,onProfileSaved,onC
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>連携済み
             </div>`
           : html`<button class="btn" onClick=${linkCalendar} disabled=${calLoading}>${calLoading?"連携中...":"Googleカレンダーを連携する"}</button>`
+        }
+      </div>
+
+      <!-- プッシュ通知 -->
+      <div style=${{background:"var(--card)",borderRadius:16,border:"1px solid var(--border)",padding:"18px",marginBottom:12}}>
+        <${SectionHeader} icon="🔔" title="タイマー終了のプッシュ通知"/>
+        <p style=${{fontSize:13,color:"var(--sub)",lineHeight:1.7,marginBottom:14}}>${pushEnabled?"有効になっています。アプリを閉じていたり画面がロックされていても、タイマー終了時に通知が届きます。":"タイマーの音はアプリを開いている間しか鳴りません。有効にすると、アプリを閉じていてもタイマー終了時に端末へ通知が届きます。"}</p>
+        ${pushEnabled
+          ? html`<div style=${{display:"flex",alignItems:"center",gap:8,color:"var(--accent)",fontWeight:700,fontSize:14,padding:"10px 14px",background:"var(--accent-l)",borderRadius:10}}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>有効
+            </div>`
+          : html`<button class="btn" onClick=${enablePush} disabled=${pushLoading}>${pushLoading?"設定中...":"プッシュ通知を有効にする"}</button>`
         }
       </div>
 
