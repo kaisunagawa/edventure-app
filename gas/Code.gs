@@ -1836,7 +1836,7 @@ function saveSettings(studentEmail, body) {
     if (String(data[i][emailIdx]) !== studentEmail) continue;
     if (body.notify_start    !== undefined) sheet.getRange(i + 1, startIdx    + 1).setValue(Number(body.notify_start) || 7);
     if (body.notify_end      !== undefined) sheet.getRange(i + 1, endIdx      + 1).setValue(Number(body.notify_end)   || 23);
-    if (body.notify_interval !== undefined) sheet.getRange(i + 1, intervalIdx + 1).setValue(Number(body.notify_interval) || 2);
+    if (body.notify_interval !== undefined) sheet.getRange(i + 1, intervalIdx + 1).setValue(Number(body.notify_interval) || 4);
     if (body.goal            !== undefined) sheet.getRange(i + 1, goal1Idx    + 1).setValue(body.goal);
     if (body.goal_deadline   !== undefined) sheet.getRange(i + 1, dead1Idx    + 1).setValue(body.goal_deadline);
     if (body.goal2           !== undefined) sheet.getRange(i + 1, goal2Idx    + 1).setValue(body.goal2);
@@ -1933,7 +1933,7 @@ function hourlyReminder() {
   sheetToObjects(getSheet("Users")).filter(u => u.is_active.toUpperCase() === "TRUE").forEach(user => {
     const start = Number(user.notify_start) || 7;
     const end = Number(user.notify_end) || 23;
-    const interval = Number(user.notify_interval) || 2;
+    const interval = Number(user.notify_interval) || 4;
     if (hour < start || hour > end) return;
     // 間隔チェック: 1日1回(interval=24)はstart時のみ、それ以外は間隔で割り切れる時間のみ
     if (interval >= 24) {
@@ -1957,8 +1957,8 @@ function hourlyReminder() {
       : -99;
     const hoursWithoutLog = hour - lastLogHour;
 
-    // 3時間以上記録がない場合はコーチメッセージ付き
-    if (hoursWithoutLog >= 3) {
+    // 5時間以上記録がない場合はコーチメッセージ付き（送信数を抑えるため、以前の3時間から緩和）
+    if (hoursWithoutLog >= 5) {
       const apiKey = PropertiesService.getScriptProperties().getProperty("CLAUDE_API_KEY");
       if (apiKey) {
         try {
