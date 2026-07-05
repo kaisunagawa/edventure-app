@@ -71,6 +71,7 @@ function doGet(e) {
       case "coachListChatworkContacts": result = coachListChatworkContacts(e.parameter.coachEmail); break;
       case "coachSyncChatworkOne": result = coachSyncChatworkOne(e.parameter.coachEmail, e.parameter); break;
       case "adminGetOverview":     result = adminGetOverview(e.parameter.coachEmail); break;
+      case "coachSetShowInCommunity": result = coachSetShowInCommunity(e.parameter.coachEmail, e.parameter); break;
       case "sendMessage":  result = sendMessage(studentEmail, e.parameter); break;
       case "saveSettings": result = saveSettings(studentEmail, e.parameter); break;
       case "syncCalendar": result = syncCalendar(studentEmail, e.parameter); break;
@@ -714,7 +715,10 @@ function getRanking(studentEmail) {
 // 「みんなの頑張り」のランキングは、ホームの「ステータス」と同じ累計基準。
 // 見ている場所によって基準がバラバラだと分かりにくいため一本化している。
 function getCommunity(studentEmail) {
-  const users = sheetToObjects(getSheet("Users")).filter(u => u.is_active.toUpperCase() === "TRUE");
+  // show_in_communityが明示的に"FALSE"の生徒だけ除外する（列が無い/空欄なら表示する = 既定は今まで通り全員表示）
+  const users = sheetToObjects(getSheet("Users")).filter(u =>
+    u.is_active.toUpperCase() === "TRUE" && String(u.show_in_community || "").toUpperCase() !== "FALSE"
+  );
   const statuses = computeAllStatuses();
 
   const list = users.map(u => {
@@ -866,7 +870,8 @@ function coachGetStudents(coachEmail) {
       goal: u.goal || "",
       contractEnd: contractEnd || "",
       contractDaysLeft: daysToEnd,
-      joinedJiroku: true
+      joinedJiroku: true,
+      showInCommunity: String(u.show_in_community || "").toUpperCase() !== "FALSE"
     };
   });
 
@@ -948,6 +953,31 @@ function coachAddClient(coachEmail, body) {
   });
   sheet.appendRow(row);
   return { ok: true };
+}
+
+// 「みんなの頑張り」（コミュニティランキング）に表示するかどうかを
+// コーチ側から生徒ごとに設定する。列がまだ無い古いUsersシートにも
+// 自動で列を追加する（他の自己修復パターンと同様）
+function coachSetShowInCommunity(coachEmail, body) {
+  if (!verifyCoach(coachEmail)) return { ok: false, error: "not a coach" };
+  const targetEmail = String(body.targetEmail || "");
+  if (!coachOwnsStudent(coachEmail, targetEmail)) return { ok: false, error: "not your student" };
+
+  const sheet = getSheet("Users");
+  const data = sheet.getDataRange().getValues();
+  let headers = data[0];
+  let colIdx = headers.indexOf("show_in_community");
+  if (colIdx === -1) {
+    colIdx = headers.length;
+    sheet.getRange(1, colIdx + 1).setValue("show_in_community");
+  }
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][headers.indexOf("student_email")]) === targetEmail) {
+      sheet.getRange(i + 1, colIdx + 1).setValue(body.show === false || body.show === "false" ? "FALSE" : "TRUE");
+      return { ok: true };
+    }
+  }
+  return { ok: false, error: "student not found" };
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -2907,7 +2937,7 @@ function formatDate(date) {
 function setupSheets() {
   const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
   const sheets = {
-    "Users": ["student_email","name","line_user_id","coach_email","coach_line_id","google_calendar_id","chatwork_room","is_active","joined_at","notify_start","notify_end","nickname","avatar"],
+    "Users": ["student_email","name","line_user_id","coach_email","coach_line_id","google_calendar_id","chatwork_room","is_active","joined_at","notify_start","notify_end","nickname","avatar","show_in_community"],
     "DailyLog": ["log_id","student_email","date","time_block","task","focus_level","memo","timestamp","goal_related"],
     "Reports": ["date","student_email","score","feedback","action","highlights","improvement","created_at","breakdown"],
     "Messages": ["message_id","student_email","content","sender_name","sender_photo","sender_role","timestamp","is_read"],

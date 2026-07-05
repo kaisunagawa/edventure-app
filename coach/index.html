@@ -576,6 +576,8 @@ function ProfileTab({ student, detail, onReload }) {
   const [fileNote, setFileNote] = useState("");
   const [syncingStripe, setSyncingStripe] = useState(false);
   const [stripeMsg, setStripeMsg] = useState("");
+  const [showInCommunity, setShowInCommunity] = useState(student.showInCommunity !== false);
+  const [savingCommunity, setSavingCommunity] = useState(false);
   const fileInputRef = useRef(null);
 
   useEffect(() => {
@@ -587,9 +589,19 @@ function ProfileTab({ student, detail, onReload }) {
       payment_type: p.payment_type || "lump", contract_amount: p.contract_amount || "",
       installment_count: p.installment_count || "", stripe_email: p.stripe_email || ""
     });
+    setShowInCommunity(student.showInCommunity !== false);
   }, [student.email]);
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+  const toggleShowInCommunity = async () => {
+    const next = !showInCommunity;
+    setShowInCommunity(next); // 楽観的更新
+    setSavingCommunity(true);
+    const r = await api("coachSetShowInCommunity", { targetEmail: student.email, show: next });
+    if (!r.ok) setShowInCommunity(!next); // 失敗したら戻す
+    setSavingCommunity(false);
+  };
 
   const save = async () => {
     setSaving(true);
@@ -770,6 +782,16 @@ function ProfileTab({ student, detail, onReload }) {
               </div>
             </div>
           `)}
+        </div>
+
+        <div class="card">
+          <div class="card-label">みんなの頑張り（コミュニティランキング）</div>
+          <div style=${{fontSize:12.5,color:"var(--sub)",marginBottom:12}}>他の生徒と一緒にランキングに表示するかどうかを設定できます。オフにすると、この生徒はランキングに表示されなくなります（本人の記録・レポートには影響しません）。</div>
+          <label style=${{display:"flex",alignItems:"center",gap:10,cursor:"pointer"}}>
+            <input type="checkbox" checked=${showInCommunity} onChange=${toggleShowInCommunity} disabled=${savingCommunity} style=${{width:18,height:18}}/>
+            <span style=${{fontSize:13,fontWeight:600}}>${showInCommunity ? "表示する" : "表示しない"}</span>
+            ${savingCommunity && html`<span style=${{fontSize:11,color:"var(--sub)"}}>保存中...</span>`}
+          </label>
         </div>
       </div>
     </div>
