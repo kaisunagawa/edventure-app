@@ -1415,6 +1415,7 @@ function ReportScreen() {
   const [reportList, setReportList]=useState([]);
   const [listLoading, setListLoading]=useState(true);
   const [view, setView]=useState("report"); // "report" | "diary"
+  const [expandedBreakdown, setExpandedBreakdown]=useState(null);
 
   useEffect(()=>{
     gasApi("getReportList").then(r=>{
@@ -1428,7 +1429,7 @@ function ReportScreen() {
 
   useEffect(()=>{
     if(!date) return;
-    setLoading(true); setView("report");
+    setLoading(true); setView("report"); setExpandedBreakdown(null);
     Promise.all([gasApi("getReport",{date}),gasApi("getLogs",{date})]).then(([r,l])=>{
       setReport(r.ok?r.data:null); if(l.ok) setLogs(l.data); setLoading(false);
     });
@@ -1522,17 +1523,27 @@ function ReportScreen() {
                   const pct=Math.max(0,Math.min(100,v/20*100));
                   const tip=BREAKDOWN_TIPS[key];
                   const color=v>=16?"var(--green)":v>=10?"var(--amber)":"var(--red)";
-                  return html`<div key=${key} style=${{display:"flex",alignItems:"center",gap:10}}>
-                    <div style=${{width:34,height:34,borderRadius:11,background:"var(--bg)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,flexShrink:0}}>${tip.icon}</div>
-                    <div style=${{flex:1,minWidth:0}}>
-                      <div style=${{display:"flex",justifyContent:"space-between",alignItems:"baseline",fontSize:12.5,color:"var(--text)",fontWeight:600,marginBottom:5}}>
-                        <span>${label}</span>
-                        <span><b style=${{fontSize:14,color}}>${v}</b><span style=${{color:"var(--sub)",fontWeight:500}}>/20</span></span>
+                  const reason=report.breakdownReasons&&report.breakdownReasons[key];
+                  const isOpen=expandedBreakdown===key;
+                  return html`<div key=${key}>
+                    <button onClick=${()=>setExpandedBreakdown(isOpen?null:key)}
+                      style=${{display:"flex",alignItems:"center",gap:10,width:"100%",background:"none",border:"none",padding:0,cursor:"pointer",fontFamily:"inherit",textAlign:"left"}}>
+                      <div style=${{width:34,height:34,borderRadius:11,background:"var(--bg)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,flexShrink:0}}>${tip.icon}</div>
+                      <div style=${{flex:1,minWidth:0}}>
+                        <div style=${{display:"flex",justifyContent:"space-between",alignItems:"baseline",fontSize:12.5,color:"var(--text)",fontWeight:600,marginBottom:5}}>
+                          <span>${label}</span>
+                          <span><b style=${{fontSize:14,color}}>${v}</b><span style=${{color:"var(--sub)",fontWeight:500}}>/20</span></span>
+                        </div>
+                        <div style=${{height:7,background:"var(--bg)",borderRadius:99,overflow:"hidden"}}>
+                          <div style=${{height:"100%",width:pct+"%",background:`linear-gradient(90deg, var(--hero1), ${color})`,borderRadius:99,transition:"width .5s ease"}}/>
+                        </div>
                       </div>
-                      <div style=${{height:7,background:"var(--bg)",borderRadius:99,overflow:"hidden"}}>
-                        <div style=${{height:"100%",width:pct+"%",background:`linear-gradient(90deg, var(--hero1), ${color})`,borderRadius:99,transition:"width .5s ease"}}/>
+                    </button>
+                    ${isOpen&&html`
+                      <div style=${{marginTop:8,marginLeft:44,padding:"9px 11px",background:"var(--bg)",borderRadius:9,fontSize:12,lineHeight:1.7,color:"var(--sub)"}}>
+                        ${reason||"この日のレポートには理由の記録がありません（古いレポートのため）"}
                       </div>
-                    </div>
+                    `}
                   </div>`;
                 })}
               </div>

@@ -366,7 +366,9 @@ function getReport(studentEmail, body) {
   if (!report) return { ok: true, data: null };
   let breakdown = null;
   if (report.breakdown) { try { breakdown = JSON.parse(report.breakdown); } catch (e) {} }
-  return { ok: true, data: { score: Number(report.score), breakdown: breakdown, feedback: report.feedback, action: report.action, highlights: report.highlights, improvement: report.improvement, date: report.date } };
+  let breakdownReasons = null;
+  if (report.breakdown_reasons) { try { breakdownReasons = JSON.parse(report.breakdown_reasons); } catch (e) {} }
+  return { ok: true, data: { score: Number(report.score), breakdown: breakdown, breakdownReasons: breakdownReasons, feedback: report.feedback, action: report.action, highlights: report.highlights, improvement: report.improvement, date: report.date } };
 }
 
 // レポート行を保存（breakdown列は後付けのため動的にヘッダーを確保する）
@@ -379,6 +381,12 @@ function appendReportRow(targetDate, studentEmail, report) {
     let bIdx = headers.indexOf("breakdown");
     if (bIdx === -1) { bIdx = headers.length; sheet.getRange(1, bIdx + 1).setValue("breakdown"); }
     sheet.getRange(newRow, bIdx + 1).setValue(JSON.stringify(report.breakdown));
+  }
+  if (report.breakdown_reasons) {
+    const headers2 = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+    let rIdx = headers2.indexOf("breakdown_reasons");
+    if (rIdx === -1) { rIdx = headers2.length; sheet.getRange(1, rIdx + 1).setValue("breakdown_reasons"); }
+    sheet.getRange(newRow, rIdx + 1).setValue(JSON.stringify(report.breakdown_reasons));
   }
 }
 
@@ -2213,10 +2221,12 @@ ${logsText}
 - 抽象的な褒め言葉より、今日のログの具体的な内容・数字に触れる
 - 励ましの文末は「。」より「！」の方が自然。highlightsとactionには 👍 🔥 👏 🙌 👊 💪 🫵 やポジティブな表情の絵文字を文末に1個添えてよい（全フィールド合計2個まで）
 
-以下のJSON形式のみで返してください（説明文不要）。breakdownの5項目の合計は必ずscoreと一致させること：
+以下のJSON形式のみで返してください（説明文不要）。breakdownの5項目の合計は必ずscoreと一致させること。
+breakdown_reasonsは各項目「なぜその点数になったか」を生徒本人に見せる1文で、必ず全項目分書くこと（品質・量の両面で減点/加点した具体的な理由に触れる）：
 {
   "score": <0-100の整数>,
   "breakdown": { "records": <0-20>, "memo": <0-20>, "focus": <0-20>, "goal": <0-20>, "consistency": <0-20> },
+  "breakdown_reasons": { "records": "<この点数になった理由を1文で>", "memo": "<同上>", "focus": "<同上>", "goal": "<同上>", "consistency": "<同上>" },
   "feedback": "<目標の現在地と今日の取り組みへの共感・承認を含む2-3文>",
   "highlights": "<今日の具体的な良かった点を1文で称える>",
   "improvement": "<責めずに前向きな改善提案または継続すべき点を1文で>",
