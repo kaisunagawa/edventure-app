@@ -1918,7 +1918,13 @@ function TimerScreen({onToast, isActive}) {
   const accentColor = mode==="break"?"var(--green)":"var(--accent)";
 
   return html`<div style=${{paddingBottom:32}}>
-    <div class="ph"><div class="ph-title-accent">ポモドーロタイマー</div></div>
+    <div class="ph" style=${{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+      <div class="ph-title-accent">ポモドーロタイマー</div>
+      <button onClick=${()=>{primeAudio();setTimeout(playBeep,150);}}
+        style=${{background:"none",border:"1px solid var(--border)",borderRadius:20,padding:"6px 12px",fontSize:12,color:"var(--sub)",cursor:"pointer",fontFamily:"inherit",flexShrink:0}}>
+        🔊 音をテスト
+      </button>
+    </div>
     <div style=${{padding:"0 16px"}}>
 
       <div style=${{display:"flex",gap:8,marginBottom:24}}>
