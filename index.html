@@ -2602,6 +2602,40 @@ function CalendarLinkBanner({onGoToSettings, onDismiss}) {
   `;
 }
 
+// 初回ホーム画面表示時に一度だけ出す、アプリの使い方チュートリアル。
+// 「あとで見る」で閉じてもFAQに同じ内容があるので実害はない
+const TUTORIAL_STEPS = [
+  { icon:"👋", title:"JIROKUへようこそ", body:"時間の使い方を記録して、AIコーチと一緒に振り返る習慣化アプリです。まずは基本の使い方を簡単にご案内します。" },
+  { icon:"📝", title:"記録タブで時間帯を記録", body:"時間帯を選んで「何をしましたか？」と自己評価を入れて保存するだけ。メモを書くとXPボーナスがもらえます。" },
+  { icon:"⧉", title:"まとめて記録も可能", body:"会議や移動など、同じ内容が続いた時は「まとめて記録」で複数の時間帯に一括保存できます。" },
+  { icon:"📅", title:"カレンダー連携で自動入力", body:"設定でGoogleカレンダーと連携すると、予定が記録に自動で入るので、選んで保存するだけになります。" },
+  { icon:"📊", title:"AIレポートとステータス", body:"毎晩、その日の記録をもとにAIがスコアとフィードバックを届けます。ホーム画面の「ステータス」は、続けるほど伸びる指標です。" },
+  { icon:"💬", title:"LINE連携でリマインダーを受け取る", body:"LINE公式アカウントを友だち追加し、登録したGmailアドレスを送ると連携完了。リマインダーやレポートが届くようになります。" },
+];
+function TutorialOverlay({onDone}) {
+  const [step,setStep]=useState(0);
+  const isLast = step === TUTORIAL_STEPS.length - 1;
+  const s = TUTORIAL_STEPS[step];
+  return html`
+    <div style=${{position:"fixed",inset:0,background:"var(--bg)",zIndex:400,display:"flex",flexDirection:"column"}}>
+      <div style=${{display:"flex",justifyContent:"flex-end",padding:"14px 16px"}}>
+        <button onClick=${onDone} style=${{background:"none",border:"none",color:"var(--sub)",fontSize:13,cursor:"pointer",fontFamily:"inherit"}}>スキップ</button>
+      </div>
+      <div style=${{flex:1,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"0 28px",textAlign:"center"}}>
+        <div style=${{fontSize:48,marginBottom:20}}>${s.icon}</div>
+        <div style=${{fontSize:19,fontWeight:800,color:"var(--text)",marginBottom:14}}>${s.title}</div>
+        <div style=${{fontSize:14,lineHeight:1.9,color:"var(--sub)",maxWidth:320}}>${s.body}</div>
+      </div>
+      <div style=${{display:"flex",justifyContent:"center",gap:6,marginBottom:20}}>
+        ${TUTORIAL_STEPS.map((_,i)=>html`<div key=${i} style=${{width:i===step?18:6,height:6,borderRadius:99,background:i===step?"var(--accent)":"var(--border)",transition:"width .2s"}}/>`)}
+      </div>
+      <div style=${{padding:"0 24px 32px"}}>
+        <button class="btn" onClick=${()=>isLast?onDone():setStep(step+1)}>${isLast?"はじめる":"次へ"}</button>
+      </div>
+    </div>
+  `;
+}
+
 function App() {
   // 起動を速くするため、ログイン済みキャッシュがあれば即アプリを表示する。
   // アカウントの存在確認はバックグラウンドで行い、消えていた場合だけログアウトさせる
@@ -2611,6 +2645,8 @@ function App() {
   const [bannerDismissed,setBannerDismissed]=useState(false);
   const [calLinked,setCalLinked]=useState(!!localStorage.getItem("cal_linked"));
   const [calBannerDismissed,setCalBannerDismissed]=useState(false);
+  const [showTutorial,setShowTutorial]=useState(!localStorage.getItem("tutorial_seen"));
+  const dismissTutorial=()=>{ localStorage.setItem("tutorial_seen","1"); setShowTutorial(false); };
   const [goalData,setGoalData]=useState(()=>{
     const g=localStorage.getItem("jiroku_goals"); if(g) try{return JSON.parse(g);}catch(e){}
     const old=localStorage.getItem("jiroku_goal"); if(old) try{const p=JSON.parse(old); if(p.goal) return [p];}catch(e){}
@@ -2648,6 +2684,7 @@ function App() {
   },[]);
 
   if(!user) return html`<${LoginScreen} onLogin=${setUser}/>`;
+  if(showTutorial) return html`<${TutorialOverlay} onDone=${dismissTutorial}/>`;
   return html`
     <div style=${{height:"100%",position:"relative"}}>
       ${user.lineLinked===false && !bannerDismissed && html`<${LineLinkBanner} email=${user.email} onDismiss=${()=>setBannerDismissed(true)}/>`}
