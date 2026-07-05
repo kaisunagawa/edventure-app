@@ -3027,6 +3027,18 @@ function testGetUser() {
   Logger.log(JSON.stringify(getUser(adminEmail())));
 }
 
+// 一時的な送信用関数: LINE連携済みだが確認メッセージがLINE送信制限で
+// 届かなかった生徒に、連携完了メッセージを直接送る（1回実行したら削除してよい）
+function sendCatchUpLineMessage() {
+  const studentEmail = "ogatakun0@gmail.com";
+  const user = sheetToObjects(getSheet("Users")).find(u => u.student_email === studentEmail);
+  if (!user) { Logger.log("生徒が見つかりません"); return; }
+  if (!user.line_user_id) { Logger.log("line_user_idが未設定です"); return; }
+  const ok = sendLineMessage(user.line_user_id,
+    "こんばんは！返信が遅くなってすみません🙏\n先ほどのメールアドレス、確認できました。LINE連携は完了していますので、今後は記録のリマインダーや毎晩のAIレポートが届くようになります。\n\nもし何か不具合があれば、いつでも教えてくださいね！");
+  Logger.log("送信結果: " + ok);
+}
+
 function testStreak() {
   updateStreak(adminEmail());
   Logger.log(JSON.stringify(getStreak(adminEmail())));
