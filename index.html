@@ -367,6 +367,18 @@ function loadFirebaseSdk() {
 
 // プッシュ通知（バックグラウンド通知）を有効化する。通知許可→Firebase初期化→
 // Service Worker登録→FCMトークン取得→サーバーへ登録、の順で行う
+// SafariのPushManager.subscribeはapplicationServerKeyの型に厳しく、
+// ライブラリ側の変換にバグがあると「must contain a valid P-256 public key」で
+// 失敗することがあるため、確実な変換で自前のUint8Arrayを作る
+function urlBase64ToUint8Array(base64String) {
+  const padding = "=".repeat((4 - base64String.length % 4) % 4);
+  const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
+  const rawData = atob(base64);
+  const outputArray = new Uint8Array(rawData.length);
+  for (let i = 0; i < rawData.length; i++) outputArray[i] = rawData.charCodeAt(i);
+  return outputArray;
+}
+
 async function enablePushNotifications() {
   if (!("Notification" in window) || !("serviceWorker" in navigator)) {
     return { ok: false, error: "このブラウザはプッシュ通知に対応していません" };
@@ -380,6 +392,15 @@ async function enablePushNotifications() {
     // sw.js（キャッシュ用と共通）の登録が終わるのを待って使う。別ファイルとして
     // 登録するとスコープが競合しキャッシュ用sw.jsが上書きされてしまうため
     const reg = await navigator.serviceWorker.ready;
+    // FirebaseのgetToken内部変換がSafariで失敗するケースがあるため、
+    // 先に自前の変換でpush購読を作っておき、getTokenには既存の購読を使わせる
+    const existingSub = await reg.pushManager.getSubscription();
+    if (!existingSub) {
+      await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(FCM_VAPID_KEY)
+      });
+    }
     const token = await messaging.getToken({ vapidKey: FCM_VAPID_KEY, serviceWorkerRegistration: reg });
     if (!token) return { ok: false, error: "通知トークンの取得に失敗しました" };
     const res = await gasPost("registerPushToken", { token });
