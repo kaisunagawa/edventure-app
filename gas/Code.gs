@@ -1964,8 +1964,8 @@ ${EMOJI_STYLE}`;
 
 function hourlyReminder() {
   const hour = new Date().getHours();
-  // 21時以降はレポート・夜のコーチメッセージの時間帯なのでリマインダーは送らない
-  if (hour >= 21) return;
+  // 23時以降はレポート・夜のコーチメッセージの時間帯なのでリマインダーは送らない
+  if (hour >= 23) return;
   const timeBlock = String(hour).padStart(2, "0") + ":00";
   const getContextBundle = preloadContextBundles();
   sheetToObjects(getSheet("Users")).filter(u => u.is_active.toUpperCase() === "TRUE").forEach(user => {
@@ -2966,8 +2966,8 @@ function setupTriggers() {
   // hourlyReminder側で時刻・間隔をチェックしているので、1時間ごとの単一トリガーに統合する。
   ScriptApp.getProjectTriggers().forEach(t => ScriptApp.deleteTrigger(t));
   ScriptApp.newTrigger("morningScheduleNotify").timeBased().everyDays(1).atHour(7).create();
-  ScriptApp.newTrigger("nightlyReport").timeBased().everyDays(1).atHour(21).create();
-  ScriptApp.newTrigger("nightlyCoachMessage").timeBased().everyDays(1).atHour(22).create();
+  ScriptApp.newTrigger("nightlyReport").timeBased().everyDays(1).atHour(23).create();
+  ScriptApp.newTrigger("nightlyCoachMessage").timeBased().everyDays(1).atHour(23).nearMinute(30).create();
   ScriptApp.newTrigger("generateMonthlySummaries").timeBased().onMonthDay(1).atHour(3).create();
   ScriptApp.newTrigger("checkTimerQueue").timeBased().everyMinutes(1).create();
   ScriptApp.newTrigger("hourlyReminder").timeBased().everyHours(1).create();
