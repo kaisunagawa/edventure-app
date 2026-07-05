@@ -155,6 +155,7 @@ function doPost(e) {
       case "coachExtractFromExistingFile": return jsonResponse(coachExtractFromExistingFile(body.coachEmail, body));
       case "coachImportNotes":     return jsonResponse(coachImportNotes(body.coachEmail, body));
       case "coachSessionSuggestions": return jsonResponse(coachSessionSuggestions(body.coachEmail, body));
+      case "coachSummarizeTranscript": return jsonResponse(coachSummarizeTranscript(body.coachEmail, body));
       default: return jsonResponse({ ok: false, error: "Unknown action" });
     }
   } catch (err) {
@@ -1482,6 +1483,52 @@ ${draftSection}
   if (!result.content || !result.content[0]) return { ok: false, error: "ai error" };
   const lines = result.content[0].text.split("\n").map(l => l.replace(/^[-・0-9.\s]+/, "").trim()).filter(l => l.length > 2);
   return { ok: true, data: { suggestions: lines } };
+}
+
+// Zoomの文字起こし（コピペしたテキスト）をAIが「話した内容・約束事項・次回テーマ」に
+// 整理し、コーチングログのフォームに仮入力できる形で返す。保存は自動化せず、
+// コーチが内容を確認してから保存する運用とする（他のAI整理機能と同じ方針）
+function coachSummarizeTranscript(coachEmail, body) {
+  if (!verifyCoach(coachEmail)) return { ok: false, error: "not a coach" };
+  const targetEmail = String(body.targetEmail || "");
+  if (!coachOwnsStudent(coachEmail, targetEmail)) return { ok: false, error: "not your student" };
+  const transcript = String(body.transcript || "").trim();
+  if (!transcript) return { ok: false, error: "文字起こしが空です" };
+  const apiKey = PropertiesService.getScriptProperties().getProperty("CLAUDE_API_KEY");
+  if (!apiKey) return { ok: false, error: "CLAUDE_API_KEY が未設定" };
+
+  const prompt = `以下はコーチングセッション（Zoom）の文字起こしです。この内容を、コーチングログとして記録するために整理してください。
+
+【文字起こし】
+${transcript.slice(0, 12000)}
+
+以下のJSON形式のみで返してください（説明文不要）:
+{
+  "content": "<話した内容・深掘りした内容の要約。3〜6文程度、具体的なエピソードや数字に触れる>",
+  "promises": "<生徒が約束した行動・宿題。複数あれば「、」で区切って1行にまとめる。無ければ空文字>",
+  "next_theme": "<次回のコーチングで扱うとよいテーマ。無ければ空文字>"
+}`;
+
+  try {
+    const res = UrlFetchApp.fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
+      payload: JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: 800, messages: [{ role: "user", content: prompt }] }),
+      muteHttpExceptions: true
+    });
+    const result = JSON.parse(res.getContentText());
+    if (!result.content || !result.content[0]) return { ok: false, error: "AI応答が空でした" };
+    const m = result.content[0].text.match(/\{[\s\S]*\}/);
+    if (!m) return { ok: false, error: "AI応答の解析に失敗しました" };
+    const parsed = JSON.parse(m[0]);
+    return { ok: true, data: {
+      content: String(parsed.content || "").trim(),
+      promises: String(parsed.promises || "").trim(),
+      next_theme: String(parsed.next_theme || "").trim()
+    } };
+  } catch (e) {
+    return { ok: false, error: "summarize failed: " + e.toString() };
+  }
 }
 
 // AI予習サマリー: 前回コーチング（無ければ直近14日）からの変化を要約

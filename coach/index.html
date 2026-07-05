@@ -248,6 +248,9 @@ function StudentMain({ student, onNoteSaved }) {
   const [suggestions, setSuggestions] = useState([]);
   const [suggestLoading, setSuggestLoading] = useState(false);
   const [suggestedOnce, setSuggestedOnce] = useState(false);
+  const [transcript, setTranscript] = useState("");
+  const [summarizing, setSummarizing] = useState(false);
+  const [summarizeMsg, setSummarizeMsg] = useState("");
   const [importOpen, setImportOpen] = useState(false);
   const [importRows, setImportRows] = useState([{ date: "", content: "", next_theme: "", promises: "" }]);
   const [importing, setImporting] = useState(false);
@@ -260,6 +263,7 @@ function StudentMain({ student, onNoteSaved }) {
   useEffect(() => {
     setDetail(null); setPrep(null); setTab("overview");
     setSessionMode(false); setSuggestions([]); setSuggestedOnce(false);
+    setTranscript(""); setSummarizeMsg("");
     setImportOpen(false); setImportRows([{ date: "", content: "", next_theme: "", promises: "" }]);
     reloadDetail();
   }, [student.email]);
@@ -278,6 +282,22 @@ function StudentMain({ student, onNoteSaved }) {
     setSuggestions(r.ok ? r.data.suggestions : ["提案の生成に失敗しました。もう一度お試しください"]);
     setSuggestedOnce(true);
     setSuggestLoading(false);
+  };
+
+  const summarizeTranscript = async () => {
+    if (!transcript.trim()) return;
+    setSummarizing(true);
+    setSummarizeMsg("");
+    const r = await apiPost("coachSummarizeTranscript", { targetEmail: student.email, transcript: transcript.trim() });
+    if (r.ok) {
+      setContent(r.data.content || "");
+      setPromises(r.data.promises || "");
+      setNextTheme(r.data.next_theme || "");
+      setSummarizeMsg("AIが整理した内容をフォームに反映しました。内容を確認してから保存してください");
+    } else {
+      setSummarizeMsg(r.error || "整理に失敗しました");
+    }
+    setSummarizing(false);
   };
 
   const addImportRow = () => setImportRows(rows => [...rows, { date: "", content: "", next_theme: "", promises: "" }]);
@@ -502,6 +522,16 @@ function StudentMain({ student, onNoteSaved }) {
                 <button class="btn" onClick=${submitImport} disabled=${importing}>${importing ? "登録中..." : "まとめて登録する"}</button>
                 ${importMsg && html`<span style=${{fontSize:12,color:"var(--green)",alignSelf:"center"}}>${importMsg}</span>`}
               </div>
+            </div>
+          `}
+
+          ${sessionMode && html`
+            <div class="card" style=${{marginBottom:20}}>
+              <div class="card-label">Zoomの文字起こしから自動整理</div>
+              <div style=${{fontSize:11.5,color:"var(--sub)",marginBottom:10}}>Zoomの文字起こし機能で出力されたテキストを貼り付けると、AIが「話した内容」「約束事項」「次回テーマ」に整理して下のフォームに反映します。保存前に必ず内容を確認してください。</div>
+              <textarea class="txa" value=${transcript} onChange=${e => setTranscript(e.target.value)} placeholder="Zoomの文字起こしをここに貼り付け" style=${{marginBottom:10,minHeight:90}}/>
+              <button class="btn" onClick=${summarizeTranscript} disabled=${summarizing || !transcript.trim()}>${summarizing ? "整理中..." : "AIで整理する"}</button>
+              ${summarizeMsg && html`<span style=${{fontSize:12,color:"var(--accent)",marginLeft:10}}>${summarizeMsg}</span>`}
             </div>
           `}
 
