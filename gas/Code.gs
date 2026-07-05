@@ -1482,7 +1482,7 @@ ${lastNoteText}
 
 ${draftSection}
 
-【出力形式】質問だけを1行ずつ箇条書きで。前置きや説明文は不要。すでにメモに書かれている内容の繰り返しにはならないよう、まだ深掘りできていない点や前回の約束事項の進捗確認を優先すること`;
+【出力形式】質問だけを1行ずつ箇条書きで。見出し・タイトル・前置き・説明文・生徒の名前を書いた行は一切含めず、質問文そのものだけを出力すること。「#」などの記号や敬体すぎない自然な話し言葉の日本語で、コーチが実際にその場で口にするような表現にすること。すでにメモに書かれている内容の繰り返しにはならないよう、まだ深掘りできていない点や前回の約束事項の進捗確認を優先すること`;
 
   const res = UrlFetchApp.fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
@@ -1492,7 +1492,9 @@ ${draftSection}
   });
   const result = JSON.parse(res.getContentText());
   if (!result.content || !result.content[0]) return { ok: false, error: "ai error" };
-  const lines = result.content[0].text.split("\n").map(l => l.replace(/^[-・0-9.\s]+/, "").trim()).filter(l => l.length > 2);
+  const lines = result.content[0].text.split("\n")
+    .map(l => l.replace(/^[#\-・*0-9.\s]+/, "").trim())
+    .filter(l => l.length > 2 && !/さんへの(提案)?質問$/.test(l));
   return { ok: true, data: { suggestions: lines } };
 }
 
