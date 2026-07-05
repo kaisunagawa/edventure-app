@@ -1,8 +1,8 @@
 // タイマー終了などをアプリを閉じている間・画面ロック中でも通知するための
 // Firebase Cloud Messaging用Service Worker。index.html側のFIREBASE_CONFIGと
 // 同じ値をここにも書く必要がある（Service Workerは別スコープで動くため共有できない）
-importScripts("https://www.gstatic.com/firebasejs/10.7.0/firebase-app-compat.js");
-importScripts("https://www.gstatic.com/firebasejs/10.7.0/firebase-messaging-compat.js");
+importScripts("https://www.gstatic.com/firebasejs/12.15.0/firebase-app-compat.js");
+importScripts("https://www.gstatic.com/firebasejs/12.15.0/firebase-messaging-compat.js");
 
 firebase.initializeApp({
   apiKey: "AIzaSyCfOKqEbdGBIHA0s_CQAYvr0oViRaK9uE4",

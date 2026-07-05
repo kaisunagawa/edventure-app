@@ -351,10 +351,10 @@ function loadFirebaseSdk() {
   if (window.firebase) return Promise.resolve();
   return new Promise((resolve, reject) => {
     const s1 = document.createElement("script");
-    s1.src = "https://www.gstatic.com/firebasejs/10.7.0/firebase-app-compat.js";
+    s1.src = "https://www.gstatic.com/firebasejs/12.15.0/firebase-app-compat.js";
     s1.onload = () => {
       const s2 = document.createElement("script");
-      s2.src = "https://www.gstatic.com/firebasejs/10.7.0/firebase-messaging-compat.js";
+      s2.src = "https://www.gstatic.com/firebasejs/12.15.0/firebase-messaging-compat.js";
       s2.onload = resolve;
       s2.onerror = reject;
       document.head.appendChild(s2);
@@ -1681,6 +1681,8 @@ function ReportScreen() {
 // 完了チャイムはWeb Audio APIのGainNodeで増幅して鳴らす。倍率が高すぎると音が割れるため
 // 実際に聞こえる範囲で調整すること（<audio>のvolume上限1.0では小さすぎたための対応）
 const TIMER_DONE_GAIN = 4;
+// 単発チャイムだとアラームらしさが弱かったため、間隔を空けて繰り返す回数
+const TIMER_DONE_REPEAT = 3;
 let sharedAudioCtx = null;
 function getSharedAudioCtx() {
   if(!sharedAudioCtx) sharedAudioCtx = new (window.AudioContext||window.webkitAudioContext)();
@@ -1789,32 +1791,43 @@ function TimerScreen({onToast, isActive}) {
   };
   const playBeep = () => {
     // <audio>のvolumeは1.0が上限で、それでも小さくて聞こえなかったという報告があったため、
-    // Web Audio APIのGainNodeで元の音量を大きく超えて増幅して鳴らす（失敗時は通常再生にフォールバック）
+    // Web Audio APIのGainNodeで元の音量を大きく超えて増幅して鳴らす（失敗時は通常再生にフォールバック）。
+    // 単発チャイムだとアラームらしさが弱いという声があったため、間隔を空けて複数回繰り返す
     let boosted = false;
     try {
       const buf = getDoneBuffer();
       if(buf){
         const ctx = getSharedAudioCtx();
         if(ctx.state === "suspended") ctx.resume();
-        const src = ctx.createBufferSource();
-        src.buffer = buf;
-        const gain = ctx.createGain();
-        gain.gain.value = TIMER_DONE_GAIN;
-        src.connect(gain).connect(ctx.destination);
-        src.start(0);
+        const gapSec = buf.duration + 0.35;
+        for(let i=0;i<TIMER_DONE_REPEAT;i++){
+          const src = ctx.createBufferSource();
+          src.buffer = buf;
+          const gain = ctx.createGain();
+          gain.gain.value = TIMER_DONE_GAIN;
+          src.connect(gain).connect(ctx.destination);
+          src.start(ctx.currentTime + gapSec*i);
+        }
         boosted = true;
       }
     } catch(e){}
     if(!boosted){
       try {
+        let count = 0;
         const el = getDoneEl();
         el.volume = 1;
-        el.currentTime = 0;
-        el.play().catch(()=>{});
+        const playOnce = () => {
+          if(count >= TIMER_DONE_REPEAT) return;
+          count++;
+          el.currentTime = 0;
+          el.play().catch(()=>{});
+        };
+        el.onended = playOnce;
+        playOnce();
       } catch(e){}
     }
-    // 音が出せない環境（マナーモード等）でも気づけるよう振動も併用
-    try { navigator.vibrate?.([200,100,200,100,200]); } catch(e){}
+    // 音が出せない環境（マナーモード等）でも気づけるよう振動も併用（アラームらしく長めのパターンに）
+    try { navigator.vibrate?.([300,150,300,150,300,150,300]); } catch(e){}
   };
 
   // バックグラウンド復帰時に経過時間を補正する
