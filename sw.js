@@ -1,4 +1,4 @@
-const CACHE = "jiroku-v1";
+const CACHE = "jiroku-v2";
 
 self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', e => {
