@@ -566,7 +566,7 @@ const getTimeBlocks = () => { const {start,end}=getLogHours(); return ALL_TIME_B
 const TIME_BLOCKS = getTimeBlocks();
 
 // ── Home ──
-function HomeScreen({goalData, onGoalSaved, profile}) {
+function HomeScreen({goalData, onGoalSaved, profile, isActive}) {
   const [report, setReport] = useState(null);
   const [schedule, setSchedule] = useState([]);
   const [game, setGame] = useState(null);
@@ -584,6 +584,7 @@ function HomeScreen({goalData, onGoalSaved, profile}) {
   const [editMode, setEditMode] = useState(false);
   const [editItems, setEditItems] = useState([]);
   useEffect(()=>{
+    if(!isActive) return;
     // キャッシュで即時表示
     const cachedGame = localStorage.getItem("cache_gameStatus");
     const cachedReport = localStorage.getItem("cache_report");
@@ -626,7 +627,7 @@ function HomeScreen({goalData, onGoalSaved, profile}) {
     const today = formatDateStr(new Date());
     const saved = localStorage.getItem("today_actions_date");
     if(saved !== today){ localStorage.removeItem("today_actions"); localStorage.setItem("today_actions_date", today); setChecked({}); }
-  },[]);
+  },[isActive]);
 
   const goalsArr = Array.isArray(goalData) ? goalData : (goalData?.goal ? [goalData] : []);
   const mainGoal = goalsArr[0] || null;
@@ -2865,7 +2866,7 @@ function App() {
       ${!calLinked && !calBannerDismissed && html`<${CalendarLinkBanner} onGoToSettings=${()=>setTab("settings")} onDismiss=${()=>setCalBannerDismissed(true)}/>`}
       <div style=${{position:"relative",flex:1,minHeight:0}}>
         <div class="screen">
-          <div style=${{display:tab==="home"?"block":"none"}}><${HomeScreen} goalData=${goalData} onGoalSaved=${setGoalData} profile=${profile}/></div>
+          <div style=${{display:tab==="home"?"block":"none"}}><${HomeScreen} goalData=${goalData} onGoalSaved=${setGoalData} profile=${profile} isActive=${tab==="home"}/></div>
           <div style=${{display:tab==="log"?"block":"none"}}><${LogScreen} onToast=${setToast} isActive=${tab==="log"}/></div>
           <div style=${{display:tab==="report"?"block":"none"}}><${ReportScreen}/></div>
           <div style=${{display:tab==="timer"?"block":"none",height:"100%"}}><${TimerScreen} onToast=${setToast} isActive=${tab==="timer"}/></div>
