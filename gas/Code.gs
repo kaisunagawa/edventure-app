@@ -151,6 +151,7 @@ function doPost(e) {
       case "coachSaveProfile":     return jsonResponse(coachSaveProfile(body.coachEmail, body));
       case "coachUploadFile":      return jsonResponse(coachUploadFile(body.coachEmail, body));
       case "coachDeleteFile":      return jsonResponse(coachDeleteFile(body.coachEmail, body));
+      case "coachDeleteNote":      return jsonResponse(coachDeleteNote(body.coachEmail, body));
       case "coachExtractContractInfo": return jsonResponse(coachExtractContractInfo(body.coachEmail, body));
       case "coachExtractFromExistingFile": return jsonResponse(coachExtractFromExistingFile(body.coachEmail, body));
       case "coachImportNotes":     return jsonResponse(coachImportNotes(body.coachEmail, body));
@@ -774,14 +775,24 @@ function getCommunity(studentEmail) {
     };
   }).sort((a, b) => b.score - a.score);
 
+  // レポートランキングは「最新のレポートの点数」で競う場（合計/継続の指標はステータス側が担う）。
+  // 生徒ごとにレポート生成日がずれるため、直近で最も新しい日付のレポートを持つ生徒だけに絞り、
+  // 数日前のレポートしか無い生徒が混ざって不公平にならないようにする
+  let latestDate = null;
+  latestReportByEmail.forEach(r => { if (!latestDate || r.date > latestDate) latestDate = r.date; });
+
   const reportRanking = users
-    .map(u => ({
-      isMe: u.student_email === studentEmail,
-      nickname: u.nickname || "名無しさん",
-      avatar: u.avatar || "🦊",
-      reportScore: latestReportByEmail.get(u.student_email) ? Number(latestReportByEmail.get(u.student_email).score) : null
-    }))
-    .filter(u => u.reportScore !== null)
+    .map(u => {
+      const r = latestReportByEmail.get(u.student_email);
+      return {
+        isMe: u.student_email === studentEmail,
+        nickname: u.nickname || "名無しさん",
+        avatar: u.avatar || "🦊",
+        reportScore: r ? Number(r.score) : null,
+        reportDate: r ? r.date : null
+      };
+    })
+    .filter(u => u.reportScore !== null && u.reportDate === latestDate)
     .sort((a, b) => b.reportScore - a.reportScore);
 
   return { ok: true, data: list, reportRanking: reportRanking };
@@ -1888,6 +1899,23 @@ function coachDeleteFile(coachEmail, body) {
   const idIdx = headers.indexOf("file_id");
   for (let i = data.length - 1; i >= 1; i--) {
     if (String(data[i][idIdx]) === String(body.file_id)) {
+      sheet.deleteRow(i + 1);
+      return { ok: true };
+    }
+  }
+  return { ok: false, error: "not found" };
+}
+
+function coachDeleteNote(coachEmail, body) {
+  if (!verifyCoach(coachEmail)) return { ok: false, error: "not a coach" };
+  const targetEmail = String(body.targetEmail || "");
+  if (!coachOwnsStudent(coachEmail, targetEmail)) return { ok: false, error: "not your student" };
+  const sheet = getCoachingNotesSheet();
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0];
+  const idIdx = headers.indexOf("note_id");
+  for (let i = data.length - 1; i >= 1; i--) {
+    if (String(data[i][idIdx]) === String(body.note_id)) {
       sheet.deleteRow(i + 1);
       return { ok: true };
     }

@@ -259,6 +259,10 @@ function StudentMain({ student, onNoteSaved }) {
   const [chatworkSyncMsg, setChatworkSyncMsg] = useState("");
 
   const reloadDetail = () => api("coachGetStudentDetail", { targetEmail: student.email }).then(r => { if (r.ok) setDetail(r.data); });
+  const deleteNote = (noteId) => {
+    if (!confirm("このコーチングログを削除しますか？")) return;
+    apiPost("coachDeleteNote", { targetEmail: student.email, note_id: noteId }).then(r => { if (r.ok) reloadDetail(); });
+  };
 
   useEffect(() => {
     setDetail(null); setPrep(null); setTab("overview");
@@ -568,7 +572,10 @@ function StudentMain({ student, onNoteSaved }) {
               ${detail.notes.length === 0 && html`<div style=${{fontSize:13,color:"var(--sub)"}}>まだ記録がありません</div>`}
               ${detail.notes.map((n, i) => html`
                 <div key=${n.note_id} style=${{padding:"10px 0",borderBottom:i < detail.notes.length-1 ? "1px solid var(--border)" : "none"}}>
-                  <div style=${{fontSize:12,fontWeight:600,color:"var(--accent)",marginBottom:4}}>${fmtDate(n.date)}</div>
+                  <div style=${{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
+                    <div style=${{fontSize:12,fontWeight:600,color:"var(--accent)"}}>${fmtDate(n.date)}</div>
+                    <button onClick=${() => deleteNote(n.note_id)} style=${{background:"none",border:"none",color:"var(--sub)",fontSize:11.5,cursor:"pointer",fontFamily:"inherit"}}>削除</button>
+                  </div>
                   <div style=${{fontSize:13,lineHeight:1.7,whiteSpace:"pre-wrap",marginBottom:4}}>${n.content}</div>
                   ${n.promises && html`<div style=${{fontSize:11.5,color:"var(--sub)"}}>約束: ${n.promises}</div>`}
                   ${n.next_theme && html`<div style=${{fontSize:11.5,color:"var(--sub)"}}>▶ 次回: ${n.next_theme}</div>`}

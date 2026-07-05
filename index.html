@@ -889,6 +889,24 @@ function HomeScreen({goalData, onGoalSaved, profile}) {
 }
 
 // ── みんなの頑張り ──
+const RANK_MEDALS = ["🥇","🥈","🥉"];
+function RankingRow({rank, avatar, nickname, isMe, scoreValue, scoreUnit, sub, isLast}) {
+  const medal = RANK_MEDALS[rank-1];
+  return html`
+    <div style=${{display:"flex",alignItems:"center",gap:11,padding:"12px 16px",borderBottom:isLast?"none":"1px solid var(--border)",background:isMe?"var(--accent-l)":"transparent"}}>
+      <div style=${{fontSize:medal?18:13,fontWeight:800,color:medal?"inherit":"var(--sub)",width:24,textAlign:"center",flexShrink:0}}>${medal||rank}</div>
+      <div style=${{width:34,height:34,borderRadius:"50%",background:"var(--bg)",border:"1px solid var(--border)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:17,flexShrink:0}}>${avatar}</div>
+      <div style=${{flex:1,minWidth:0}}>
+        <div style=${{fontSize:14,fontWeight:700,color:"var(--text)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>${nickname}${isMe?" (あなた)":""}</div>
+        ${sub&&html`<div style=${{fontSize:11,color:"var(--sub)",marginTop:1}}>${sub}</div>`}
+      </div>
+      <div style=${{textAlign:"right",flexShrink:0}}>
+        <span style=${{fontSize:18,fontWeight:800,color:"var(--accent)"}}>${scoreValue}</span>
+        <span style=${{fontSize:11,color:"var(--sub)",marginLeft:2}}>${scoreUnit}</span>
+      </div>
+    </div>
+  `;
+}
 function CommunityOverlay({onClose}) {
   const [list,setList]=useState(null);
   const [reportRanking,setReportRanking]=useState(null);
@@ -924,30 +942,21 @@ function CommunityOverlay({onClose}) {
           <div style=${{padding:"14px 16px",borderBottom:"1px solid var(--border)",fontSize:12,fontWeight:700,color:"var(--text)"}}>ステータスランキング</div>
           ${list===null&&html`<div style=${{padding:20,textAlign:"center",color:"var(--sub)",fontSize:13}}>読み込み中...</div>`}
           ${list&&list.map((u,i)=>html`
-            <div key=${i} style=${{display:"flex",alignItems:"center",gap:10,padding:"11px 16px",borderBottom:i<list.length-1?"1px solid var(--border)":"none",background:u.isMe?"var(--bg)":"transparent"}}>
-              <div style=${{fontSize:13,fontWeight:700,color:"var(--sub)",width:20,textAlign:"center",flexShrink:0}}>${i+1}</div>
-              <div style=${{width:32,height:32,borderRadius:"50%",background:"var(--bg)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:17,flexShrink:0}}>${u.avatar}</div>
-              <div style=${{flex:1,minWidth:0}}>
-                <div style=${{fontSize:14,fontWeight:600,color:"var(--text)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>${u.nickname}${u.isMe?" (あなた)":""}</div>
-                <div style=${{fontSize:11,color:"var(--sub)"}}>ステータス ${u.score}点${u.streak>0?` · 🔥${u.streak}日`:""}</div>
-              </div>
-            </div>
+            <${RankingRow} key=${i} rank=${i+1} avatar=${u.avatar} nickname=${u.nickname} isMe=${u.isMe}
+              scoreValue=${u.score} scoreUnit="点" sub=${u.streak>0?`🔥${u.streak}日連続`:null} isLast=${i===list.length-1}/>
           `)}
           ${list&&list.length===0&&html`<div style=${{padding:20,textAlign:"center",color:"var(--sub)",fontSize:13}}>まだデータがありません</div>`}
         </div>
 
         <div style=${{background:"var(--card)",borderRadius:16,border:"1px solid var(--border)",overflow:"hidden",marginBottom:16}}>
-          <div style=${{padding:"14px 16px",borderBottom:"1px solid var(--border)",fontSize:12,fontWeight:700,color:"var(--text)"}}>レポートランキング</div>
+          <div style=${{padding:"14px 16px",borderBottom:"1px solid var(--border)"}}>
+            <div style=${{fontSize:12,fontWeight:700,color:"var(--text)"}}>レポートランキング</div>
+            <div style=${{fontSize:10.5,color:"var(--sub)",marginTop:2}}>最新のレポートが届いた人同士で競います</div>
+          </div>
           ${reportRanking===null&&html`<div style=${{padding:20,textAlign:"center",color:"var(--sub)",fontSize:13}}>読み込み中...</div>`}
           ${reportRanking&&reportRanking.map((u,i)=>html`
-            <div key=${i} style=${{display:"flex",alignItems:"center",gap:10,padding:"11px 16px",borderBottom:i<reportRanking.length-1?"1px solid var(--border)":"none",background:u.isMe?"var(--bg)":"transparent"}}>
-              <div style=${{fontSize:13,fontWeight:700,color:"var(--sub)",width:20,textAlign:"center",flexShrink:0}}>${i+1}</div>
-              <div style=${{width:32,height:32,borderRadius:"50%",background:"var(--bg)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:17,flexShrink:0}}>${u.avatar}</div>
-              <div style=${{flex:1,minWidth:0}}>
-                <div style=${{fontSize:14,fontWeight:600,color:"var(--text)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>${u.nickname}${u.isMe?" (あなた)":""}</div>
-                <div style=${{fontSize:11,color:"var(--sub)"}}>直近レポート ${u.reportScore}点</div>
-              </div>
-            </div>
+            <${RankingRow} key=${i} rank=${i+1} avatar=${u.avatar} nickname=${u.nickname} isMe=${u.isMe}
+              scoreValue=${u.reportScore} scoreUnit="点" isLast=${i===reportRanking.length-1}/>
           `)}
           ${reportRanking&&reportRanking.length===0&&html`<div style=${{padding:20,textAlign:"center",color:"var(--sub)",fontSize:13}}>まだデータがありません</div>`}
         </div>
