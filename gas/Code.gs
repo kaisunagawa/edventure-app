@@ -753,7 +753,7 @@ function getRanking(studentEmail) {
 
     scores = Object.keys(latest)
       .filter(email => latest[email].date === latestDate)
-      .map(email => ({ email, score: Number(latest[email].score) || 0 }));
+      .map(email => ({ email, score: Number(latest[email].score) || 0, date: latestDate }));
     scores.sort((a, b) => b.score - a.score);
     try { CacheService.getScriptCache().put(CACHE_KEY, JSON.stringify(scores), 300); } catch (e) { /* サイズ超過時は無視 */ }
   }
@@ -761,8 +761,21 @@ function getRanking(studentEmail) {
   if (scores.length < 2) return { ok: true, data: null };
 
   const idx = scores.findIndex(s => s.email === studentEmail);
-  if (idx === -1) return { ok: true, data: null };
-  return { ok: true, data: { rank: idx + 1, total: scores.length, score: scores[idx].score } };
+  if (idx !== -1) return { ok: true, data: { rank: idx + 1, total: scores.length, score: scores[idx].score } };
+
+  // 「みんなの頑張り」を非表示にしている生徒は共有キャッシュのscoresから除外されるため
+  // ここには出てこないが、非表示は「他人から見えない」ためのものであって、自分自身が
+  // 自分の順位を見られなくなるのは意図しない副作用のため、ここで個別に救済する
+  const cohortDate = scores.length ? scores[0].date : null;
+  if (cohortDate) {
+    const myReports = getFilteredRows("Reports", "student_email", studentEmail).sort((a, b) => b.date > a.date ? 1 : -1);
+    if (myReports.length && myReports[0].date === cohortDate) {
+      const myScore = Number(myReports[0].score) || 0;
+      const rank = scores.filter(s => s.score > myScore).length + 1;
+      return { ok: true, data: { rank, total: scores.length + 1, score: myScore } };
+    }
+  }
+  return { ok: true, data: null };
 }
 
 // 「みんなの頑張り」画面用。ニックネーム＋アバターは本名と違い公開前提の情報なので
