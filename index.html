@@ -1970,7 +1970,7 @@ function FAQSection(){
 }
 
 // ── Settings ──
-function SettingsScreen({onToast,onLogout,onGoalSaved,profile,onProfileSaved}) {
+function SettingsScreen({onToast,onLogout,onGoalSaved,profile,onProfileSaved,onCalLinked}) {
   const [nickname,setNickname]=useState(profile?.nickname||CURRENT_USER.name);
   const [avatar,setAvatar]=useState(profile?.avatar||"🦊");
   const [showAllAvatars,setShowAllAvatars]=useState(false);
@@ -2035,6 +2035,7 @@ function SettingsScreen({onToast,onLogout,onGoalSaved,profile,onProfileSaved}) {
           await gasPost("saveSettings",{google_calendar_id:calId});
           localStorage.setItem("cal_linked","1");
           setCalLinked(true);
+          onCalLinked && onCalLinked();
           fetchCalendarEvents(formatDateStr(new Date())); // 今日の予定を先読み
           onToast("カレンダーを連携しました！");
         }catch{ onToast("カレンダー取得に失敗しました"); }
@@ -2583,6 +2584,24 @@ function LineLinkBanner({email, onDismiss}) {
   `;
 }
 
+// Googleカレンダー未連携の場合に表示する案内バナー。カレンダー連携は任意機能
+// （記録の自動入力が楽になるだけ）なので、LINEのバナーより控えめなトーンにする
+function CalendarLinkBanner({onGoToSettings, onDismiss}) {
+  return html`
+    <div style=${{background:"var(--card)",borderBottom:"1px solid var(--border)",padding:"10px 16px",fontSize:12.5,color:"var(--text)",position:"relative",zIndex:49}}>
+      <div style=${{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8}}>
+        <div style=${{lineHeight:1.6}}>
+          📅 Googleカレンダーがまだ連携されていません。連携すると予定が記録に自動で入るようになります。
+        </div>
+        <div style=${{display:"flex",gap:8,alignItems:"center",flexShrink:0}}>
+          <button onClick=${onGoToSettings} style=${{padding:"6px 12px",borderRadius:7,border:"1px solid var(--border)",background:"var(--bg)",color:"var(--text)",fontSize:12,cursor:"pointer",fontWeight:600}}>連携する</button>
+          <button onClick=${onDismiss} style=${{background:"none",border:"none",color:"var(--sub)",fontSize:16,cursor:"pointer"}}>×</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
 function App() {
   // 起動を速くするため、ログイン済みキャッシュがあれば即アプリを表示する。
   // アカウントの存在確認はバックグラウンドで行い、消えていた場合だけログアウトさせる
@@ -2590,6 +2609,8 @@ function App() {
   const [tab,setTab]=useState("home");
   const [toast,setToast]=useState(null);
   const [bannerDismissed,setBannerDismissed]=useState(false);
+  const [calLinked,setCalLinked]=useState(!!localStorage.getItem("cal_linked"));
+  const [calBannerDismissed,setCalBannerDismissed]=useState(false);
   const [goalData,setGoalData]=useState(()=>{
     const g=localStorage.getItem("jiroku_goals"); if(g) try{return JSON.parse(g);}catch(e){}
     const old=localStorage.getItem("jiroku_goal"); if(old) try{const p=JSON.parse(old); if(p.goal) return [p];}catch(e){}
@@ -2630,12 +2651,13 @@ function App() {
   return html`
     <div style=${{height:"100%",position:"relative"}}>
       ${user.lineLinked===false && !bannerDismissed && html`<${LineLinkBanner} email=${user.email} onDismiss=${()=>setBannerDismissed(true)}/>`}
+      ${!calLinked && !calBannerDismissed && html`<${CalendarLinkBanner} onGoToSettings=${()=>setTab("settings")} onDismiss=${()=>setCalBannerDismissed(true)}/>`}
       <div class="screen">
         <div style=${{display:tab==="home"?"block":"none"}}><${HomeScreen} goalData=${goalData} onGoalSaved=${setGoalData} profile=${profile}/></div>
         <div style=${{display:tab==="log"?"block":"none"}}><${LogScreen} onToast=${setToast} isActive=${tab==="log"}/></div>
         <div style=${{display:tab==="report"?"block":"none"}}><${ReportScreen}/></div>
         <div style=${{display:tab==="timer"?"block":"none",height:"100%"}}><${TimerScreen} onToast=${setToast} isActive=${tab==="timer"}/></div>
-        <div style=${{display:tab==="settings"?"block":"none"}}><${SettingsScreen} onToast=${setToast} onLogout=${logout} onGoalSaved=${setGoalData} profile=${profile} onProfileSaved=${setProfile}/></div>
+        <div style=${{display:tab==="settings"?"block":"none"}}><${SettingsScreen} onToast=${setToast} onLogout=${logout} onGoalSaved=${setGoalData} profile=${profile} onProfileSaved=${setProfile} onCalLinked=${()=>setCalLinked(true)}/></div>
       </div>
       <nav class="nav">
         ${TABS.map(t=>html`
