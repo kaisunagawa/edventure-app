@@ -2860,15 +2860,17 @@ function App() {
   if(!user) return html`<${LoginScreen} onLogin=${setUser}/>`;
   if(showTutorial) return html`<${TutorialOverlay} onDone=${dismissTutorial}/>`;
   return html`
-    <div style=${{height:"100%",position:"relative"}}>
+    <div style=${{height:"100%",position:"relative",display:"flex",flexDirection:"column"}}>
       ${user.lineLinked===false && !bannerDismissed && html`<${LineLinkBanner} email=${user.email} onDismiss=${()=>setBannerDismissed(true)}/>`}
       ${!calLinked && !calBannerDismissed && html`<${CalendarLinkBanner} onGoToSettings=${()=>setTab("settings")} onDismiss=${()=>setCalBannerDismissed(true)}/>`}
-      <div class="screen">
-        <div style=${{display:tab==="home"?"block":"none"}}><${HomeScreen} goalData=${goalData} onGoalSaved=${setGoalData} profile=${profile}/></div>
-        <div style=${{display:tab==="log"?"block":"none"}}><${LogScreen} onToast=${setToast} isActive=${tab==="log"}/></div>
-        <div style=${{display:tab==="report"?"block":"none"}}><${ReportScreen}/></div>
-        <div style=${{display:tab==="timer"?"block":"none",height:"100%"}}><${TimerScreen} onToast=${setToast} isActive=${tab==="timer"}/></div>
-        <div style=${{display:tab==="settings"?"block":"none"}}><${SettingsScreen} onToast=${setToast} onLogout=${logout} onGoalSaved=${setGoalData} profile=${profile} onProfileSaved=${setProfile} onCalLinked=${()=>setCalLinked(true)}/></div>
+      <div style=${{position:"relative",flex:1,minHeight:0}}>
+        <div class="screen">
+          <div style=${{display:tab==="home"?"block":"none"}}><${HomeScreen} goalData=${goalData} onGoalSaved=${setGoalData} profile=${profile}/></div>
+          <div style=${{display:tab==="log"?"block":"none"}}><${LogScreen} onToast=${setToast} isActive=${tab==="log"}/></div>
+          <div style=${{display:tab==="report"?"block":"none"}}><${ReportScreen}/></div>
+          <div style=${{display:tab==="timer"?"block":"none",height:"100%"}}><${TimerScreen} onToast=${setToast} isActive=${tab==="timer"}/></div>
+          <div style=${{display:tab==="settings"?"block":"none"}}><${SettingsScreen} onToast=${setToast} onLogout=${logout} onGoalSaved=${setGoalData} profile=${profile} onProfileSaved=${setProfile} onCalLinked=${()=>setCalLinked(true)}/></div>
+        </div>
       </div>
       <nav class="nav">
         ${TABS.map(t=>html`
