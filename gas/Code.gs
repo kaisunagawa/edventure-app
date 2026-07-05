@@ -239,9 +239,8 @@ function getUser(studentEmail) {
 }
 
 function getReportList(studentEmail) {
-  const rows = sheetToObjects(getSheet("Reports"));
+  const rows = getFilteredRows("Reports", "student_email", studentEmail);
   const list = rows
-    .filter(r => r.student_email === studentEmail)
     .sort((a, b) => b.date > a.date ? 1 : -1)
     .map(r => {
       let breakdown = null;
@@ -361,8 +360,7 @@ function getStatusSummary(studentEmail) {
 }
 
 function getReport(studentEmail, body) {
-  const rows = sheetToObjects(getSheet("Reports"));
-  const userRows = rows.filter(r => r.student_email === studentEmail).sort((a, b) => b.date > a.date ? 1 : -1);
+  const userRows = getFilteredRows("Reports", "student_email", studentEmail).sort((a, b) => b.date > a.date ? 1 : -1);
   const targetDate = (body && body.date) ? body.date : formatDate(new Date());
   const report = userRows.find(r => r.date === targetDate) || userRows[0];
   if (!report) return { ok: true, data: null };
@@ -390,6 +388,7 @@ function appendReportRow(targetDate, studentEmail, report) {
     if (rIdx === -1) { rIdx = headers2.length; sheet.getRange(1, rIdx + 1).setValue("breakdown_reasons"); }
     sheet.getRange(newRow, rIdx + 1).setValue(JSON.stringify(report.breakdown_reasons));
   }
+  try { CacheService.getScriptCache().remove("ranking_scores_v1"); } catch (e) { /* ignore */ }
 }
 
 // student_email・dateで先に絞り込んでから必要な行だけをオブジェクト化する。
@@ -472,13 +471,26 @@ function saveLog(studentEmail, body) {
     if (String(data[i][emailIdx]) === studentEmail &&
         rowDate === targetDate &&
         String(data[i][timeIdx]) === String(body.time_block)) {
+      const focusIdx = headers.indexOf("focus_level");
+      const prevFocus = String(data[i][focusIdx] || "").trim();
+      const newFocus = String(body.focus_level || "").trim();
       sheet.getRange(i+1, headers.indexOf("task")+1).setValue(body.task);
-      sheet.getRange(i+1, headers.indexOf("focus_level")+1).setValue(body.focus_level);
+      sheet.getRange(i+1, focusIdx+1).setValue(body.focus_level);
       sheet.getRange(i+1, headers.indexOf("memo")+1).setValue(body.memo || "");
       let grIdx = headers.indexOf("goal_related");
       if(grIdx === -1){ grIdx = headers.length; sheet.getRange(1, grIdx+1).setValue("goal_related"); }
       sheet.getRange(i+1, grIdx+1).setValue(body.goal_related || "false");
       if (!isPast) { updateStreak(studentEmail); invalidateStatusCache(); }
+
+      // 保存時に自己評価が未入力だった記録に、後から評価を追加した場合だけ
+      // このタイミングで1回だけXPを付与する。評価が既にあった記録の更新では
+      // 付与しない（何度更新してもポイントが積み上がらないようにするため）
+      if (!isPast && !prevFocus && newFocus) {
+        const xpResult = addXP(studentEmail, body.memo, todaysLogCount, {
+          totalLogs, memoCount: memoCount + ((body.memo || "").trim() ? 1 : 0)
+        });
+        return { ok: true, log_id: String(data[i][0]), updated: true, ...xpResult };
+      }
       return { ok: true, log_id: String(data[i][0]), updated: true, xp_gained: 0 };
     }
   }
@@ -546,9 +558,13 @@ function saveLogMulti(studentEmail, body) {
 
   const newRows = [];
   let updatedAny = false;
+  let xpEligible = false; // 新規ブロック、または「未評価→評価あり」に変わった更新がある場合のみXP対象にする
   blocks.forEach(b => {
     const dataIdx = rowIndexByKey[targetDate + "|" + b];
     if (dataIdx !== undefined) {
+      const prevFocus = String(data[dataIdx][idx.focus] || "").trim();
+      const newFocus = String(body.focus_level || "").trim();
+      if (!prevFocus && newFocus) xpEligible = true;
       // 列の並びに依存しないよう、行全体を1回のsetValuesで書き換える
       const updatedRow = data[dataIdx].slice();
       updatedRow[idx.task] = body.task;
@@ -558,6 +574,7 @@ function saveLogMulti(studentEmail, body) {
       sheet.getRange(dataIdx + 1, 1, 1, updatedRow.length).setValues([updatedRow]);
       updatedAny = true;
     } else {
+      xpEligible = true;
       const row = new Array(headers.length).fill("");
       row[idx.logId] = "log_" + Date.now() + "_" + Math.random().toString(36).slice(2, 6);
       row[idx.email] = studentEmail;
@@ -586,6 +603,8 @@ function saveLogMulti(studentEmail, body) {
 
   updateStreak(studentEmail); // ブロック数ぶんではなく1回だけ
   invalidateStatusCache();
+  // 既に評価済みの記録をただ再編集しただけ（新規ブロックも評価追加もない）場合はXPを与えない
+  if (!xpEligible) return { ok: true, xp_gained: 0, updated: updatedAny, count: blocks.length };
   const xpResult = addXP(studentEmail, body.memo, todaysLogCount, { totalLogs, memoCount }); // DailyLogの再読み込みなし
   return { ok: true, xp_gained: xpResult.xp_gained, level_up: xpResult.level_up, level: xpResult.level, updated: updatedAny, count: blocks.length };
 }
@@ -667,7 +686,7 @@ function checkBadges(studentEmail, currentBadges, xp, streak, logSummary) {
 }
 
 function getGameStatus(studentEmail) {
-  const user = sheetToObjects(getSheet("Users")).find(u => u.student_email === studentEmail);
+  const user = getFilteredRows("Users", "student_email", studentEmail)[0];
   if (!user) return { ok: true, data: { xp: 0, level: 1, streak: 0, badges: [], goal: "", goal_deadline: "" } };
   const xp = Number(user.xp || 0);
   const level = getXpLevel(xp);
@@ -692,19 +711,29 @@ function getGameStatus(studentEmail) {
 // 測る指標として直近の活動量を採用。他ユーザーの氏名やスコアは返さずプライバシーに配慮する。
 // 本日のランキング: 各ユーザーの最新レポートのスコアで順位付けする。
 // レポートは毎晩21時生成のため、日中は前日分のスコアで競う形になる。
+// ホーム画面で毎回呼ばれるため、computeAllStatusesと同様に5分キャッシュする
 function getRanking(studentEmail) {
-  const users = sheetToObjects(getSheet("Users")).filter(u => u.is_active.toUpperCase() === "TRUE");
-  if (users.length < 2) return { ok: true, data: null };
-  const active = new Set(users.map(u => u.student_email));
+  const CACHE_KEY = "ranking_scores_v1";
+  let scores;
+  const cached = CacheService.getScriptCache().get(CACHE_KEY);
+  if (cached) {
+    scores = JSON.parse(cached);
+  } else {
+    const users = sheetToObjects(getSheet("Users")).filter(u => u.is_active.toUpperCase() === "TRUE");
+    const active = new Set(users.map(u => u.student_email));
 
-  const latest = {};
-  sheetToObjects(getSheet("Reports")).forEach(r => {
-    if (!active.has(r.student_email)) return;
-    if (!latest[r.student_email] || r.date > latest[r.student_email].date) latest[r.student_email] = r;
-  });
+    const latest = {};
+    sheetToObjects(getSheet("Reports")).forEach(r => {
+      if (!active.has(r.student_email)) return;
+      if (!latest[r.student_email] || r.date > latest[r.student_email].date) latest[r.student_email] = r;
+    });
 
-  const scores = Object.keys(latest).map(email => ({ email, score: Number(latest[email].score) || 0 }));
-  scores.sort((a, b) => b.score - a.score);
+    scores = Object.keys(latest).map(email => ({ email, score: Number(latest[email].score) || 0 }));
+    scores.sort((a, b) => b.score - a.score);
+    try { CacheService.getScriptCache().put(CACHE_KEY, JSON.stringify(scores), 300); } catch (e) { /* サイズ超過時は無視 */ }
+  }
+
+  if (scores.length < 2) return { ok: true, data: null };
 
   const idx = scores.findIndex(s => s.email === studentEmail);
   if (idx === -1) return { ok: true, data: null };
@@ -715,25 +744,46 @@ function getRanking(studentEmail) {
 // 実名やメールは一切含めず、直近7日の活動量でランキング表示する。
 // 「みんなの頑張り」のランキングは、ホームの「ステータス」と同じ累計基準。
 // 見ている場所によって基準がバラバラだと分かりにくいため一本化している。
+// レポートスコア（直近レポートの点数）のランキングも別途あわせて返す。
 function getCommunity(studentEmail) {
-  // show_in_communityが明示的に"FALSE"の生徒だけ除外する（列が無い/空欄なら表示する = 既定は今まで通り全員表示）
+  // show_in_communityが明示的に"FALSE"の生徒は、本人以外の目からは完全に見えなくする
+  // （自分自身は自分の結果を見られるよう例外にする）
   const users = sheetToObjects(getSheet("Users")).filter(u =>
-    u.is_active.toUpperCase() === "TRUE" && String(u.show_in_community || "").toUpperCase() !== "FALSE"
+    u.is_active.toUpperCase() === "TRUE" &&
+    (u.student_email === studentEmail || String(u.show_in_community || "").toUpperCase() !== "FALSE")
   );
   const statuses = computeAllStatuses();
+  const allReports = sheetToObjects(getSheet("Reports"));
+  const latestReportByEmail = new Map();
+  allReports.forEach(r => {
+    const cur = latestReportByEmail.get(r.student_email);
+    if (!cur || r.date > cur.date) latestReportByEmail.set(r.student_email, r);
+  });
 
   const list = users.map(u => {
     const status = statuses[u.student_email];
+    const latestReport = latestReportByEmail.get(u.student_email);
     return {
       isMe: u.student_email === studentEmail,
       nickname: u.nickname || "名無しさん",
       avatar: u.avatar || "🦊",
       streak: Number(u.streak || 0),
-      score: status ? status.score : 0
+      score: status ? status.score : 0,
+      reportScore: latestReport ? Number(latestReport.score) : null
     };
   }).sort((a, b) => b.score - a.score);
 
-  return { ok: true, data: list };
+  const reportRanking = users
+    .map(u => ({
+      isMe: u.student_email === studentEmail,
+      nickname: u.nickname || "名無しさん",
+      avatar: u.avatar || "🦊",
+      reportScore: latestReportByEmail.get(u.student_email) ? Number(latestReportByEmail.get(u.student_email).score) : null
+    }))
+    .filter(u => u.reportScore !== null)
+    .sort((a, b) => b.reportScore - a.reportScore);
+
+  return { ok: true, data: list, reportRanking: reportRanking };
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1799,8 +1849,8 @@ function coachDeleteFile(coachEmail, body) {
 }
 
 function getMessages(studentEmail) {
-  const rows = sheetToObjects(getSheet("Messages"));
-  const msgs = rows.filter(r => r.student_email === studentEmail)
+  const rows = getFilteredRows("Messages", "student_email", studentEmail);
+  const msgs = rows
     .sort((a, b) => a.message_id > b.message_id ? 1 : -1)
     .map(r => ({ message_id: r.message_id, content: r.content, sender_name: r.sender_name, sender_role: r.sender_role, timestamp: r.timestamp, is_read: r.is_read }));
   return { ok: true, data: msgs };
@@ -1883,7 +1933,7 @@ ${logSummary}`;
 }
 
 function getSchedule(studentEmail) {
-  const user = sheetToObjects(getSheet("Users")).find(u => u.student_email === studentEmail);
+  const user = getFilteredRows("Users", "student_email", studentEmail)[0];
   if (!user || !user.google_calendar_id) return { ok: true, data: [] };
   try {
     const cal = CalendarApp.getCalendarById(user.google_calendar_id);
@@ -2613,9 +2663,8 @@ function checkTimerQueue() {
 
 // 指定日のカレンダー予定キャッシュを取得
 function getCachedCalendar(studentEmail, dateStr) {
-  const sheet = getSheet("CalendarCache");
-  if (!sheet) return null;
-  const row = sheetToObjects(sheet).find(r => r.student_email === studentEmail && r.date === dateStr);
+  if (!getSheet("CalendarCache")) return null;
+  const row = getFilteredRows("CalendarCache", "student_email", studentEmail).find(r => r.date === dateStr);
   return row && row.events ? row.events : null;
 }
 
@@ -2975,29 +3024,48 @@ function notifyCoachOnReport(user, report) {
 // ユーティリティ
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+function rowToObject(row, headers) {
+  const obj = {};
+  headers.forEach((h, i) => {
+    const v = row[i];
+    if (v instanceof Date) {
+      if (v.getFullYear() === 1899) {
+        obj[h] = String(v.getHours()).padStart(2,"0") + ":" + String(v.getMinutes()).padStart(2,"0");
+      } else {
+        const inTokyo = new Date(v.toLocaleString("en-US", {timeZone:"Asia/Tokyo"}));
+        const hasTime = inTokyo.getHours() !== 0 || inTokyo.getMinutes() !== 0;
+        obj[h] = hasTime
+          ? Utilities.formatDate(v, "Asia/Tokyo", "yyyy-MM-dd HH:mm")
+          : Utilities.formatDate(v, "Asia/Tokyo", "yyyy-MM-dd");
+      }
+    }
+    else { obj[h] = v !== undefined && v !== null ? String(v) : ""; }
+  });
+  return obj;
+}
+
 function sheetToObjects(sheet) {
   const data = sheet.getDataRange().getValues();
   if (data.length < 2) return [];
   const headers = data[0];
-  return data.slice(1).map(row => {
-    const obj = {};
-    headers.forEach((h, i) => {
-      const v = row[i];
-      if (v instanceof Date) {
-        if (v.getFullYear() === 1899) {
-          obj[h] = String(v.getHours()).padStart(2,"0") + ":" + String(v.getMinutes()).padStart(2,"0");
-        } else {
-          const inTokyo = new Date(v.toLocaleString("en-US", {timeZone:"Asia/Tokyo"}));
-          const hasTime = inTokyo.getHours() !== 0 || inTokyo.getMinutes() !== 0;
-          obj[h] = hasTime
-            ? Utilities.formatDate(v, "Asia/Tokyo", "yyyy-MM-dd HH:mm")
-            : Utilities.formatDate(v, "Asia/Tokyo", "yyyy-MM-dd");
-        }
-      }
-      else { obj[h] = v !== undefined && v !== null ? String(v) : ""; }
-    });
-    return obj;
-  });
+  return data.slice(1).map(row => rowToObject(row, headers));
+}
+
+// 指定した列の値で先に絞り込んでから、対象行だけをオブジェクト化する。
+// sheetToObjects()でシート全体を毎回フル変換すると、行数（全生徒の履歴）が
+// 増えるほど遅くなるため、1人分のデータしか使わない関数はこちらを使う
+function getFilteredRows(sheetName, filterColumn, filterValue) {
+  const sheet = getSheet(sheetName);
+  const data = sheet.getDataRange().getValues();
+  if (data.length < 2) return [];
+  const headers = data[0];
+  const colIdx = headers.indexOf(filterColumn);
+  const rows = [];
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][colIdx]) !== filterValue) continue;
+    rows.push(rowToObject(data[i], headers));
+  }
+  return rows;
 }
 
 function formatDate(date) {

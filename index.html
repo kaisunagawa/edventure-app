@@ -891,12 +891,13 @@ function HomeScreen({goalData, onGoalSaved, profile}) {
 // ── みんなの頑張り ──
 function CommunityOverlay({onClose}) {
   const [list,setList]=useState(null);
+  const [reportRanking,setReportRanking]=useState(null);
   const [achievements,setAchievements]=useState(null);
   const [message,setMessage]=useState("");
   const [sending,setSending]=useState(false);
 
   const load=()=>{
-    gasApi("getCommunity").then(r=>{ if(r.ok) setList(r.data); });
+    gasApi("getCommunity").then(r=>{ if(r.ok) { setList(r.data); setReportRanking(r.reportRanking||[]); } });
     gasApi("getAchievements").then(r=>{ if(r.ok) setAchievements(r.data); });
   };
   useEffect(()=>{ load(); },[]);
@@ -933,6 +934,22 @@ function CommunityOverlay({onClose}) {
             </div>
           `)}
           ${list&&list.length===0&&html`<div style=${{padding:20,textAlign:"center",color:"var(--sub)",fontSize:13}}>まだデータがありません</div>`}
+        </div>
+
+        <div style=${{background:"var(--card)",borderRadius:16,border:"1px solid var(--border)",overflow:"hidden",marginBottom:16}}>
+          <div style=${{padding:"14px 16px",borderBottom:"1px solid var(--border)",fontSize:12,fontWeight:700,color:"var(--text)"}}>レポートランキング</div>
+          ${reportRanking===null&&html`<div style=${{padding:20,textAlign:"center",color:"var(--sub)",fontSize:13}}>読み込み中...</div>`}
+          ${reportRanking&&reportRanking.map((u,i)=>html`
+            <div key=${i} style=${{display:"flex",alignItems:"center",gap:10,padding:"11px 16px",borderBottom:i<reportRanking.length-1?"1px solid var(--border)":"none",background:u.isMe?"var(--bg)":"transparent"}}>
+              <div style=${{fontSize:13,fontWeight:700,color:"var(--sub)",width:20,textAlign:"center",flexShrink:0}}>${i+1}</div>
+              <div style=${{width:32,height:32,borderRadius:"50%",background:"var(--bg)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:17,flexShrink:0}}>${u.avatar}</div>
+              <div style=${{flex:1,minWidth:0}}>
+                <div style=${{fontSize:14,fontWeight:600,color:"var(--text)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>${u.nickname}${u.isMe?" (あなた)":""}</div>
+                <div style=${{fontSize:11,color:"var(--sub)"}}>直近レポート ${u.reportScore}点</div>
+              </div>
+            </div>
+          `)}
+          ${reportRanking&&reportRanking.length===0&&html`<div style=${{padding:20,textAlign:"center",color:"var(--sub)",fontSize:13}}>まだデータがありません</div>`}
         </div>
 
         <div style=${{background:"var(--card)",borderRadius:16,border:"1px solid var(--border)",padding:16,marginBottom:16}}>
