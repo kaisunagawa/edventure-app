@@ -72,6 +72,7 @@ function doGet(e) {
       case "coachSyncChatworkOne": result = coachSyncChatworkOne(e.parameter.coachEmail, e.parameter); break;
       case "adminGetOverview":     result = adminGetOverview(e.parameter.coachEmail); break;
       case "coachSetShowInCommunity": result = coachSetShowInCommunity(e.parameter.coachEmail, e.parameter); break;
+      case "adminBackfillReportReasons": result = adminBackfillReportReasons(e.parameter.coachEmail); break;
       case "sendMessage":  result = sendMessage(studentEmail, e.parameter); break;
       case "saveSettings": result = saveSettings(studentEmail, e.parameter); break;
       case "syncCalendar": result = syncCalendar(studentEmail, e.parameter); break;
@@ -1064,6 +1065,75 @@ function adminGetOverview(email) {
   } };
 }
 
+// 過去のレポート（breakdown_reasonsが未生成のもの）に、後からコメントだけを
+// 追加する。既存の点数（score・breakdown）は一切変更しない。
+// breakdown自体が保存されていない古いレポート（内訳データが無い）は、
+// 何を根拠にコメントすべきか分からないためスキップする
+function adminBackfillReportReasons(email) {
+  if (!verifyAdmin(email)) return { ok: false, error: "not admin" };
+  const apiKey = PropertiesService.getScriptProperties().getProperty("CLAUDE_API_KEY");
+  if (!apiKey) return { ok: false, error: "CLAUDE_API_KEY が未設定" };
+
+  const sheet = getSheet("Reports");
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0];
+  const dateIdx = headers.indexOf("date");
+  const emailIdx = headers.indexOf("student_email");
+  let bIdx = headers.indexOf("breakdown");
+  let rIdx = headers.indexOf("breakdown_reasons");
+  if (rIdx === -1) { rIdx = headers.length; sheet.getRange(1, rIdx + 1).setValue("breakdown_reasons"); }
+
+  const allLogs = sheetToObjects(getSheet("DailyLog"));
+  const logsByKey = groupBy(allLogs, "student_email");
+
+  let updated = 0, skippedNoBreakdown = 0, skippedError = 0;
+  for (let i = 1; i < data.length; i++) {
+    const existingReasons = data[i][rIdx];
+    if (existingReasons) continue;
+    const breakdownRaw = data[i][bIdx];
+    if (!breakdownRaw) { skippedNoBreakdown++; continue; }
+    let breakdown;
+    try { breakdown = JSON.parse(breakdownRaw); } catch (e) { skippedNoBreakdown++; continue; }
+
+    const studentEmail = String(data[i][emailIdx]);
+    const date = String(data[i][dateIdx]);
+    const logs = (logsByKey.get(studentEmail) || []).filter(l => l.date === date);
+    const logsText = logs.map(l => l.time_block + " - " + l.task + "（集中度：" + l.focus_level + (l.goal_related === "true" ? "、目標関連" : "") + (l.memo ? "、メモ：" + l.memo : "") + "）").join("\n") || "記録なし";
+
+    const prompt = `以下は生徒のある日の記録と、その日について既に採点済みの内訳（20点満点×5項目）です。点数は変更せず、それぞれの点数についての短いひとことコメントだけを日本語で書いてください。
+
+【その日の記録】
+${logsText}
+
+【既に採点済みの内訳】
+records: ${breakdown.records}, memo: ${breakdown.memo}, focus: ${breakdown.focus}, goal: ${breakdown.goal}, consistency: ${breakdown.consistency}
+
+以下のJSON形式のみで返してください（説明文不要）:
+{ "records": "<コメント1文>", "memo": "<同上>", "focus": "<同上>", "goal": "<同上>", "consistency": "<同上>" }`;
+
+    try {
+      const res = UrlFetchApp.fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
+        payload: JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: 400, messages: [{ role: "user", content: prompt }] }),
+        muteHttpExceptions: true
+      });
+      const result = JSON.parse(res.getContentText());
+      if (!result.content || !result.content[0]) { skippedError++; continue; }
+      const m = result.content[0].text.match(/\{[\s\S]*\}/);
+      if (!m) { skippedError++; continue; }
+      const reasons = JSON.parse(m[0]);
+      sheet.getRange(i + 1, rIdx + 1).setValue(JSON.stringify(reasons));
+      updated++;
+    } catch (e) {
+      Logger.log("backfill error row " + (i + 1) + ": " + e);
+      skippedError++;
+    }
+  }
+  Logger.log(`backfill完了: 更新${updated}件 / 内訳なしでスキップ${skippedNoBreakdown}件 / エラーでスキップ${skippedError}件`);
+  return { ok: true, data: { updated, skippedNoBreakdown, skippedError } };
+}
+
 // Chatworkの連絡先一覧を取得し、まだCRMに取り込んでいない相手だけを返す。
 // Chatwork APIはメールアドレスを返さないため、氏名・Chatwork ID・ルームIDのみ取得し、
 // メールアドレスはコーチが取り込み時に手入力する運用とする
@@ -1943,6 +2013,7 @@ ${recentMsgs}
 - 直近のコーチメッセージと同じ言い回し・内容・切り口は絶対に繰り返さない。毎回違う角度から話す
 - 全レポート履歴と直近14日のログを踏まえて、具体的なエピソードや数字に触れる
 - 過去の記録・メモ・出来事は積極的に引用し、目標と結びつけてコーチングする（本人の言葉を使うと刺さる）。ただし引用は元のメモの意味・文脈を正確に保つこと。意味を取り違えたり不自然なたとえになるくらいなら、その引用は使わない
+- 「Chatworkで」のように情報の出どころを名指ししない。本人の状況として自然に触れる
 - 今日のカレンダー予定がある場合は、目標との関係を意識しつつ今日の過ごし方に軽く触れる
 - 3文以内
 ${EMOJI_STYLE}`;
@@ -2025,6 +2096,7 @@ ${recentMsgs}
 - 直近のコーチメッセージと同じ言い回しは使わない
 - 「〇〇さんへ」「〇〇へのメッセージ案：」のような宛名・見出し・ラベル・説明は一切書かない。生徒にそのまま送るLINE本文だけを出力する
 - URLやリンクは本文に含めない（アプリ側で自動的に案内が付くため）
+- 「Chatworkで」のように情報の出どころを名指ししない
 ${EMOJI_STYLE}
 - ただし1文だけの短文なので絵文字は1個まで`;
 
@@ -2150,11 +2222,12 @@ ${ctx}
 ${recentMsgs}
 
 【スタイル】
-- 今は夜22時。挨拶（おはよう・こんにちは等）は書かず、時間帯に合った内容で本題から入る
+- 今は夜23時台。挨拶（おはよう・こんにちは等）は書かず、時間帯に合った内容で本題から入る
 - レポートの内容（スコア・良かった点・改善点）を言い直さない。分析はもう終わってる
 - カレンダーの予定と実際の記録を見比べて、予定どおり実行できていた場面があれば具体的に承認する
 - 今日のログの中の具体的な一場面を1つだけ拾って、そこに一言添える
 - 過去のメモや出来事の引用は歓迎だが、元の意味・文脈を正確に保つこと。取り違えた引用をするくらいなら使わない
+- 「Chatworkで」のように情報の出どころを名指ししない。本人の状況として自然に触れる
 - 敬語とタメ語を自然に混ぜる。友人が寝る前に送るLINEのような温度感
 - 「---」「【】」「〇〇さんへ」などの見出し・宛名は絶対使わない
 - 直近のコーチメッセージと同じ言い回し・構成は絶対に繰り返さない
@@ -2250,13 +2323,14 @@ ${logsText}
 - 毎日同じ書き出しにならないよう、直近レポートと違う切り口で書く
 - 抽象的な褒め言葉より、今日のログの具体的な内容・数字に触れる
 - 励ましの文末は「。」より「！」の方が自然。highlightsとactionには 👍 🔥 👏 🙌 👊 💪 🫵 やポジティブな表情の絵文字を文末に1個添えてよい（全フィールド合計2個まで）
+- 「Chatworkで」「Chatworkのやり取りから」のように情報の出どころを名指ししない。本人の状況として自然に触れる
 
 以下のJSON形式のみで返してください（説明文不要）。breakdownの5項目の合計は必ずscoreと一致させること。
-breakdown_reasonsは各項目「なぜその点数になったか」を生徒本人に見せる1文で、必ず全項目分書くこと（品質・量の両面で減点/加点した具体的な理由に触れる）：
+breakdown_reasonsは各項目の点数についてのひとことコメントで、必ず全項目分書くこと（品質・量の両面で何を評価/改善点としたか具体的に触れる）：
 {
   "score": <0-100の整数>,
   "breakdown": { "records": <0-20>, "memo": <0-20>, "focus": <0-20>, "goal": <0-20>, "consistency": <0-20> },
-  "breakdown_reasons": { "records": "<この点数になった理由を1文で>", "memo": "<同上>", "focus": "<同上>", "goal": "<同上>", "consistency": "<同上>" },
+  "breakdown_reasons": { "records": "<この点数についてのひとことコメント>", "memo": "<同上>", "focus": "<同上>", "goal": "<同上>", "consistency": "<同上>" },
   "feedback": "<目標の現在地と今日の取り組みへの共感・承認を含む2-3文>",
   "highlights": "<今日の具体的な良かった点を1文で称える>",
   "improvement": "<責めずに前向きな改善提案または継続すべき点を1文で>",
@@ -2674,7 +2748,7 @@ ${goalsText}
 【全期間スコアトレンド】${scoreTrend}
 【直近のコーチングセッション（担当コーチとの面談記録。約束事項のフォローアップを意識する）】
 ${coachingText}
-【Chatworkでの直近のやり取り】
+【本人とのこれまでのやり取り（生成文では情報源に言及せず、本人の状況として自然に触れること）】
 ${chatworkText}
 【月次サマリー（入会〜先月まで）】
 ${summariesText}

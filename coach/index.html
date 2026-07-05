@@ -859,6 +859,8 @@ function ChatworkImportModal({ onClose, onAddClient }) {
 function AdminOverview() {
   const [data, setData] = useState(null);
   const [error, setError] = useState("");
+  const [backfilling, setBackfilling] = useState(false);
+  const [backfillMsg, setBackfillMsg] = useState("");
 
   useEffect(() => {
     api("adminGetOverview").then(r => {
@@ -867,12 +869,30 @@ function AdminOverview() {
     });
   }, []);
 
+  const runBackfill = async () => {
+    setBackfilling(true);
+    setBackfillMsg("");
+    const r = await api("adminBackfillReportReasons");
+    if (r.ok) {
+      setBackfillMsg(`${r.data.updated}件にコメントを追加しました（内訳なしでスキップ${r.data.skippedNoBreakdown}件、エラー${r.data.skippedError}件）`);
+    } else {
+      setBackfillMsg(r.error || "失敗しました");
+    }
+    setBackfilling(false);
+  };
+
   if (error) return html`<div style=${{padding:28,color:"var(--red)",fontSize:13}}>${error}</div>`;
   if (!data) return html`<div style=${{display:"flex",justifyContent:"center",padding:60}}><div class="spin"/></div>`;
 
   return html`
     <div style=${{height:"100%",overflowY:"auto",padding:"20px 28px"}}>
-      <div style=${{fontSize:17,fontWeight:700,marginBottom:16}}>管理者ダッシュボード</div>
+      <div style=${{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
+        <div style=${{fontSize:17,fontWeight:700}}>管理者ダッシュボード</div>
+        <div style=${{display:"flex",alignItems:"center",gap:10}}>
+          ${backfillMsg && html`<span style=${{fontSize:11.5,color:"var(--sub)"}}>${backfillMsg}</span>`}
+          <button class="btn" style=${{fontSize:12}} onClick=${runBackfill} disabled=${backfilling}>${backfilling ? "処理中..." : "過去レポートに採点コメントを追加"}</button>
+        </div>
+      </div>
 
       <div style=${{display:"grid",gridTemplateColumns:"repeat(4, 1fr)",gap:16,marginBottom:20}}>
         <div class="card">
