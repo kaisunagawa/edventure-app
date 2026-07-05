@@ -2666,15 +2666,15 @@ function AchievementBanner({onOpenCommunity}) {
   const open=()=>{ dismiss(); onOpenCommunity(); };
   if(!item) return null;
   return html`
-    <div style=${{background:"var(--accent-l)",borderBottom:"1px solid var(--border)",padding:"10px 16px",fontSize:12.5,color:"var(--text)",position:"relative",zIndex:48}}>
+    <div style=${{background:"var(--accent-l)",borderBottom:"1px solid var(--border)",padding:"8px 16px",fontSize:11,color:"var(--text)",position:"relative",zIndex:48}}>
       <div style=${{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8}}>
-        <div style=${{lineHeight:1.6,display:"flex",alignItems:"center",gap:8,minWidth:0}}>
-          <span style=${{fontSize:18,flexShrink:0}}>${item.avatar}</span>
+        <div style=${{lineHeight:1.5,display:"flex",alignItems:"center",gap:7,minWidth:0}}>
+          <span style=${{fontSize:15,flexShrink:0}}>${item.avatar}</span>
           <span style=${{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}><b>${item.nickname}</b>さんが${item.message}</span>
         </div>
-        <div style=${{display:"flex",gap:8,alignItems:"center",flexShrink:0}}>
-          <button onClick=${open} style=${{padding:"6px 12px",borderRadius:7,border:"1px solid var(--accent)",background:"var(--card)",color:"var(--accent)",fontSize:12,cursor:"pointer",fontWeight:600}}>見る</button>
-          <button onClick=${dismiss} style=${{background:"none",border:"none",color:"var(--sub)",fontSize:16,cursor:"pointer"}}>×</button>
+        <div style=${{display:"flex",gap:6,alignItems:"center",flexShrink:0}}>
+          <button onClick=${open} style=${{padding:"5px 10px",borderRadius:7,border:"1px solid var(--accent)",background:"var(--card)",color:"var(--accent)",fontSize:10.5,cursor:"pointer",fontWeight:600}}>見る</button>
+          <button onClick=${dismiss} style=${{background:"none",border:"none",color:"var(--sub)",fontSize:14,cursor:"pointer"}}>×</button>
         </div>
       </div>
     </div>
