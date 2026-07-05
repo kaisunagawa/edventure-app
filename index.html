@@ -338,13 +338,14 @@ let CURRENT_USER = JSON.parse(localStorage.getItem("edventure_user") || "null");
 // ここのapiKey等はWebクライアント向けの公開設定値であり秘密情報ではない（GAS側のサービスアカウント鍵とは別物）。
 // firebase-messaging-sw.js側にも同じ設定を書く必要がある（Service Workerは別スコープで読み込むため共有できない）
 const FIREBASE_CONFIG = {
-  apiKey: "YOUR_FIREBASE_API_KEY",
-  authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
-  projectId: "YOUR_PROJECT_ID",
-  messagingSenderId: "YOUR_SENDER_ID",
-  appId: "YOUR_APP_ID"
+  apiKey: "AIzaSyCfOKqEbdGBIHA0s_CQAYvr0oViRaK9uE4",
+  authDomain: "jiroku-77bbf.firebaseapp.com",
+  projectId: "jiroku-77bbf",
+  storageBucket: "jiroku-77bbf.firebasestorage.app",
+  messagingSenderId: "156734910749",
+  appId: "1:156734910749:web:5a16619bbde59718d2b1f4"
 };
-const FCM_VAPID_KEY = "YOUR_VAPID_PUBLIC_KEY";
+const FCM_VAPID_KEY = "BGiDjMmTpVTREWJ0kdVhxAmFKtxTXodq-UBfx-Y754r-3_tJ5waVLb6Cn4f9QDyArIMVFvFlBpugVn4Ktprgrh4";
 
 function loadFirebaseSdk() {
   if (window.firebase) return Promise.resolve();
