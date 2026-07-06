@@ -669,7 +669,7 @@ const getTimeBlocks = () => { const {start,end}=getLogHours(); return ALL_TIME_B
 const TIME_BLOCKS = getTimeBlocks();
 
 // ── Home ──
-function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity}) {
+function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, onGoTimer}) {
   const [report, setReport] = useState(null);
   const [schedule, setSchedule] = useState([]);
   const [game, setGame] = useState(null);
@@ -897,12 +897,16 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity})
                 <div style=${{fontSize:26,fontWeight:800,color:"var(--text)",lineHeight:1}}>${hh>0?html`${hh}<span style=${{fontSize:15,fontWeight:700}}>時間</span>`:""}${mm}<span style=${{fontSize:15,fontWeight:700}}>分</span></div>
                 <div style=${{fontSize:13,color:"var(--sub)",fontWeight:600}}>/ ${targetHours}時間</div>
               </div>
-              <div style=${{display:"flex",alignItems:"center",gap:10}}>
+              <div style=${{display:"flex",alignItems:"center",gap:10,marginBottom:12}}>
                 <div style=${{flex:1,height:8,background:"var(--bg)",borderRadius:99,overflow:"hidden"}}>
                   <div style=${{height:"100%",width:pct+"%",background:done?"var(--green)":"var(--accent)",borderRadius:99,transition:"width .5s ease"}}/>
                 </div>
                 <div style=${{fontSize:13,fontWeight:800,color:done?"var(--green)":"var(--accent)",minWidth:42,textAlign:"right"}}>${done?"達成🎉":pct+"%"}</div>
               </div>
+              <button onClick=${onGoTimer}
+                style=${{display:"flex",alignItems:"center",justifyContent:"center",gap:7,width:"100%",padding:"10px",borderRadius:10,border:"1.5px solid var(--accent)",background:"var(--accent-l)",color:"var(--accent)",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
+                <${S} n="timer" s=${16}/>タイマーで集中時間を測る
+              </button>
             </div>
           `;
         })()}
@@ -3173,7 +3177,7 @@ function App() {
       ${!calLinked && !calBannerDismissed && html`<${CalendarLinkBanner} onGoToSettings=${()=>setTab("settings")} onDismiss=${()=>setCalBannerDismissed(true)}/>`}
       <div style=${{position:"relative",flex:1,minHeight:0}}>
         <div class="screen">
-          <div style=${{display:tab==="home"?"block":"none"}}><${HomeScreen} goalData=${goalData} onGoalSaved=${setGoalData} profile=${profile} isActive=${tab==="home"} showInCommunity=${user.showInCommunity!==false}/></div>
+          <div style=${{display:tab==="home"?"block":"none"}}><${HomeScreen} goalData=${goalData} onGoalSaved=${setGoalData} profile=${profile} isActive=${tab==="home"} showInCommunity=${user.showInCommunity!==false} onGoTimer=${()=>setTab("timer")}/></div>
           <div style=${{display:tab==="log"?"block":"none"}}><${LogScreen} onToast=${setToast} isActive=${tab==="log"}/></div>
           <div style=${{display:tab==="report"?"block":"none"}}><${ReportScreen}/></div>
           <div style=${{display:tab==="timer"?"block":"none",height:"100%"}}><${TimerScreen} onToast=${setToast} isActive=${tab==="timer"}/></div>
