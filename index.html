@@ -1152,7 +1152,10 @@ function LogScreen({onToast, isActive}) {
   const [task, setTask] = useState("");
   const [focus, setFocus] = useState("");
   const [memo, setMemo] = useState("");
-  const [goalRelated, setGoalRelated] = useState(false);
+  // 「目標に関連している」は毎回チェックし直すのを忘れやすいため、
+  // 最後に選んだ状態を記憶して新しい時間帯のデフォルトにする（タイマーと同じ方式）
+  const goalRelatedDefault = () => localStorage.getItem("jiroku_log_goal_related") === "true";
+  const [goalRelated, setGoalRelated] = useState(goalRelatedDefault);
 
   // カレンダー予定の自動入力。端末キャッシュ→本人認証→サーバー共有
   // キャッシュの順にまず自動で試すが、Safari等でサードパーティCookieが
@@ -1197,7 +1200,7 @@ function LogScreen({onToast, isActive}) {
     const existing = currentLogs.find(l => l.time_block === b);
     const v = existing
       ? {task:existing.task||"", focus:existing.focus_level||"", memo:existing.memo||"", goalRelated:existing.goal_related==="true"||existing.goal_related===true}
-      : {task:"", focus:"", memo:"", goalRelated:false};
+      : {task:"", focus:"", memo:"", goalRelated:goalRelatedDefault()};
     setTask(v.task); setFocus(v.focus); setMemo(v.memo); setGoalRelated(v.goalRelated);
     lastLoadedRef.current = v;
   };
@@ -1334,7 +1337,7 @@ function LogScreen({onToast, isActive}) {
           `}
         </div>
         <div class="form-grp">
-          <button onClick=${()=>setGoalRelated(!goalRelated)} style=${{display:"flex",alignItems:"center",gap:8,background:"none",border:`1.5px solid ${goalRelated?"var(--accent)":"var(--border)"}`,borderRadius:9,padding:"7px 11px",width:"100%",cursor:"pointer",transition:"all .15s",backgroundColor:goalRelated?"var(--accent-l)":"transparent"}}>
+          <button onClick=${()=>{const v=!goalRelated;setGoalRelated(v);localStorage.setItem("jiroku_log_goal_related",String(v));}} style=${{display:"flex",alignItems:"center",gap:8,background:"none",border:`1.5px solid ${goalRelated?"var(--accent)":"var(--border)"}`,borderRadius:9,padding:"7px 11px",width:"100%",cursor:"pointer",transition:"all .15s",backgroundColor:goalRelated?"var(--accent-l)":"transparent"}}>
             <div style=${{width:16,height:16,borderRadius:5,border:`2px solid ${goalRelated?"var(--accent)":"var(--border)"}`,background:goalRelated?"var(--accent)":"transparent",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,transition:"all .15s"}}>
               ${goalRelated&&html`<svg width="10" height="10" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="white" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`}
             </div>
