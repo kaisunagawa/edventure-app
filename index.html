@@ -724,15 +724,11 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
       if(sched.ok) setSchedule(sched.data);
       if(logs.ok) setTodayLogs(logs.data);
       if(rank.ok){
-        // 前回確認時の順位と比較して、上がった/下がった/変わらないを矢印で表示する
-        const prevRank = Number(localStorage.getItem("jiroku_prev_rank")||"") || null;
-        let trend = null;
-        if(rank.data && prevRank !== null){
-          trend = rank.data.rank < prevRank ? "up" : rank.data.rank > prevRank ? "down" : "same";
-        }
-        setRanking(rank.data ? {...rank.data, trend} : null);
+        // 順位変動（trend）はサーバー側で「前回のランキング開催日の順位」と比較して
+        // 算出される。以前は端末内で前回閲覧時と比較していたため、ホームを開くたびに
+        // 基準が上書きされて常に「変わらず」になる不具合があった
+        setRanking(rank.data);
         localStorage.setItem("cache_ranking", JSON.stringify(rank.data));
-        if(rank.data) localStorage.setItem("jiroku_prev_rank", String(rank.data.rank));
       }
       if(status.ok && status.data){ setStatusSummary(status.data); localStorage.setItem("cache_status", JSON.stringify(status.data)); }
     });

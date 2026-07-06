@@ -398,7 +398,7 @@ function appendReportRow(targetDate, studentEmail, report) {
     if (rIdx === -1) { rIdx = headers2.length; sheet.getRange(1, rIdx + 1).setValue("breakdown_reasons"); }
     sheet.getRange(newRow, rIdx + 1).setValue(JSON.stringify(report.breakdown_reasons));
   }
-  try { CacheService.getScriptCache().remove("ranking_scores_v1"); } catch (e) { /* ignore */ }
+  try { CacheService.getScriptCache().remove("ranking_scores_v2"); } catch (e) { /* ignore */ }
   try { postHighScoreAchievement(studentEmail, report.score); } catch (e) { /* ignore */ }
 }
 
@@ -764,48 +764,71 @@ function getGameStatus(studentEmail) {
 // 生徒ごとにレポート生成日がずれるため、同じ日に最新レポートが出た人だけを対象にし、
 // show_in_communityがFALSEの生徒（ランキング非表示を選んだ人）は分母からも除外する
 function getRanking(studentEmail) {
-  const CACHE_KEY = "ranking_scores_v1";
-  let scores;
+  const CACHE_KEY = "ranking_scores_v2";
+  let payload;
   const cached = CacheService.getScriptCache().get(CACHE_KEY);
   if (cached) {
-    scores = JSON.parse(cached);
+    payload = JSON.parse(cached);
   } else {
     const users = sheetToObjects(getSheet("Users")).filter(u =>
       u.is_active.toUpperCase() === "TRUE" && String(u.show_in_community || "").toUpperCase() !== "FALSE"
     );
     const active = new Set(users.map(u => u.student_email));
-
-    const latest = {};
-    sheetToObjects(getSheet("Reports")).forEach(r => {
-      if (!active.has(r.student_email)) return;
-      if (!latest[r.student_email] || r.date > latest[r.student_email].date) latest[r.student_email] = r;
-    });
+    const reports = sheetToObjects(getSheet("Reports")).filter(r => active.has(r.student_email));
 
     let latestDate = null;
-    Object.values(latest).forEach(r => { if (!latestDate || r.date > latestDate) latestDate = r.date; });
+    reports.forEach(r => { if (!latestDate || r.date > latestDate) latestDate = r.date; });
+    // 前回のランキング開催日（最新日より前で最も新しいレポート日付）。
+    // 「昨日と比べて順位が上がったか」の比較対象として使う
+    let prevDate = null;
+    reports.forEach(r => { if (r.date < latestDate && (!prevDate || r.date > prevDate)) prevDate = r.date; });
 
-    scores = Object.keys(latest)
-      .filter(email => latest[email].date === latestDate)
-      .map(email => ({ email, score: Number(latest[email].score) || 0, date: latestDate }));
-    scores.sort((a, b) => b.score - a.score);
-    try { CacheService.getScriptCache().put(CACHE_KEY, JSON.stringify(scores), 300); } catch (e) { /* サイズ超過時は無視 */ }
+    const buildScores = (d) => reports
+      .filter(r => r.date === d)
+      .map(r => ({ email: r.student_email, score: Number(r.score) || 0 }))
+      .sort((a, b) => b.score - a.score);
+
+    payload = {
+      date: latestDate,
+      scores: latestDate ? buildScores(latestDate) : [],
+      prevDate: prevDate,
+      prevScores: prevDate ? buildScores(prevDate) : []
+    };
+    try { CacheService.getScriptCache().put(CACHE_KEY, JSON.stringify(payload), 300); } catch (e) { /* サイズ超過時は無視 */ }
   }
 
+  const scores = payload.scores || [];
+  const prevScores = payload.prevScores || [];
   if (scores.length < 2) return { ok: true, data: null };
 
+  const rankOf = (arr, email) => { const i = arr.findIndex(s => s.email === email); return i === -1 ? null : i + 1; };
   const idx = scores.findIndex(s => s.email === studentEmail);
-  if (idx !== -1) return { ok: true, data: { rank: idx + 1, total: scores.length, score: scores[idx].score } };
+  if (idx !== -1) {
+    const rank = idx + 1;
+    const prevRank = rankOf(prevScores, studentEmail);
+    const trend = prevRank === null ? null : (rank < prevRank ? "up" : rank > prevRank ? "down" : "same");
+    return { ok: true, data: { rank, total: scores.length, score: scores[idx].score, trend } };
+  }
 
   // 「みんなの頑張り」を非表示にしている生徒は共有キャッシュのscoresから除外されるため
   // ここには出てこないが、非表示は「他人から見えない」ためのものであって、自分自身が
   // 自分の順位を見られなくなるのは意図しない副作用のため、ここで個別に救済する
-  const cohortDate = scores.length ? scores[0].date : null;
-  if (cohortDate) {
+  if (payload.date) {
     const myReports = getFilteredRows("Reports", "student_email", studentEmail).sort((a, b) => b.date > a.date ? 1 : -1);
-    if (myReports.length && myReports[0].date === cohortDate) {
-      const myScore = Number(myReports[0].score) || 0;
+    const mine = myReports.find(r => r.date === payload.date);
+    if (mine) {
+      const myScore = Number(mine.score) || 0;
       const rank = scores.filter(s => s.score > myScore).length + 1;
-      return { ok: true, data: { rank, total: scores.length + 1, score: myScore } };
+      let prevRank = null;
+      if (payload.prevDate) {
+        const minePrev = myReports.find(r => r.date === payload.prevDate);
+        if (minePrev) {
+          const ps = Number(minePrev.score) || 0;
+          prevRank = prevScores.filter(s => s.score > ps).length + 1;
+        }
+      }
+      const trend = prevRank === null ? null : (rank < prevRank ? "up" : rank > prevRank ? "down" : "same");
+      return { ok: true, data: { rank, total: scores.length + 1, score: myScore, trend } };
     }
   }
   return { ok: true, data: null };
