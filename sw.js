@@ -4,22 +4,27 @@ const CACHE = "jiroku-v3";
 // 別ファイル（firebase-messaging-sw.js）として登録すると、同じスコープ('/')の
 // Service Workerはどちらか一方しか制御できず、このキャッシュ用sw.jsが上書きされて
 // オフライン起動・高速表示が壊れてしまうため、同じsw.js内にまとめて登録する
-importScripts("https://www.gstatic.com/firebasejs/12.15.0/firebase-app-compat.js");
-importScripts("https://www.gstatic.com/firebasejs/12.15.0/firebase-messaging-compat.js");
-firebase.initializeApp({
-  apiKey: "AIzaSyCfOKqEbdGBIHA0s_CQAYvr0oViRaK9uE4",
-  authDomain: "jiroku-77bbf.firebaseapp.com",
-  projectId: "jiroku-77bbf",
-  storageBucket: "jiroku-77bbf.firebasestorage.app",
-  messagingSenderId: "156734910749",
-  appId: "1:156734910749:web:5a16619bbde59718d2b1f4"
-});
-const messaging = firebase.messaging();
-messaging.onBackgroundMessage((payload) => {
-  const title = (payload.notification && payload.notification.title) || "JIROKU";
-  const body = (payload.notification && payload.notification.body) || "";
-  self.registration.showNotification(title, { body, icon: "icon-192.png", badge: "icon-192.png" });
-});
+// Firebase SDKの読み込みに失敗しても（オフライン・CDN障害等）、下のキャッシュ機能
+// だけは生き残るようtry/catchで囲む。ここで例外が漏れるとService Worker自体が
+// 起動できず、オフライン起動・高速表示まで壊れてしまう
+try {
+  importScripts("https://www.gstatic.com/firebasejs/12.15.0/firebase-app-compat.js");
+  importScripts("https://www.gstatic.com/firebasejs/12.15.0/firebase-messaging-compat.js");
+  firebase.initializeApp({
+    apiKey: "AIzaSyCfOKqEbdGBIHA0s_CQAYvr0oViRaK9uE4",
+    authDomain: "jiroku-77bbf.firebaseapp.com",
+    projectId: "jiroku-77bbf",
+    storageBucket: "jiroku-77bbf.firebasestorage.app",
+    messagingSenderId: "156734910749",
+    appId: "1:156734910749:web:5a16619bbde59718d2b1f4"
+  });
+  const messaging = firebase.messaging();
+  messaging.onBackgroundMessage((payload) => {
+    const title = (payload.notification && payload.notification.title) || "JIROKU";
+    const body = (payload.notification && payload.notification.body) || "";
+    self.registration.showNotification(title, { body, icon: "icon-192.png", badge: "icon-192.png" });
+  });
+} catch (e) { /* FCMなしでもキャッシュ機能は動かす */ }
 
 self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', e => {

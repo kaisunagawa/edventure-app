@@ -2199,7 +2199,7 @@ function SettingsScreen({onToast,onLogout,onGoalSaved,profile,onProfileSaved,onC
     onProfileSaved({nickname:nn,avatar});
     onToast("プロフィールを保存しました");
   };
-  const saved=JSON.parse(localStorage.getItem("notifySettings")||'{"start":7,"end":23,"interval":2}');
+  const saved=JSON.parse(localStorage.getItem("notifySettings")||'{"start":7,"end":23,"interval":6}');
   const savedGoals=JSON.parse(localStorage.getItem("jiroku_goals")||'[{"goal":"","deadline":""}]');
   const savedLogHours=getLogHours();
   const [interval,setInterval]=useState(saved.interval||2);

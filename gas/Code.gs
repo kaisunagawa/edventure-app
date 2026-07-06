@@ -497,7 +497,8 @@ function saveLog(studentEmail, body) {
         const xpResult = addXP(studentEmail, body.memo, todaysLogCount, {
           totalLogs, memoCount: memoCount + ((body.memo || "").trim() ? 1 : 0)
         });
-        if (String(body.goal_related) === "true") incrementGoalBlocksAndNotify(studentEmail, 1);
+        // 目標カウントはここでは増やさない（新規保存時に既にカウント済みのため、
+        // 「評価なしで保存→後から評価を追加」の流れで二重カウントになるのを防ぐ）
         return { ok: true, log_id: String(data[i][0]), updated: true, ...xpResult };
       }
       return { ok: true, log_id: String(data[i][0]), updated: true, xp_gained: 0 };
@@ -569,7 +570,9 @@ function saveLogMulti(studentEmail, body) {
   const newRows = [];
   let updatedAny = false;
   let xpEligible = false; // 新規ブロック、または「未評価→評価あり」に変わった更新がある場合のみXP対象にする
-  let xpEligibleGoalCount = 0; // うち目標関連としてXP対象になったブロック数（マイルストーン判定用）
+  // 目標カウントは新規ブロックのみ対象（既存ブロックの更新で増やすと、
+  // 「評価なしで保存→後から評価を追加」の流れで二重カウントになるため）
+  let xpEligibleGoalCount = 0; // うち目標関連の新規ブロック数（マイルストーン判定用）
   blocks.forEach(b => {
     const dataIdx = rowIndexByKey[targetDate + "|" + b];
     if (dataIdx !== undefined) {
@@ -577,7 +580,6 @@ function saveLogMulti(studentEmail, body) {
       const newFocus = String(body.focus_level || "").trim();
       if (!prevFocus && newFocus) {
         xpEligible = true;
-        if (String(body.goal_related) === "true") xpEligibleGoalCount++;
       }
       // 列の並びに依存しないよう、行全体を1回のsetValuesで書き換える
       const updatedRow = data[dataIdx].slice();
@@ -3293,6 +3295,8 @@ function addDaysToDate(date, n) {
 
 // 生徒アプリから呼ばれる: 直近の週次サマリーを1件返す
 function getWeeklySummary(studentEmail) {
+  // シートがまだ無い（初回の月曜トリガー実行前）場合はエラーにせずnullを返す
+  if (!getSheet("WeeklySummary")) return { ok: true, data: null };
   const rows = getFilteredRows("WeeklySummary", "student_email", studentEmail)
     .sort((a, b) => b.week_start > a.week_start ? 1 : -1);
   if (rows.length === 0) return { ok: true, data: null };
