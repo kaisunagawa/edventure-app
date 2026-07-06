@@ -81,6 +81,7 @@ function doGet(e) {
       case "getDiary":     result = getDiary(studentEmail, e.parameter); break;
       case "saveDiary":    result = saveDiary(studentEmail, e.parameter); break;
       case "getWeeklySummary": result = getWeeklySummary(studentEmail); break;
+      case "getTimeUseSummary": result = getTimeUseSummary(studentEmail); break;
       case "scheduleTimerEnd": result = scheduleTimerEnd(studentEmail, e.parameter); break;
       case "cancelTimerEnd":   result = cancelTimerEnd(studentEmail); break;
       case "registerPushToken": result = registerPushToken(studentEmail, e.parameter); break;
@@ -3307,6 +3308,30 @@ function getWeeklySummary(studentEmail) {
     totalBlocks: Number(r.total_blocks) || 0,
     goalRelatedPct: Number(r.goal_related_pct) || 0,
     streakEnd: Number(r.streak_end) || 0
+  } };
+}
+
+// レポート一覧画面の「時間の使い方」サマリー。直近14日の記録から
+// 1日平均の記録量・平均集中・目標関連の割合・よく時間を使っていることを集計する
+function getTimeUseSummary(studentEmail) {
+  const cutoff = formatDate(new Date(Date.now() - 14 * 86400000));
+  const logs = getFilteredRows("DailyLog", "student_email", studentEmail).filter(l => l.date >= cutoff);
+  if (logs.length === 0) return { ok: true, data: null };
+
+  const days = new Set(logs.map(l => l.date)).size;
+  const focusNums = logs.map(l => parseInt(l.focus_level) || 0).filter(n => n > 0);
+  const goalCount = logs.filter(l => l.goal_related === "true" || l.goal_related === true).length;
+  const taskHours = {};
+  logs.forEach(l => { const t = String(l.task || "").trim(); if (t) taskHours[t] = (taskHours[t] || 0) + 1; });
+  const topTasks = Object.entries(taskHours).sort((a, b) => b[1] - a[1]).slice(0, 3)
+    .map(entry => ({ task: entry[0], hours: entry[1] }));
+
+  return { ok: true, data: {
+    days,
+    avgBlocksPerDay: Math.round(logs.length / days * 10) / 10,
+    avgFocus: focusNums.length ? Math.round(focusNums.reduce((a, b) => a + b, 0) / focusNums.length * 10) / 10 : null,
+    goalPct: Math.round(goalCount / logs.length * 100),
+    topTasks
   } };
 }
 
