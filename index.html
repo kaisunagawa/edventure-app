@@ -890,23 +890,25 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
             <div style=${{padding:"16px 16px 15px",borderBottom:"1px solid var(--border)"}}>
               <div style=${{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
                 <div style=${{fontSize:11,fontWeight:600,color:"var(--sub)",letterSpacing:".02em"}}>今日の目標</div>
-                <button onClick=${onEditDailyGoal} style=${{background:"none",border:"none",color:"var(--accent)",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit",padding:0}}>変更</button>
+                <div style=${{display:"flex",alignItems:"center",gap:10}}>
+                  <button onClick=${onGoTimer}
+                    style=${{display:"inline-flex",alignItems:"center",gap:4,padding:"4px 9px",borderRadius:99,border:"1px solid var(--border)",background:"none",color:"var(--sub)",fontSize:10.5,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>
+                    <${S} n="timer" s=${11}/>タイマーで測る
+                  </button>
+                  <button onClick=${onEditDailyGoal} style=${{background:"none",border:"none",color:"var(--accent)",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit",padding:0}}>変更</button>
+                </div>
               </div>
               <div style=${{fontSize:13,fontWeight:700,color:"var(--text)",marginBottom:12}}>1日${targetHours}時間、目標に取り組む</div>
               <div style=${{display:"flex",alignItems:"baseline",gap:6,marginBottom:10}}>
                 <div style=${{fontSize:26,fontWeight:800,color:"var(--text)",lineHeight:1}}>${hh>0?html`${hh}<span style=${{fontSize:15,fontWeight:700}}>時間</span>`:""}${mm}<span style=${{fontSize:15,fontWeight:700}}>分</span></div>
                 <div style=${{fontSize:13,color:"var(--sub)",fontWeight:600}}>/ ${targetHours}時間</div>
               </div>
-              <div style=${{display:"flex",alignItems:"center",gap:10,marginBottom:12}}>
+              <div style=${{display:"flex",alignItems:"center",gap:10}}>
                 <div style=${{flex:1,height:8,background:"var(--bg)",borderRadius:99,overflow:"hidden"}}>
                   <div style=${{height:"100%",width:pct+"%",background:"var(--accent)",borderRadius:99,transition:"width .5s ease"}}/>
                 </div>
                 <div style=${{fontSize:13,fontWeight:800,color:"var(--accent)",minWidth:42,textAlign:"right"}}>${done?"達成🎉":pct+"%"}</div>
               </div>
-              <button onClick=${onGoTimer}
-                style=${{display:"inline-flex",alignItems:"center",gap:4,padding:"5px 10px",borderRadius:99,border:"1px solid var(--border)",background:"none",color:"var(--sub)",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>
-                <${S} n="timer" s=${12}/>タイマーで測る
-              </button>
             </div>
           `;
         })()}
