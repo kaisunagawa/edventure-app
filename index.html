@@ -1487,7 +1487,7 @@ function JournalSection({date, logs}) {
 
     <!-- 自分の日記 -->
     <div class="card">
-      <div class="card-label">✍️ 日記</div>
+      <div class="card-label" style=${{display:"flex",alignItems:"center",gap:6}}><${S} n="pencil" s=${12}/>日記</div>
       <textarea class="txa" style=${{minHeight:110}} placeholder="この日を自由に振り返って書き残せます"
         value=${diary} onInput=${e=>setDiary(e.target.value)} disabled=${!loaded}/>
       <button class="btn" onClick=${save} disabled=${saving||!loaded} style=${{marginTop:10}}>
@@ -1702,15 +1702,17 @@ function ReportScreen() {
       <div style=${{display:"flex",gap:6,margin:"0 16px 4px",background:"var(--bg)",borderRadius:10,padding:3}}>
         <button onClick=${()=>setView("report")} disabled=${!hasReport}
           style=${{flex:1,padding:"8px",borderRadius:8,border:"none",cursor:hasReport?"pointer":"default",fontFamily:"inherit",fontSize:13,fontWeight:600,
-            background:currentView==="report"?"var(--card)":"transparent",color:currentView==="report"?"var(--accent)":"var(--sub)",
+            display:"flex",alignItems:"center",justifyContent:"center",gap:6,
+            background:currentView==="report"?"var(--card)":"transparent",color:currentView==="report"?"var(--text)":"var(--sub)",
             boxShadow:currentView==="report"?"0 1px 3px rgba(0,0,0,.08)":"none",opacity:hasReport?1:0.5}}>
-          📊 レポート
+          <${S} n="chart" s=${14}/>レポート
         </button>
         <button onClick=${()=>setView("diary")}
           style=${{flex:1,padding:"8px",borderRadius:8,border:"none",cursor:"pointer",fontFamily:"inherit",fontSize:13,fontWeight:600,
-            background:currentView==="diary"?"var(--card)":"transparent",color:currentView==="diary"?"var(--accent)":"var(--sub)",
+            display:"flex",alignItems:"center",justifyContent:"center",gap:6,
+            background:currentView==="diary"?"var(--card)":"transparent",color:currentView==="diary"?"var(--text)":"var(--sub)",
             boxShadow:currentView==="diary"?"0 1px 3px rgba(0,0,0,.08)":"none"}}>
-          ✍️ 日記
+          <${S} n="pencil" s=${14}/>日記
         </button>
       </div>
     `}
