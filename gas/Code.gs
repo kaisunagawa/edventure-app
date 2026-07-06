@@ -481,8 +481,14 @@ function saveLog(studentEmail, body) {
         rowDate === targetDate &&
         String(data[i][timeIdx]) === String(body.time_block)) {
       const focusIdx = headers.indexOf("focus_level");
+      let awardedIdx = headers.indexOf("xp_awarded");
+      if (awardedIdx === -1) { awardedIdx = headers.length; sheet.getRange(1, awardedIdx + 1).setValue("xp_awarded"); }
       const prevFocus = String(data[i][focusIdx] || "").trim();
       const newFocus = String(body.focus_level || "").trim();
+      const flagRaw = String(data[i][awardedIdx] || "").toUpperCase();
+      // xp_awardedフラグが未設定の古い記録は、既に評価が入っていれば「付与済み」とみなす
+      // （デプロイ前からある記録が、編集で二重にXPをもらわないための移行措置）
+      const prevAwarded = flagRaw === "TRUE" || (flagRaw === "" && !!prevFocus);
       sheet.getRange(i+1, headers.indexOf("task")+1).setValue(body.task);
       sheet.getRange(i+1, focusIdx+1).setValue(body.focus_level);
       sheet.getRange(i+1, headers.indexOf("memo")+1).setValue(body.memo || "");
@@ -491,15 +497,14 @@ function saveLog(studentEmail, body) {
       sheet.getRange(i+1, grIdx+1).setValue(body.goal_related || "false");
       if (!isPast) { updateStreak(studentEmail); invalidateStatusCache(); }
 
-      // 保存時に自己評価が未入力だった記録に、後から評価を追加した場合だけ
-      // このタイミングで1回だけXPを付与する。評価が既にあった記録の更新では
-      // 付与しない（何度更新してもポイントが積み上がらないようにするため）
-      if (!isPast && !prevFocus && newFocus) {
+      // 「まだXP未付与」かつ「今回きちんと評価が入っている」記録にだけ、1回だけXPを付与する。
+      // 評価なしで保存→あとで評価を足した修正でも確実に付き、付与済みの記録は何度更新しても増えない
+      if (!isPast && !prevAwarded && newFocus) {
+        sheet.getRange(i+1, awardedIdx+1).setValue("TRUE");
+        if (String(body.goal_related) === "true") incrementGoalBlocksAndNotify(studentEmail, 1);
         const xpResult = addXP(studentEmail, body.memo, todaysLogCount, {
           totalLogs, memoCount: memoCount + ((body.memo || "").trim() ? 1 : 0)
         });
-        // 目標カウントはここでは増やさない（新規保存時に既にカウント済みのため、
-        // 「評価なしで保存→後から評価を追加」の流れで二重カウントになるのを防ぐ）
         return { ok: true, log_id: String(data[i][0]), updated: true, ...xpResult };
       }
       return { ok: true, log_id: String(data[i][0]), updated: true, xp_gained: 0 };
@@ -510,18 +515,24 @@ function saveLog(studentEmail, body) {
   const newRow = sheet.getLastRow() + 1;
   sheet.appendRow([logId, studentEmail, targetDate, "", body.task, body.focus_level, body.memo || "", now, body.goal_related || "false"]);
   sheet.getRange(newRow, 4).setNumberFormat("@").setValue(String(body.time_block));
+  let awardedIdxN = headers.indexOf("xp_awarded");
+  if (awardedIdxN === -1) { awardedIdxN = headers.length; sheet.getRange(1, awardedIdxN + 1).setValue("xp_awarded"); }
 
+  const newFocusN = String(body.focus_level || "").trim();
   // 過去日の後付け入力はストリーク・XPの対象外（後から稼げない）
-  if (isPast) return { ok: true, log_id: logId, xp_gained: 0 };
+  if (isPast) { sheet.getRange(newRow, awardedIdxN + 1).setValue("FALSE"); return { ok: true, log_id: logId, xp_gained: 0 }; }
 
   updateStreak(studentEmail);
   invalidateStatusCache();
-  // +1 = 今追加した1件（totalLogs/memoCountにも反映）
+  // 評価が入っている記録だけ、その場でXPを付与して「付与済み」の印を付ける。
+  // 評価なしで保存した場合は付与せず未付与のままにし、あとで評価を足した更新時に付与する
+  if (!newFocusN) { sheet.getRange(newRow, awardedIdxN + 1).setValue("FALSE"); return { ok: true, log_id: logId, xp_gained: 0 }; }
+  sheet.getRange(newRow, awardedIdxN + 1).setValue("TRUE");
+  if (String(body.goal_related) === "true") incrementGoalBlocksAndNotify(studentEmail, 1);
   const xpResult = addXP(studentEmail, body.memo, todaysLogCount + 1, {
     totalLogs: totalLogs + 1,
     memoCount: memoCount + ((body.memo || "").trim() ? 1 : 0)
   });
-  if (String(body.goal_related) === "true") incrementGoalBlocksAndNotify(studentEmail, 1);
   return { ok: true, log_id: logId, ...xpResult };
 }
 
@@ -547,6 +558,12 @@ function saveLogMulti(studentEmail, body) {
     sheet.getRange(1, goalIdx + 1).setValue("goal_related");
     headers = headers.concat(["goal_related"]);
   }
+  let awardedIdx = headers.indexOf("xp_awarded");
+  if (awardedIdx === -1) {
+    awardedIdx = headers.length;
+    sheet.getRange(1, awardedIdx + 1).setValue("xp_awarded");
+    headers = headers.concat(["xp_awarded"]);
+  }
 
   const today = formatDate(new Date());
   const targetDate = (body.date && /^\d{4}-\d{2}-\d{2}$/.test(String(body.date)) && String(body.date) <= today)
@@ -568,31 +585,34 @@ function saveLogMulti(studentEmail, body) {
     rowIndexByKey[rowDate + "|" + String(data[i][idx.time])] = i;
   }
 
+  const newFocus = String(body.focus_level || "").trim();
   const newRows = [];
   let updatedAny = false;
-  let xpEligible = false; // 新規ブロック、または「未評価→評価あり」に変わった更新がある場合のみXP対象にする
-  // 目標カウントは新規ブロックのみ対象（既存ブロックの更新で増やすと、
-  // 「評価なしで保存→後から評価を追加」の流れで二重カウントになるため）
-  let xpEligibleGoalCount = 0; // うち目標関連の新規ブロック数（マイルストーン判定用）
+  // 記録ごとに「初めて評価が入った時に1回だけ付与」する方式。今回新たにXP対象になった
+  // ブロック数を数え、1つでもあればバッチ全体で1回だけXPを付与する（何度更新しても増えない）
+  let awardedBlockCount = 0;
+  let awardedGoalBlockCount = 0; // うち目標関連（マイルストーン判定用）
   blocks.forEach(b => {
     const dataIdx = rowIndexByKey[targetDate + "|" + b];
     if (dataIdx !== undefined) {
       const prevFocus = String(data[dataIdx][idx.focus] || "").trim();
-      const newFocus = String(body.focus_level || "").trim();
-      if (!prevFocus && newFocus) {
-        xpEligible = true;
-      }
+      const flagRaw = String(data[dataIdx][awardedIdx] || "").toUpperCase();
+      const prevAwarded = flagRaw === "TRUE" || (flagRaw === "" && !!prevFocus);
       // 列の並びに依存しないよう、行全体を1回のsetValuesで書き換える
       const updatedRow = data[dataIdx].slice();
+      while (updatedRow.length <= awardedIdx) updatedRow.push("");
       updatedRow[idx.task] = body.task;
       updatedRow[idx.focus] = body.focus_level;
       updatedRow[idx.memo] = body.memo || "";
       updatedRow[goalIdx] = body.goal_related || "false";
+      if (!isPast && !prevAwarded && newFocus) {
+        updatedRow[awardedIdx] = "TRUE";
+        awardedBlockCount++;
+        if (String(body.goal_related) === "true") awardedGoalBlockCount++;
+      }
       sheet.getRange(dataIdx + 1, 1, 1, updatedRow.length).setValues([updatedRow]);
       updatedAny = true;
     } else {
-      xpEligible = true;
-      if (String(body.goal_related) === "true") xpEligibleGoalCount++;
       const row = new Array(headers.length).fill("");
       row[idx.logId] = "log_" + Date.now() + "_" + Math.random().toString(36).slice(2, 6);
       row[idx.email] = studentEmail;
@@ -603,6 +623,13 @@ function saveLogMulti(studentEmail, body) {
       row[idx.memo] = body.memo || "";
       row[idx.timestamp] = now;
       row[goalIdx] = body.goal_related || "false";
+      if (!isPast && newFocus) {
+        row[awardedIdx] = "TRUE";
+        awardedBlockCount++;
+        if (String(body.goal_related) === "true") awardedGoalBlockCount++;
+      } else {
+        row[awardedIdx] = "FALSE";
+      }
       newRows.push(row);
       totalLogs++;
       if ((body.memo || "").trim()) memoCount++;
@@ -621,10 +648,10 @@ function saveLogMulti(studentEmail, body) {
 
   updateStreak(studentEmail); // ブロック数ぶんではなく1回だけ
   invalidateStatusCache();
-  // 既に評価済みの記録をただ再編集しただけ（新規ブロックも評価追加もない）場合はXPを与えない
-  if (!xpEligible) return { ok: true, xp_gained: 0, updated: updatedAny, count: blocks.length };
+  // 今回どの記録も新たにXP対象にならなかった（評価済みの再編集だけ等）場合はXPを与えない
+  if (awardedBlockCount === 0) return { ok: true, xp_gained: 0, updated: updatedAny, count: blocks.length };
   const xpResult = addXP(studentEmail, body.memo, todaysLogCount, { totalLogs, memoCount }); // DailyLogの再読み込みなし
-  if (xpEligibleGoalCount > 0) incrementGoalBlocksAndNotify(studentEmail, xpEligibleGoalCount);
+  if (awardedGoalBlockCount > 0) incrementGoalBlocksAndNotify(studentEmail, awardedGoalBlockCount);
   return { ok: true, xp_gained: xpResult.xp_gained, level_up: xpResult.level_up, level: xpResult.level, updated: updatedAny, count: blocks.length };
 }
 
@@ -3514,7 +3541,7 @@ function setupSheets() {
   const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
   const sheets = {
     "Users": ["student_email","name","line_user_id","coach_email","coach_line_id","google_calendar_id","chatwork_room","is_active","joined_at","notify_start","notify_end","nickname","avatar","show_in_community","fcm_token"],
-    "DailyLog": ["log_id","student_email","date","time_block","task","focus_level","memo","timestamp","goal_related"],
+    "DailyLog": ["log_id","student_email","date","time_block","task","focus_level","memo","timestamp","goal_related","xp_awarded"],
     "Reports": ["date","student_email","score","feedback","action","highlights","improvement","created_at","breakdown"],
     "Messages": ["message_id","student_email","content","sender_name","sender_photo","sender_role","timestamp","is_read"],
     "Coaches": ["coach_email","coach_name","assigned_students"],
