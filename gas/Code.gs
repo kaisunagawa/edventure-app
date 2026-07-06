@@ -74,6 +74,8 @@ function doGet(e) {
       case "adminGetOverview":     result = adminGetOverview(e.parameter.coachEmail); break;
       case "coachSetShowInCommunity": result = coachSetShowInCommunity(e.parameter.coachEmail, e.parameter); break;
       case "adminBackfillReportReasons": result = adminBackfillReportReasons(e.parameter.coachEmail); break;
+      case "adminRunNightlyReport": result = adminRunNightlyReport(e.parameter.coachEmail); break;
+      case "adminRunNightlyCoachMessage": result = adminRunNightlyCoachMessage(e.parameter.coachEmail); break;
       case "sendMessage":  result = sendMessage(studentEmail, e.parameter); break;
       case "saveSettings": result = saveSettings(studentEmail, e.parameter); break;
       case "syncCalendar": result = syncCalendar(studentEmail, e.parameter); break;
@@ -2471,20 +2473,55 @@ function nightlyReport() {
       const report = generateReportWithClaude(user.student_email, user.name, logs);
       if (!report) return;
       appendReportRow(today, user.student_email, report);
-      const latestUser = sheetToObjects(getSheet("Users")).find(u => u.student_email === user.student_email);
-      const streak = Number(latestUser?.streak || 1);
-      const streakMsg = streak >= 3 ? "\n\n🔥 連続" + streak + "日記録中！" : "";
-      const trendMsg = report.trend ? "\n\n📈 " + formatForLine(stripSalutation(report.trend)) : "";
-      sendLineMessage(user.line_user_id,
-        "📊 今日のAIレポート\n\nスコア：" + report.score + "点\n\n"
-        + formatForLine(stripSalutation(report.feedback))
-        + trendMsg
-        + "\n\n✅ 明日のアクション\n" + formatForLine(stripSalutation(report.action))
-        + streakMsg);
-
+      sendReportLineMessage(user, report);
       notifyCoachOnReport(user, report);
     } catch (err) { Logger.log(err); }
   });
+}
+
+function sendReportLineMessage(user, report) {
+  const latestUser = sheetToObjects(getSheet("Users")).find(u => u.student_email === user.student_email);
+  const streak = Number(latestUser?.streak || 1);
+  const streakMsg = streak >= 3 ? "\n\n🔥 連続" + streak + "日記録中！" : "";
+  const trendMsg = report.trend ? "\n\n📈 " + formatForLine(stripSalutation(report.trend)) : "";
+  sendLineMessage(user.line_user_id,
+    "📊 今日のAIレポート\n\nスコア：" + report.score + "点\n\n"
+    + formatForLine(stripSalutation(report.feedback))
+    + trendMsg
+    + "\n\n✅ 明日のアクション\n" + formatForLine(stripSalutation(report.action))
+    + streakMsg);
+}
+
+// 夜間バッチが走らなかった時にWeb API経由で補完実行するための管理用エンドポイント。
+// 通常のnightlyReportと違いXP減衰は行わず（手動の補完実行で罰を与えないため）、
+// 生徒ごとの結果（生成/スキップ/エラー内容）をJSONで返すので原因調査にも使える
+function adminRunNightlyReport(email) {
+  if (!verifyAdmin(email)) return { ok: false, error: "not admin" };
+  const targetDate = nightlyTargetDate();
+  const results = [];
+  sheetToObjects(getSheet("Users")).filter(u => u.is_active.toUpperCase() === "TRUE").forEach(user => {
+    try {
+      const logs = getLogs(user.student_email, { date: targetDate }).data;
+      if (logs.length === 0) { results.push({ email: user.student_email, status: "no-logs" }); return; }
+      const existing = sheetToObjects(getSheet("Reports")).find(r => r.student_email === user.student_email && r.date === targetDate);
+      if (existing) { results.push({ email: user.student_email, status: "already-exists" }); return; }
+      const report = generateReportWithClaude(user.student_email, user.name, logs);
+      if (!report) { results.push({ email: user.student_email, status: "ai-failed" }); return; }
+      appendReportRow(targetDate, user.student_email, report);
+      if (user.line_user_id) sendReportLineMessage(user, report);
+      notifyCoachOnReport(user, report);
+      results.push({ email: user.student_email, status: "sent", score: report.score });
+    } catch (err) {
+      results.push({ email: user.student_email, status: "error", error: String(err) });
+    }
+  });
+  return { ok: true, targetDate: targetDate, results: results };
+}
+
+function adminRunNightlyCoachMessage(email) {
+  if (!verifyAdmin(email)) return { ok: false, error: "not admin" };
+  nightlyCoachMessage();
+  return { ok: true, targetDate: nightlyTargetDate() };
 }
 
 function nightlyCoachMessage() {
