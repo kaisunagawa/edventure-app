@@ -71,8 +71,8 @@ GASエディタで `setupTriggers` 関数を選択して「実行」ボタンを
 | `morningScheduleNotify` | 毎朝7時 | Googleカレンダー予定 → LINE通知 |
 | `hourlyReminder` | 毎時0分 | ログ入力リマインダー → LINE通知 |
 | `checkTimerQueue` | 毎分 | タイマー完了チェック |
-| `nightlyReport` | 毎晩23時 | Claude APIでスコア生成 → スプレッドシート保存 → LINE通知 |
-| `nightlyCoachMessage` | 毎晩23時30分 | AIコーチからのメッセージ送信 |
+| `nightlyReport` | 毎晩22時 | Claude APIでスコア生成 → スプレッドシート保存 → LINE通知 |
+| `nightlyCoachMessage` | 毎晩22時30分 | AIコーチからのメッセージ送信 |
 | `generateMonthlySummaries` | 毎月1日3時 | 月次サマリー生成 |
 | `generateWeeklySummaries` | 毎週月曜8時 | 直前の月〜日を振り返る週次サマリー生成 |
 | `syncStripeTotals` | 毎日4時 | 生徒ごとのStripe累計支払額を同期 |

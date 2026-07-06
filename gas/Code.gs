@@ -756,7 +756,7 @@ function getGameStatus(studentEmail) {
 // 累積XPだと入会が早い人が有利になり続けるため、「今どれだけ真剣に取り組めているか」を
 // 測る指標として直近の活動量を採用。他ユーザーの氏名やスコアは返さずプライバシーに配慮する。
 // 本日のランキング: 各ユーザーの最新レポートのスコアで順位付けする。
-// レポートは毎晩23時生成のため、日中は前日分のスコアで競う形になる。
+// レポートは毎晩22時生成のため、日中は前日分のスコアで競う形になる。
 // ホーム画面で毎回呼ばれるため、computeAllStatusesと同様に5分キャッシュする
 // 「みんなの頑張り」のレポートランキングと基準を完全に一致させる。
 // 生徒ごとにレポート生成日がずれるため、同じ日に最新レポートが出た人だけを対象にし、
@@ -2312,8 +2312,8 @@ ${EMOJI_STYLE}`;
 
 function hourlyReminder() {
   const hour = new Date().getHours();
-  // 23時以降はレポート・夜のコーチメッセージの時間帯なのでリマインダーは送らない
-  if (hour >= 23) return;
+  // 22時以降はレポート・夜のコーチメッセージの時間帯なのでリマインダーは送らない
+  if (hour >= 22) return;
   const timeBlock = String(hour).padStart(2, "0") + ":00";
   const getContextBundle = preloadContextBundles();
   sheetToObjects(getSheet("Users")).filter(u => u.is_active.toUpperCase() === "TRUE").forEach(user => {
@@ -2500,7 +2500,7 @@ ${ctx}
 ${recentMsgs}
 
 【スタイル】
-- 今は夜23時台。挨拶（おはよう・こんにちは等）は書かず、時間帯に合った内容で本題から入る
+- 今は夜22時台。挨拶（おはよう・こんにちは等）は書かず、時間帯に合った内容で本題から入る
 - レポートの内容（スコア・良かった点・改善点）を言い直さない。分析はもう終わってる
 - カレンダーの予定と実際の記録を見比べて、予定どおり実行できていた場面があれば具体的に承認する
 - 今日のログの中の具体的な一場面を1つだけ拾って、そこに一言添える
@@ -3570,8 +3570,8 @@ function setupTriggers() {
   // hourlyReminder側で時刻・間隔をチェックしているので、1時間ごとの単一トリガーに統合する。
   ScriptApp.getProjectTriggers().forEach(t => ScriptApp.deleteTrigger(t));
   ScriptApp.newTrigger("morningScheduleNotify").timeBased().everyDays(1).atHour(7).create();
-  ScriptApp.newTrigger("nightlyReport").timeBased().everyDays(1).atHour(23).create();
-  ScriptApp.newTrigger("nightlyCoachMessage").timeBased().everyDays(1).atHour(23).nearMinute(30).create();
+  ScriptApp.newTrigger("nightlyReport").timeBased().everyDays(1).atHour(22).create();
+  ScriptApp.newTrigger("nightlyCoachMessage").timeBased().everyDays(1).atHour(22).nearMinute(30).create();
   ScriptApp.newTrigger("generateMonthlySummaries").timeBased().onMonthDay(1).atHour(3).create();
   ScriptApp.newTrigger("generateWeeklySummaries").timeBased().everyWeeks(1).onWeekDay(ScriptApp.WeekDay.MONDAY).atHour(8).create();
   ScriptApp.newTrigger("checkTimerQueue").timeBased().everyMinutes(1).create();
