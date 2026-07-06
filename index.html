@@ -476,8 +476,13 @@ async function getCalendarToken(interactive){
     }catch{ clearTimeout(timeout); finish(null); }
   });
 }
-const gcalCache={}, gcalSynced={}, gcalInFlight={};
+const gcalCache={}, gcalCacheAt={}, gcalSynced={}, gcalInFlight={};
 const GCAL_LS="gcal_evs_";
+// 今日の予定は後から追加・変更されることがあるため、キャッシュは10分で期限切れにして
+// 再取得する（以前は一度取得したら丸1日使い回していたため、後から入れた予定が
+// 記録タブの自動入力に反映されなかった）
+const GCAL_TTL_MS = 10*60*1000;
+const gcalFresh = dateStr => gcalCache[dateStr] && (Date.now()-(gcalCacheAt[dateStr]||0)) < GCAL_TTL_MS;
 function cleanupGcalLS(){
   try{
     const limit=addDays(formatDateStr(new Date()),-7);
@@ -492,7 +497,7 @@ function cleanupGcalLS(){
 // ほぼ同時に呼び出すと、Googleへのサイレント認証リクエストが競合して
 // 片方が失敗することがあったため、同じ日付の取得は1つの実行を共有する
 async function fetchCalendarEvents(dateStr, interactive=false){
-  if(gcalCache[dateStr]) return gcalCache[dateStr];
+  if(gcalFresh(dateStr)) return gcalCache[dateStr];
   // interactive(ボタン手動タップ)はユーザー操作なので毎回必ず新規実行し、
   // 裏で動いているサイレント取得の使い回しはしない
   if(!interactive && gcalInFlight[dateStr]) return gcalInFlight[dateStr];
@@ -501,11 +506,22 @@ async function fetchCalendarEvents(dateStr, interactive=false){
   try{ return await p; } finally { if(!interactive) delete gcalInFlight[dateStr]; }
 }
 async function fetchCalendarEventsUncached(dateStr, interactive=false){
-  if(gcalCache[dateStr]) return gcalCache[dateStr];
+  if(gcalFresh(dateStr)) return gcalCache[dateStr];
   if(!interactive){
     try{
       const ls=localStorage.getItem(GCAL_LS+dateStr);
-      if(ls){ const evs=JSON.parse(ls); gcalCache[dateStr]=evs; gcalSynced[dateStr]=1; return evs; }
+      if(ls){
+        const parsed=JSON.parse(ls);
+        // 新形式{t,evs}と旧形式（配列そのまま）の両方を受け付ける
+        const evs=Array.isArray(parsed)?parsed:parsed.evs;
+        const t=Array.isArray(parsed)?0:(parsed.t||0);
+        if(evs && (Date.now()-t) < GCAL_TTL_MS){
+          gcalCache[dateStr]=evs; gcalCacheAt[dateStr]=t; gcalSynced[dateStr]=1;
+          return evs;
+        }
+        // 期限切れでも下の再取得が失敗した時のフォールバックとしてメモリには入れておく
+        if(evs){ gcalCache[dateStr]=evs; gcalCacheAt[dateStr]=0; }
+      }
     }catch{}
   }
   const token=await getCalendarToken(interactive);
@@ -527,8 +543,8 @@ async function fetchCalendarEventsUncached(dateStr, interactive=false){
             sub:e.location||(e.hangoutLink?"Zoom/Meet":"")
           };
         });
-        gcalCache[dateStr]=evs;
-        try{ localStorage.setItem(GCAL_LS+dateStr, JSON.stringify(evs)); cleanupGcalLS(); }catch{}
+        gcalCache[dateStr]=evs; gcalCacheAt[dateStr]=Date.now();
+        try{ localStorage.setItem(GCAL_LS+dateStr, JSON.stringify({t:Date.now(),evs})); cleanupGcalLS(); }catch{}
         // サーバーへ同期（コーチのプロンプト用＆次回起動・他端末のフォールバック）
         if(CURRENT_USER && !gcalSynced[dateStr]){
           gcalSynced[dateStr]=1;
@@ -543,12 +559,13 @@ async function fetchCalendarEventsUncached(dateStr, interactive=false){
   try{
     const r=await gasApi("getCalendar",{date:dateStr});
     if(r.ok && r.data){
-      gcalCache[dateStr]=r.data; gcalSynced[dateStr]=1;
-      try{ localStorage.setItem(GCAL_LS+dateStr, JSON.stringify(r.data)); }catch{}
+      gcalCache[dateStr]=r.data; gcalCacheAt[dateStr]=Date.now(); gcalSynced[dateStr]=1;
+      try{ localStorage.setItem(GCAL_LS+dateStr, JSON.stringify({t:Date.now(),evs:r.data})); }catch{}
       return r.data;
     }
   }catch{}
-  return null;
+  // 再取得に失敗した場合は、期限切れでも手元にあるキャッシュを返す（何も出ないよりまし）
+  return gcalCache[dateStr]||null;
 }
 // 時間ブロック（例 "10:00-11:00"）に重なる予定タイトル一覧
 function eventsForBlock(evs, block){
