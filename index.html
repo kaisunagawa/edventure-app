@@ -662,6 +662,9 @@ const EVALS = [
 ];
 const ALL_TIME_BLOCKS = ["05:00-06:00","06:00-07:00","07:00-08:00","08:00-09:00","09:00-10:00","10:00-11:00","11:00-12:00","12:00-13:00","13:00-14:00","14:00-15:00","15:00-16:00","16:00-17:00","17:00-18:00","18:00-19:00","19:00-20:00","20:00-21:00","21:00-22:00","22:00-23:00","23:00-24:00"];
 const getLogHours = () => JSON.parse(localStorage.getItem("jiroku_log_hours")||'{"start":6,"end":23}');
+// 1日の目標時間（目標に関連した記録を何時間積むか）。固定の8h基準ではなく、
+// 本人が自分で決めた目標に対する達成度を測れるようにする。デフォルトは2時間
+const getDailyGoalHours = () => Number(localStorage.getItem("jiroku_daily_goal_hours")) || 2;
 const getTimeBlocks = () => { const {start,end}=getLogHours(); return ALL_TIME_BLOCKS.filter(b=>parseInt(b)>=start&&parseInt(b)<=end); };
 const TIME_BLOCKS = getTimeBlocks();
 
@@ -683,6 +686,14 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity})
   });
   const [editMode, setEditMode] = useState(false);
   const [editItems, setEditItems] = useState([]);
+  const [showGoalTimeEdit, setShowGoalTimeEdit] = useState(false);
+  const [dailyGoalHours, setDailyGoalHours] = useState(getDailyGoalHours);
+  const onEditDailyGoal = () => setShowGoalTimeEdit(true);
+  const pickDailyGoal = (h) => {
+    localStorage.setItem("jiroku_daily_goal_hours", String(h));
+    setDailyGoalHours(h);
+    setShowGoalTimeEdit(false);
+  };
   useEffect(()=>{
     if(!isActive) return;
     // キャッシュで即時表示
@@ -847,24 +858,54 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity})
 
     ${showCommunity&&html`<${CommunityOverlay} onClose=${()=>setShowCommunity(false)}/>`}
 
+    ${showGoalTimeEdit&&html`
+      <div style=${{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"flex-end",zIndex:200}}
+        onClick=${e=>{if(e.target===e.currentTarget)setShowGoalTimeEdit(false);}}>
+        <div style=${{background:"var(--card)",borderRadius:"20px 20px 0 0",padding:"24px 20px 32px",width:"100%",boxSizing:"border-box"}}>
+          <div style=${{fontSize:18,fontWeight:800,marginBottom:4,color:"var(--text)"}}>1日の目標時間</div>
+          <div style=${{fontSize:13,color:"var(--sub)",marginBottom:18,lineHeight:1.6}}>目標に関連した記録を、1日に何時間積みたいですか？無理なく続けられる時間を、自分で決めましょう。</div>
+          <div style=${{display:"flex",flexWrap:"wrap",gap:8}}>
+            ${[0.5,1,1.5,2,3,4,5,6].map(h=>{
+              const on=dailyGoalHours===h;
+              return html`<button key=${h} onClick=${()=>pickDailyGoal(h)}
+                style=${{padding:"10px 16px",borderRadius:12,border:`1.5px solid ${on?"var(--accent)":"var(--border)"}`,background:on?"var(--accent)":"transparent",color:on?"#fff":"var(--text)",fontSize:14,fontWeight:on?700:500,cursor:"pointer",fontFamily:"inherit"}}>
+                ${h}時間</button>`;
+            })}
+          </div>
+        </div>
+      </div>
+    `}
+
     <!-- Goals -->
     ${goalsArr.length>0&&html`
       <div style=${{margin:"16px 16px 10px",background:"var(--card)",borderRadius:16,border:"1px solid var(--border)",overflow:"hidden"}}>
-        <div style=${{padding:"14px 16px 10px",borderBottom:"1px solid var(--border)",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-          <div style=${{fontSize:12,fontWeight:700,color:"var(--text)",letterSpacing:".02em"}}>目標</div>
-          ${(()=>{
-            const goalMins=todayLogs.filter(l=>l.goal_related==="true"||l.goal_related===true).length*60;
-            const pct=Math.min(100,Math.round(goalMins/480*100));
-            const hh=Math.floor(goalMins/60),mm=goalMins%60;
-            const timeStr=hh>0?`${hh}h${mm>0?mm+"m":""}`:`${mm}m`;
-            return html`<div style=${{display:"flex",alignItems:"center",gap:6}}>
-              <div style=${{fontSize:11,color:goalMins>0?"var(--accent)":"var(--sub)",fontWeight:600}}>${goalMins>0?timeStr:"未記録"} / 8h</div>
-              <div style=${{width:48,height:4,background:"var(--border)",borderRadius:99,overflow:"hidden"}}>
-                <div style=${{height:"100%",width:pct+"%",background:"var(--accent)",borderRadius:99}}/>
+        ${(()=>{
+          const goalMins=todayLogs.filter(l=>l.goal_related==="true"||l.goal_related===true).length*60;
+          const targetHours=dailyGoalHours;
+          const targetMins=targetHours*60;
+          const pct=Math.min(100,Math.round(goalMins/targetMins*100));
+          const hh=Math.floor(goalMins/60),mm=goalMins%60;
+          const done=goalMins>=targetMins;
+          return html`
+            <div style=${{padding:"16px 16px 14px",borderBottom:"1px solid var(--border)"}}>
+              <div style=${{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+                <div style=${{fontSize:11,fontWeight:600,color:"var(--sub)",letterSpacing:".02em"}}>今日の目標</div>
+                <button onClick=${onEditDailyGoal} style=${{background:"none",border:"none",color:"var(--accent)",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit",padding:0}}>変更</button>
               </div>
-            </div>`;
-          })()}
-        </div>
+              <div style=${{fontSize:16,fontWeight:800,color:"var(--text)",marginBottom:10}}>1日${targetHours}時間、目標に取り組む</div>
+              <div style=${{display:"flex",alignItems:"baseline",gap:6,marginBottom:10}}>
+                <div style=${{fontSize:26,fontWeight:800,color:"var(--text)",lineHeight:1}}>${hh>0?html`${hh}<span style=${{fontSize:15,fontWeight:700}}>時間</span>`:""}${mm}<span style=${{fontSize:15,fontWeight:700}}>分</span></div>
+                <div style=${{fontSize:13,color:"var(--sub)",fontWeight:600}}>/ ${targetHours}時間</div>
+              </div>
+              <div style=${{display:"flex",alignItems:"center",gap:10}}>
+                <div style=${{flex:1,height:8,background:"var(--bg)",borderRadius:99,overflow:"hidden"}}>
+                  <div style=${{height:"100%",width:pct+"%",background:done?"var(--green)":"var(--accent)",borderRadius:99,transition:"width .5s ease"}}/>
+                </div>
+                <div style=${{fontSize:13,fontWeight:800,color:done?"var(--green)":"var(--accent)",minWidth:42,textAlign:"right"}}>${done?"達成🎉":pct+"%"}</div>
+              </div>
+            </div>
+          `;
+        })()}
         ${goalsArr.map((g,i)=>{
           const dl=g.deadline?Math.ceil((new Date(g.deadline)-new Date())/86400000):null;
           const dlColor=dl===null?"var(--sub)":dl<=7?"var(--red)":dl<=14?"var(--amber)":"var(--accent)";
