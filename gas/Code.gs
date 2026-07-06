@@ -2438,15 +2438,26 @@ function updateStreak(studentEmail) {
   }
 }
 
+// 夜間バッチが対象とする「締めの日」。22時のトリガーが正常な時間に動けば当日だが、
+// 発火の遅延や手動実行が深夜0時を跨ぐと「今日=翌日」の記録（当然まだ0件）を見て
+// 全員を記録なしと誤判定し、XP減衰・ストリークリセットを誤発動してしまうため、
+// 正午より前の実行は「前日」を締めの対象にする
+function nightlyTargetDate() {
+  const now = new Date();
+  if (now.getHours() < 12) return formatDate(new Date(now.getTime() - 86400000));
+  return formatDate(now);
+}
+
 function nightlyReport() {
-  const today = formatDate(new Date());
+  const today = nightlyTargetDate();
+  const isSameDay = today === formatDate(new Date());
   sheetToObjects(getSheet("Users")).filter(u => u.is_active.toUpperCase() === "TRUE").forEach(user => {
     try {
-      const logs = getLogs(user.student_email).data;
+      const logs = getLogs(user.student_email, { date: today }).data;
 
       // ログなし → XP減少・ストリークリセット
       if (logs.length === 0) {
-        applyXPDecay(user.student_email);
+        applyXPDecay(user.student_email, today);
         return;
       }
 
@@ -2454,7 +2465,9 @@ function nightlyReport() {
       const existing = sheetToObjects(getSheet("Reports")).find(r => r.student_email === user.student_email && r.date === today);
       if (existing) { Logger.log(user.student_email + ": 本日のレポートは既に存在します"); return; }
 
-      updateStreak(user.student_email);
+      // 日付を跨いだ後の実行では、updateStreakが「翌日」を記録日として
+      // 誤登録してしまうためスキップする（記録保存時にも更新されているので実害はない）
+      if (isSameDay) updateStreak(user.student_email);
       const report = generateReportWithClaude(user.student_email, user.name, logs);
       if (!report) return;
       appendReportRow(today, user.student_email, report);
@@ -2475,7 +2488,7 @@ function nightlyReport() {
 }
 
 function nightlyCoachMessage() {
-  const today = formatDate(new Date());
+  const today = nightlyTargetDate();
   const apiKey = PropertiesService.getScriptProperties().getProperty("CLAUDE_API_KEY");
   if (!apiKey) return;
 
@@ -2530,7 +2543,7 @@ ${EMOJI_STYLE}`;
 }
 
 // 記録なしの日はXPを減らしてストリークをリセット
-function applyXPDecay(studentEmail) {
+function applyXPDecay(studentEmail, targetDate) {
   const sheet = getSheet("Users");
   const data = sheet.getDataRange().getValues();
   const headers = data[0];
@@ -2538,6 +2551,9 @@ function applyXPDecay(studentEmail) {
   const xpIdx = headers.indexOf("xp");
   const streakIdx = headers.indexOf("streak");
   const lastLogDateIdx = headers.indexOf("last_log_date");
+  // 「締めの日」の前日。深夜0時を跨いだ実行でも判定がずれないよう、実行時刻ではなく
+  // 対象日を基準に計算する（未指定なら従来通り実行日基準）
+  const baseDate = targetDate ? new Date(targetDate + "T00:00:00") : new Date();
 
   for (let i = 1; i < data.length; i++) {
     if (String(data[i][emailIdx]) !== studentEmail) continue;
@@ -2545,7 +2561,7 @@ function applyXPDecay(studentEmail) {
     const currentXP = Number(data[i][xpIdx] || 0);
     const rawLLD2 = data[i][lastLogDateIdx];
     const lastLogDate = rawLLD2 instanceof Date ? Utilities.formatDate(rawLLD2, "Asia/Tokyo", "yyyy-MM-dd") : String(rawLLD2 || "");
-    const yesterday = formatDate(new Date(Date.now() - 86400000));
+    const yesterday = formatDate(new Date(baseDate.getTime() - 86400000));
 
     // 昨日も記録なしなら減少額を増やす（最大-30）
     const missedYesterday = lastLogDate !== yesterday;
@@ -3220,6 +3236,75 @@ ${logsText}
 
 function testGenerateMonthlySummary() {
   generateMonthlySummaries();
+}
+
+// 昨日の日付でレポートを一括生成する（エディタから引数なしで実行できるラッパー）。
+// 夜間バッチが何らかの理由で走らなかった日の翌日に、これを1回実行すれば補完できる
+function generateReportForYesterday() {
+  generateReportForDate(formatDate(new Date(Date.now() - 86400000)));
+}
+
+// 全生徒のストリークをDailyLogの実記録から再計算する復旧ユーティリティ。
+// 最終記録日から遡って連続日数を数え、streakとlast_log_dateを実データに合わせて直す
+function adminRecomputeStreaks() {
+  const sheet = getSheet("Users");
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0];
+  const emailIdx = headers.indexOf("student_email");
+  const streakIdx = headers.indexOf("streak");
+  const lastLogDateIdx = headers.indexOf("last_log_date");
+  if (streakIdx === -1 || lastLogDateIdx === -1) { Logger.log("streak/last_log_date列がありません"); return; }
+
+  const datesByEmail = new Map();
+  sheetToObjects(getSheet("DailyLog")).forEach(l => {
+    const email = String(l.student_email || "");
+    if (!email || !l.date) return;
+    if (!datesByEmail.has(email)) datesByEmail.set(email, new Set());
+    datesByEmail.get(email).add(String(l.date).substring(0, 10));
+  });
+
+  for (let i = 1; i < data.length; i++) {
+    const email = String(data[i][emailIdx]);
+    const dates = datesByEmail.get(email);
+    if (!dates || dates.size === 0) continue;
+    const sorted = Array.from(dates).sort();
+    const last = sorted[sorted.length - 1];
+    let streak = 1;
+    let cursor = new Date(last + "T00:00:00");
+    while (true) {
+      cursor = new Date(cursor.getTime() - 86400000);
+      if (dates.has(formatDate(cursor))) streak++;
+      else break;
+    }
+    sheet.getRange(i + 1, streakIdx + 1).setValue(streak);
+    sheet.getRange(i + 1, lastLogDateIdx + 1).setValue(last);
+    Logger.log(email + ": streak=" + streak + " last_log_date=" + last);
+  }
+}
+
+// 2026-07-07 0:06の誤実行（夜間バッチが日付を跨ぎ「翌日の記録0件」と誤判定した
+// 事故）の復旧用。実行ログから判明しているXP減少分を戻し、全員のストリークを
+// 実記録から再計算する。1回だけ実行すること（2回実行するとXPが二重に増える）
+function adminRepairDecayIncident20260707() {
+  const restore = {
+    "work.sunagawa@gmail.com": 15,
+    "kanayan0320@gmail.com": 15,
+    "teddy.0923ak@gmail.com": 15,
+    "www.mimikunlll@gmail.com": 15
+  };
+  const sheet = getSheet("Users");
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0];
+  const emailIdx = headers.indexOf("student_email");
+  const xpIdx = headers.indexOf("xp");
+  for (let i = 1; i < data.length; i++) {
+    const email = String(data[i][emailIdx]);
+    if (!restore[email]) continue;
+    const cur = Number(data[i][xpIdx] || 0);
+    sheet.getRange(i + 1, xpIdx + 1).setValue(cur + restore[email]);
+    Logger.log(email + ": XP " + cur + " → " + (cur + restore[email]) + " (復旧 +" + restore[email] + ")");
+  }
+  adminRecomputeStreaks();
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
