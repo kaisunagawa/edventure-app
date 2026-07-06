@@ -7,10 +7,11 @@ const APP_URL = "https://kaisunagawa.github.io/edventure-app/";
 const CLAUDE_API_KEY = PropertiesService.getScriptProperties().getProperty("CLAUDE_API_KEY");
 const LINE_CHANNEL_TOKEN = PropertiesService.getScriptProperties().getProperty("LINE_CHANNEL_TOKEN");
 
-// 生徒向けメッセージ共通の文末・絵文字ルール（コーチの声のトーンを統一する）
-const EMOJI_STYLE = `- 文末は「。」で終えるより「！」「？」や絵文字で終える方が自然。硬い「。」止めを多用しない
-- 絵文字は次の中から優先して使う: 👍 🔥 👏 🙌 👊 💪 🫵 と、ポジティブな表情の絵文字（😊 😆 🤝 ✨ など）
-- 絵文字は文中ではなく文末に置く。1メッセージ1〜3個まで`;
+// 生徒向けメッセージ共通の文末・絵文字ルール（コーチの声のトーンを統一する）。
+// 「AIっぽい煽り」を抑え、自然な人間のコーチが送るLINEらしい落ち着いたトーンにする
+const EMOJI_STYLE = `- テンションを上げすぎない。「〜じゃん！」「エネルギーに」「感覚を味わって」のような若者言葉・煽り表現は使わず、実際の人間が送る自然な文章にする
+- 絵文字は使うとしても1メッセージ0〜1個まで。使わない文の方が多くてよい
+- 2文以上ある場合は改行を入れて読みやすくする（1文1行を目安に）`;
 
 // XP閾値テーブル（非線形）: インデックス = レベル-1
 const XP_THRESHOLDS = [0, 500, 1200, 2200, 3500, 5200, 7500, 10000, 13000, 17000, 21000, 25500, 30500, 36000, 42000, 49000];
@@ -2189,7 +2190,7 @@ function saveSettings(studentEmail, body) {
     if (String(data[i][emailIdx]) !== studentEmail) continue;
     if (body.notify_start    !== undefined) sheet.getRange(i + 1, startIdx    + 1).setValue(Number(body.notify_start) || 7);
     if (body.notify_end      !== undefined) sheet.getRange(i + 1, endIdx      + 1).setValue(Number(body.notify_end)   || 23);
-    if (body.notify_interval !== undefined) sheet.getRange(i + 1, intervalIdx + 1).setValue(Number(body.notify_interval) || 4);
+    if (body.notify_interval !== undefined) sheet.getRange(i + 1, intervalIdx + 1).setValue(Number(body.notify_interval) || 6);
     if (body.goal            !== undefined) sheet.getRange(i + 1, goal1Idx    + 1).setValue(body.goal);
     if (body.goal_deadline   !== undefined) sheet.getRange(i + 1, dead1Idx    + 1).setValue(body.goal_deadline);
     if (body.goal2           !== undefined) sheet.getRange(i + 1, goal2Idx    + 1).setValue(body.goal2);
@@ -2261,7 +2262,7 @@ ${recentMsgs}
 - 「Chatworkで」のように情報の出どころを名指ししない。本人の状況として自然に触れる
 - 記録の時間の単位は「ブロック」ではなく「時間帯」と表現する
 - 今日のカレンダー予定がある場合は、目標との関係を意識しつつ今日の過ごし方に軽く触れる
-- 3文以内
+- 3文以内。読点（、）で長くつなげず、1文ごとに句点（。！？）で区切って改行が入りやすくする
 ${EMOJI_STYLE}`;
 
       const res = UrlFetchApp.fetch("https://api.anthropic.com/v1/messages", {
@@ -2288,7 +2289,7 @@ function hourlyReminder() {
   sheetToObjects(getSheet("Users")).filter(u => u.is_active.toUpperCase() === "TRUE").forEach(user => {
     const start = Number(user.notify_start) || 7;
     const end = Number(user.notify_end) || 23;
-    const interval = Number(user.notify_interval) || 4;
+    const interval = Number(user.notify_interval) || 6;
     if (hour < start || hour > end) return;
     // 間隔チェック: 1日1回(interval=24)はstart時のみ、それ以外は間隔で割り切れる時間のみ
     if (interval >= 24) {
@@ -2312,8 +2313,8 @@ function hourlyReminder() {
       : -99;
     const hoursWithoutLog = hour - lastLogHour;
 
-    // 5時間以上記録がない場合はコーチメッセージ付き（送信数を抑えるため、以前の3時間から緩和）
-    if (hoursWithoutLog >= 5) {
+    // 7時間以上記録がない場合はコーチメッセージ付き（通知数を抑えるため、以前の5時間からさらに緩和）
+    if (hoursWithoutLog >= 7) {
       const apiKey = PropertiesService.getScriptProperties().getProperty("CLAUDE_API_KEY");
       if (apiKey) {
         try {
@@ -2479,7 +2480,7 @@ ${recentMsgs}
 - 敬語とタメ語を自然に混ぜる。友人が寝る前に送るLINEのような温度感
 - 「---」「【】」「〇〇さんへ」などの見出し・宛名は絶対使わない
 - 直近のコーチメッセージと同じ言い回し・構成は絶対に繰り返さない
-- 2文以内
+- 2文以内。読点（、）で長くつなげず、1文ごとに句点（。！？）で区切って改行が入りやすくする
 ${EMOJI_STYLE}`;
 
       const res = UrlFetchApp.fetch("https://api.anthropic.com/v1/messages", {
@@ -2492,7 +2493,7 @@ ${EMOJI_STYLE}`;
       if (result.content && result.content[0]) {
         const bodyText = stripSalutation(result.content[0].text);
         logCoachMessage(user.student_email, bodyText);
-        sendLineMessage(user.line_user_id, "🤖 習慣AIコーチより\n\n" + formatForLine(bodyText));
+        sendLineMessage(user.line_user_id, formatForLine(bodyText));
       }
     } catch(e) { Logger.log("nightlyCoachMessage error: " + e); }
   });
