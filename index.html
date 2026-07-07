@@ -1405,6 +1405,11 @@ function LogScreen({onToast, isActive}) {
   // その時間帯の開始時が枠の1時間以内に収まっているログがあれば済みとみなす
   const recordedHours = new Set(logs.map(l => String(l.time_block||"").slice(0,2)).filter(Boolean));
   const recorded = { has: t => recordedHours.has(t.slice(0,2)) };
+  // 手動記録は「HH:00-HH:00」の1時間枠、タイマー記録は実測の分単位キーで保存されるため、
+  // 同じ1時間の中に複数の記録が混在しうる。選択中のブロックと同じ時間の他の記録を
+  // 一覧で見せて、上書きではなく別記録として追加される旨も明示する
+  const isFullHourBlock = tb => /^\d{2}:00-\d{2}:00$/.test(String(tb||""));
+  const hourSiblingLogs = logs.filter(l => l.time_block!==block && String(l.time_block||"").slice(0,2)===block.slice(0,2));
 
   return html`<div>
     <div class="ph">
@@ -1438,6 +1443,19 @@ function LogScreen({onToast, isActive}) {
           <button onClick=${loadCalByTap} style=${{display:"flex",alignItems:"center",gap:8,width:"100%",padding:"10px 14px",marginBottom:12,borderRadius:10,border:"1.5px dashed var(--accent)",background:"var(--accent-l)",color:"var(--accent)",fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>
             📅 タップしてカレンダーの予定を読み込む
           </button>
+        `}
+        ${hourSiblingLogs.length>0&&html`
+          <div style=${{background:"var(--accent-l)",border:"1px solid var(--accent)",borderRadius:10,padding:"10px 12px",marginBottom:12}}>
+            <div style=${{fontSize:12,fontWeight:700,color:"var(--accent)",marginBottom:6}}>⏱ この時間帯には他に${hourSiblingLogs.length}件の記録があります</div>
+            ${hourSiblingLogs.map(l=>html`
+              <div key=${l.time_block} onClick=${()=>handleBlockSelect(l.time_block)}
+                style=${{display:"flex",justifyContent:"space-between",gap:8,padding:"4px 0",cursor:"pointer"}}>
+                <span style=${{fontSize:11.5,color:"var(--sub)",flexShrink:0}}>${l.time_block}</span>
+                <span style=${{fontSize:11.5,color:"var(--text)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>${l.task}</span>
+              </div>
+            `)}
+            <div style=${{fontSize:10.5,color:"var(--sub)",marginTop:4}}>ここで保存すると上書きではなく別の記録として追加されます</div>
+          </div>
         `}
         <div class="form-grp">
           <label class="form-lbl">何をしましたか？</label>
@@ -1476,8 +1494,9 @@ function LogScreen({onToast, isActive}) {
         <div class="card-label">${isToday(date)?"本日の記録":date+" の記録"}</div>
         ${logs.map((l,i)=>{
           const num=l.focus_level?.charAt(0);
+          const isTimer = !isFullHourBlock(l.time_block);
           return html`<div key=${i} class="log-row" style=${{cursor:"pointer"}} onClick=${()=>{handleBlockSelect(l.time_block);window.scrollTo?.(0,0);}}>
-            <div class="log-time">${l.time_block}</div>
+            <div class="log-time">${isTimer?"⏱ ":""}${l.time_block}</div>
             <div><div class="log-task">${l.task}</div>
             <div class="log-meta"><span class="dot" style=${{background:DOT[num]||"var(--sub)"}}/>${l.focus_level}${l.memo?` · ${l.memo}`:""}</div></div>
           </div>`;
