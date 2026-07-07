@@ -1400,7 +1400,11 @@ function LogScreen({onToast, isActive}) {
     });
   };
 
-  const recorded = new Set(logs.map(l => l.time_block));
+  // タイマー記録は分単位の時間帯キー(例: 14:05-14:20)で保存されるため、手動記録の
+  // 1時間枠チップ(例: 14:00-15:00)と文字列が一致しない。チップの「済み」表示は、
+  // その時間帯の開始時が枠の1時間以内に収まっているログがあれば済みとみなす
+  const recordedHours = new Set(logs.map(l => String(l.time_block||"").slice(0,2)).filter(Boolean));
+  const recorded = { has: t => recordedHours.has(t.slice(0,2)) };
 
   return html`<div>
     <div class="ph">
@@ -2102,8 +2106,11 @@ function TimerScreen({onToast, isActive}) {
   const saveLog = async () => {
     setSaving(true);
     const st = startTime||new Date();
-    const h  = st.getHours();
-    const timeBlock = String(h).padStart(2,"0")+":00-"+String(h+1).padStart(2,"0")+":00";
+    const endDt = new Date(st.getTime() + (sessionResult?sessionResult.actual:selectedMin)*60000);
+    const fmtHM = d => String(d.getHours()).padStart(2,"0")+":"+String(d.getMinutes()).padStart(2,"0");
+    // 同じ1時間内に複数回タイマーで測っても記録が上書きされないよう、時間帯キーは
+    // 「HH:00-HH:00」の固定枠ではなく、実際の開始〜終了の分単位にする（1回ごとに別の記録として残る）
+    const timeBlock = fmtHM(st)+"-"+fmtHM(endDt);
     // 予定に対する実測の集中時間を、メモの末尾に分単位で自動追記する
     // （レポート生成のAIにも渡るため、計画実行力のフィードバック材料になる）
     const timerNote = sessionResult ? `⏱ 集中${sessionResult.actual}分（予定${sessionResult.planned}分）` : "";
@@ -2123,8 +2130,7 @@ function TimerScreen({onToast, isActive}) {
     // タイマー記録は1時間枠ではなく「実際に集中した開始〜終了時刻」でカレンダーに書き戻す
     // （同じ時間帯キーを使うので、手動記録側で作ったイベントがあれば実測時刻に更新される）
     const calTitle = url.searchParams.get("task");
-    const calEnd = new Date(st.getTime() + (sessionResult?sessionResult.actual:selectedMin)*60000);
-    upsertCalendarEvent(formatDateStr(st), timeBlock, st.toISOString(), calEnd.toISOString(), calTitle);
+    upsertCalendarEvent(formatDateStr(st), timeBlock, st.toISOString(), endDt.toISOString(), calTitle);
     setSaving(false); setShowModal(false); setLogMemo(""); setTask(""); setSessionResult(null);
     setMode("break"); setTimeLeft(breakMin*60); setStartTime(null);
   };
@@ -3237,6 +3243,16 @@ function TutorialMiniLine() {
     <div style=${{alignSelf:"flex-start",background:"var(--bg)",border:"1px solid var(--border)",borderRadius:"10px 10px 10px 2px",padding:"6px 10px",fontSize:9.5,color:"var(--text)",maxWidth:"88%"}}>連携が完了しました🎉</div>
   <//>`;
 }
+function TutorialMiniPush() {
+  return html`<${TutorialMiniScreen}>
+    <div style=${{flex:1,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:8}}>
+      <div style=${{fontSize:30}}>🔔</div>
+      <div style=${{background:"var(--bg)",border:"1px solid var(--border)",borderRadius:10,padding:"8px 12px",fontSize:9.5,color:"var(--text)",textAlign:"center"}}>
+        ⏰ タイマー終了<br/><span style=${{color:"var(--sub)"}}>集中時間が終わりました！</span>
+      </div>
+    </div>
+  <//>`;
+}
 const TUTORIAL_STEPS = [
   { mock:TutorialMiniWelcome, title:"JIROKUへようこそ", body:"時間の使い方を記録して、AIコーチと一緒に振り返る習慣化アプリです。まずは基本の使い方を簡単にご案内します。" },
   { mock:TutorialMiniLog, title:"記録タブで時間帯を記録", body:"時間帯を選んで「何をしましたか？」と自己評価を入れて保存するだけ。メモを書くとXPボーナスがもらえます。" },
@@ -3244,28 +3260,46 @@ const TUTORIAL_STEPS = [
   { mock:TutorialMiniCalendar, title:"カレンダー連携で自動入力", body:"設定でGoogleカレンダーと連携すると、予定が記録に自動で入るので、選んで保存するだけになります。" },
   { mock:TutorialMiniReport, title:"AIレポートとステータス", body:"毎晩、その日の記録をもとにAIがスコアとフィードバックを届けます。ホーム画面の「ステータス」は、続けるほど伸びる指標です。" },
   { mock:TutorialMiniLine, title:"LINE連携でリマインダーを受け取る", body:"LINE公式アカウントを友だち追加し、登録したGmailアドレスを送ると連携完了。リマインダーやレポートが届くようになります。" },
+  { mock:TutorialMiniPush, title:"プッシュ通知を有効にしよう", body:"タイマー終了などの通知を、アプリを閉じていても受け取れるようにします。習慣化に欠かせない機能なので、必ず有効にしてください。", pushStep:true },
   { mock:TutorialMiniLog, title:"さっそく1つ記録してみよう", body:"習慣づくりは、まず1回から。次のボタンを押すと記録画面が開くので、直近の1時間で何をしていたかを記録してみましょう。", cta:true },
 ];
 function TutorialOverlay({onDone}) {
   const [step,setStep]=useState(0);
+  const [pushDone,setPushDone]=useState(()=>!!localStorage.getItem("push_enabled"));
+  const [pushLoading,setPushLoading]=useState(false);
+  const [pushError,setPushError]=useState("");
   const isLast = step === TUTORIAL_STEPS.length - 1;
   const s = TUTORIAL_STEPS[step];
   const Mock = s.mock;
+  const isPushStep = !!s.pushStep && !pushDone;
+
+  const doEnablePush=async()=>{
+    setPushLoading(true); setPushError("");
+    const r=await enablePushNotifications();
+    setPushLoading(false);
+    if(r.ok){ setPushDone(true); setStep(step+1); }
+    else setPushError(r.error||"有効化に失敗しました。もう一度お試しください");
+  };
+
   return html`
     <div style=${{position:"fixed",inset:0,background:"var(--bg)",zIndex:400,display:"flex",flexDirection:"column"}}>
       <div style=${{display:"flex",justifyContent:"flex-end",padding:"14px 16px"}}>
-        <button onClick=${onDone} style=${{background:"none",border:"none",color:"var(--sub)",fontSize:13,cursor:"pointer",fontFamily:"inherit"}}>スキップ</button>
+        ${!isPushStep&&html`<button onClick=${onDone} style=${{background:"none",border:"none",color:"var(--sub)",fontSize:13,cursor:"pointer",fontFamily:"inherit"}}>スキップ</button>`}
       </div>
       <div style=${{flex:1,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"0 28px",textAlign:"center"}}>
         <div style=${{marginBottom:22}}><${Mock}/></div>
         <div style=${{fontSize:19,fontWeight:800,color:"var(--text)",marginBottom:14}}>${s.title}</div>
         <div style=${{fontSize:14,lineHeight:1.9,color:"var(--sub)",maxWidth:320}}>${s.body}</div>
+        ${isPushStep&&pushError&&html`<div style=${{marginTop:12,fontSize:12.5,color:"var(--red, #e05555)"}}>${pushError}</div>`}
       </div>
       <div style=${{display:"flex",justifyContent:"center",gap:6,marginBottom:20}}>
         ${TUTORIAL_STEPS.map((_,i)=>html`<div key=${i} style=${{width:i===step?18:6,height:6,borderRadius:99,background:i===step?"var(--accent)":"var(--border)",transition:"width .2s"}}/>`)}
       </div>
       <div style=${{padding:"0 24px 32px"}}>
-        <button class="btn" onClick=${()=>isLast?onDone():setStep(step+1)}>${isLast?"さっそく記録する":"次へ"}</button>
+        ${isPushStep
+          ? html`<button class="btn" disabled=${pushLoading} onClick=${doEnablePush}>${pushLoading?"設定中...":"プッシュ通知を有効にする"}</button>`
+          : html`<button class="btn" onClick=${()=>isLast?onDone():setStep(step+1)}>${isLast?"さっそく記録する":"次へ"}</button>`
+        }
       </div>
     </div>
   `;
