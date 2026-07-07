@@ -76,6 +76,8 @@ function doGet(e) {
       case "adminBackfillReportReasons": result = adminBackfillReportReasons(e.parameter.coachEmail); break;
       case "adminRunNightlyReport": result = adminRunNightlyReport(e.parameter.coachEmail); break;
       case "adminRunNightlyCoachMessage": result = adminRunNightlyCoachMessage(e.parameter.coachEmail); break;
+      case "adminDiagnosePush": result = adminDiagnosePush(e.parameter.coachEmail, e.parameter.targetEmail); break;
+      case "adminTestPush": result = adminTestPush(e.parameter.coachEmail, e.parameter.targetEmail); break;
       case "sendMessage":  result = sendMessage(studentEmail, e.parameter); break;
       case "saveSettings": result = saveSettings(studentEmail, e.parameter); break;
       case "syncCalendar": result = syncCalendar(studentEmail, e.parameter); break;
@@ -2972,11 +2974,15 @@ function getFcmAccessToken() {
 
 // FCM経由でWebプッシュ通知を1件送信する。失敗しても呼び出し元は無視してよい
 // （通知はあくまで補助であり、LINE通知が主）
-function sendFcmPush(token, title, body) {
+// FCM送信の結果を詳細に返す（診断で失敗理由を見られるようにするため）。
+// { ok, code, error } を返す。呼び出し元がbooleanだけ欲しい場合は .ok を見る
+function sendFcmPushDetailed(token, title, body) {
   try {
     const projectId = PropertiesService.getScriptProperties().getProperty("FCM_PROJECT_ID");
+    if (!projectId) return { ok: false, error: "FCM_PROJECT_ID未設定" };
+    if (!token) return { ok: false, error: "トークンなし" };
     const accessToken = getFcmAccessToken();
-    if (!projectId || !accessToken || !token) return false;
+    if (!accessToken) return { ok: false, error: "アクセストークン取得失敗（FCM_CLIENT_EMAIL/PRIVATE_KEY未設定か不正）" };
     const payload = {
       message: {
         token: token,
@@ -2991,10 +2997,48 @@ function sendFcmPush(token, title, body) {
       payload: JSON.stringify(payload),
       muteHttpExceptions: true
     });
-    return res.getResponseCode() === 200;
+    const code = res.getResponseCode();
+    if (code === 200) return { ok: true, code: code };
+    return { ok: false, code: code, error: res.getContentText().substring(0, 300) };
   } catch (e) {
-    return false;
+    return { ok: false, error: String(e) };
   }
+}
+
+function sendFcmPush(token, title, body) {
+  return sendFcmPushDetailed(token, title, body).ok;
+}
+
+// プッシュ通知の設定状況を診断する（トークン登録の有無・FCM鍵の有無を確認）
+function adminDiagnosePush(coachEmail, targetEmail) {
+  if (!verifyCoach(coachEmail)) return { ok: false, error: "not a coach" };
+  const email = targetEmail || coachEmail;
+  const user = sheetToObjects(getSheet("Users")).find(u => u.student_email === email);
+  if (!user) return { ok: false, error: "user not found" };
+  const props = PropertiesService.getScriptProperties();
+  return {
+    ok: true,
+    email: email,
+    hasFcmToken: !!user.fcm_token,
+    fcmTokenPreview: user.fcm_token ? String(user.fcm_token).substring(0, 12) + "…" : null,
+    server: {
+      FCM_PROJECT_ID: !!props.getProperty("FCM_PROJECT_ID"),
+      FCM_CLIENT_EMAIL: !!props.getProperty("FCM_CLIENT_EMAIL"),
+      FCM_PRIVATE_KEY: !!props.getProperty("FCM_PRIVATE_KEY"),
+      accessTokenOk: !!getFcmAccessToken()
+    }
+  };
+}
+
+// 実際にテスト通知を1件送って、成否と失敗理由を返す
+function adminTestPush(coachEmail, targetEmail) {
+  if (!verifyCoach(coachEmail)) return { ok: false, error: "not a coach" };
+  const email = targetEmail || coachEmail;
+  const user = sheetToObjects(getSheet("Users")).find(u => u.student_email === email);
+  if (!user) return { ok: false, error: "user not found" };
+  if (!user.fcm_token) return { ok: false, error: "この生徒はまだプッシュ通知を有効にしていません（fcm_tokenなし）" };
+  const result = sendFcmPushDetailed(user.fcm_token, "🔔 テスト通知", "プッシュ通知は正常に届いています！");
+  return { ok: result.ok, detail: result };
 }
 
 function getTimerQueueSheet() {
