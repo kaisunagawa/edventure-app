@@ -520,10 +520,14 @@ async function upsertCalendarEvent(dateStr, key, startISO, endISO, title, origin
     try{ map = JSON.parse(localStorage.getItem(CAL_EVT_LS+dateStr)||"{}"); }catch{}
     const base = "https://www.googleapis.com/calendar/v3/calendars/primary/events";
     const headers = { Authorization:"Bearer "+token, "Content-Type":"application/json" };
+    // 色分け(colorId)はGoogleカレンダーの表示上あまり目立たず、見分けがつきにくいという
+    // フィードバックがあったため、タイトル自体に「✅ 」を付けて、どの画面・端末でも
+    // 文字で確実に「実際にやったこと」と分かるようにする（色は補助的な扱いにする）
+    const recordTitle = "✅ " + title;
     // extendedProperties.private.jirokuRecordで「JIROKUの記録から書き込んだ/更新した予定」と
     // 印を付けておく。カレンダー上は普通の予定として見えるが、アプリ側の「今日の予定」
     // 表示や自動入力では、既に完了したことをまた"予定"として出さないようこの印で除外する
-    const body = JSON.stringify({ summary: title, start:{ dateTime:startISO }, end:{ dateTime:endISO },
+    const body = JSON.stringify({ summary: recordTitle, start:{ dateTime:startISO }, end:{ dateTime:endISO },
       colorId: JIROKU_RECORD_COLOR_ID, extendedProperties:{ private:{ jirokuRecord:"1" } } });
 
     // 自動入力の元になった予定（=これから記録する内容と同じもの）が1件だけ特定できて
@@ -534,7 +538,7 @@ async function upsertCalendarEvent(dateStr, key, startISO, endISO, title, origin
     if(originalEventId && !map[key] && !alreadyClaimed){
       // 元の予定が記録した時間帯より長い場合、開始・終了時刻を記録の1時間分に
       // 縮めてしまわないよう、タイトルと色・印だけを更新し時刻には触れない
-      const titleOnlyBody = JSON.stringify({ summary: title,
+      const titleOnlyBody = JSON.stringify({ summary: recordTitle,
         colorId: JIROKU_RECORD_COLOR_ID, extendedProperties:{ private:{ jirokuRecord:"1" } } });
       const r0 = await fetch(base+"/"+encodeURIComponent(originalEventId), { method:"PATCH", headers, body:titleOnlyBody });
       if(r0.ok){
