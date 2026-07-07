@@ -333,10 +333,29 @@ function StudentMain({ student, onNoteSaved }) {
     setSummarizeMsg("");
     const r = await apiPost("coachSummarizeTranscript", { targetEmail: student.email, transcript: transcript.trim() });
     if (r.ok) {
-      setContent(r.data.content || "");
-      setPromises(r.data.promises || "");
-      setNextTheme(r.data.next_theme || "");
-      setSummarizeMsg("AIが整理した内容をフォームに反映しました。内容を確認してから保存してください");
+      const newContent = r.data.content || "";
+      const newPromises = r.data.promises || "";
+      const newNextTheme = r.data.next_theme || "";
+      // フォームのstate更新は非同期なので、そのままsaveNote()を呼ぶと更新前の
+      // 古い値を送ってしまう。整理結果をそのまま直接保存するようにする
+      setContent(newContent);
+      setPromises(newPromises);
+      setNextTheme(newNextTheme);
+      if (newContent.trim()) {
+        setSaving(true);
+        const rSave = await api("coachSaveNote", { targetEmail: student.email, date: noteDate, content: newContent.trim(), next_theme: newNextTheme.trim(), promises: newPromises.trim() });
+        setSaving(false);
+        if (rSave.ok) {
+          setSummarizeMsg("AIが整理して保存しました。AIコーチにも反映されます");
+          setTranscript(""); setContent(""); setNextTheme(""); setPromises("");
+          api("coachGetStudentDetail", { targetEmail: student.email }).then(rr => { if (rr.ok) setDetail(rr.data); });
+          onNoteSaved && onNoteSaved(student.email, noteDate);
+        } else {
+          setSummarizeMsg("整理はできましたが保存に失敗しました。フォームの内容を確認して保存し直してください");
+        }
+      } else {
+        setSummarizeMsg("AIが整理した内容をフォームに反映しました。内容を確認してから保存してください");
+      }
     } else {
       setSummarizeMsg(r.error || "整理に失敗しました");
     }
