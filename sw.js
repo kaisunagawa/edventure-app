@@ -1,4 +1,4 @@
-const CACHE = "jiroku-v3";
+const CACHE = "jiroku-v4";
 
 // タイマー終了などをバックグラウンドでも通知するためのFirebase Cloud Messaging。
 // 別ファイル（firebase-messaging-sw.js）として登録すると、同じスコープ('/')の
@@ -22,9 +22,27 @@ try {
   messaging.onBackgroundMessage((payload) => {
     const title = (payload.notification && payload.notification.title) || "JIROKU";
     const body = (payload.notification && payload.notification.body) || "";
-    self.registration.showNotification(title, { body, icon: "icon-192.png", badge: "icon-192.png" });
+    // 独自にshowNotificationを呼ぶ場合、FCMのwebpush.fcm_options.linkによる
+    // 標準クリック挙動は効かないため、リンク先をdataとして持たせて
+    // notificationclickハンドラで自前で開く
+    const link = (payload.data && payload.data.link) || (payload.fcmOptions && payload.fcmOptions.link) || "/";
+    self.registration.showNotification(title, { body, icon: "icon-192.png", badge: "icon-192.png", data: { url: link } });
   });
 } catch (e) { /* FCMなしでもキャッシュ機能は動かす */ }
+
+// プッシュ通知タップ時: 既に開いているタブがあればフォーカス、なければ新規に開く
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const url = (event.notification.data && event.notification.data.url) || "/";
+  event.waitUntil(
+    clients.matchAll({ type: "window", includeUncontrolled: true }).then((clientList) => {
+      for (const client of clientList) {
+        if (client.url.includes(self.location.origin) && "focus" in client) return client.focus();
+      }
+      if (clients.openWindow) return clients.openWindow(url);
+    })
+  );
+});
 
 self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', e => {

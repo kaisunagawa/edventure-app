@@ -2987,6 +2987,7 @@ function sendFcmPushDetailed(token, title, body) {
       message: {
         token: token,
         notification: { title: title, body: body },
+        data: { link: APP_URL },
         webpush: { fcm_options: { link: APP_URL } }
       }
     };
@@ -3106,9 +3107,6 @@ function checkTimerQueue() {
       const studentEmail = String(data[i][0]);
       const label = data[i][2] || "タイマー";
       const user = users.find(u => u.student_email === studentEmail);
-      if (user && user.line_user_id) {
-        sendLineMessage(user.line_user_id, "⏰ " + label + "が終了しました！\n記録を忘れずに📝\n" + APP_URL);
-      }
       if (user && user.fcm_token) {
         sendFcmPush(user.fcm_token, "⏰ " + label, "終了しました！記録を忘れずに📝");
       }
