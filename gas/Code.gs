@@ -3016,6 +3016,13 @@ function adminDiagnosePush(coachEmail, targetEmail) {
   const user = sheetToObjects(getSheet("Users")).find(u => u.student_email === email);
   if (!user) return { ok: false, error: "user not found" };
   const props = PropertiesService.getScriptProperties();
+  let accessTokenOk = false;
+  let accessTokenError = null;
+  try {
+    accessTokenOk = !!getFcmAccessToken();
+  } catch (e) {
+    accessTokenError = String(e);
+  }
   return {
     ok: true,
     email: email,
@@ -3025,7 +3032,8 @@ function adminDiagnosePush(coachEmail, targetEmail) {
       FCM_PROJECT_ID: !!props.getProperty("FCM_PROJECT_ID"),
       FCM_CLIENT_EMAIL: !!props.getProperty("FCM_CLIENT_EMAIL"),
       FCM_PRIVATE_KEY: !!props.getProperty("FCM_PRIVATE_KEY"),
-      accessTokenOk: !!getFcmAccessToken()
+      accessTokenOk: accessTokenOk,
+      accessTokenError: accessTokenError
     }
   };
 }
