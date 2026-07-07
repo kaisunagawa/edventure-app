@@ -380,12 +380,15 @@ function urlBase64ToUint8Array(base64String) {
 }
 
 async function enablePushNotifications() {
-  if (!("Notification" in window) || !("serviceWorker" in navigator)) {
-    return { ok: false, error: "このブラウザはプッシュ通知に対応していません" };
-  }
-  const perm = await Notification.requestPermission();
-  if (perm !== "granted") return { ok: false, error: "通知が許可されませんでした" };
+  // requestPermission自体が例外を投げる環境（対応が不完全なブラウザ等）でも
+  // 必ず{ok,error}を返すようにする。ここで例外が漏れると、呼び出し元の
+  // チュートリアルが「設定中...」のまま固まって進めなくなってしまうため
   try {
+    if (!("Notification" in window) || typeof Notification.requestPermission !== "function" || !("serviceWorker" in navigator)) {
+      return { ok: false, error: "このブラウザはプッシュ通知に対応していません" };
+    }
+    const perm = await Notification.requestPermission();
+    if (perm !== "granted") return { ok: false, error: "通知が許可されませんでした" };
     await loadFirebaseSdk();
     if (!firebase.apps.length) firebase.initializeApp(FIREBASE_CONFIG);
     const messaging = firebase.messaging();
@@ -2579,6 +2582,14 @@ function SettingsScreen({onToast,onLogout,onGoalSaved,profile,onProfileSaved,onC
       callback: async(tokenResp)=>{
         clearTimeout(safety);
         if(tokenResp.error){ setCalLoading(false); onToast("カレンダー連携に失敗しました"); return; }
+        // トークンを受け取れた時点で、Google側の許可(スコープの同意)自体は成功している。
+        // この後のカレンダーID取得・サーバー保存が失敗しても「許可済み」の記録は
+        // 別に残しておく（そうしないと、付随処理の失敗のたびに毎回この画面で
+        // 許可を求め続けることになってしまうため）
+        localStorage.setItem("cal_linked","1");
+        localStorage.setItem("cal_write_granted","1");
+        setCalLinked(true);
+        setCalWriteGranted(true);
         try{
           gcalToken=tokenResp.access_token;
           gcalTokenExp=Date.now()+(Number(tokenResp.expires_in)||3600)*1000;
@@ -2587,10 +2598,6 @@ function SettingsScreen({onToast,onLogout,onGoalSaved,profile,onProfileSaved,onC
           }).then(r=>r.json());
           const calId=calRes.id||CURRENT_USER.email;
           await gasPost("saveSettings",{google_calendar_id:calId});
-          localStorage.setItem("cal_linked","1");
-          localStorage.setItem("cal_write_granted","1");
-          setCalLinked(true);
-          setCalWriteGranted(true);
           onCalLinked && onCalLinked();
           fetchCalendarEvents(formatDateStr(new Date())); // 今日の予定を先読み
           onToast("カレンダーを連携しました！");
@@ -3369,6 +3376,22 @@ function TutorialMiniPush() {
     </div>
   <//>`;
 }
+function TutorialMiniAddHome() {
+  return html`<${TutorialMiniScreen}>
+    <div style=${{flex:1,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:8}}>
+      <div style=${{fontSize:30}}>➕</div>
+      <div style=${{background:"var(--bg)",border:"1px solid var(--border)",borderRadius:10,padding:"8px 12px",fontSize:9.5,color:"var(--text)",textAlign:"center"}}>
+        📱 ホーム画面<br/><span style=${{color:"var(--sub)"}}>JIROKUのアイコンを追加</span>
+      </div>
+    </div>
+  <//>`;
+}
+// PWAとしてホーム画面から起動している（=スタンドアロン表示）かどうか。
+// iOSは navigator.standalone、その他は display-mode:standalone メディアクエリで判定
+const isStandaloneDisplay = () =>
+  (window.navigator && window.navigator.standalone === true) ||
+  (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches);
+
 const TUTORIAL_STEPS = [
   { mock:TutorialMiniWelcome, title:"JIROKUへようこそ", body:"時間の使い方を記録して、AIコーチと一緒に振り返る習慣化アプリです。まずは基本の使い方を簡単にご案内します。" },
   { mock:TutorialMiniLog, title:"記録タブで時間帯を記録", body:"時間帯を選んで「何をしましたか？」と自己評価、そしてメモを入れて保存します。メモには、うまくできたか・感じたこと・改善点を書きましょう。振り返って気づくことが習慣化の一番のポイントです。" },
@@ -3376,25 +3399,38 @@ const TUTORIAL_STEPS = [
   { mock:TutorialMiniCalendar, title:"カレンダー連携で自動入力", body:"設定でGoogleカレンダーと連携すると、予定が記録に自動で入るので、選んで保存するだけになります。" },
   { mock:TutorialMiniReport, title:"AIレポートとステータス", body:"毎晩、その日の記録をもとにAIがスコアとフィードバックを届けます。ホーム画面の「ステータス」は、続けるほど伸びる指標です。" },
   { mock:TutorialMiniLine, title:"LINE連携でリマインダーを受け取る", body:"LINE公式アカウントを友だち追加し、登録したGmailアドレスを送ると連携完了。リマインダーやレポートが届くようになります。" },
+  { mock:TutorialMiniAddHome, title:"ホーム画面に追加しよう", body:"次のプッシュ通知を使うには、まずJIROKUをホーム画面に追加する必要があります。\niPhoneの場合：共有ボタン（□に↑）→「ホーム画面に追加」\nAndroidの場合：メニュー（⋮）→「ホーム画面に追加」またはインストール\n追加できたら、一度そのアイコンからこのページを開き直してください。",
+    skipIf: isStandaloneDisplay },
   { mock:TutorialMiniPush, title:"プッシュ通知を有効にしよう", body:"タイマー終了などの通知を、アプリを閉じていても受け取れるようにします。習慣化に欠かせない機能なので、必ず有効にしてください。", pushStep:true },
   { mock:TutorialMiniLog, title:"さっそく1つ記録してみよう", body:"習慣づくりは、まず1回から。次のボタンを押すと記録画面が開くので、直近の1時間で何をしていたかを記録してみましょう。", cta:true },
 ];
+const UNSUPPORTED_PUSH_ERROR = "このブラウザはプッシュ通知に対応していません";
 function TutorialOverlay({onDone}) {
+  // ホーム画面から既に開いている場合は「ホーム画面に追加」の案内を飛ばす
+  const [steps] = useState(()=>TUTORIAL_STEPS.filter(s=>!s.skipIf || !s.skipIf()));
   const [step,setStep]=useState(0);
   const [pushDone,setPushDone]=useState(()=>!!localStorage.getItem("push_enabled"));
   const [pushLoading,setPushLoading]=useState(false);
   const [pushError,setPushError]=useState("");
-  const isLast = step === TUTORIAL_STEPS.length - 1;
-  const s = TUTORIAL_STEPS[step];
+  const isLast = step === steps.length - 1;
+  const s = steps[step];
   const Mock = s.mock;
   const isPushStep = !!s.pushStep && !pushDone;
+  // ブラウザが技術的に非対応な場合だけ、詰まらないようスキップできるようにする
+  const isUnsupported = pushError === UNSUPPORTED_PUSH_ERROR;
 
   const doEnablePush=async()=>{
     setPushLoading(true); setPushError("");
-    const r=await enablePushNotifications();
+    try{
+      const r=await enablePushNotifications();
+      if(r.ok){ setPushDone(true); setStep(step+1); }
+      else setPushError(r.error||"有効化に失敗しました。もう一度お試しください");
+    }catch(e){
+      // ここに来ることは無いはずだが、万一例外が漏れても「設定中...」のまま
+      // 固まらないようにする
+      setPushError(String(e && e.message || e) || "有効化に失敗しました。もう一度お試しください");
+    }
     setPushLoading(false);
-    if(r.ok){ setPushDone(true); setStep(step+1); }
-    else setPushError(r.error||"有効化に失敗しました。もう一度お試しください");
   };
 
   return html`
@@ -3405,17 +3441,23 @@ function TutorialOverlay({onDone}) {
       <div style=${{flex:1,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"0 28px",textAlign:"center"}}>
         <div style=${{marginBottom:22}}><${Mock}/></div>
         <div style=${{fontSize:19,fontWeight:800,color:"var(--text)",marginBottom:14}}>${s.title}</div>
-        <div style=${{fontSize:14,lineHeight:1.9,color:"var(--sub)",maxWidth:320}}>${s.body}</div>
+        <div style=${{fontSize:14,lineHeight:1.9,color:"var(--sub)",maxWidth:320,whiteSpace:"pre-line"}}>${s.body}</div>
         ${isPushStep&&pushError&&html`<div style=${{marginTop:12,fontSize:12.5,color:"var(--red, #e05555)"}}>${pushError}</div>`}
       </div>
       <div style=${{display:"flex",justifyContent:"center",gap:6,marginBottom:20}}>
-        ${TUTORIAL_STEPS.map((_,i)=>html`<div key=${i} style=${{width:i===step?18:6,height:6,borderRadius:99,background:i===step?"var(--accent)":"var(--border)",transition:"width .2s"}}/>`)}
+        ${steps.map((_,i)=>html`<div key=${i} style=${{width:i===step?18:6,height:6,borderRadius:99,background:i===step?"var(--accent)":"var(--border)",transition:"width .2s"}}/>`)}
       </div>
       <div style=${{padding:"0 24px 32px"}}>
         ${isPushStep
           ? html`<button class="btn" disabled=${pushLoading} onClick=${doEnablePush}>${pushLoading?"設定中...":"プッシュ通知を有効にする"}</button>`
           : html`<button class="btn" onClick=${()=>isLast?onDone():setStep(step+1)}>${isLast?"さっそく記録する":"次へ"}</button>`
         }
+        ${isPushStep&&isUnsupported&&html`
+          <button onClick=${()=>{setPushError("");setStep(step+1);}}
+            style=${{width:"100%",background:"none",border:"none",color:"var(--sub)",fontSize:12.5,padding:"10px",cursor:"pointer",fontFamily:"inherit"}}>
+            このブラウザでは使えないので次へ進む
+          </button>
+        `}
       </div>
     </div>
   `;
