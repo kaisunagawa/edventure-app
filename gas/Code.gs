@@ -76,6 +76,7 @@ function doGet(e) {
       case "adminBackfillReportReasons": result = adminBackfillReportReasons(e.parameter.coachEmail); break;
       case "adminRunNightlyReport": result = adminRunNightlyReport(e.parameter.coachEmail); break;
       case "adminRunNightlyCoachMessage": result = adminRunNightlyCoachMessage(e.parameter.coachEmail); break;
+      case "adminBroadcastLine": result = adminBroadcastLine(e.parameter.coachEmail, e.parameter.message, e.parameter.confirm); break;
       case "adminDiagnosePush": result = adminDiagnosePush(e.parameter.coachEmail, e.parameter.targetEmail); break;
       case "adminTestPush": result = adminTestPush(e.parameter.coachEmail, e.parameter.targetEmail, e.parameter.title, e.parameter.body); break;
       case "sendMessage":  result = sendMessage(studentEmail, e.parameter); break;
@@ -2194,11 +2195,15 @@ function getSchedule(studentEmail) {
     const now = new Date();
     const start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     const end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59);
-    const data = cal.getEvents(start, end).map(ev => ({
-      title: ev.getTitle(),
-      time: ev.getStartTime().toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Tokyo" }),
-      sub: ev.getLocation() || ""
-    }));
+    // JIROKUの記録から自動で書き込んだ予定(jirokuRecordタグ付き)は、
+    // 既に完了したことなので「今日の予定」からは除外する（フロント側と同じ扱い）
+    const data = cal.getEvents(start, end)
+      .filter(ev => ev.getTag("jirokuRecord") !== "1")
+      .map(ev => ({
+        title: ev.getTitle(),
+        time: ev.getStartTime().toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Tokyo" }),
+        sub: ev.getLocation() || ""
+      }));
     return { ok: true, data };
   } catch (err) { return { ok: true, data: [] }; }
 }
@@ -2247,7 +2252,7 @@ function saveSettings(studentEmail, body) {
     if (String(data[i][emailIdx]) !== studentEmail) continue;
     if (body.notify_start    !== undefined) sheet.getRange(i + 1, startIdx    + 1).setValue(Number(body.notify_start) || 7);
     if (body.notify_end      !== undefined) sheet.getRange(i + 1, endIdx      + 1).setValue(Number(body.notify_end)   || 23);
-    if (body.notify_interval !== undefined) sheet.getRange(i + 1, intervalIdx + 1).setValue(Number(body.notify_interval) || 6);
+    if (body.notify_interval !== undefined) sheet.getRange(i + 1, intervalIdx + 1).setValue(Number(body.notify_interval) || 2);
     if (body.goal            !== undefined) sheet.getRange(i + 1, goal1Idx    + 1).setValue(body.goal);
     if (body.goal_deadline   !== undefined) sheet.getRange(i + 1, dead1Idx    + 1).setValue(body.goal_deadline);
     if (body.goal2           !== undefined) sheet.getRange(i + 1, goal2Idx    + 1).setValue(body.goal2);
@@ -2347,7 +2352,7 @@ function hourlyReminder() {
   sheetToObjects(getSheet("Users")).filter(u => u.is_active.toUpperCase() === "TRUE").forEach(user => {
     const start = Number(user.notify_start) || 7;
     const end = Number(user.notify_end) || 23;
-    const interval = Number(user.notify_interval) || 6;
+    const interval = Number(user.notify_interval) || 2;
     if (hour < start || hour > end) return;
     // 間隔チェック: 1日1回(interval=24)はstart時のみ、それ以外は間隔で割り切れる時間のみ
     if (interval >= 24) {
@@ -2364,6 +2369,33 @@ function hourlyReminder() {
       return lh >= hour - interval && lh <= hour;
     });
     if (alreadyLogged) return;
+
+    // 今日1件も記録が無い生徒には、AI生成コストをかけず、最後に記録した日からの
+    // 経過日数に応じてエスカレーションする固定テンプレを送る（1日空いた程度と、
+    // 何日も止まっている生徒とでは、声のかけ方を変えたいという要望に対応）
+    if (todayLogs.length === 0) {
+      const lastLogDateStr = user.last_log_date
+        ? (user.last_log_date instanceof Date ? formatDate(user.last_log_date) : String(user.last_log_date))
+        : "";
+      const daysSinceLastLog = lastLogDateStr
+        ? Math.round((new Date(today + "T00:00:00") - new Date(lastLogDateStr + "T00:00:00")) / 86400000)
+        : null;
+
+      if (daysSinceLastLog === null || daysSinceLastLog >= 2) {
+        let dormantText;
+        if (daysSinceLastLog === null) {
+          dormantText = "まだ1件も記録がありません。まずは直近の1時間、何をしていたか記録してみましょう";
+        } else if (daysSinceLastLog >= 7) {
+          dormantText = daysSinceLastLog + "日間記録がお休みになっています。無理のない範囲で、また1つから再開してみませんか？";
+        } else if (daysSinceLastLog >= 4) {
+          dormantText = daysSinceLastLog + "日間記録がありません。今日、1つだけでも記録してみましょう";
+        } else {
+          dormantText = daysSinceLastLog + "日間記録がありません。少しずつで大丈夫なので、今日1つ記録してみましょう";
+        }
+        notifyUserTimeSlot(user, "📝 記録のお願い", dormantText, dormantText + "\n📝 " + APP_URL);
+        return;
+      }
+    }
 
     // 最後に記録した時間からの経過時間
     const lastLogHour = todayLogs.length > 0
@@ -2549,6 +2581,23 @@ function adminRunNightlyCoachMessage(email) {
   if (!verifyAdmin(email)) return { ok: false, error: "not admin" };
   nightlyCoachMessage();
   return { ok: true, targetDate: nightlyTargetDate() };
+}
+
+// JIROKUに登録済み(is_active=TRUE)かつLINE連携済みの生徒全員にLINEでお知らせを送る。
+// confirm="yes"を渡さない限り実際には送信せず、対象人数とプレビューだけ返す
+// （一斉送信は取り消せないため、必ず事前確認できるようにしている）
+function adminBroadcastLine(email, message, confirm) {
+  if (!verifyAdmin(email)) return { ok: false, error: "not admin" };
+  if (!message) return { ok: false, error: "message is required" };
+  const targets = sheetToObjects(getSheet("Users")).filter(u =>
+    u.is_active.toUpperCase() === "TRUE" && u.line_user_id
+  );
+  if (confirm !== "yes") {
+    return { ok: true, dryRun: true, recipientCount: targets.length, preview: message };
+  }
+  let sent = 0;
+  targets.forEach(u => { if (sendLineMessage(u.line_user_id, message)) sent++; });
+  return { ok: true, dryRun: false, recipientCount: targets.length, sentCount: sent };
 }
 
 function nightlyCoachMessage() {
