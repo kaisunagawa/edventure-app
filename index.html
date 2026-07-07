@@ -1930,10 +1930,13 @@ function TimerScreen({onToast, isActive}) {
   const [showModal, setShowModal]     = useState(false);
   // タイマー完了後の記録をワンタップで確定できるよう、自己評価は初期値を入れておく
   // （毎回5段階から選び直す手間を減らす。もちろん自由に変更できる）
-  const [logFocus, setLogFocus]       = useState("4");
+  const [logFocus, setLogFocus]       = useState("4 — よくできた");
   const [logMemo, setLogMemo]         = useState("");
   const [logGoalRelated, setLogGoalRelated] = useState(()=>localStorage.getItem("jiroku_timer_goal_related")!=="false");
   const [saving, setSaving]           = useState(false);
+  // 今回のセッションの実測結果（予定◯分に対して実際◯分集中したか）。
+  // 途中で終えた場合も分単位で記録できるよう、モーダルを開く時点で確定させる
+  const [sessionResult, setSessionResult] = useState(null); // {planned, actual} | null
 
   // 状態をlocalStorageに保存
   useEffect(()=>{
@@ -2006,7 +2009,7 @@ function TimerScreen({onToast, isActive}) {
               setIsRunning(false);
               playBeep();
               cancelEndNotify(); // アプリ内で気づけたのでLINE通知は不要
-              if(modeRef.current === "focus"){ setSessionCount(c=>c+1); setShowModal(true); }
+              if(modeRef.current === "focus"){ setSessionCount(c=>c+1); setSessionResult({planned:selectedMinRef.current, actual:selectedMinRef.current}); setShowModal(true); }
               else { setMode("focus"); setTimeLeft(selectedMinRef.current*60); }
             }
           }
@@ -2023,7 +2026,7 @@ function TimerScreen({onToast, isActive}) {
       setIsRunning(false);
       playBeep();
       cancelEndNotify(); // アプリ内で気づけたのでLINE通知は不要
-      if(mode==="focus"){ setSessionCount(c=>c+1); setShowModal(true); }
+      if(mode==="focus"){ setSessionCount(c=>c+1); setSessionResult({planned:selectedMin, actual:selectedMin}); setShowModal(true); }
       else { setMode("focus"); setTimeLeft(selectedMin*60); }
       return;
     }
@@ -2043,29 +2046,33 @@ function TimerScreen({onToast, isActive}) {
     scheduleEndNotify(timeLeft, mode);
   };
   const pause = () => { primeAudio(); setIsRunning(false); cancelEndNotify(); };
-  const reset = () => { setIsRunning(false); setTimeLeft(selectedMin*60); setStartTime(null); setMode("focus"); setTask(""); localStorage.removeItem("jiroku_timer_state"); cancelEndNotify(); };
+  const reset = () => { setIsRunning(false); setTimeLeft(selectedMin*60); setStartTime(null); setMode("focus"); setTask(""); setSessionResult(null); localStorage.removeItem("jiroku_timer_state"); cancelEndNotify(); };
 
   const saveLog = async () => {
     setSaving(true);
     const st = startTime||new Date();
     const h  = st.getHours();
     const timeBlock = String(h).padStart(2,"0")+":00-"+String(h+1).padStart(2,"0")+":00";
+    // 予定に対する実測の集中時間を、メモの末尾に分単位で自動追記する
+    // （レポート生成のAIにも渡るため、計画実行力のフィードバック材料になる）
+    const timerNote = sessionResult ? `⏱ 集中${sessionResult.actual}分（予定${sessionResult.planned}分）` : "";
+    const memoToSave = [logMemo.trim(), timerNote].filter(Boolean).join("\n");
     const url = new URL(GAS_URL);
     url.searchParams.set("action","saveLog");
     url.searchParams.set("studentEmail",CURRENT_USER.email);
     url.searchParams.set("time_block",timeBlock);
-    url.searchParams.set("task",task.trim()||`ポモドーロ${selectedMin}分集中`);
+    url.searchParams.set("task",task.trim()||`ポモドーロ${sessionResult?sessionResult.actual:selectedMin}分集中`);
     url.searchParams.set("focus_level",logFocus);
-    url.searchParams.set("memo",logMemo.trim());
+    url.searchParams.set("memo",memoToSave);
     url.searchParams.set("goal_related",logGoalRelated?"true":"false");
     const res = await fetch(url).then(r=>r.json()).catch(()=>({ok:false}));
     if(!res.ok){ onToast("記録に失敗しました。もう一度お試しください"); setSaving(false); return; }
     if(res.xp_gained){ const lv=res.level_up?` → Lv.${res.level}！`:""; onToast(`+${res.xp_gained} XP 獲得${lv}`); }
     else onToast(res.updated?"記録を更新しました":"記録しました");
-    setSaving(false); setShowModal(false); setLogMemo(""); setTask("");
+    setSaving(false); setShowModal(false); setLogMemo(""); setTask(""); setSessionResult(null);
     setMode("break"); setTimeLeft(breakMin*60); setStartTime(null);
   };
-  const skipLog = () => { setShowModal(false); setTask(""); setMode("break"); setTimeLeft(breakMin*60); setStartTime(null); };
+  const skipLog = () => { setShowModal(false); setTask(""); setSessionResult(null); setMode("break"); setTimeLeft(breakMin*60); setStartTime(null); };
 
   const mins = Math.floor(timeLeft/60);
   const secs = timeLeft%60;
@@ -2133,7 +2140,16 @@ function TimerScreen({onToast, isActive}) {
       </div>
 
       ${startTime&&!showModal&&html`
-        <button onClick=${()=>{pause();setShowModal(true);}}
+        <button onClick=${()=>{
+            pause();
+            // 途中終了でも実際に集中した時間を分単位で確定させる（最低1分）。
+            // 休憩中に押した場合は、直前の集中セッションは完走済みなので予定＝実測
+            const actual = mode==="focus"
+              ? Math.max(1, Math.round((selectedMin*60 - timeLeft)/60))
+              : selectedMin;
+            setSessionResult({planned:selectedMin, actual});
+            setShowModal(true);
+          }}
           style=${{width:"100%",padding:"11px",borderRadius:12,border:"1.5px solid var(--accent)",
           background:"none",color:"var(--accent)",fontSize:14,fontWeight:600,cursor:"pointer",marginBottom:16}}>
           ✓ タスク完了・途中で記録する
@@ -2186,7 +2202,13 @@ function TimerScreen({onToast, isActive}) {
         onClick=${e=>{if(e.target===e.currentTarget)setShowModal(false);}}>
         <div style=${{background:"var(--card)",borderRadius:"20px 20px 0 0",padding:"24px 20px 32px",width:"100%",boxSizing:"border-box"}}>
           <div style=${{fontSize:20,fontWeight:800,marginBottom:4}}>お疲れ様でした！🎉</div>
-          <div style=${{fontSize:13,color:"var(--sub)",marginBottom:20}}>${selectedMin}分の集中セッションが完了しました。記録しましょう。</div>
+          <div style=${{fontSize:13,color:"var(--sub)",marginBottom:20}}>
+            ${sessionResult
+              ? (sessionResult.actual>=sessionResult.planned
+                  ? `${sessionResult.planned}分の集中セッションが完了しました。記録しましょう。`
+                  : `予定${sessionResult.planned}分のうち${sessionResult.actual}分集中しました。記録しましょう。`)
+              : `${selectedMin}分の集中セッションが完了しました。記録しましょう。`}
+          </div>
           <div class="form-grp">
             <label class="form-lbl">何をしましたか？</label>
             <input class="inp" value=${task} onInput=${e=>setTask(e.target.value)}
