@@ -1461,10 +1461,13 @@ function LogScreen({onToast, isActive}) {
           <${EvalPicker} value=${focus} onChange=${setFocus}/>
         </div>
         <div class="form-grp">
-          <label class="form-lbl">メモ（任意）</label>
-          <textarea class="txa" placeholder="気づいたことや振り返り..." value=${memo} onInput=${e=>setMemo(e.target.value)} />
+          <div style=${{display:"flex",justifyContent:"space-between",alignItems:"baseline",gap:8}}>
+            <label class="form-lbl" style=${{marginBottom:0}}>メモ（必須）</label>
+            <span style=${{fontSize:10.5,color:"var(--sub)",whiteSpace:"nowrap"}}>うまくできたか・感じたこと・改善点</span>
+          </div>
+          <textarea class="txa" style=${{marginTop:6}} placeholder="うまくいった点、感じたこと、次はこうしたい、など" value=${memo} onInput=${e=>setMemo(e.target.value)} />
         </div>
-        <button class="btn" onClick=${save} disabled=${!task.trim()||saving}>${saving?html`<span class="spin"/>`:recorded.has(block)?"更新する":"保存する"}</button>
+        <button class="btn" onClick=${save} disabled=${!task.trim()||!memo.trim()||saving}>${saving?html`<span class="spin"/>`:recorded.has(block)?"更新する":"保存する"}</button>
       </div>
     </div>
 
@@ -2289,11 +2292,14 @@ function TimerScreen({onToast, isActive}) {
             <${EvalPicker} value=${logFocus} onChange=${setLogFocus}/>
           </div>
           <div class="form-grp" style=${{marginBottom:20}}>
-            <label class="form-lbl">メモ（任意）</label>
-            <textarea class="txa" placeholder="気づいたことや振り返り..." value=${logMemo}
+            <div style=${{display:"flex",justifyContent:"space-between",alignItems:"baseline",gap:8}}>
+              <label class="form-lbl" style=${{marginBottom:0}}>メモ（必須）</label>
+              <span style=${{fontSize:10.5,color:"var(--sub)",whiteSpace:"nowrap"}}>うまくできたか・感じたこと・改善点</span>
+            </div>
+            <textarea class="txa" style=${{marginTop:6}} placeholder="うまくいった点、感じたこと、次はこうしたい、など" value=${logMemo}
               onInput=${e=>setLogMemo(e.target.value)}/>
           </div>
-          <button class="btn" onClick=${saveLog} disabled=${saving} style=${{marginBottom:10}}>
+          <button class="btn" onClick=${saveLog} disabled=${saving||!logMemo.trim()} style=${{marginBottom:10}}>
             ${saving?html`<span class="spin"/>`:html`記録して休憩へ（${breakMin}分）`}
           </button>
           <button onClick=${skipLog} style=${{width:"100%",background:"none",border:"none",color:"var(--sub)",fontSize:13,padding:"8px",cursor:"pointer"}}>
@@ -2311,7 +2317,7 @@ function TimerScreen({onToast, isActive}) {
 // ── 使い方 Q&A ──
 const FAQ_ITEMS = [
   { q:"記録のやり方は？",
-    a:"記録タブで時間帯を選び、「何をしましたか？」と自己評価を入れて保存するだけです。\n同じ時間帯にもう一度保存すると上書きされるので、間違えても大丈夫。\nメモを書くと+5XPのボーナスがあります。" },
+    a:"記録タブで時間帯を選び、「何をしましたか？」と自己評価、そしてメモを入れて保存します。\n同じ時間帯にもう一度保存すると上書きされるので、間違えても大丈夫。\nメモは「うまくできたか・感じたこと・改善点」を書く必須項目です。振り返って気づく時間そのものが習慣化に大切なので、必ず入力してください（+5XPも付きます）。" },
   { q:"同じ内容を複数の時間帯にまとめて記録したい",
     a:"記録タブの「⧉ まとめて記録」を押すと、複数の時間帯を選べるようになります。\n選び終わったら通常通り内容と自己評価を入れて保存すれば、選んだ時間帯すべてに同じ内容が一括で記録されます。\n会議や移動など、長時間同じことをしていた時に便利です。" },
   { q:"Googleカレンダーと連携したい",
@@ -3255,7 +3261,7 @@ function TutorialMiniPush() {
 }
 const TUTORIAL_STEPS = [
   { mock:TutorialMiniWelcome, title:"JIROKUへようこそ", body:"時間の使い方を記録して、AIコーチと一緒に振り返る習慣化アプリです。まずは基本の使い方を簡単にご案内します。" },
-  { mock:TutorialMiniLog, title:"記録タブで時間帯を記録", body:"時間帯を選んで「何をしましたか？」と自己評価を入れて保存するだけ。メモを書くとXPボーナスがもらえます。" },
+  { mock:TutorialMiniLog, title:"記録タブで時間帯を記録", body:"時間帯を選んで「何をしましたか？」と自己評価、そしてメモを入れて保存します。メモには、うまくできたか・感じたこと・改善点を書きましょう。振り返って気づくことが習慣化の一番のポイントです。" },
   { mock:TutorialMiniMulti, title:"まとめて記録も可能", body:"会議や移動など、同じ内容が続いた時は「まとめて記録」で複数の時間帯に一括保存できます。" },
   { mock:TutorialMiniCalendar, title:"カレンダー連携で自動入力", body:"設定でGoogleカレンダーと連携すると、予定が記録に自動で入るので、選んで保存するだけになります。" },
   { mock:TutorialMiniReport, title:"AIレポートとステータス", body:"毎晩、その日の記録をもとにAIがスコアとフィードバックを届けます。ホーム画面の「ステータス」は、続けるほど伸びる指標です。" },
