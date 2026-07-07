@@ -754,6 +754,10 @@ function ProfileTab({ student, detail, onReload }) {
   const syncStripe = async () => {
     setSyncingStripe(true);
     setStripeMsg("");
+    // 「Stripe連携用メールアドレス」欄に入力しただけで保存ボタンを押していないと、
+    // サーバー側には古い(空の)値のまま残り、生徒のログインメールで検索されて
+    // 見つからなくなる。同期の前に必ず現在のフォーム内容を保存しておく
+    await apiPost("coachSaveProfile", { targetEmail: student.email, ...form });
     const r = await api("coachSyncStripeOne", { targetEmail: student.email });
     setStripeMsg(r.ok ? "更新しました" : "同期に失敗しました: " + (r.error || ""));
     if (r.ok) onReload();
