@@ -2337,7 +2337,7 @@ function SettingsScreen({onToast,onLogout,onGoalSaved,profile,onProfileSaved,onC
   const [interval,setInterval]=useState(saved.interval||2);
   const [logStart,setLogStart]=useState(savedLogHours.start);
   const [logEnd,setLogEnd]=useState(savedLogHours.end);
-  const PRESET_OPTIONS=[15,20,25,30,45,60,90];
+  const PRESET_OPTIONS=[5,10,15,20,25,30,45,60,90];
   const [selectedPresets,setSelectedPresets]=useState(()=>JSON.parse(localStorage.getItem("timer_presets")||"[25,45,60]"));
   const [breakMin,setBreakMin]=useState(()=>Number(localStorage.getItem("timer_break")||"5"));
   const [alarmStyle,setAlarmStyle]=useState(()=>localStorage.getItem("timer_alarm_style")||"standard");
@@ -2553,10 +2553,10 @@ function SettingsScreen({onToast,onLogout,onGoalSaved,profile,onProfileSaved,onC
         <div style=${{display:"flex",flexWrap:"wrap",gap:8,marginBottom:18}}>
           ${PRESET_OPTIONS.map(min=>html`
             <button key=${min} onClick=${()=>togglePreset(min)}
-              style=${{padding:"8px 18px",borderRadius:20,border:`1.5px solid ${selectedPresets.includes(min)?"var(--accent)":"var(--border)"}`,
+              style=${{padding:"5px 12px",borderRadius:16,border:`1.5px solid ${selectedPresets.includes(min)?"var(--accent)":"var(--border)"}`,
               background:selectedPresets.includes(min)?"var(--accent)":"transparent",
               color:selectedPresets.includes(min)?"#fff":"var(--text)",
-              fontSize:14,fontWeight:600,cursor:"pointer",
+              fontSize:11,fontWeight:600,cursor:"pointer",
               opacity:!selectedPresets.includes(min)&&selectedPresets.length>=3?0.35:1,
               transition:"all .15s"}}>
               ${min}分
