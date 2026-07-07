@@ -806,6 +806,15 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
     : [];
   const actionItems = customActions !== null ? customActions : aiItems;
 
+  // タイマー画面の「何に集中しますか？」からも今日のアクションを選べるよう、
+  // 完了していない項目を端末に共有しておく（未完了のものだけ、選ぶ意味があるため）
+  useEffect(()=>{
+    try {
+      const remaining = actionItems.filter(item=>!checked[item]);
+      localStorage.setItem("jiroku_today_actions_shared", JSON.stringify({date:todayKey, items:remaining}));
+    } catch(e){}
+  },[actionItems, checked, todayKey]);
+
   const toggleCheck = (key) => {
     const next = {...checked, [key]: !checked[key]};
     setChecked(next);
@@ -2015,6 +2024,22 @@ function TimerScreen({onToast, isActive}) {
   // 途中で終えた場合も分単位で記録できるよう、モーダルを開く時点で確定させる
   const [sessionResult, setSessionResult] = useState(null); // {planned, actual} | null
 
+  // ホーム画面の「今日のアクション」を、タイマーの集中対象としてもワンタップで選べるようにする
+  const [todayActionOptions, setTodayActionOptions] = useState(()=>{
+    try {
+      const s = JSON.parse(localStorage.getItem("jiroku_today_actions_shared")||"null");
+      if (s && s.date === formatDateStr(new Date())) return s.items || [];
+    } catch(e){}
+    return [];
+  });
+  useEffect(()=>{
+    if (!isActive) return;
+    try {
+      const s = JSON.parse(localStorage.getItem("jiroku_today_actions_shared")||"null");
+      setTodayActionOptions(s && s.date === formatDateStr(new Date()) ? (s.items||[]) : []);
+    } catch(e){}
+  },[isActive]);
+
   // 状態をlocalStorageに保存
   useEffect(()=>{
     localStorage.setItem("jiroku_timer_state", JSON.stringify({
@@ -2209,6 +2234,16 @@ function TimerScreen({onToast, isActive}) {
           <label class="form-lbl">何に集中しますか？（任意）</label>
           <input class="inp" placeholder="例：資料作成、家事、勉強など" value=${task}
             onInput=${e=>setTask(e.target.value)} disabled=${isRunning}/>
+          ${!isRunning && todayActionOptions.length>0 && html`
+            <div style=${{display:"flex",flexWrap:"wrap",gap:6,marginTop:8}}>
+              ${todayActionOptions.map((a,i)=>html`
+                <button key=${i} onClick=${()=>setTask(a)}
+                  style=${{padding:"5px 10px",borderRadius:20,border:`1.5px solid ${task===a?"var(--accent)":"var(--border)"}`,background:task===a?"var(--accent-l)":"transparent",color:task===a?"var(--accent)":"var(--sub)",fontSize:11.5,fontWeight:500,cursor:"pointer",fontFamily:"inherit",maxWidth:"100%",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                  🎯 ${a}
+                </button>
+              `)}
+            </div>
+          `}
         </div>
       `}
 
