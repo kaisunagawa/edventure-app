@@ -461,7 +461,7 @@ async function getCalendarToken(interactive){
     try{
       const client=google.accounts.oauth2.initTokenClient({
         client_id: GOOGLE_CLIENT_ID,
-        scope: "https://www.googleapis.com/auth/calendar.readonly",
+        scope: "https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/calendar.events",
         use_fedcm_for_prompt: true,
         callback: (t)=>{
           clearTimeout(timeout);
@@ -495,8 +495,39 @@ function cleanupGcalLS(){
     const limit=addDays(formatDateStr(new Date()),-7);
     Object.keys(localStorage).forEach(k=>{
       if(k.startsWith(GCAL_LS) && k.slice(GCAL_LS.length)<limit) localStorage.removeItem(k);
+      if(k.startsWith(CAL_EVT_LS) && k.slice(CAL_EVT_LS.length)<limit) localStorage.removeItem(k);
     });
   }catch{}
+}
+// 記録をGoogleカレンダーへ自動で書き戻す（メインカレンダーのみ）。
+// 「日付ごとの {時間帯: eventId} マップ」を端末に持ち、同じ時間帯の再保存では
+// イベントを新規作成せず既存イベントを更新する（編集のたびに重複しないように）。
+// カレンダー未連携・書き込み権限が未許可（再連携前）の場合は静かに何もしない。
+// 記録の保存自体はGAS側で完了済みなので、ここで失敗しても記録には影響しない
+const CAL_EVT_LS = "jiroku_cal_evt_";
+async function upsertCalendarEvent(dateStr, key, startISO, endISO, title){
+  try{
+    if(!localStorage.getItem("cal_linked") || !title) return;
+    const token = await getCalendarToken(false);
+    if(!token) return;
+    let map = {};
+    try{ map = JSON.parse(localStorage.getItem(CAL_EVT_LS+dateStr)||"{}"); }catch{}
+    const base = "https://www.googleapis.com/calendar/v3/calendars/primary/events";
+    const headers = { Authorization:"Bearer "+token, "Content-Type":"application/json" };
+    const body = JSON.stringify({ summary: title, start:{ dateTime:startISO }, end:{ dateTime:endISO } });
+    if(map[key]){
+      const r = await fetch(base+"/"+encodeURIComponent(map[key]), { method:"PATCH", headers, body });
+      if(r.ok) return;
+      // カレンダー側で手動削除されていた場合(404/410)だけ作り直す。それ以外の失敗は諦める
+      if(r.status!==404 && r.status!==410) return;
+    }
+    const r2 = await fetch(base, { method:"POST", headers, body });
+    if(r2.ok){
+      const ev = await r2.json();
+      map[key] = ev.id;
+      try{ localStorage.setItem(CAL_EVT_LS+dateStr, JSON.stringify(map)); }catch{}
+    }
+  }catch(e){}
 }
 // 取得戦略: メモリ → 端末キャッシュ → 本人認証で取得 → サーバーの共有キャッシュ
 // 一度どこかで取得できれば端末とサーバーの両方に残るので、以後は認証なしで自動表示される。
@@ -869,9 +900,9 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
     ${showCommunity&&html`<${CommunityOverlay} onClose=${()=>setShowCommunity(false)}/>`}
 
     ${showGoalTimeEdit&&html`
-      <div style=${{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"flex-end",zIndex:200}}
+      <div style=${{position:"fixed",inset:0,height:"100dvh",background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"flex-end",zIndex:200}}
         onClick=${e=>{if(e.target===e.currentTarget)setShowGoalTimeEdit(false);}}>
-        <div style=${{background:"var(--card)",borderRadius:"20px 20px 0 0",padding:"24px 20px 32px",width:"100%",boxSizing:"border-box"}}>
+        <div style=${{background:"var(--card)",borderRadius:"20px 20px 0 0",padding:"24px 20px calc(28px + env(safe-area-inset-bottom))",width:"100%",boxSizing:"border-box",maxHeight:"70dvh",overflowY:"auto"}}>
           <div style=${{fontSize:18,fontWeight:800,marginBottom:4,color:"var(--text)"}}>1日の目標時間</div>
           <div style=${{fontSize:13,color:"var(--sub)",marginBottom:18,lineHeight:1.6}}>目標に関連した記録を、1日に何時間積みたいですか？無理なく続けられる時間を、自分で決めましょう。</div>
           <div style=${{display:"flex",flexWrap:"wrap",gap:8}}>
@@ -1361,6 +1392,12 @@ function LogScreen({onToast, isActive}) {
     try{ localStorage.setItem(LOGS_LS+date, JSON.stringify(next)); }catch(e){}
     if(blocks.length>1){ setMultiMode(false); setExtraBlocks([]); }
     setSaving(false);
+    // Googleカレンダーへ書き戻し（連携済みのときだけ・待たずに裏で実行）
+    blocks.forEach(b=>{
+      const stt = new Date(date+"T"+b.slice(0,5)+":00");
+      if(isNaN(stt)) return;
+      upsertCalendarEvent(date, b, stt.toISOString(), new Date(stt.getTime()+3600000).toISOString(), task.trim());
+    });
   };
 
   const recorded = new Set(logs.map(l => l.time_block));
@@ -2083,6 +2120,11 @@ function TimerScreen({onToast, isActive}) {
     if(!res.ok){ onToast("記録に失敗しました。もう一度お試しください"); setSaving(false); return; }
     if(res.xp_gained){ const lv=res.level_up?` → Lv.${res.level}！`:""; onToast(`+${res.xp_gained} XP 獲得${lv}`); }
     else onToast(res.updated?"記録を更新しました":"記録しました");
+    // タイマー記録は1時間枠ではなく「実際に集中した開始〜終了時刻」でカレンダーに書き戻す
+    // （同じ時間帯キーを使うので、手動記録側で作ったイベントがあれば実測時刻に更新される）
+    const calTitle = url.searchParams.get("task");
+    const calEnd = new Date(st.getTime() + (sessionResult?sessionResult.actual:selectedMin)*60000);
+    upsertCalendarEvent(formatDateStr(st), timeBlock, st.toISOString(), calEnd.toISOString(), calTitle);
     setSaving(false); setShowModal(false); setLogMemo(""); setTask(""); setSessionResult(null);
     setMode("break"); setTimeLeft(breakMin*60); setStartTime(null);
   };
@@ -2270,6 +2312,8 @@ const FAQ_ITEMS = [
     a:"設定の「Googleカレンダー連携」ボタンを押して、Googleアカウントでログインします。\n\n途中で「このアプリはGoogleで確認されていません」という警告が出ますが、これは小規模アプリに必ず表示されるものです。\n「詳細」→「kaisunagawa.github.io（安全ではないページ）に移動」→「許可」の順に進めば連携完了です。" },
   { q:"カレンダーを複数つなげたい（仕事用とプライベート用など）",
     a:"連携済みなら、設定のカレンダー欄に出る「連携するカレンダーを選ぶ（複数可）」から、読み込みたいカレンダーをチェックで複数選べます。選んだ全部の予定がまとめて表示されます。\n別のGoogleアカウントのカレンダーを使いたい場合は、そのカレンダーを連携中のアカウントに共有すると、一覧に出てきて選べるようになります。" },
+  { q:"記録した内容がGoogleカレンダーにも入るって本当？",
+    a:"はい。カレンダー連携済みなら、記録を保存すると自動でメインのカレンダーに予定として書き込まれます。\n手で入力した記録はその1時間の枠で、タイマーで測った記録は実際に集中した開始〜終了時刻で入ります。同じ時間帯を編集し直しても重複はせず、カレンダー側の予定が更新されます。\n以前から連携している人は、書き込みの許可が増えたため、一度設定から「Googleカレンダー連携」を押して連携し直すと有効になります。" },
   { q:"予定が記録に自動で入るって本当？",
     a:"カレンダー連携済みなら、未記録の時間帯を選ぶとその時間の予定名が「何をしましたか？」に自動で入ります。\nあとは自己評価を選んで保存するだけ。もちろん自由に書き換えられます。\n予定を後から追加・変更しても、しばらくすると自動で反映されます。" },
   { q:"LINE通知を受け取りたい",
