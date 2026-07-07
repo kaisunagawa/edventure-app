@@ -78,6 +78,8 @@ function doGet(e) {
       case "adminRunNightlyCoachMessage": result = adminRunNightlyCoachMessage(e.parameter.coachEmail); break;
       case "adminBroadcastLine": result = adminBroadcastLine(e.parameter.coachEmail, e.parameter.message, e.parameter.confirm); break;
       case "adminDiagnosePush": result = adminDiagnosePush(e.parameter.coachEmail, e.parameter.targetEmail); break;
+      case "adminDebugStripeSearch": result = adminDebugStripeSearch(e.parameter.coachEmail, e.parameter.email); break;
+      case "adminDebugCalendarColors": result = adminDebugCalendarColors(e.parameter.coachEmail); break;
       case "adminTestPush": result = adminTestPush(e.parameter.coachEmail, e.parameter.targetEmail, e.parameter.title, e.parameter.body); break;
       case "sendMessage":  result = sendMessage(studentEmail, e.parameter); break;
       case "saveSettings": result = saveSettings(studentEmail, e.parameter); break;
@@ -1964,19 +1966,53 @@ function fetchStripeTotalPaid(email) {
     { headers: { Authorization: authHeader }, muteHttpExceptions: true }
   );
   const custData = JSON.parse(custRes.getContentText());
-  if (!custData.data || custData.data.length === 0) return null;
-  const customerId = custData.data[0].id;
+  const customerId = (custData.data && custData.data.length > 0) ? custData.data[0].id : null;
 
+  if (customerId) {
+    let total = 0;
+    let currency = "jpy";
+    let startingAfter = null;
+    for (let i = 0; i < 10; i++) { // 最大1000件（100件×10ページ）まで
+      let url = `https://api.stripe.com/v1/charges?customer=${customerId}&limit=100`;
+      if (startingAfter) url += `&starting_after=${startingAfter}`;
+      const res = UrlFetchApp.fetch(url, { headers: { Authorization: authHeader }, muteHttpExceptions: true });
+      const data = JSON.parse(res.getContentText());
+      if (!data.data) break;
+      data.data.forEach(charge => {
+        if (charge.paid && !charge.refunded) {
+          total += charge.amount - (charge.amount_refunded || 0);
+          currency = charge.currency;
+        }
+      });
+      if (!data.has_more || data.data.length === 0) break;
+      startingAfter = data.data[data.data.length - 1].id;
+    }
+    if (total > 0) return { total, currency, customerId };
+  }
+
+  // 決済リンク等で正式な顧客(Customer)を作らず支払いだけが行われた場合、
+  // Stripe上は「ゲスト」という表示専用レコードになり、customers/searchでは
+  // 見つからない。billing_details.emailはChargesのsearch対応フィールドに
+  // 含まれていないため、一覧取得して自前でメールアドレス照合する
+  return fetchStripeTotalPaidByChargeEmail(email, authHeader);
+}
+
+function fetchStripeTotalPaidByChargeEmail(email, authHeader) {
+  const targetEmail = String(email).toLowerCase();
   let total = 0;
   let currency = "jpy";
+  let found = false;
   let startingAfter = null;
-  for (let i = 0; i < 10; i++) { // 最大1000件（100件×10ページ）まで
-    let url = `https://api.stripe.com/v1/charges?customer=${customerId}&limit=100`;
-    if (startingAfter) url += `&starting_after=${startingAfter}`;
+  for (let i = 0; i < 20; i++) { // 最大2000件（100件×20ページ）まで
+    let url = "https://api.stripe.com/v1/charges?limit=100";
+    if (startingAfter) url += "&starting_after=" + startingAfter;
     const res = UrlFetchApp.fetch(url, { headers: { Authorization: authHeader }, muteHttpExceptions: true });
     const data = JSON.parse(res.getContentText());
     if (!data.data) break;
     data.data.forEach(charge => {
+      const chargeEmail = (charge.billing_details && charge.billing_details.email) || charge.receipt_email || "";
+      if (String(chargeEmail).toLowerCase() !== targetEmail) return;
+      found = true;
       if (charge.paid && !charge.refunded) {
         total += charge.amount - (charge.amount_refunded || 0);
         currency = charge.currency;
@@ -1985,7 +2021,8 @@ function fetchStripeTotalPaid(email) {
     if (!data.has_more || data.data.length === 0) break;
     startingAfter = data.data[data.data.length - 1].id;
   }
-  return { total, currency, customerId };
+  if (!found) return null;
+  return { total, currency, customerId: null };
 }
 
 // 全生徒・全クライアント分をまとめてStripeと同期し、StudentProfileシートに記録する（日次トリガー）。
@@ -2034,6 +2071,49 @@ function syncStripeTotals() {
     }
   });
   Logger.log("Stripe同期完了");
+}
+
+// Stripe同期がなぜ失敗するかを切り分けるための診断用。
+// customers/searchの生レスポンスをそのまま返し、0件なのかAPIエラーなのかが分かるようにする
+// カレンダーの色分けが効いていない件の切り分け用。colorId毎の実際の名前・色を
+// Google公式のColors.get()からそのまま取得する（憶測でIDを決め打ちしないため）
+function adminDebugCalendarColors(coachEmail) {
+  if (!verifyCoach(coachEmail)) return { ok: false, error: "not a coach" };
+  const token = ScriptApp.getOAuthToken();
+  const res = UrlFetchApp.fetch("https://www.googleapis.com/calendar/v3/colors", {
+    headers: { Authorization: "Bearer " + token }, muteHttpExceptions: true
+  });
+  const code = res.getResponseCode();
+  let body;
+  try { body = JSON.parse(res.getContentText()); } catch (e) { body = res.getContentText(); }
+  return { ok: true, httpCode: code, response: body };
+}
+
+function adminDebugStripeSearch(coachEmail, email) {
+  if (!verifyCoach(coachEmail)) return { ok: false, error: "not a coach" };
+  const apiKey = PropertiesService.getScriptProperties().getProperty("STRIPE_SECRET_KEY");
+  if (!apiKey) return { ok: false, error: "STRIPE_SECRET_KEY未設定" };
+  // キーそのものは返さず、本番用(sk_live_)かテスト用(sk_test_)かのモードだけ分かるようにする
+  const keyMode = apiKey.startsWith("sk_live_") ? "live"
+    : apiKey.startsWith("sk_test_") ? "test"
+    : apiKey.startsWith("rk_live_") ? "live(restricted)"
+    : apiKey.startsWith("rk_test_") ? "test(restricted)"
+    : "unknown";
+  const authHeader = "Basic " + Utilities.base64Encode(apiKey + ":");
+  const query = `email:'${email}'`;
+  const res = UrlFetchApp.fetch(
+    "https://api.stripe.com/v1/customers/search?query=" + encodeURIComponent(query),
+    { headers: { Authorization: authHeader }, muteHttpExceptions: true }
+  );
+  const code = res.getResponseCode();
+  let body;
+  try { body = JSON.parse(res.getContentText()); } catch (e) { body = res.getContentText(); }
+
+  const chargeResult = fetchStripeTotalPaidByChargeEmail(email, authHeader);
+
+  return { ok: true, keyMode: keyMode, searchedEmail: email,
+    customerSearch: { httpCode: code, response: body },
+    chargeListMatch: chargeResult };
 }
 
 // コーチ画面から1人分だけ即時同期する（新規契約直後などの手動更新用）。
