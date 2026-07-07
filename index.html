@@ -524,9 +524,16 @@ async function upsertCalendarEvent(dateStr, key, startISO, endISO, title, origin
       colorId: JIROKU_RECORD_COLOR_ID, extendedProperties:{ private:{ jirokuRecord:"1" } } });
 
     // 自動入力の元になった予定（=これから記録する内容と同じもの）が1件だけ特定できて
-    // いる場合は、新規に別イベントを作らず、その予定自体を更新する（重複防止）
-    if(originalEventId && !map[key]){
-      const r0 = await fetch(base+"/"+encodeURIComponent(originalEventId), { method:"PATCH", headers, body });
+    // いる場合は、新規に別イベントを作らず、その予定自体を更新する（重複防止）。
+    // ただし、その予定が既に他の時間帯キーで紐付け済みなら（例: 2時間の予定を
+    // 2つの1時間枠に分けて別々に記録した場合）、二重に奪い合わないよう対象外にする
+    const alreadyClaimed = Object.values(map).includes(originalEventId);
+    if(originalEventId && !map[key] && !alreadyClaimed){
+      // 元の予定が記録した時間帯より長い場合、開始・終了時刻を記録の1時間分に
+      // 縮めてしまわないよう、タイトルと色・印だけを更新し時刻には触れない
+      const titleOnlyBody = JSON.stringify({ summary: title,
+        colorId: JIROKU_RECORD_COLOR_ID, extendedProperties:{ private:{ jirokuRecord:"1" } } });
+      const r0 = await fetch(base+"/"+encodeURIComponent(originalEventId), { method:"PATCH", headers, body:titleOnlyBody });
       if(r0.ok){
         map[key] = originalEventId;
         try{ localStorage.setItem(CAL_EVT_LS+dateStr, JSON.stringify(map)); }catch{}
