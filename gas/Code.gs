@@ -77,7 +77,7 @@ function doGet(e) {
       case "adminRunNightlyReport": result = adminRunNightlyReport(e.parameter.coachEmail); break;
       case "adminRunNightlyCoachMessage": result = adminRunNightlyCoachMessage(e.parameter.coachEmail); break;
       case "adminDiagnosePush": result = adminDiagnosePush(e.parameter.coachEmail, e.parameter.targetEmail); break;
-      case "adminTestPush": result = adminTestPush(e.parameter.coachEmail, e.parameter.targetEmail); break;
+      case "adminTestPush": result = adminTestPush(e.parameter.coachEmail, e.parameter.targetEmail, e.parameter.title, e.parameter.body); break;
       case "sendMessage":  result = sendMessage(studentEmail, e.parameter); break;
       case "saveSettings": result = saveSettings(studentEmail, e.parameter); break;
       case "syncCalendar": result = syncCalendar(studentEmail, e.parameter); break;
@@ -2291,7 +2291,7 @@ function morningScheduleNotify() {
   const getContextBundle = preloadContextBundles();
   sheetToObjects(getSheet("Users")).filter(u => u.is_active.toUpperCase() === "TRUE").forEach(user => {
     try {
-      if (!user.line_user_id) return;
+      if (!user.line_user_id && !user.fcm_token) return;
 
       const apiKey = PropertiesService.getScriptProperties().getProperty("CLAUDE_API_KEY");
       if (!apiKey) return;
@@ -2332,7 +2332,8 @@ ${EMOJI_STYLE}`;
       if (!result.content || !result.content[0]) return;
       const bodyText = stripSalutation(result.content[0].text);
       logCoachMessage(user.student_email, bodyText);
-      sendLineMessage(user.line_user_id, "🌅 おはようございます、" + (user.nickname || user.name) + "さん！\n\n" + formatForLine(bodyText));
+      notifyUserTimeSlot(user, "🌅 今日の一言", bodyText,
+        "🌅 おはようございます、" + (user.nickname || user.name) + "さん！\n\n" + formatForLine(bodyText));
     } catch (err) { Logger.log("morningCoach error: " + err); }
   });
 }
@@ -2415,13 +2416,14 @@ ${EMOJI_STYLE}
           if (result.content && result.content[0]) {
             const bodyText = stripSalutation(result.content[0].text).trim();
             logCoachMessage(user.student_email, bodyText);
-            sendLineMessage(user.line_user_id, bodyText + "\n📝 " + APP_URL);
+            notifyUserTimeSlot(user, "📝 記録リマインダー", bodyText, bodyText + "\n📝 " + APP_URL);
             return;
           }
         } catch(e) { Logger.log("hourlyCoach error: " + e); }
       }
     }
-    sendLineMessage(user.line_user_id, "⏱ " + timeBlock + " の記録タイム！\n📝 " + APP_URL);
+    notifyUserTimeSlot(user, "⏱ 記録タイム", timeBlock + " の記録タイム！",
+      "⏱ " + timeBlock + " の記録タイム！\n📝 " + APP_URL);
   });
 }
 
@@ -3040,13 +3042,13 @@ function adminDiagnosePush(coachEmail, targetEmail) {
 }
 
 // 実際にテスト通知を1件送って、成否と失敗理由を返す
-function adminTestPush(coachEmail, targetEmail) {
+function adminTestPush(coachEmail, targetEmail, title, body) {
   if (!verifyCoach(coachEmail)) return { ok: false, error: "not a coach" };
   const email = targetEmail || coachEmail;
   const user = sheetToObjects(getSheet("Users")).find(u => u.student_email === email);
   if (!user) return { ok: false, error: "user not found" };
   if (!user.fcm_token) return { ok: false, error: "この生徒はまだプッシュ通知を有効にしていません（fcm_tokenなし）" };
-  const result = sendFcmPushDetailed(user.fcm_token, "🔔 テスト通知", "プッシュ通知は正常に届いています！");
+  const result = sendFcmPushDetailed(user.fcm_token, title || "🔔 テスト通知", body || "プッシュ通知は正常に届いています！");
   return { ok: result.ok, detail: result };
 }
 
@@ -3651,6 +3653,18 @@ function stripSalutation(text) {
 // 送信結果を必ず確認してログに残す。muteHttpExceptions:trueだけだと
 // レート制限・無料枠超過・ブロック等での失敗が完全に無音で握りつぶされ、
 // 「送信にムラがある」原因の切り分けが一切できなくなるため
+// レポート・コーチメッセージ以外の「時間帯系」通知（記録リマインダー・朝の予定通知など）向け。
+// プッシュ通知を有効化済み(fcm_token あり)の生徒にはプッシュ、それ以外は今まで通りLINEに送る。
+// LINEはレポート・コーチメッセージ専用にして通数を抑える狙い
+function notifyUserTimeSlot(user, pushTitle, pushBody, lineText) {
+  if (user.fcm_token) {
+    const r = sendFcmPushDetailed(user.fcm_token, pushTitle, pushBody);
+    if (r.ok) return true;
+  }
+  if (user.line_user_id) { sendLineMessage(user.line_user_id, lineText); return true; }
+  return false;
+}
+
 function sendLineMessage(lineUserId, text) {
   if (!lineUserId || !LINE_CHANNEL_TOKEN) return false;
   try {
