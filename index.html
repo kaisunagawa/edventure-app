@@ -505,7 +505,10 @@ function cleanupGcalLS(){
 // カレンダー未連携・書き込み権限が未許可（再連携前）の場合は静かに何もしない。
 // 記録の保存自体はGAS側で完了済みなので、ここで失敗しても記録には影響しない
 const CAL_EVT_LS = "jiroku_cal_evt_";
-async function upsertCalendarEvent(dateStr, key, startISO, endISO, title){
+// 実際にやったこと（JIROKUが書き込む/更新する予定）は色を統一し、予定していただけの
+// 予定と見分けられるようにする（10 = Basil、緑系）
+const JIROKU_RECORD_COLOR_ID = "10";
+async function upsertCalendarEvent(dateStr, key, startISO, endISO, title, originalEventId){
   try{
     if(!localStorage.getItem("cal_linked") || !title) return;
     const token = await getCalendarToken(false);
@@ -514,11 +517,24 @@ async function upsertCalendarEvent(dateStr, key, startISO, endISO, title){
     try{ map = JSON.parse(localStorage.getItem(CAL_EVT_LS+dateStr)||"{}"); }catch{}
     const base = "https://www.googleapis.com/calendar/v3/calendars/primary/events";
     const headers = { Authorization:"Bearer "+token, "Content-Type":"application/json" };
-    // extendedProperties.private.jirokuRecordで「JIROKUの記録から書き込んだ予定」と
+    // extendedProperties.private.jirokuRecordで「JIROKUの記録から書き込んだ/更新した予定」と
     // 印を付けておく。カレンダー上は普通の予定として見えるが、アプリ側の「今日の予定」
     // 表示や自動入力では、既に完了したことをまた"予定"として出さないようこの印で除外する
     const body = JSON.stringify({ summary: title, start:{ dateTime:startISO }, end:{ dateTime:endISO },
-      extendedProperties:{ private:{ jirokuRecord:"1" } } });
+      colorId: JIROKU_RECORD_COLOR_ID, extendedProperties:{ private:{ jirokuRecord:"1" } } });
+
+    // 自動入力の元になった予定（=これから記録する内容と同じもの）が1件だけ特定できて
+    // いる場合は、新規に別イベントを作らず、その予定自体を更新する（重複防止）
+    if(originalEventId && !map[key]){
+      const r0 = await fetch(base+"/"+encodeURIComponent(originalEventId), { method:"PATCH", headers, body });
+      if(r0.ok){
+        map[key] = originalEventId;
+        try{ localStorage.setItem(CAL_EVT_LS+dateStr, JSON.stringify(map)); }catch{}
+        return;
+      }
+      // 更新に失敗した場合は下の通常フローで新規作成にフォールバックする
+    }
+
     if(map[key]){
       const r = await fetch(base+"/"+encodeURIComponent(map[key]), { method:"PATCH", headers, body });
       if(r.ok) return;
@@ -587,7 +603,7 @@ async function fetchCalendarEventsUncached(dateStr, interactive=false){
           const s=e.start?.dateTime?new Date(e.start.dateTime):null;
           const en=e.end?.dateTime?new Date(e.end.dateTime):null;
           return {
-            title:e.summary||"(無題)", allDay:!s,
+            id:e.id, title:e.summary||"(無題)", allDay:!s,
             startHour:s?s.getHours()+s.getMinutes()/60:null,
             endHour:en?en.getHours()+en.getMinutes()/60:null,
             time:s?s.toLocaleTimeString("ja-JP",{hour:"2-digit",minute:"2-digit"}):"終日",
@@ -623,6 +639,15 @@ function eventsForBlock(evs, block){
   if(!evs) return [];
   const h=parseInt(block);
   return evs.filter(e=>!e.allDay && e.startHour!==null && e.startHour<h+1 && e.endHour>h).map(e=>e.title);
+}
+// 自動入力の元になった予定そのものを特定するための版（重複作成を避けるために使う）。
+// この時間帯に重なる予定が1件だけの場合に限り「その予定＝これから記録する内容」と
+// みなす。複数重なっている場合はどれと紐付けるべきか判断できないため対象外にする
+function eventForBlock(evs, block){
+  if(!evs) return null;
+  const h=parseInt(block);
+  const matches=evs.filter(e=>!e.allDay && e.startHour!==null && e.startHour<h+1 && e.endHour>h && e.id);
+  return matches.length===1 ? matches[0] : null;
 }
 
 const MOCK_LOGS = [
@@ -1272,6 +1297,9 @@ function LogScreen({onToast, isActive}) {
   const [dayEvents, setDayEvents] = useState(null);
   const [calNeedsTap, setCalNeedsTap] = useState(false);
   const autoFillRef = useRef("");
+  // 自動入力の元になった予定のID（1件だけ特定できた場合のみ）。保存時にこの予定自体を
+  // 更新するために使う（別イベントとして重複作成しないようにするため）
+  const autoFillEventIdRef = useRef(null);
   useEffect(()=>{
     if(!isActive) return;
     setCalNeedsTap(false);
@@ -1293,10 +1321,14 @@ function LogScreen({onToast, isActive}) {
     const titles=eventsForBlock(dayEvents, block);
     if(titles.length===0){
       if(task===autoFillRef.current && task!=="") { setTask(""); autoFillRef.current=""; }
+      autoFillEventIdRef.current=null;
       return;
     }
     const suggestion=titles.join("、");
     if(task==="" || task===autoFillRef.current){ setTask(suggestion); autoFillRef.current=suggestion; }
+    // 重なっている予定が1件だけなら、その予定と紐付けて保存時に更新できるようにする
+    const single=eventForBlock(dayEvents, block);
+    autoFillEventIdRef.current = single ? single.id : null;
   },[block, dayEvents, logs]);
 
   // ブロック切替時に既存ログを読み込んでフォームに反映。
@@ -1407,11 +1439,14 @@ function LogScreen({onToast, isActive}) {
     try{ localStorage.setItem(LOGS_LS+date, JSON.stringify(next)); }catch(e){}
     if(blocks.length>1){ setMultiMode(false); setExtraBlocks([]); }
     setSaving(false);
-    // Googleカレンダーへ書き戻し（連携済みのときだけ・待たずに裏で実行）
+    // Googleカレンダーへ書き戻し（連携済みのときだけ・待たずに裏で実行）。
+    // 単一ブロックで、かつ自動入力の元になった予定が1件だけ特定できている場合は、
+    // 新規に別イベントを作らずその予定自体を更新する（同じ時間に重複しないように）
+    const linkedEventId = blocks.length===1 ? autoFillEventIdRef.current : null;
     blocks.forEach(b=>{
       const stt = new Date(date+"T"+b.slice(0,5)+":00");
       if(isNaN(stt)) return;
-      upsertCalendarEvent(date, b, stt.toISOString(), new Date(stt.getTime()+3600000).toISOString(), task.trim());
+      upsertCalendarEvent(date, b, stt.toISOString(), new Date(stt.getTime()+3600000).toISOString(), task.trim(), linkedEventId);
     });
   };
 
@@ -2481,6 +2516,7 @@ function SettingsScreen({onToast,onLogout,onGoalSaved,profile,onProfileSaved,onC
   const addGoal=()=>{ if(goals.length<3) setGoals([...goals,{goal:"",deadline:""}]); };
   const removeGoal=(i)=>{ if(goals.length>1) setGoals(goals.filter((_,j)=>j!==i)); };
   const [calLinked,setCalLinked]=useState(!!localStorage.getItem("cal_linked"));
+  const [calWriteGranted,setCalWriteGranted]=useState(!!localStorage.getItem("cal_write_granted"));
   const [calLoading,setCalLoading]=useState(false);
   // 複数カレンダー連携: アカウント内のカレンダー一覧から選択できるようにする
   const [calList,setCalList]=useState(null);
@@ -2545,7 +2581,9 @@ function SettingsScreen({onToast,onLogout,onGoalSaved,profile,onProfileSaved,onC
           const calId=calRes.id||CURRENT_USER.email;
           await gasPost("saveSettings",{google_calendar_id:calId});
           localStorage.setItem("cal_linked","1");
+          localStorage.setItem("cal_write_granted","1");
           setCalLinked(true);
+          setCalWriteGranted(true);
           onCalLinked && onCalLinked();
           fetchCalendarEvents(formatDateStr(new Date())); // 今日の予定を先読み
           onToast("カレンダーを連携しました！");
@@ -2786,10 +2824,15 @@ function SettingsScreen({onToast,onLogout,onGoalSaved,profile,onProfileSaved,onC
               <div style=${{display:"flex",alignItems:"center",gap:8,color:"var(--accent)",fontWeight:700,fontSize:14,padding:"10px 14px",background:"var(--accent-l)",borderRadius:10,marginBottom:10}}>
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>連携済み
               </div>
-              <button onClick=${linkCalendar} disabled=${calLoading}
-                style=${{width:"100%",padding:"9px",borderRadius:10,border:"1px solid var(--border)",background:"none",color:"var(--text)",fontSize:12.5,fontWeight:600,cursor:"pointer",fontFamily:"inherit",marginBottom:10}}>
-                ${calLoading?"連携中...":"記録をカレンダーに書き込む権限を許可する"}
-              </button>
+              ${calWriteGranted
+                ? html`<div style=${{display:"flex",alignItems:"center",gap:8,color:"var(--sub)",fontWeight:500,fontSize:12.5,padding:"9px 4px",marginBottom:10}}>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>記録のカレンダー書き込みも許可済み
+                  </div>`
+                : html`<button onClick=${linkCalendar} disabled=${calLoading}
+                    style=${{width:"100%",padding:"9px",borderRadius:10,border:"1px solid var(--border)",background:"none",color:"var(--text)",fontSize:12.5,fontWeight:600,cursor:"pointer",fontFamily:"inherit",marginBottom:10}}>
+                    ${calLoading?"連携中...":"記録をカレンダーに書き込む権限を許可する"}
+                  </button>`
+              }
               ${calList===null
                 ? html`<button onClick=${loadCalList} disabled=${calListLoading}
                     style=${{width:"100%",padding:"9px",borderRadius:10,border:"1px solid var(--border)",background:"none",color:"var(--text)",fontSize:12.5,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>
