@@ -514,7 +514,11 @@ async function upsertCalendarEvent(dateStr, key, startISO, endISO, title){
     try{ map = JSON.parse(localStorage.getItem(CAL_EVT_LS+dateStr)||"{}"); }catch{}
     const base = "https://www.googleapis.com/calendar/v3/calendars/primary/events";
     const headers = { Authorization:"Bearer "+token, "Content-Type":"application/json" };
-    const body = JSON.stringify({ summary: title, start:{ dateTime:startISO }, end:{ dateTime:endISO } });
+    // extendedProperties.private.jirokuRecordで「JIROKUの記録から書き込んだ予定」と
+    // 印を付けておく。カレンダー上は普通の予定として見えるが、アプリ側の「今日の予定」
+    // 表示や自動入力では、既に完了したことをまた"予定"として出さないようこの印で除外する
+    const body = JSON.stringify({ summary: title, start:{ dateTime:startISO }, end:{ dateTime:endISO },
+      extendedProperties:{ private:{ jirokuRecord:"1" } } });
     if(map[key]){
       const r = await fetch(base+"/"+encodeURIComponent(map[key]), { method:"PATCH", headers, body });
       if(r.ok) return;
@@ -577,7 +581,9 @@ async function fetchCalendarEventsUncached(dateStr, interactive=false){
       const items=[];
       responses.forEach(r=>{ if(r&&r.items) items.push(...r.items); });
       if(responses.some(r=>r&&r.items)){
-        const evs=items.filter(e=>e.status!=="cancelled").map(e=>{
+        // JIROKUの記録から自動で書き込んだ予定（jirokuRecordの印付き）は、
+        // 既に完了したことなので「今日の予定」表示・記録の自動入力からは除外する
+        const evs=items.filter(e=>e.status!=="cancelled" && !e.extendedProperties?.private?.jirokuRecord).map(e=>{
           const s=e.start?.dateTime?new Date(e.start.dateTime):null;
           const en=e.end?.dateTime?new Date(e.end.dateTime):null;
           return {
