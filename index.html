@@ -483,6 +483,13 @@ const GCAL_LS="gcal_evs_";
 // 記録タブの自動入力に反映されなかった）
 const GCAL_TTL_MS = 10*60*1000;
 const gcalFresh = dateStr => gcalCache[dateStr] && (Date.now()-(gcalCacheAt[dateStr]||0)) < GCAL_TTL_MS;
+// 連携カレンダーの選択を変えた時などに、古い選択で取得済みのキャッシュを全て破棄する
+function clearCalendarCache(){
+  Object.keys(gcalCache).forEach(k=>delete gcalCache[k]);
+  Object.keys(gcalCacheAt).forEach(k=>delete gcalCacheAt[k]);
+  Object.keys(gcalSynced).forEach(k=>delete gcalSynced[k]);
+  try{ Object.keys(localStorage).forEach(k=>{ if(k.startsWith(GCAL_LS)) localStorage.removeItem(k); }); }catch{}
+}
 function cleanupGcalLS(){
   try{
     const limit=addDays(formatDateStr(new Date()),-7);
@@ -529,10 +536,17 @@ async function fetchCalendarEventsUncached(dateStr, interactive=false){
     try{
       const timeMin=new Date(dateStr+"T00:00:00").toISOString();
       const timeMax=new Date(dateStr+"T23:59:59").toISOString();
-      const r=await fetch("https://www.googleapis.com/calendar/v3/calendars/primary/events?singleEvents=true&orderBy=startTime&maxResults=50&timeMin="+encodeURIComponent(timeMin)+"&timeMax="+encodeURIComponent(timeMax),
-        {headers:{Authorization:"Bearer "+token}}).then(r=>r.json());
-      if(r.items){
-        const evs=r.items.filter(e=>e.status!=="cancelled").map(e=>{
+      // 連携するカレンダーは複数選択できる（仕事用＋プライベート用など）。
+      // 未設定ならメインカレンダー（primary）のみ
+      const calIds=JSON.parse(localStorage.getItem("jiroku_cal_ids")||'["primary"]');
+      const responses=await Promise.all(calIds.map(id=>
+        fetch("https://www.googleapis.com/calendar/v3/calendars/"+encodeURIComponent(id)+"/events?singleEvents=true&orderBy=startTime&maxResults=50&timeMin="+encodeURIComponent(timeMin)+"&timeMax="+encodeURIComponent(timeMax),
+          {headers:{Authorization:"Bearer "+token}}).then(r=>r.json()).catch(()=>null)
+      ));
+      const items=[];
+      responses.forEach(r=>{ if(r&&r.items) items.push(...r.items); });
+      if(responses.some(r=>r&&r.items)){
+        const evs=items.filter(e=>e.status!=="cancelled").map(e=>{
           const s=e.start?.dateTime?new Date(e.start.dateTime):null;
           const en=e.end?.dateTime?new Date(e.end.dateTime):null;
           return {
@@ -542,7 +556,7 @@ async function fetchCalendarEventsUncached(dateStr, interactive=false){
             time:s?s.toLocaleTimeString("ja-JP",{hour:"2-digit",minute:"2-digit"}):"終日",
             sub:e.location||(e.hangoutLink?"Zoom/Meet":"")
           };
-        });
+        }).sort((a,b)=>(a.startHour??-1)-(b.startHour??-1));
         gcalCache[dateStr]=evs; gcalCacheAt[dateStr]=Date.now();
         try{ localStorage.setItem(GCAL_LS+dateStr, JSON.stringify({t:Date.now(),evs})); cleanupGcalLS(); }catch{}
         // サーバーへ同期（コーチのプロンプト用＆次回起動・他端末のフォールバック）
@@ -2348,6 +2362,38 @@ function SettingsScreen({onToast,onLogout,onGoalSaved,profile,onProfileSaved,onC
   const removeGoal=(i)=>{ if(goals.length>1) setGoals(goals.filter((_,j)=>j!==i)); };
   const [calLinked,setCalLinked]=useState(!!localStorage.getItem("cal_linked"));
   const [calLoading,setCalLoading]=useState(false);
+  // 複数カレンダー連携: アカウント内のカレンダー一覧から選択できるようにする
+  const [calList,setCalList]=useState(null);
+  const [calListLoading,setCalListLoading]=useState(false);
+  const [selectedCalIds,setSelectedCalIds]=useState(()=>{
+    try{ return JSON.parse(localStorage.getItem("jiroku_cal_ids")||'["primary"]'); }catch(e){ return ["primary"]; }
+  });
+  const loadCalList=async()=>{
+    setCalListLoading(true);
+    let token=await getCalendarToken(false);
+    if(!token) token=await getCalendarToken(true);
+    if(!token){ setCalListLoading(false); onToast("カレンダー一覧の取得に失敗しました"); return; }
+    try{
+      const r=await fetch("https://www.googleapis.com/calendar/v3/users/me/calendarList?minAccessRole=reader&maxResults=50",
+        {headers:{Authorization:"Bearer "+token}}).then(r=>r.json());
+      if(r.items){
+        // メインを先頭に、次に名前順で並べる
+        const list=r.items.map(c=>({id:c.primary?"primary":c.id, summary:c.summaryOverride||c.summary||c.id, primary:!!c.primary}))
+          .sort((a,b)=>(b.primary?1:0)-(a.primary?1:0) || String(a.summary).localeCompare(String(b.summary),"ja"));
+        setCalList(list);
+      } else onToast("カレンダー一覧の取得に失敗しました");
+    }catch(e){ onToast("カレンダー一覧の取得に失敗しました"); }
+    setCalListLoading(false);
+  };
+  const toggleCalId=(id)=>{
+    const next=selectedCalIds.includes(id)
+      ? selectedCalIds.filter(x=>x!==id)
+      : [...selectedCalIds,id];
+    if(next.length===0) return; // 最低1つは必須
+    setSelectedCalIds(next);
+    localStorage.setItem("jiroku_cal_ids",JSON.stringify(next));
+    clearCalendarCache(); // 選択が変わったら古い予定キャッシュを破棄して取り直す
+  };
   const [pushEnabled,setPushEnabled]=useState(!!localStorage.getItem("push_enabled"));
   const [pushLoading,setPushLoading]=useState(false);
   const enablePush=async()=>{
@@ -2616,8 +2662,29 @@ function SettingsScreen({onToast,onLogout,onGoalSaved,profile,onProfileSaved,onC
         <${SectionHeader} icon="📅" title="Googleカレンダー連携"/>
         <p style=${{fontSize:13,color:"var(--sub)",lineHeight:1.7,marginBottom:14}}>${calLinked?"連携済みです。ホームに今日の予定が表示され、記録の「何をしましたか？」に予定が自動入力されます。":"連携すると、ホームに今日の予定が表示され、記録の「何をしましたか？」にカレンダーの予定が自動で入ります。記録の手間が大幅に減ります。"}</p>
         ${calLinked
-          ? html`<div style=${{display:"flex",alignItems:"center",gap:8,color:"var(--accent)",fontWeight:700,fontSize:14,padding:"10px 14px",background:"var(--accent-l)",borderRadius:10}}>
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>連携済み
+          ? html`<div>
+              <div style=${{display:"flex",alignItems:"center",gap:8,color:"var(--accent)",fontWeight:700,fontSize:14,padding:"10px 14px",background:"var(--accent-l)",borderRadius:10,marginBottom:10}}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>連携済み
+              </div>
+              ${calList===null
+                ? html`<button onClick=${loadCalList} disabled=${calListLoading}
+                    style=${{width:"100%",padding:"9px",borderRadius:10,border:"1px solid var(--border)",background:"none",color:"var(--text)",fontSize:12.5,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>
+                    ${calListLoading?"読み込み中...":"連携するカレンダーを選ぶ（複数可）"}
+                  </button>`
+                : html`<div>
+                    <div style=${{fontSize:12,color:"var(--sub)",marginBottom:8,fontWeight:500}}>予定を読み込むカレンダー（複数選択できます）</div>
+                    ${calList.map(c=>{
+                      const on=selectedCalIds.includes(c.id);
+                      return html`<button key=${c.id} onClick=${()=>toggleCalId(c.id)}
+                        style=${{display:"flex",alignItems:"center",gap:8,width:"100%",padding:"9px 11px",marginBottom:6,borderRadius:9,border:`1.5px solid ${on?"var(--accent)":"var(--border)"}`,background:on?"var(--accent-l)":"transparent",cursor:"pointer",fontFamily:"inherit",textAlign:"left"}}>
+                        <div style=${{width:16,height:16,borderRadius:5,border:`2px solid ${on?"var(--accent)":"var(--border)"}`,background:on?"var(--accent)":"transparent",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
+                          ${on&&html`<svg width="10" height="10" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="white" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`}
+                        </div>
+                        <span style=${{fontSize:13,color:on?"var(--accent)":"var(--text)",fontWeight:on?600:400,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>${c.summary}${c.primary?"（メイン）":""}</span>
+                      </button>`;
+                    })}
+                    <div style=${{fontSize:11,color:"var(--sub)",lineHeight:1.6,marginTop:4}}>別のGoogleアカウントのカレンダーを使いたい場合は、そのカレンダーをこのアカウントに共有すると一覧に表示されます。</div>
+                  </div>`}
             </div>`
           : html`<button class="btn" onClick=${linkCalendar} disabled=${calLoading}>${calLoading?"連携中...":"Googleカレンダーを連携する"}</button>`
         }
