@@ -3196,6 +3196,7 @@ const TUTORIAL_STEPS = [
   { mock:TutorialMiniCalendar, title:"カレンダー連携で自動入力", body:"設定でGoogleカレンダーと連携すると、予定が記録に自動で入るので、選んで保存するだけになります。" },
   { mock:TutorialMiniReport, title:"AIレポートとステータス", body:"毎晩、その日の記録をもとにAIがスコアとフィードバックを届けます。ホーム画面の「ステータス」は、続けるほど伸びる指標です。" },
   { mock:TutorialMiniLine, title:"LINE連携でリマインダーを受け取る", body:"LINE公式アカウントを友だち追加し、登録したGmailアドレスを送ると連携完了。リマインダーやレポートが届くようになります。" },
+  { mock:TutorialMiniLog, title:"さっそく1つ記録してみよう", body:"習慣づくりは、まず1回から。次のボタンを押すと記録画面が開くので、直近の1時間で何をしていたかを記録してみましょう。", cta:true },
 ];
 function TutorialOverlay({onDone}) {
   const [step,setStep]=useState(0);
@@ -3216,7 +3217,7 @@ function TutorialOverlay({onDone}) {
         ${TUTORIAL_STEPS.map((_,i)=>html`<div key=${i} style=${{width:i===step?18:6,height:6,borderRadius:99,background:i===step?"var(--accent)":"var(--border)",transition:"width .2s"}}/>`)}
       </div>
       <div style=${{padding:"0 24px 32px"}}>
-        <button class="btn" onClick=${()=>isLast?onDone():setStep(step+1)}>${isLast?"はじめる":"次へ"}</button>
+        <button class="btn" onClick=${()=>isLast?onDone():setStep(step+1)}>${isLast?"さっそく記録する":"次へ"}</button>
       </div>
     </div>
   `;
@@ -3232,7 +3233,9 @@ function App() {
   const [calLinked,setCalLinked]=useState(!!localStorage.getItem("cal_linked"));
   const [calBannerDismissed,setCalBannerDismissed]=useState(false);
   const [showTutorial,setShowTutorial]=useState(!localStorage.getItem("tutorial_seen"));
-  const dismissTutorial=()=>{ localStorage.setItem("tutorial_seen","1"); setShowTutorial(false); };
+  // チュートリアル終了後は記録タブに着地させる（登録だけして使い始めない人が多いため、
+  // 最初の1件を記録するところまで自然に誘導する）。スキップ時も同様に記録タブへ
+  const dismissTutorial=()=>{ localStorage.setItem("tutorial_seen","1"); setShowTutorial(false); setTab("log"); };
   const [goalData,setGoalData]=useState(()=>{
     const g=localStorage.getItem("jiroku_goals"); if(g) try{return JSON.parse(g);}catch(e){}
     const old=localStorage.getItem("jiroku_goal"); if(old) try{const p=JSON.parse(old); if(p.goal) return [p];}catch(e){}
