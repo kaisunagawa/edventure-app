@@ -2459,7 +2459,7 @@ function SettingsScreen({onToast,onLogout,onGoalSaved,profile,onProfileSaved,onC
     const safety=setTimeout(()=>setCalLoading(false), 45000);
     const client=google.accounts.oauth2.initTokenClient({
       client_id: GOOGLE_CLIENT_ID,
-      scope: "https://www.googleapis.com/auth/calendar.readonly",
+      scope: "https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/calendar.events",
       error_callback: ()=>{ clearTimeout(safety); setCalLoading(false); onToast("連携できませんでした。もう一度お試しください"); },
       callback: async(tokenResp)=>{
         clearTimeout(safety);
@@ -2714,6 +2714,10 @@ function SettingsScreen({onToast,onLogout,onGoalSaved,profile,onProfileSaved,onC
               <div style=${{display:"flex",alignItems:"center",gap:8,color:"var(--accent)",fontWeight:700,fontSize:14,padding:"10px 14px",background:"var(--accent-l)",borderRadius:10,marginBottom:10}}>
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>連携済み
               </div>
+              <button onClick=${linkCalendar} disabled=${calLoading}
+                style=${{width:"100%",padding:"9px",borderRadius:10,border:"1px solid var(--border)",background:"none",color:"var(--text)",fontSize:12.5,fontWeight:600,cursor:"pointer",fontFamily:"inherit",marginBottom:10}}>
+                ${calLoading?"連携中...":"記録をカレンダーに書き込む権限を許可する"}
+              </button>
               ${calList===null
                 ? html`<button onClick=${loadCalList} disabled=${calListLoading}
                     style=${{width:"100%",padding:"9px",borderRadius:10,border:"1px solid var(--border)",background:"none",color:"var(--text)",fontSize:12.5,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>
