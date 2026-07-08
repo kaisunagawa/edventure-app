@@ -68,9 +68,11 @@ function doGet(e) {
       case "coachGetStudents":      result = coachGetStudents(e.parameter.coachEmail); break;
       case "coachGetStudentDetail": result = coachGetStudentDetail(e.parameter.coachEmail, e.parameter.targetEmail); break;
       case "coachSaveNote":         result = coachSaveNote(e.parameter.coachEmail, e.parameter); break;
+      case "coachVerifyNote":       result = coachVerifyNote(e.parameter.coachEmail, e.parameter); break;
       case "coachPrepSummary":      result = coachPrepSummary(e.parameter.coachEmail, e.parameter.targetEmail); break;
       case "coachSyncStripeOne":    result = coachSyncStripeOne(e.parameter.coachEmail, e.parameter); break;
       case "coachAddClient":       result = coachAddClient(e.parameter.coachEmail, e.parameter); break;
+      case "adminFixChatworkMisassignment": result = adminFixChatworkMisassignment(e.parameter.coachEmail, e.parameter.wrongEmail, e.parameter.correctEmail, e.parameter.correctName); break;
       case "coachListChatworkContacts": result = coachListChatworkContacts(e.parameter.coachEmail); break;
       case "coachSyncChatworkOne": result = coachSyncChatworkOne(e.parameter.coachEmail, e.parameter); break;
       case "adminGetOverview":     result = adminGetOverview(e.parameter.coachEmail); break;
@@ -1052,7 +1054,14 @@ function getCoachingNotesSheet() {
   let sheet = getSheet("CoachingNotes");
   if (!sheet) {
     sheet = SpreadsheetApp.openById(SPREADSHEET_ID).insertSheet("CoachingNotes");
-    sheet.appendRow(["note_id", "coach_email", "student_email", "date", "content", "next_theme", "promises", "created_at"]);
+    sheet.appendRow(["note_id", "coach_email", "student_email", "date", "content", "next_theme", "promises", "created_at", "unverified"]);
+    return sheet;
+  }
+  // 既存シートに後から追加された列（unverified）が無い場合の自己修復
+  const lastCol = sheet.getLastColumn();
+  const headers = lastCol > 0 ? sheet.getRange(1, 1, 1, lastCol).getValues()[0] : [];
+  if (!headers.includes("unverified")) {
+    sheet.getRange(1, headers.length + 1).setValue("unverified");
   }
   return sheet;
 }
@@ -1150,6 +1159,32 @@ function coachGetStudents(coachEmail) {
 }
 
 // JIROKU未登録のクライアントを手動でCRMに追加する（契約書・Stripe情報だけ先に管理したい場合）
+// 「Chatworkから取り込む」で誤って自分自身のメールアドレスに紐付けてしまった
+// 場合の復旧用。coachEmailのプロフィールからchatwork_id/room_idを取り除いた上で、
+// 正しいメールアドレスへ改めて取り込む（一度きりの手動復旧用ヘルパー）
+function adminFixChatworkMisassignment(coachEmail, wrongEmail, correctEmail, correctName) {
+  if (!verifyCoach(coachEmail)) return { ok: false, error: "not a coach" };
+  const sheet = getStudentProfileSheet();
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0];
+  const emailIdx = headers.indexOf("student_email");
+  const cwIdIdx = headers.indexOf("chatwork_id");
+  const cwRoomIdx = headers.indexOf("chatwork_room_id");
+  let cwId = "", cwRoom = "";
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][emailIdx]) === wrongEmail) {
+      cwId = String(data[i][cwIdIdx] || "");
+      cwRoom = String(data[i][cwRoomIdx] || "");
+      sheet.getRange(i + 1, cwIdIdx + 1).setValue("");
+      sheet.getRange(i + 1, cwRoomIdx + 1).setValue("");
+      break;
+    }
+  }
+  if (!cwId) return { ok: false, error: "wrongEmail側にchatwork_idが見つかりませんでした" };
+  const addResult = coachAddClient(coachEmail, { email: correctEmail, name: correctName, chatwork_id: cwId, chatwork_room_id: cwRoom });
+  return { ok: true, movedChatworkId: cwId, movedRoomId: cwRoom, addResult: addResult };
+}
+
 function coachAddClient(coachEmail, body) {
   if (!verifyCoach(coachEmail)) return { ok: false, error: "not a coach" };
   const email = String(body.email || "").trim().toLowerCase();
@@ -1589,6 +1624,8 @@ function coachSaveNote(coachEmail, body) {
   if (!content) return { ok: false, error: "empty content" };
   const sheet = getCoachingNotesSheet();
   const now = new Date().toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" });
+  // unverified: AI(Zoom文字起こしの自動整理)が保存した場合はTRUE。要約が間違っている
+  // 可能性があるため、コーチが後から確認するまで「未確認」の印を残しておく
   sheet.appendRow([
     "cn_" + Date.now(),
     coachEmail,
@@ -1597,9 +1634,30 @@ function coachSaveNote(coachEmail, body) {
     content.slice(0, 2000),
     String(body.next_theme || "").slice(0, 500),
     String(body.promises || "").slice(0, 500),
-    now
+    now,
+    body.unverified ? "TRUE" : "FALSE"
   ]);
   return { ok: true };
+}
+
+// AI下書きとして保存されたコーチングログを、コーチが内容を確認した印を付ける
+function coachVerifyNote(coachEmail, body) {
+  if (!verifyCoach(coachEmail)) return { ok: false, error: "not a coach" };
+  const noteId = String(body.note_id || "");
+  const sheet = getCoachingNotesSheet();
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0];
+  const idIdx = headers.indexOf("note_id");
+  const coachIdx = headers.indexOf("coach_email");
+  const unverifiedIdx = headers.indexOf("unverified");
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][idIdx]) === noteId) {
+      if (String(data[i][coachIdx]) !== coachEmail) return { ok: false, error: "not your note" };
+      sheet.getRange(i + 1, unverifiedIdx + 1).setValue("FALSE");
+      return { ok: true };
+    }
+  }
+  return { ok: false, error: "note not found" };
 }
 
 // 過去のコーチングログをまとめてインポートする（JIROKU導入前の履歴の一括登録用）。
@@ -1770,6 +1828,7 @@ ${lastNoteText}
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 const STUDENT_PROFILE_HEADERS = ["student_email","coach_email","name","birthdate","gender","family","address","phone","occupation","profile_notes",
+  "instagram","tiktok",
   "contract_start","contract_end","payment_type","contract_amount","installment_count","updated_at",
   "stripe_email","stripe_total_paid","stripe_currency","stripe_synced_at",
   "chatwork_id","chatwork_room_id"];
@@ -1826,7 +1885,7 @@ function coachSaveProfile(coachEmail, body) {
   const data = sheet.getDataRange().getValues();
   const headers = data[0];
   const emailIdx = headers.indexOf("student_email");
-  const fields = ["name","birthdate","gender","family","address","phone","occupation","profile_notes","contract_start","contract_end","payment_type","contract_amount","installment_count","stripe_email"];
+  const fields = ["name","birthdate","gender","family","address","phone","occupation","profile_notes","instagram","tiktok","contract_start","contract_end","payment_type","contract_amount","installment_count","stripe_email"];
 
   const now = new Date().toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" });
   for (let i = 1; i < data.length; i++) {
@@ -3906,8 +3965,8 @@ function setupSheets() {
     "Journal": ["date","student_email","diary","updated_at","auto_summary"],
     "TimerQueue": ["student_email","end_time","label","notified","created_at"],
     "Achievements": ["achievement_id","date","student_email","nickname","avatar","message","created_at"],
-    "CoachingNotes": ["note_id","coach_email","student_email","date","content","next_theme","promises","created_at"],
-    "StudentProfile": ["student_email","coach_email","name","birthdate","gender","family","address","phone","occupation","profile_notes","contract_start","contract_end","payment_type","contract_amount","installment_count","updated_at","stripe_email","stripe_total_paid","stripe_currency","stripe_synced_at","chatwork_id","chatwork_room_id"],
+    "CoachingNotes": ["note_id","coach_email","student_email","date","content","next_theme","promises","created_at","unverified"],
+    "StudentProfile": ["student_email","coach_email","name","birthdate","gender","family","address","phone","occupation","profile_notes","instagram","tiktok","contract_start","contract_end","payment_type","contract_amount","installment_count","updated_at","stripe_email","stripe_total_paid","stripe_currency","stripe_synced_at","chatwork_id","chatwork_room_id"],
     "ContractFiles": ["file_id","student_email","file_name","file_url","note","uploaded_at"],
     "ChatworkMessages": ["message_id","room_id","student_email","account_id","sender_name","body","send_time","synced_at"]
   };

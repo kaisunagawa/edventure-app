@@ -302,6 +302,9 @@ function StudentMain({ student, onNoteSaved }) {
     if (!confirm("このコーチングログを削除しますか？")) return;
     apiPost("coachDeleteNote", { targetEmail: student.email, note_id: noteId }).then(r => { if (r.ok) reloadDetail(); });
   };
+  const verifyNote = (noteId) => {
+    api("coachVerifyNote", { note_id: noteId }).then(r => { if (r.ok) reloadDetail(); });
+  };
 
   useEffect(() => {
     setDetail(null); setPrep(null); setTab("overview");
@@ -343,10 +346,12 @@ function StudentMain({ student, onNoteSaved }) {
       setNextTheme(newNextTheme);
       if (newContent.trim()) {
         setSaving(true);
-        const rSave = await api("coachSaveNote", { targetEmail: student.email, date: noteDate, content: newContent.trim(), next_theme: newNextTheme.trim(), promises: newPromises.trim() });
+        // AI(Notion AIの文字起こし要約)からの自動保存は、要約が間違っている可能性が
+        // あるため「未確認」の印を付けて残す。コーチングログ一覧から後で確認できる
+        const rSave = await api("coachSaveNote", { targetEmail: student.email, date: noteDate, content: newContent.trim(), next_theme: newNextTheme.trim(), promises: newPromises.trim(), unverified: "true" });
         setSaving(false);
         if (rSave.ok) {
-          setSummarizeMsg("AIが整理して保存しました。AIコーチにも反映されます");
+          setSummarizeMsg("AIが整理して保存しました（未確認の印付き）。AIコーチにも反映されます");
           setTranscript(""); setContent(""); setNextTheme(""); setPromises("");
           api("coachGetStudentDetail", { targetEmail: student.email }).then(rr => { if (rr.ok) setDetail(rr.data); });
           onNoteSaved && onNoteSaved(student.email, noteDate);
@@ -501,6 +506,16 @@ function StudentMain({ student, onNoteSaved }) {
                   入会日: ${detail.joined_at || "不明"}
                 </div>
               </div>
+
+              ${(detail.profile?.instagram || detail.profile?.tiktok) && html`
+                <div class="card">
+                  <div class="card-label">SNSアカウント</div>
+                  <div style=${{fontSize:13,lineHeight:2}}>
+                    ${detail.profile.instagram && html`<div>📷 Instagram: ${detail.profile.instagram}</div>`}
+                    ${detail.profile.tiktok && html`<div>🎵 TikTok: ${detail.profile.tiktok}</div>`}
+                  </div>
+                </div>
+              `}
             </div>
           </div>
         `}
@@ -590,7 +605,7 @@ function StudentMain({ student, onNoteSaved }) {
           ${sessionMode && html`
             <div class="card" style=${{marginBottom:20}}>
               <div class="card-label">Zoomの文字起こしから自動整理</div>
-              <div style=${{fontSize:11.5,color:"var(--sub)",marginBottom:10}}>Zoomの文字起こし機能で出力されたテキストを貼り付けると、AIが「話した内容」「約束事項」「次回テーマ」に整理して下のフォームに反映します。保存前に必ず内容を確認してください。</div>
+              <div style=${{fontSize:11.5,color:"var(--sub)",marginBottom:10}}>Zoomの文字起こし機能で出力されたテキストを貼り付けると、AIが「話した内容」「約束事項」「次回テーマ」に整理してそのまま保存します。要約が間違っている可能性があるため「AI下書き・未確認」の印を付けて保存するので、下のコーチング履歴から後で内容を確認してください。</div>
               <textarea class="txa" value=${transcript} onChange=${e => setTranscript(e.target.value)} placeholder="Zoomの文字起こしをここに貼り付け" style=${{marginBottom:10,minHeight:90}}/>
               <button class="btn" onClick=${summarizeTranscript} disabled=${summarizing || !transcript.trim()}>${summarizing ? "整理中..." : "AIで整理する"}</button>
               ${summarizeMsg && html`<span style=${{fontSize:12,color:"var(--accent)",marginLeft:10}}>${summarizeMsg}</span>`}
@@ -629,10 +644,16 @@ function StudentMain({ student, onNoteSaved }) {
               <div class="card-label">コーチング履歴</div>
               ${detail.notes.length === 0 && html`<div style=${{fontSize:13,color:"var(--sub)"}}>まだ記録がありません</div>`}
               ${detail.notes.map((n, i) => html`
-                <div key=${n.note_id} style=${{padding:"10px 0",borderBottom:i < detail.notes.length-1 ? "1px solid var(--border)" : "none"}}>
-                  <div style=${{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
-                    <div style=${{fontSize:12,fontWeight:600,color:"var(--accent)"}}>${fmtDate(n.date)}</div>
-                    <button onClick=${() => deleteNote(n.note_id)} style=${{background:"none",border:"none",color:"var(--sub)",fontSize:11.5,cursor:"pointer",fontFamily:"inherit"}}>削除</button>
+                <div key=${n.note_id} style=${{padding:"10px 0",borderBottom:i < detail.notes.length-1 ? "1px solid var(--border)" : "none",background:n.unverified==="TRUE"?"var(--amber-l, #fff8e6)":"transparent"}}>
+                  <div style=${{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4,gap:8}}>
+                    <div style=${{display:"flex",alignItems:"center",gap:8}}>
+                      <div style=${{fontSize:12,fontWeight:600,color:"var(--accent)"}}>${fmtDate(n.date)}</div>
+                      ${n.unverified==="TRUE" && html`<span style=${{fontSize:10.5,fontWeight:700,color:"#a06b00",background:"#ffe9b3",borderRadius:20,padding:"2px 8px"}}>⚠️ AI下書き・未確認</span>`}
+                    </div>
+                    <div style=${{display:"flex",gap:10,alignItems:"center"}}>
+                      ${n.unverified==="TRUE" && html`<button onClick=${() => verifyNote(n.note_id)} style=${{background:"none",border:"1px solid var(--accent)",color:"var(--accent)",borderRadius:8,fontSize:11,padding:"3px 8px",cursor:"pointer",fontFamily:"inherit"}}>確認済みにする</button>`}
+                      <button onClick=${() => deleteNote(n.note_id)} style=${{background:"none",border:"none",color:"var(--sub)",fontSize:11.5,cursor:"pointer",fontFamily:"inherit"}}>削除</button>
+                    </div>
                   </div>
                   <div style=${{fontSize:13,lineHeight:1.7,whiteSpace:"pre-wrap",marginBottom:4}}>${n.content}</div>
                   ${n.promises && html`<div style=${{fontSize:11.5,color:"var(--sub)"}}>約束: ${n.promises}</div>`}
@@ -659,6 +680,7 @@ function ProfileTab({ student, detail, onReload }) {
     name: p.name || student.name || "", birthdate: p.birthdate || "", gender: p.gender || "", family: p.family || "",
     address: p.address || "", phone: p.phone || "",
     occupation: p.occupation || "", profile_notes: p.profile_notes || "",
+    instagram: p.instagram || "", tiktok: p.tiktok || "",
     contract_start: p.contract_start || "", contract_end: p.contract_end || "",
     payment_type: p.payment_type || "lump", contract_amount: p.contract_amount || "",
     installment_count: p.installment_count || "", stripe_email: p.stripe_email || ""
@@ -804,6 +826,16 @@ function ProfileTab({ student, detail, onReload }) {
         <input class="inp" value=${form.phone} onChange=${e=>set("phone", e.target.value)} placeholder="例：090-1234-5678" style=${{marginBottom:12}}/>
         <label class="lbl">職業</label>
         <input class="inp" value=${form.occupation} onChange=${e=>set("occupation", e.target.value)} placeholder="例：会社員、経営者、学生など" style=${{marginBottom:12}}/>
+        <div style=${{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:12}}>
+          <div>
+            <label class="lbl">Instagram</label>
+            <input class="inp" value=${form.instagram} onChange=${e=>set("instagram", e.target.value)} placeholder="@handle または URL"/>
+          </div>
+          <div>
+            <label class="lbl">TikTok</label>
+            <input class="inp" value=${form.tiktok} onChange=${e=>set("tiktok", e.target.value)} placeholder="@handle または URL"/>
+          </div>
+        </div>
         <label class="lbl">プロフィールメモ（性格・背景など自由記述）</label>
         <textarea class="txa" value=${form.profile_notes} onChange=${e=>set("profile_notes", e.target.value)} placeholder="コーチングに役立つ背景情報を自由に" style=${{marginBottom:0}}/>
       </div>
