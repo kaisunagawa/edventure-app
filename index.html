@@ -509,13 +509,22 @@ function cleanupGcalLS(){
 // 記録の保存自体はGAS側で完了済みなので、ここで失敗しても記録には影響しない
 const CAL_EVT_LS = "jiroku_cal_evt_";
 // 実際にやったこと（JIROKUが書き込む/更新する予定）は色を統一し、予定していただけの
-// 予定と見分けられるようにする（10 = Basil、緑系）
-const JIROKU_RECORD_COLOR_ID = "10";
-async function upsertCalendarEvent(dateStr, key, startISO, endISO, title, exactOriginalEventId){
+// 予定と見分けられるようにする（8 = Graphite、目立たない灰色。✅マークで判別できるため
+// 色自体は主張しすぎないものにする）
+const JIROKU_RECORD_COLOR_ID = "8";
+// 通信エラーやトークンの一時的な失効で書き込みに失敗すると、以前は何の痕跡も残らず
+// 静かに諦めていたため、原因が特定できなかった。1回だけ再試行し、それでも失敗したら
+// コンソールにログを残す（ユーザー体験は変えず、次に同じ問題が起きた時に調査できるように）
+async function upsertCalendarEvent(dateStr, key, startISO, endISO, title, exactOriginalEventId, isRetry){
   try{
     if(!localStorage.getItem("cal_linked") || !title) return;
     const token = await getCalendarToken(false);
-    if(!token) return;
+    if(!token) {
+      if(!isRetry) console.warn("[JIROKU calendar] token取得失敗、1秒後に再試行", {dateStr, key, title});
+      if(!isRetry) return setTimeout(()=>upsertCalendarEvent(dateStr, key, startISO, endISO, title, exactOriginalEventId, true), 1000);
+      console.error("[JIROKU calendar] token取得に再試行しても失敗", {dateStr, key, title});
+      return;
+    }
     let map = {};
     try{ map = JSON.parse(localStorage.getItem(CAL_EVT_LS+dateStr)||"{}"); }catch{}
     const base = "https://www.googleapis.com/calendar/v3/calendars/primary/events";
@@ -550,16 +559,37 @@ async function upsertCalendarEvent(dateStr, key, startISO, endISO, title, exactO
     if(map[key]){
       const r = await fetch(base+"/"+encodeURIComponent(map[key]), { method:"PATCH", headers, body });
       if(r.ok) return;
-      // カレンダー側で手動削除されていた場合(404/410)だけ作り直す。それ以外の失敗は諦める
-      if(r.status!==404 && r.status!==410) return;
+      // カレンダー側で手動削除されていた場合(404/410)だけ作り直す。それ以外の失敗は
+      // 一時的な通信エラーの可能性があるため、1回だけ再試行してから諦める
+      if(r.status!==404 && r.status!==410){
+        if(!isRetry){
+          console.warn("[JIROKU calendar] 更新失敗、1秒後に再試行", {dateStr, key, title, status:r.status});
+          setTimeout(()=>upsertCalendarEvent(dateStr, key, startISO, endISO, title, exactOriginalEventId, true), 1000);
+        } else {
+          console.error("[JIROKU calendar] 更新に再試行しても失敗", {dateStr, key, title, status:r.status});
+        }
+        return;
+      }
     }
     const r2 = await fetch(base, { method:"POST", headers, body });
     if(r2.ok){
       const ev = await r2.json();
       map[key] = ev.id;
       try{ localStorage.setItem(CAL_EVT_LS+dateStr, JSON.stringify(map)); }catch{}
+    } else if(!isRetry){
+      console.warn("[JIROKU calendar] 新規作成失敗、1秒後に再試行", {dateStr, key, title, status:r2.status});
+      setTimeout(()=>upsertCalendarEvent(dateStr, key, startISO, endISO, title, exactOriginalEventId, true), 1000);
+    } else {
+      console.error("[JIROKU calendar] 新規作成に再試行しても失敗", {dateStr, key, title, status:r2.status});
     }
-  }catch(e){}
+  }catch(e){
+    if(!isRetry){
+      console.warn("[JIROKU calendar] 書き込み中に例外、1秒後に再試行", {dateStr, key, title, error:String(e)});
+      setTimeout(()=>upsertCalendarEvent(dateStr, key, startISO, endISO, title, exactOriginalEventId, true), 1000);
+    } else {
+      console.error("[JIROKU calendar] 再試行しても例外", {dateStr, key, title, error:String(e)});
+    }
+  }
 }
 // 取得戦略: メモリ → 端末キャッシュ → 本人認証で取得 → サーバーの共有キャッシュ
 // 一度どこかで取得できれば端末とサーバーの両方に残るので、以後は認証なしで自動表示される。
@@ -609,9 +639,19 @@ async function fetchCalendarEventsUncached(dateStr, interactive=false){
       const items=[];
       responses.forEach(r=>{ if(r&&r.items) items.push(...r.items); });
       if(responses.some(r=>r&&r.items)){
-        // JIROKUの記録から自動で書き込んだ予定（jirokuRecordの印付き）は、
-        // 既に完了したことなので「今日の予定」表示・記録の自動入力からは除外する
-        const evs=items.filter(e=>e.status!=="cancelled" && !e.extendedProperties?.private?.jirokuRecord).map(e=>{
+        // JIROKUの記録から自動で書き込んだ予定は、既に完了したことなので
+        // 「今日の予定」表示・記録の自動入力からは除外する。判定は3段構え：
+        // (1) jirokuRecordの印付き (2) この端末が書き込んだイベントID
+        // (3) タイトルが✅始まり（印が付く前に作られた古い記録や他端末分の保険）
+        let jirokuIds = {};
+        try{ jirokuIds = JSON.parse(localStorage.getItem(CAL_EVT_LS+dateStr)||"{}"); }catch{}
+        const jirokuIdSet = new Set(Object.values(jirokuIds));
+        const evs=items.filter(e=>
+          e.status!=="cancelled" &&
+          !e.extendedProperties?.private?.jirokuRecord &&
+          !jirokuIdSet.has(e.id) &&
+          !String(e.summary||"").startsWith("✅")
+        ).map(e=>{
           const s=e.start?.dateTime?new Date(e.start.dateTime):null;
           const en=e.end?.dateTime?new Date(e.end.dateTime):null;
           return {
@@ -3582,7 +3622,48 @@ window.onerror = (msg,src,line,col,err) => {
 window.addEventListener("unhandledrejection", e => {
   console.error("Unhandled promise rejection:", e.reason);
 });
-if('serviceWorker' in navigator){navigator.serviceWorker.register('sw.js');}
+if('serviceWorker' in navigator){
+  navigator.serviceWorker.register('sw.js');
+  // SPAは一度読み込むと開きっぱなしの間ずっと古いJSを実行し続けるため、
+  // デプロイ後も昨日のバージョンのまま動く画面が残り、機能差のある書き込み
+  // （カレンダーの✅なし等）が混ざる問題があった。アプリを前面に戻したタイミングで
+  // Service Workerの更新を確認し、新バージョンが有効になったら一度だけ再読み込みする。
+  // 入力途中の内容は下書き自動保存・タイマー状態もlocalStorageに保存済みなので消えない
+  let swReloaded = false;
+  // 初回訪問時のSW初回登録(claim)でもcontrollerchangeが発火するため、
+  // 「既にSWが制御していた状態からの交代」の時だけ再読み込みする
+  const hadController = !!navigator.serviceWorker.controller;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (swReloaded || !hadController) return;
+    swReloaded = true;
+    if (document.visibilityState === 'visible') location.reload();
+  });
+
+  // controllerchangeはsw.js自体が変わった時しか発火しないため、アプリ本体
+  // (index.html)だけの更新はこちらで検知する。起動時に自分自身のHTMLを取得して
+  // ハッシュを控え、アプリを前面に戻すたび（最短10分間隔）に取り直して比較。
+  // 変わっていたら新バージョンが公開されたということなので再読み込みする
+  let baselineHtmlHash = null, lastVerCheck = 0;
+  async function checkAppUpdate(){
+    try{
+      const now = Date.now();
+      if (now - lastVerCheck < 10*60*1000) return;
+      lastVerCheck = now;
+      const res = await fetch("index.html", { cache: "no-store" });
+      if (!res.ok) return;
+      const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(await res.text()));
+      const h = Array.from(new Uint8Array(buf)).join(",");
+      if (baselineHtmlHash === null) { baselineHtmlHash = h; return; }
+      if (h !== baselineHtmlHash && !swReloaded) { swReloaded = true; location.reload(); }
+    }catch(e){}
+  }
+  checkAppUpdate(); // 起動時に基準ハッシュを取得
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible') return;
+    navigator.serviceWorker.getRegistration().then(reg => { if (reg) reg.update(); });
+    checkAppUpdate();
+  });
+}
 </script>
 </body>
 </html>
