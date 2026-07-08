@@ -2341,9 +2341,13 @@ function getSchedule(studentEmail) {
     // JIROKUの記録から自動で書き込んだ予定は、既に完了したことなので
     // 「今日の予定」からは除外する（フロント側と同じ扱い）。
     // CalendarAppのgetTagはAPI経由のprivate extendedPropertiesを読めない
-    // 場合があるため、タイトルが✅始まりかどうかでも判定する
+    // 場合があるため、タイトルが✅/✔️始まりかどうかでも判定する
+    // （マークを✅→✔️に変更した経緯があるため両方を見る）
     const data = cal.getEvents(start, end)
-      .filter(ev => ev.getTag("jirokuRecord") !== "1" && String(ev.getTitle() || "").indexOf("✅") !== 0)
+      .filter(ev => {
+        const t = String(ev.getTitle() || "");
+        return ev.getTag("jirokuRecord") !== "1" && t.indexOf("✅") !== 0 && t.indexOf("✔️") !== 0;
+      })
       .map(ev => ({
         title: ev.getTitle(),
         time: ev.getStartTime().toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Tokyo" }),
