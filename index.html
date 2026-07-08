@@ -532,7 +532,7 @@ async function upsertCalendarEvent(dateStr, key, startISO, endISO, title, exactO
     // 色分け(colorId)はGoogleカレンダーの表示上あまり目立たず、見分けがつきにくいという
     // フィードバックがあったため、タイトル自体に「✅ 」を付けて、どの画面・端末でも
     // 文字で確実に「実際にやったこと」と分かるようにする（色は補助的な扱いにする）
-    const recordTitle = "✅ " + title;
+    const recordTitle = "✔️ " + title;
     // extendedProperties.private.jirokuRecordで「JIROKUの記録から書き込んだ/更新した予定」と
     // 印を付けておく。カレンダー上は普通の予定として見えるが、アプリ側の「今日の予定」
     // 表示や自動入力では、既に完了したことをまた"予定"として出さないようこの印で除外する
@@ -642,16 +642,18 @@ async function fetchCalendarEventsUncached(dateStr, interactive=false){
         // JIROKUの記録から自動で書き込んだ予定は、既に完了したことなので
         // 「今日の予定」表示・記録の自動入力からは除外する。判定は3段構え：
         // (1) jirokuRecordの印付き (2) この端末が書き込んだイベントID
-        // (3) タイトルが✅始まり（印が付く前に作られた古い記録や他端末分の保険）
+        // (3) タイトルが✅/✔️始まり（印が付く前に作られた古い記録や他端末分の保険。
+        // マークを✅→✔️に変更した経緯があるため両方を見る）
         let jirokuIds = {};
         try{ jirokuIds = JSON.parse(localStorage.getItem(CAL_EVT_LS+dateStr)||"{}"); }catch{}
         const jirokuIdSet = new Set(Object.values(jirokuIds));
-        const evs=items.filter(e=>
-          e.status!=="cancelled" &&
-          !e.extendedProperties?.private?.jirokuRecord &&
-          !jirokuIdSet.has(e.id) &&
-          !String(e.summary||"").startsWith("✅")
-        ).map(e=>{
+        const evs=items.filter(e=>{
+          const summary = String(e.summary||"");
+          return e.status!=="cancelled" &&
+            !e.extendedProperties?.private?.jirokuRecord &&
+            !jirokuIdSet.has(e.id) &&
+            !summary.startsWith("✅") && !summary.startsWith("✔️");
+        }).map(e=>{
           const s=e.start?.dateTime?new Date(e.start.dateTime):null;
           const en=e.end?.dateTime?new Date(e.end.dateTime):null;
           return {
@@ -2930,8 +2932,8 @@ function SettingsScreen({onToast,onLogout,onGoalSaved,profile,onProfileSaved,onC
 
       <!-- プッシュ通知 -->
       <div style=${{background:"var(--card)",borderRadius:16,border:"1px solid var(--border)",padding:"18px",marginBottom:12}}>
-        <${SectionHeader} icon="🔔" title="タイマー終了のプッシュ通知"/>
-        <p style=${{fontSize:13,color:"var(--sub)",lineHeight:1.7,marginBottom:14}}>${pushEnabled?"有効になっています。アプリを閉じていたり画面がロックされていても、タイマー終了時に通知が届きます。":"タイマーの音はアプリを開いている間しか鳴りません。有効にすると、アプリを閉じていてもタイマー終了時に端末へ通知が届きます。"}</p>
+        <${SectionHeader} icon="🔔" title="プッシュ通知"/>
+        <p style=${{fontSize:13,color:"var(--sub)",lineHeight:1.7,marginBottom:14}}>${pushEnabled?"有効になっています。アプリを閉じていたり画面がロックされていても、タイマー終了・記録リマインダーなどの通知が届きます。":"タイマーの音はアプリを開いている間しか鳴りません。有効にすると、アプリを閉じていてもタイマー終了・記録リマインダーなどの通知が端末に届きます。"}</p>
         ${pushEnabled
           ? html`<div style=${{display:"flex",alignItems:"center",gap:8,color:"var(--accent)",fontWeight:700,fontSize:14,padding:"10px 14px",background:"var(--accent-l)",borderRadius:10}}>
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>有効
@@ -3458,7 +3460,7 @@ const TUTORIAL_STEPS = [
   { mock:TutorialMiniLine, title:"LINE連携でリマインダーを受け取る", body:"LINE公式アカウントを友だち追加し、登録したGmailアドレスを送ると連携完了。リマインダーやレポートが届くようになります。" },
   { mock:TutorialMiniAddHome, title:"ホーム画面に追加しよう", body:"次のプッシュ通知を使うには、まずJIROKUをホーム画面に追加する必要があります。\niPhoneの場合：共有ボタン（□に↑）→「ホーム画面に追加」\nAndroidの場合：メニュー（⋮）→「ホーム画面に追加」またはインストール\n追加できたら、一度そのアイコンからこのページを開き直してください。",
     skipIf: isStandaloneDisplay },
-  { mock:TutorialMiniPush, title:"プッシュ通知を有効にしよう", body:"タイマー終了などの通知を、アプリを閉じていても受け取れるようにします。習慣化に欠かせない機能なので、必ず有効にしてください。", pushStep:true },
+  { mock:TutorialMiniPush, title:"プッシュ通知を有効にしよう", body:"タイマー終了・記録リマインダーなどの通知を、アプリを閉じていても受け取れるようにします。習慣化に欠かせない機能なので、必ず有効にしてください。", pushStep:true },
   { mock:TutorialMiniLog, title:"さっそく1つ記録してみよう", body:"習慣づくりは、まず1回から。次のボタンを押すと記録画面が開くので、直近の1時間で何をしていたかを記録してみましょう。", cta:true },
 ];
 const UNSUPPORTED_PUSH_ERROR = "このブラウザはプッシュ通知に対応していません";
@@ -3624,6 +3626,15 @@ window.addEventListener("unhandledrejection", e => {
 });
 if('serviceWorker' in navigator){
   navigator.serviceWorker.register('sw.js');
+  // 過去バージョンで一時的に別ファイル(firebase-messaging-sw.js)を登録していた
+  // 名残や、別スコープに残った古い登録が残っていると、同じプッシュ通知が二重に
+  // 表示される原因になり得るため、sw.js以外の登録があれば掃除しておく
+  navigator.serviceWorker.getRegistrations().then(regs => {
+    regs.forEach(reg => {
+      const url = reg.active?.scriptURL || reg.installing?.scriptURL || reg.waiting?.scriptURL || "";
+      if (url && !url.endsWith("/sw.js")) reg.unregister();
+    });
+  }).catch(()=>{});
   // SPAは一度読み込むと開きっぱなしの間ずっと古いJSを実行し続けるため、
   // デプロイ後も昨日のバージョンのまま動く画面が残り、機能差のある書き込み
   // （カレンダーの✅なし等）が混ざる問題があった。アプリを前面に戻したタイミングで
