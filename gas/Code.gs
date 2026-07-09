@@ -159,6 +159,7 @@ function doPost(e) {
     const studentEmail = body.studentEmail;
     switch (action) {
       case "saveLog":      return jsonResponse(saveLog(studentEmail, body));
+      case "saveLogMulti": return jsonResponse(saveLogMulti(studentEmail, body));
       case "sendMessage":  return jsonResponse(sendMessage(studentEmail, body));
       case "saveSettings": return jsonResponse(saveSettings(studentEmail, body));
       case "saveDiary":    return jsonResponse(saveDiary(studentEmail, body));

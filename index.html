@@ -433,6 +433,21 @@ async function gasPost(action, body = {}) {
   try { await fetch(url.toString(), { mode:"no-cors" }); } catch {}
   return { ok:true };
 }
+// gasPostと違い、レスポンス（xp_gained等）を読み取れる本物のPOST。
+// メモが長くなるとURLの長さ制限に引っかかる可能性がある保存系の操作
+// （saveLog/saveLogMulti）で使う。text/plainはCORSのプリフライトを
+// 避けるためのおまじない（GAS Web Appはpreflightに正しく応答できないため）
+async function gasPostJson(action, body = {}) {
+  if (!GAS_URL) return mockPost(action, body);
+  try {
+    const r = await fetch(GAS_URL, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain" },
+      body: JSON.stringify({ action, studentEmail: CURRENT_USER.email, ...body })
+    });
+    return await r.json();
+  } catch { return { ok:false }; }
+}
 
 // ── Googleカレンダー（各ユーザー本人の権限でブラウザから直接読む） ──
 // GAS(CalendarApp)はスクリプト所有者のアカウントでしか読めないため、
@@ -1488,18 +1503,18 @@ function LogScreen({onToast, isActive}) {
     if(!task.trim()) return;
     setSaving(true);
     saveVersionRef.current++;
-    const url=new URL(GAS_URL);
-    // まとめて記録: 選択された全ブロックを1回のリクエストで保存する
+    // まとめて記録: 選択された全ブロックを1回のリクエストで保存する。
+    // メモが長くなるとURLの長さ制限に引っかかる可能性があるため、GETのURL
+    // パラメータではなくPOSTのボディで送る（gasPostJson）
     const blocks = [block, ...extraBlocks].sort((a,b)=>a>b?1:-1);
-    url.searchParams.set("action", blocks.length>1 ? "saveLogMulti" : "saveLog");
-    url.searchParams.set("studentEmail",CURRENT_USER.email);
-    url.searchParams.set("date",date);
-    if(blocks.length>1) url.searchParams.set("time_blocks", blocks.join(","));
-    else url.searchParams.set("time_block", block);
-    url.searchParams.set("task",task.trim());
-    url.searchParams.set("focus_level",focus); url.searchParams.set("memo",memo.trim());
-    url.searchParams.set("goal_related", goalRelated ? "true" : "false");
-    const res=await fetch(url).then(r=>r.json()).catch(()=>({ok:false}));
+    const payload = {
+      date,
+      task: task.trim(), focus_level: focus, memo: memo.trim(),
+      goal_related: goalRelated ? "true" : "false",
+    };
+    if(blocks.length>1) payload.time_blocks = blocks.join(",");
+    else payload.time_block = block;
+    const res = await gasPostJson(blocks.length>1 ? "saveLogMulti" : "saveLog", payload);
     if(!res.ok){ onToast("保存に失敗しました。もう一度お試しください"); setSaving(false); return; }
     if(res.xp_gained){ const lv=res.level_up?`  →  Lv.${res.level} へ！`:""; onToast(`+${res.xp_gained} XP 獲得${lv}`); }
     else onToast(res.updated?"記録を上書きしました":(blocks.length>1?blocks.length+"個の時間帯に保存しました":"保存しました"));
@@ -2283,21 +2298,21 @@ function TimerScreen({onToast, isActive}) {
     // （レポート生成のAIにも渡るため、計画実行力のフィードバック材料になる）
     const timerNote = sessionResult ? `⏱ 集中${sessionResult.actual}分（予定${sessionResult.planned}分）` : "";
     const memoToSave = [logMemo.trim(), timerNote].filter(Boolean).join("\n");
-    const url = new URL(GAS_URL);
-    url.searchParams.set("action","saveLog");
-    url.searchParams.set("studentEmail",CURRENT_USER.email);
-    url.searchParams.set("time_block",timeBlock);
-    url.searchParams.set("task",task.trim()||`ポモドーロ${sessionResult?sessionResult.actual:selectedMin}分集中`);
-    url.searchParams.set("focus_level",logFocus);
-    url.searchParams.set("memo",memoToSave);
-    url.searchParams.set("goal_related",logGoalRelated?"true":"false");
-    const res = await fetch(url).then(r=>r.json()).catch(()=>({ok:false}));
+    // メモが長くなるとURLの長さ制限に引っかかる可能性があるため、GETのURL
+    // パラメータではなくPOSTのボディで送る（gasPostJson）
+    const calTitle = task.trim()||`ポモドーロ${sessionResult?sessionResult.actual:selectedMin}分集中`;
+    const res = await gasPostJson("saveLog", {
+      time_block: timeBlock,
+      task: calTitle,
+      focus_level: logFocus,
+      memo: memoToSave,
+      goal_related: logGoalRelated?"true":"false",
+    });
     if(!res.ok){ onToast("記録に失敗しました。もう一度お試しください"); setSaving(false); return; }
     if(res.xp_gained){ const lv=res.level_up?` → Lv.${res.level}！`:""; onToast(`+${res.xp_gained} XP 獲得${lv}`); }
     else onToast(res.updated?"記録を更新しました":"記録しました");
     // タイマー記録は1時間枠ではなく「実際に集中した開始〜終了時刻」でカレンダーに書き戻す
     // （同じ時間帯キーを使うので、手動記録側で作ったイベントがあれば実測時刻に更新される）
-    const calTitle = url.searchParams.get("task");
     upsertCalendarEvent(formatDateStr(st), timeBlock, st.toISOString(), endDt.toISOString(), calTitle);
     setSaving(false); setShowModal(false); setLogMemo(""); setTask(""); setSessionResult(null);
     setMode("break"); setTimeLeft(breakMin*60); setStartTime(null);
