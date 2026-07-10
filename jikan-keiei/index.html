@@ -52,15 +52,26 @@
   .body-t b{color:var(--ink);}
 
   /* P/L table */
-  .pl{background:#fff;border:1px solid var(--line);border-radius:16px;padding:44px 44px 36px;max-width:640px;margin:44px auto 0;}
-  .pl-title{font-size:13px;font-weight:700;letter-spacing:0.14em;color:var(--sub);margin-bottom:26px;display:flex;justify-content:space-between;}
-  .pl-row{display:flex;justify-content:space-between;align-items:baseline;gap:20px;padding:17px 0;border-bottom:1px solid var(--line);}
-  .pl-row:last-of-type{border-bottom:2px solid var(--ink);}
-  .pl-row .l{font-size:14.5px;line-height:1.7;}
-  .pl-row .l small{display:block;font-size:12px;color:var(--sub);}
-  .pl-row .v{font-size:26px;font-weight:700;color:var(--brass);white-space:nowrap;}
-  .pl-row .v small{font-size:13px;color:var(--sub);font-weight:500;}
-  .pl-note{font-size:13.5px;color:var(--sub);margin-top:24px;line-height:2;}
+  .pl{background:#fff;border:1px solid var(--line);border-radius:16px;padding:40px 44px 36px;max-width:680px;margin:44px auto 0;box-shadow:0 2px 24px rgba(20,48,58,0.05);}
+  .pl-title{display:flex;justify-content:space-between;align-items:baseline;padding-bottom:18px;border-bottom:2px solid var(--ink);margin-bottom:6px;}
+  .pl-title .t{font-size:15px;font-weight:700;letter-spacing:0.1em;color:var(--ink);}
+  .pl-title .p{font-size:12px;color:var(--sub);letter-spacing:0.06em;}
+  .pl-row{padding:20px 0;border-bottom:1px solid var(--line);}
+  .pl-row .top{display:flex;justify-content:space-between;align-items:baseline;gap:20px;margin-bottom:10px;}
+  .pl-row .l{font-size:15.5px;font-weight:700;line-height:1.6;letter-spacing:0.02em;}
+  .pl-row .l small{display:block;font-size:12.5px;color:#7A828C;font-weight:400;margin-top:2px;}
+  .pl-row .v{font-size:27px;font-weight:700;white-space:nowrap;}
+  .pl-row .v small{font-size:13px;color:var(--sub);font-weight:500;margin-left:2px;}
+  .pl-row .v .pct{font-size:12.5px;color:#7A828C;font-weight:500;margin-left:8px;}
+  .pl-bar{height:8px;background:#EFF1F3;border-radius:99px;overflow:hidden;}
+  .pl-bar i{display:block;height:100%;border-radius:99px;}
+  .pl-total{display:flex;justify-content:space-between;align-items:baseline;padding:18px 0 4px;border-top:2px solid var(--ink);margin-top:-1px;}
+  .pl-total .l{font-size:14px;font-weight:700;letter-spacing:0.04em;}
+  .pl-total .v{font-size:20px;font-weight:700;}
+  .pl-total .v small{font-size:12px;color:var(--sub);font-weight:500;}
+  .pl-verdict{background:#FBF7EF;border:1px solid #E8DCC3;border-radius:12px;padding:18px 22px;margin-top:24px;font-size:14.5px;line-height:2;}
+  .pl-verdict b{color:var(--brass);font-size:17px;}
+  .pl-note{font-size:13.5px;color:var(--sub);margin-top:20px;line-height:2;}
 
   /* Pain list */
   .pain{border-top:1px solid var(--line);padding:22px 4px;font-size:16px;line-height:2;display:flex;gap:18px;}
@@ -132,9 +143,25 @@
     .mech,.results{grid-template-columns:1fr;}
     .flow{grid-template-columns:1fr;}
     .farrow{transform:rotate(90deg);justify-content:center;}
-    .pl{padding:30px 24px;}
-    .pl-row .v{font-size:21px;}
+
+    /* 改行崩れ対策 */
+    .hero .brand{flex-direction:column;gap:6px;align-items:flex-start;}
+    .hero h1{font-size:25px;letter-spacing:0.03em;}
+    .sec-h{letter-spacing:0.02em;}
+    .pl{padding:28px 20px;}
+    .pl-title{flex-direction:column;gap:4px;align-items:flex-start;}
+    .pl-row .top{flex-wrap:nowrap;}
+    .pl-row .l{font-size:14px;min-width:0;}
+    .pl-row .l small{font-size:11.5px;}
+    .pl-row .v{font-size:20px;flex-shrink:0;}
+    .pl-row .v .pct{margin-left:5px;font-size:11px;}
+    .pl-verdict{padding:15px 16px;font-size:13.5px;}
+    .pl-verdict br{display:none;}
     .cta h2{font-size:25px;}
+    .cta h2 br{display:none;}
+    .st{gap:16px;}
+    .pain{font-size:14.5px;gap:12px;}
+    .body-t{font-size:14px;}
   }
 </style>
 </head>
@@ -160,20 +187,39 @@
     <div class="eyebrow">Time P/L</div>
     <h2 class="sec-h serif">あなたの1週間を、<br>決算書にすると。</h2>
     <div class="pl" style="text-align:left;">
-      <div class="pl-title"><span>時間損益計算書</span><span class="en">Weekly</span></div>
-      <div class="pl-row">
-        <div class="l">事業を伸ばす時間<small>戦略・商談・採用・仕組みづくり</small></div>
-        <div class="v en">12<small> 時間</small></div>
+      <div class="pl-title">
+        <span class="t">時間損益計算書</span>
+        <span class="p">ある経営者の1週間（稼働68時間）</span>
       </div>
       <div class="pl-row">
-        <div class="l">現場に吸われた時間<small>作業・割り込み・その場の対応</small></div>
-        <div class="v en">38<small> 時間</small></div>
+        <div class="top">
+          <div class="l">事業を伸ばす時間<small>戦略・商談・採用・仕組みづくり</small></div>
+          <div class="v en" style="color:var(--brass);">12<small>時間</small><span class="pct">18%</span></div>
+        </div>
+        <div class="pl-bar"><i style="width:18%;background:var(--brass);"></i></div>
       </div>
       <div class="pl-row">
-        <div class="l">どこに消えたか不明な時間<small>記憶にない。しかし確かに消えた</small></div>
-        <div class="v en">18<small> 時間</small></div>
+        <div class="top">
+          <div class="l">現場に吸われた時間<small>作業・割り込み・その場の対応</small></div>
+          <div class="v en" style="color:#3E4650;">38<small>時間</small><span class="pct">56%</span></div>
+        </div>
+        <div class="pl-bar"><i style="width:56%;background:#8A93A0;"></i></div>
       </div>
-      <p class="pl-note">多くの経営者の1週間は、こうなっている。問題は怠けではない。<b>計測していない</b>ことだ。</p>
+      <div class="pl-row" style="border-bottom:none;">
+        <div class="top">
+          <div class="l">どこに消えたか不明な時間<small>記憶にない。しかし確かに消えた</small></div>
+          <div class="v en" style="color:#3E4650;">18<small>時間</small><span class="pct">26%</span></div>
+        </div>
+        <div class="pl-bar"><i style="width:26%;background:#C4CAD1;"></i></div>
+      </div>
+      <div class="pl-total">
+        <span class="l">週の稼働時間 合計</span>
+        <span class="v en">68<small> 時間</small></span>
+      </div>
+      <div class="pl-verdict">
+        68時間働いて、事業を前に進める時間は <b>18%</b>。<br>これが、多くの経営者の「時間の決算」の実態です。
+      </div>
+      <p class="pl-note">問題は怠けではない。<b>計測していない</b>ことだ。測れば、変えられる。</p>
     </div>
   </div>
 </section>
