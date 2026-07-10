@@ -72,6 +72,9 @@ function doGet(e) {
       case "coachPrepSummary":      result = coachPrepSummary(e.parameter.coachEmail, e.parameter.targetEmail); break;
       case "coachSyncStripeOne":    result = coachSyncStripeOne(e.parameter.coachEmail, e.parameter); break;
       case "coachAddClient":       result = coachAddClient(e.parameter.coachEmail, e.parameter); break;
+      case "coachListLeads":       result = coachListLeads(e.parameter.coachEmail); break;
+      case "coachSaveLead":        result = coachSaveLead(e.parameter.coachEmail, e.parameter); break;
+      case "coachDeleteLead":      result = coachDeleteLead(e.parameter.coachEmail, e.parameter); break;
       case "adminFixChatworkMisassignment": result = adminFixChatworkMisassignment(e.parameter.coachEmail, e.parameter.wrongEmail, e.parameter.correctEmail, e.parameter.correctName); break;
       case "coachListChatworkContacts": result = coachListChatworkContacts(e.parameter.coachEmail); break;
       case "coachSyncChatworkOne": result = coachSyncChatworkOne(e.parameter.coachEmail, e.parameter); break;
@@ -165,6 +168,7 @@ function doPost(e) {
       case "saveDiary":    return jsonResponse(saveDiary(studentEmail, body));
       case "syncCalendar": return jsonResponse(syncCalendar(studentEmail, body));
       case "coachSaveProfile":     return jsonResponse(coachSaveProfile(body.coachEmail, body));
+      case "coachSaveLead":        return jsonResponse(coachSaveLead(body.coachEmail, body));
       case "coachUploadFile":      return jsonResponse(coachUploadFile(body.coachEmail, body));
       case "coachDeleteFile":      return jsonResponse(coachDeleteFile(body.coachEmail, body));
       case "coachDeleteNote":      return jsonResponse(coachDeleteNote(body.coachEmail, body));
@@ -1184,6 +1188,88 @@ function adminFixChatworkMisassignment(coachEmail, wrongEmail, correctEmail, cor
   if (!cwId) return { ok: false, error: "wrongEmail側にchatwork_idが見つかりませんでした" };
   const addResult = coachAddClient(coachEmail, { email: correctEmail, name: correctName, chatwork_id: cwId, chatwork_room_id: cwRoom });
   return { ok: true, movedChatworkId: cwId, movedRoomId: cwRoom, addResult: addResult };
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// セッション管理（見込み客パイプライン）
+// SNS→予約→実施→仕分け(アプリ/コーチング/見送り)までを管理する。
+// 既存の生徒(Users/StudentProfile)とは別に、成約前のリードを扱う軽い台帳
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+function getSessionLeadsSheet() {
+  let sheet = getSheet("SessionLeads");
+  if (!sheet) {
+    sheet = SpreadsheetApp.openById(SPREADSHEET_ID).insertSheet("SessionLeads");
+    sheet.appendRow(["lead_id", "coach_email", "name", "contact", "status", "memo", "created_at", "updated_at"]);
+  }
+  return sheet;
+}
+
+function coachListLeads(coachEmail) {
+  if (!verifyCoach(coachEmail)) return { ok: false, error: "not a coach" };
+  const leads = sheetToObjects(getSessionLeadsSheet())
+    .filter(l => l.coach_email === coachEmail)
+    .sort((a, b) => (b.updated_at || "") > (a.updated_at || "") ? 1 : -1);
+  return { ok: true, data: leads };
+}
+
+function coachSaveLead(coachEmail, body) {
+  if (!verifyCoach(coachEmail)) return { ok: false, error: "not a coach" };
+  const name = String(body.name || "").trim();
+  if (!name) return { ok: false, error: "name required" };
+  const sheet = getSessionLeadsSheet();
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0];
+  const idIdx = headers.indexOf("lead_id");
+  const coachIdx = headers.indexOf("coach_email");
+  const now = new Date().toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" });
+  const leadId = String(body.lead_id || "");
+
+  if (leadId) {
+    for (let i = 1; i < data.length; i++) {
+      if (String(data[i][idIdx]) === leadId) {
+        if (String(data[i][coachIdx]) !== coachEmail) return { ok: false, error: "not your lead" };
+        sheet.getRange(i + 1, headers.indexOf("name") + 1).setValue(name);
+        sheet.getRange(i + 1, headers.indexOf("contact") + 1).setValue(String(body.contact || ""));
+        sheet.getRange(i + 1, headers.indexOf("status") + 1).setValue(String(body.status || "予約前"));
+        sheet.getRange(i + 1, headers.indexOf("memo") + 1).setValue(String(body.memo || "").slice(0, 1000));
+        sheet.getRange(i + 1, headers.indexOf("updated_at") + 1).setValue(now);
+        return { ok: true, lead_id: leadId };
+      }
+    }
+    return { ok: false, error: "lead not found" };
+  }
+
+  const newId = "lead_" + Date.now();
+  const row = headers.map(h => {
+    if (h === "lead_id") return newId;
+    if (h === "coach_email") return coachEmail;
+    if (h === "name") return name;
+    if (h === "contact") return String(body.contact || "");
+    if (h === "status") return String(body.status || "予約前");
+    if (h === "memo") return String(body.memo || "").slice(0, 1000);
+    if (h === "created_at" || h === "updated_at") return now;
+    return "";
+  });
+  sheet.appendRow(row);
+  return { ok: true, lead_id: newId };
+}
+
+function coachDeleteLead(coachEmail, body) {
+  if (!verifyCoach(coachEmail)) return { ok: false, error: "not a coach" };
+  const leadId = String(body.lead_id || "");
+  const sheet = getSessionLeadsSheet();
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0];
+  const idIdx = headers.indexOf("lead_id");
+  const coachIdx = headers.indexOf("coach_email");
+  for (let i = data.length - 1; i >= 1; i--) {
+    if (String(data[i][idIdx]) === leadId) {
+      if (String(data[i][coachIdx]) !== coachEmail) return { ok: false, error: "not your lead" };
+      sheet.deleteRow(i + 1);
+      return { ok: true };
+    }
+  }
+  return { ok: false, error: "lead not found" };
 }
 
 function coachAddClient(coachEmail, body) {

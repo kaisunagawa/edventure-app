@@ -166,7 +166,7 @@ function LoginScreen({ onLogin }) {
 }
 
 // ── サイドバー: 生徒一覧（検索・要フォロー順） ──
-function Sidebar({ students, selectedEmail, onSelect, onLogout, coach, onAddClient, onOpenChatworkImport, isAdmin, showAdmin, onShowAdmin }) {
+function Sidebar({ students, selectedEmail, onSelect, onLogout, coach, onAddClient, onOpenChatworkImport, isAdmin, showAdmin, onShowAdmin, showSessions, onShowSessions }) {
   const [q, setQ] = useState("");
   const [adding, setAdding] = useState(false);
   const [newName, setNewName] = useState("");
@@ -235,6 +235,10 @@ function Sidebar({ students, selectedEmail, onSelect, onLogout, coach, onAddClie
             </div>
           `}
         <button style=${{fontSize:12.5,background:"none",border:"1px solid var(--border)",borderRadius:8,padding:"8px 0",cursor:"pointer",fontFamily:"inherit",width:"100%",marginTop:6}} onClick=${onOpenChatworkImport}>Chatworkから取り込む</button>
+        <button onClick=${onShowSessions}
+          style=${{fontSize:12.5,border:"1px solid var(--border)",borderRadius:8,padding:"8px 0",cursor:"pointer",fontFamily:"inherit",width:"100%",marginTop:6,background:showSessions?"var(--accent-l)":"none",color:showSessions?"var(--accent)":"var(--text)",fontWeight:600}}>
+          🗓 セッション管理
+        </button>
         ${isAdmin && html`
           <button onClick=${onShowAdmin}
             style=${{fontSize:12.5,border:"1px solid var(--border)",borderRadius:8,padding:"8px 0",cursor:"pointer",fontFamily:"inherit",width:"100%",marginTop:6,background:showAdmin?"var(--accent-l)":"none",color:showAdmin?"var(--accent)":"var(--text)",fontWeight:600}}>
@@ -1030,6 +1034,98 @@ function ChatworkImportModal({ onClose, onAddClient }) {
   `;
 }
 
+// ── セッション管理: SNS→予約→実施→仕分けの見込み客パイプライン ──
+const LEAD_STATUSES = ["予約前", "予約済", "実施済", "アプリのみ", "コーチング", "見送り"];
+const LEAD_STATUS_COLOR = {
+  "予約前": "#9CA3AF", "予約済": "#0891B2", "実施済": "#8B5CF6",
+  "アプリのみ": "#22C55E", "コーチング": "#F59E0B", "見送り": "#EF4444"
+};
+function SessionManager() {
+  const [leads, setLeads] = useState(null);
+  const [editing, setEditing] = useState(null); // lead object being edited, or {} for new
+  const [saving, setSaving] = useState(false);
+
+  const reload = () => api("coachListLeads").then(r => { if (r.ok) setLeads(r.data); });
+  useEffect(() => { reload(); }, []);
+
+  const blank = () => ({ lead_id: "", name: "", contact: "", status: "予約前", memo: "" });
+  const save = async () => {
+    if (!editing.name.trim()) return;
+    setSaving(true);
+    const r = await apiPost("coachSaveLead", editing);
+    setSaving(false);
+    if (r.ok) { setEditing(null); reload(); }
+  };
+  const del = async (lead) => {
+    if (!confirm(lead.name + " さんをセッション管理から削除しますか？")) return;
+    const r = await apiPost("coachDeleteLead", { lead_id: lead.lead_id });
+    if (r.ok) reload();
+  };
+
+  const setField = (k, v) => setEditing(e => ({ ...e, [k]: v }));
+
+  return html`
+    <div style=${{height:"100%",overflowY:"auto",padding:"24px 28px"}}>
+      <div style=${{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+        <div style=${{fontSize:20,fontWeight:800}}>🗓 セッション管理</div>
+        <button class="btn" onClick=${()=>setEditing(blank())}>＋ 新規リードを追加</button>
+      </div>
+      <div style=${{fontSize:13,color:"var(--sub)",marginBottom:20}}>SNSで反応してくれた見込み客を、予約→実施→仕分けまで管理します。成約したら「新しいクライアントを追加」で正式登録してください。</div>
+
+      ${editing && html`
+        <div class="card" style=${{marginBottom:20,border:"1.5px solid var(--accent)"}}>
+          <div class="card-label">${editing.lead_id ? "リードを編集" : "新規リード"}</div>
+          <div style=${{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:12}}>
+            <div><label class="lbl">名前</label><input class="inp" value=${editing.name} onChange=${e=>setField("name",e.target.value)} placeholder="例：山田太郎"/></div>
+            <div><label class="lbl">連絡先（LINE名・メール等）</label><input class="inp" value=${editing.contact} onChange=${e=>setField("contact",e.target.value)} placeholder="任意"/></div>
+          </div>
+          <label class="lbl">ステータス</label>
+          <div style=${{display:"flex",flexWrap:"wrap",gap:6,marginBottom:12}}>
+            ${LEAD_STATUSES.map(s=>html`
+              <button key=${s} onClick=${()=>setField("status",s)}
+                style=${{padding:"6px 12px",borderRadius:20,border:`1.5px solid ${editing.status===s?LEAD_STATUS_COLOR[s]:"var(--border)"}`,background:editing.status===s?LEAD_STATUS_COLOR[s]:"transparent",color:editing.status===s?"#fff":"var(--sub)",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>${s}</button>
+            `)}
+          </div>
+          <label class="lbl">メモ</label>
+          <textarea class="txa" value=${editing.memo} onChange=${e=>setField("memo",e.target.value)} placeholder="セッションで聞いた悩み・目標・所感など" style=${{marginBottom:12}}/>
+          <div style=${{display:"flex",gap:8}}>
+            <button class="btn" onClick=${save} disabled=${saving||!editing.name.trim()}>${saving?"保存中...":"保存する"}</button>
+            <button style=${{background:"none",border:"1px solid var(--border)",borderRadius:8,padding:"0 16px",cursor:"pointer",fontFamily:"inherit"}} onClick=${()=>setEditing(null)}>キャンセル</button>
+          </div>
+        </div>
+      `}
+
+      ${leads === null && html`<div style=${{display:"flex",justifyContent:"center",padding:40}}><div class="spin"/></div>`}
+      ${leads && leads.length === 0 && !editing && html`<div style=${{fontSize:14,color:"var(--sub)",textAlign:"center",padding:40}}>まだリードがありません。「＋新規リードを追加」から始めましょう。</div>`}
+
+      ${leads && LEAD_STATUSES.map(status => {
+        const group = leads.filter(l => l.status === status);
+        if (group.length === 0) return null;
+        return html`
+          <div key=${status} style=${{marginBottom:22}}>
+            <div style=${{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
+              <span style=${{width:9,height:9,borderRadius:"50%",background:LEAD_STATUS_COLOR[status]}}></span>
+              <span style=${{fontSize:13,fontWeight:700}}>${status}</span>
+              <span style=${{fontSize:12,color:"var(--sub)"}}>${group.length}件</span>
+            </div>
+            ${group.map(l => html`
+              <div key=${l.lead_id} class="card" style=${{marginBottom:8,cursor:"pointer"}} onClick=${()=>setEditing({...l})}>
+                <div style=${{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:12}}>
+                  <div style=${{flex:1}}>
+                    <div style=${{fontSize:15,fontWeight:700,marginBottom:2}}>${l.name}${l.contact?html`<span style=${{fontSize:12,color:"var(--sub)",fontWeight:400,marginLeft:8}}>${l.contact}</span>`:""}</div>
+                    ${l.memo && html`<div style=${{fontSize:13,color:"var(--sub)",lineHeight:1.6,whiteSpace:"pre-wrap"}}>${l.memo}</div>`}
+                  </div>
+                  <button onClick=${e=>{e.stopPropagation();del(l);}} style=${{background:"none",border:"none",color:"var(--sub)",fontSize:11.5,cursor:"pointer",fontFamily:"inherit",flexShrink:0}}>削除</button>
+                </div>
+              </div>
+            `)}
+          </div>
+        `;
+      })}
+    </div>
+  `;
+}
+
 // ── 管理者ダッシュボード: 全コーチ・全生徒を横断した数字 ──
 function AdminOverview() {
   const [data, setData] = useState(null);
@@ -1160,6 +1256,7 @@ function App() {
   const [isAdmin, setIsAdmin] = useState(false);
   const [selected, setSelected] = useState(null);
   const [showAdmin, setShowAdmin] = useState(false);
+  const [showSessions, setShowSessions] = useState(false);
   const [chatworkImportOpen, setChatworkImportOpen] = useState(false);
 
   const refreshStudents = () => api("coachGetStudents").then(r => { if (r.ok) { setStudents(r.data); setIsAdmin(!!r.isAdmin); } });
@@ -1186,11 +1283,14 @@ function App() {
   return html`
     <div style=${{display:"flex",height:"100%"}}>
       <${Sidebar} students=${students} selectedEmail=${selected?.email}
-        onSelect=${(s)=>{setSelected(s); setShowAdmin(false);}} onLogout=${logout} coach=${coach}
+        onSelect=${(s)=>{setSelected(s); setShowAdmin(false); setShowSessions(false);}} onLogout=${logout} coach=${coach}
         onAddClient=${addClient} onOpenChatworkImport=${()=>setChatworkImportOpen(true)}
-        isAdmin=${isAdmin} showAdmin=${showAdmin} onShowAdmin=${()=>{setShowAdmin(true); setSelected(null);}}/>
+        isAdmin=${isAdmin} showAdmin=${showAdmin} onShowAdmin=${()=>{setShowAdmin(true); setShowSessions(false); setSelected(null);}}
+        showSessions=${showSessions} onShowSessions=${()=>{setShowSessions(true); setShowAdmin(false); setSelected(null);}}/>
       <main style=${{flex:1,overflow:"hidden",background:"var(--bg)"}}>
-        ${showAdmin
+        ${showSessions
+          ? html`<${SessionManager}/>`
+          : showAdmin
           ? html`<${AdminOverview}/>`
           : selected
             ? html`<${StudentMain} key=${selected.email} student=${selected} onNoteSaved=${refreshStudents}/>`
