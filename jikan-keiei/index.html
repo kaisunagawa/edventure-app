@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>時間経営｜経営者のための時間と意思決定のコーチング — by EdVenture</title>
+<meta name="description" content="会社は経営している。時間は、経営しているか。経営者の時間を「見える資源」に変える、時間と意思決定のコーチング。">
+<meta property="og:title" content="時間経営｜経営者のための時間と意思決定のコーチング">
+<meta property="og:description" content="会社は経営している。時間は、経営しているか。経営者の時間を「見える資源」に変えるコーチング。">
+<meta property="og:type" content="website">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Shippori+Mincho:wght@500;600;700&family=Noto+Sans+JP:wght@400;500;700&family=DM+Sans:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#F7F8F9; --ink:#14181D; --sub:#6E7681; --line:#E8EAED;
+    --accent:#0891B2; --accent-d:#0e7490;
+    --band:#14303A; --brass:#B08D4A;
+  }
+  *{margin:0;padding:0;box-sizing:border-box;}
+  html{scroll-behavior:smooth;}
+  body{
+    font-family:'Noto Sans JP',-apple-system,BlinkMacSystemFont,sans-serif;
+    color:var(--ink); background:var(--bg); line-height:1.95;
+    font-feature-settings:"palt"; -webkit-font-smoothing:antialiased;
+  }
+  .serif{font-family:'Shippori Mincho',serif;}
+  .en{font-family:'DM Sans',sans-serif;}
+  .wrap{max-width:1000px;margin:0 auto;padding:0 28px;}
+  .narrow{max-width:680px;margin-left:auto;margin-right:auto;}
+
+  .btn{
+    display:inline-flex;align-items:center;gap:10px;background:var(--accent);color:#fff;
+    font-weight:700;font-size:15.5px;padding:17px 34px;border-radius:10px;text-decoration:none;
+    letter-spacing:0.04em;transition:background .2s, transform .12s;
+  }
+  .btn:hover{background:var(--accent-d);transform:translateY(-1px);}
+
+  /* Hero */
+  .hero{background:var(--band);color:#fff;padding:96px 0 88px;}
+  .hero .brand{display:flex;align-items:baseline;gap:14px;margin-bottom:64px;}
+  .hero .brand .name{font-size:19px;font-weight:600;letter-spacing:0.34em;color:#fff;}
+  .hero .brand .by{font-size:10.5px;letter-spacing:0.12em;color:rgba(255,255,255,0.45);text-transform:uppercase;}
+  .hero h1{font-size:44px;font-weight:600;line-height:1.75;letter-spacing:0.06em;color:#fff;margin-bottom:34px;}
+  .hero p{font-size:15.5px;color:rgba(255,255,255,0.78);line-height:2.15;max-width:560px;margin-bottom:42px;}
+  .hero-note{display:block;margin-top:16px;font-size:12.5px;color:rgba(255,255,255,0.5);letter-spacing:0.04em;}
+
+  section{padding:92px 0;}
+  .eyebrow{font-size:11.5px;font-weight:700;letter-spacing:0.22em;color:var(--accent);margin-bottom:22px;text-transform:uppercase;}
+  .sec-h{font-size:32px;font-weight:600;line-height:1.75;letter-spacing:0.05em;margin-bottom:24px;}
+  .body-t{font-size:15px;color:var(--sub);line-height:2.15;}
+  .body-t b{color:var(--ink);}
+
+  /* P/L table */
+  .pl{background:#fff;border:1px solid var(--line);border-radius:16px;padding:44px 44px 36px;max-width:640px;margin:44px auto 0;}
+  .pl-title{font-size:13px;font-weight:700;letter-spacing:0.14em;color:var(--sub);margin-bottom:26px;display:flex;justify-content:space-between;}
+  .pl-row{display:flex;justify-content:space-between;align-items:baseline;gap:20px;padding:17px 0;border-bottom:1px solid var(--line);}
+  .pl-row:last-of-type{border-bottom:2px solid var(--ink);}
+  .pl-row .l{font-size:14.5px;line-height:1.7;}
+  .pl-row .l small{display:block;font-size:12px;color:var(--sub);}
+  .pl-row .v{font-size:26px;font-weight:700;color:var(--brass);white-space:nowrap;}
+  .pl-row .v small{font-size:13px;color:var(--sub);font-weight:500;}
+  .pl-note{font-size:13.5px;color:var(--sub);margin-top:24px;line-height:2;}
+
+  /* Pain list */
+  .pain{border-top:1px solid var(--line);padding:22px 4px;font-size:16px;line-height:2;display:flex;gap:18px;}
+  .pain:last-of-type{border-bottom:1px solid var(--line);}
+  .pain .d{color:var(--brass);flex-shrink:0;font-family:'Shippori Mincho',serif;}
+
+  /* Mechanism cards */
+  .mech{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;margin-top:48px;}
+  .mcard{background:#fff;border:1px solid var(--line);border-radius:16px;padding:34px 28px;}
+  .mcard .k{font-size:12px;font-weight:700;letter-spacing:0.16em;color:var(--accent);margin-bottom:14px;}
+  .mcard h3{font-size:17.5px;font-weight:700;line-height:1.7;margin-bottom:12px;letter-spacing:0.03em;}
+  .mcard p{font-size:13.5px;color:var(--sub);line-height:2;}
+
+  /* Asset section (data compounds) */
+  .asset{background:var(--band);color:#fff;}
+  .asset .eyebrow{color:#7FD6E8;}
+  .asset .sec-h{color:#fff;}
+  .asset .body-t{color:rgba(255,255,255,0.75);}
+  .asset .body-t b{color:#fff;}
+  .flow{display:grid;grid-template-columns:1fr auto 1fr auto 1fr;gap:14px;align-items:stretch;margin-top:52px;}
+  .fstep{background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.14);border-radius:14px;padding:26px 22px;}
+  .fstep .t{font-size:15.5px;font-weight:700;color:#fff;margin-bottom:8px;letter-spacing:0.03em;line-height:1.7;}
+  .fstep p{font-size:12.5px;color:rgba(255,255,255,0.65);line-height:1.95;}
+  .farrow{display:flex;align-items:center;color:rgba(255,255,255,0.35);font-size:20px;}
+
+  /* Steps */
+  .stepper{max-width:640px;margin:48px auto 0;}
+  .st{display:flex;gap:26px;padding:26px 0;border-bottom:1px solid var(--line);}
+  .st:last-child{border-bottom:none;}
+  .st .n{font-family:'Shippori Mincho',serif;font-size:22px;color:var(--brass);flex-shrink:0;width:34px;line-height:1.6;}
+  .st h3{font-size:17px;font-weight:700;margin-bottom:6px;letter-spacing:0.03em;}
+  .st p{font-size:14px;color:var(--sub);line-height:2;}
+
+  /* Results */
+  .results{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;margin-top:48px;}
+  .rcard{background:#fff;border:1px solid var(--line);border-radius:16px;padding:30px 26px;}
+  .rcard .who{font-size:12px;font-weight:700;letter-spacing:0.08em;color:var(--sub);margin-bottom:14px;}
+  .rcard p{font-size:14px;line-height:2.05;}
+  .rcard p b{color:var(--brass);font-weight:700;}
+  .r-note{font-size:11.5px;color:var(--sub);margin-top:20px;text-align:center;}
+
+  /* Price */
+  .price-box{background:#fff;border:1px solid var(--line);border-radius:16px;padding:44px;max-width:640px;margin:44px auto 0;text-align:center;}
+  .price-box .big{font-family:'Shippori Mincho',serif;font-size:24px;font-weight:600;letter-spacing:0.08em;margin-bottom:12px;}
+  .price-box p{font-size:13.5px;color:var(--sub);line-height:2.05;}
+
+  /* FAQ */
+  .faq{max-width:680px;margin:44px auto 0;}
+  .fq{padding:26px 4px;border-bottom:1px solid var(--line);}
+  .fq:first-child{border-top:1px solid var(--line);}
+  .fq h3{font-size:15.5px;font-weight:700;margin-bottom:10px;line-height:1.8;}
+  .fq p{font-size:14px;color:var(--sub);line-height:2.05;}
+
+  /* CTA */
+  .cta{background:var(--band);color:#fff;padding:100px 0;text-align:center;}
+  .cta h2{font-family:'Shippori Mincho',serif;font-size:34px;font-weight:600;line-height:1.9;letter-spacing:0.06em;color:#fff;margin-bottom:26px;}
+  .cta p{font-size:15px;color:rgba(255,255,255,0.75);line-height:2.1;margin-bottom:40px;}
+
+  footer{text-align:center;padding:56px 28px;font-size:12.5px;color:var(--sub);}
+  footer .fb{font-size:14px;font-weight:600;letter-spacing:0.3em;color:var(--ink);margin-bottom:12px;}
+  footer a{color:var(--sub);text-decoration:none;border-bottom:1px solid var(--line);}
+
+  @media(max-width:820px){
+    .hero{padding:64px 0 60px;}
+    .hero h1{font-size:30px;}
+    .hero .brand{margin-bottom:44px;}
+    .sec-h{font-size:24px;}
+    section{padding:64px 0;}
+    .mech,.results{grid-template-columns:1fr;}
+    .flow{grid-template-columns:1fr;}
+    .farrow{transform:rotate(90deg);justify-content:center;}
+    .pl{padding:30px 24px;}
+    .pl-row .v{font-size:21px;}
+    .cta h2{font-size:25px;}
+  }
+</style>
+</head>
+<body>
+
+<!-- Hero -->
+<header class="hero">
+  <div class="wrap">
+    <div class="brand">
+      <span class="name serif">時間経営</span>
+      <span class="by en">Time Management for Executives — by EdVenture</span>
+    </div>
+    <h1 class="serif">会社は経営している。<br>時間は、経営しているか。</h1>
+    <p>売上も利益も、毎月数字で見ている。だが自分の24時間がどこに投資され、どこで消えたかを、数字で言える経営者はほとんどいない。時間経営は、経営者の時間を「見える資源」に変えるコーチングです。</p>
+    <a href="https://timerex.net/s/work.sngw_119d/d2d315fc/" class="btn" target="_blank" rel="noopener">無料の経営時間分析を予約する</a>
+    <span class="hero-note">30分・オンライン。売り込みはしません。</span>
+  </div>
+</header>
+
+<!-- P/L -->
+<section>
+  <div class="wrap" style="text-align:center;">
+    <div class="eyebrow">Time P/L</div>
+    <h2 class="sec-h serif">あなたの1週間を、<br>決算書にすると。</h2>
+    <div class="pl" style="text-align:left;">
+      <div class="pl-title"><span>時間損益計算書</span><span class="en">Weekly</span></div>
+      <div class="pl-row">
+        <div class="l">事業を伸ばす時間<small>戦略・商談・採用・仕組みづくり</small></div>
+        <div class="v en">12<small> 時間</small></div>
+      </div>
+      <div class="pl-row">
+        <div class="l">現場に吸われた時間<small>作業・割り込み・その場の対応</small></div>
+        <div class="v en">38<small> 時間</small></div>
+      </div>
+      <div class="pl-row">
+        <div class="l">どこに消えたか不明な時間<small>記憶にない。しかし確かに消えた</small></div>
+        <div class="v en">18<small> 時間</small></div>
+      </div>
+      <p class="pl-note">多くの経営者の1週間は、こうなっている。問題は怠けではない。<b>計測していない</b>ことだ。</p>
+    </div>
+  </div>
+</section>
+
+<!-- Pain -->
+<section style="padding-top:0;">
+  <div class="wrap narrow">
+    <div class="eyebrow">The Problem</div>
+    <h2 class="sec-h serif">忙しさは、成果の証明ではない。</h2>
+    <div style="margin-top:36px;">
+      <div class="pain"><span class="d">一</span><span>朝から晩まで動いているのに、重要な仕事が後回しになっている</span></div>
+      <div class="pain"><span class="d">二</span><span>1日が「対応」で終わり、「前進」がない</span></div>
+      <div class="pain"><span class="d">三</span><span>現場を離れられず、経営者にしかできない仕事に時間を使えていない</span></div>
+    </div>
+    <p class="body-t" style="margin-top:34px;">経営で「なんとなく」を許さないあなたが、自分の時間だけは、なんとなくで動かしている。</p>
+  </div>
+</section>
+
+<!-- Mechanism -->
+<section style="background:#fff;border-top:1px solid var(--line);border-bottom:1px solid var(--line);">
+  <div class="wrap" style="text-align:center;">
+    <div class="eyebrow">How It Works</div>
+    <h2 class="sec-h serif">あなたは、普段通り過ごすだけ。</h2>
+    <p class="body-t narrow">1時間ごとに手で記録する必要はありません。仕組みが観測し、対話が方向を定めます。</p>
+    <div class="mech" style="text-align:left;">
+      <div class="mcard">
+        <div class="k">OBSERVE</div>
+        <h3>カレンダーが、そのまま記録になる</h3>
+        <p>Googleカレンダーと連携し、予定が自動で時間の記録に変わります。手入力はほぼ不要。移動の合間に数タップ添えるだけで、精度が上がります。</p>
+      </div>
+      <div class="mcard">
+        <div class="k">ANALYZE</div>
+        <h3>AIが毎晩、観測結果を届ける</h3>
+        <p>その日の時間がどう使われたかを、AIが毎晩分析してレポート。秘書のように、あなたの時間を観測し続けます。</p>
+      </div>
+      <div class="mcard">
+        <div class="k">DECIDE</div>
+        <h3>コーチと、週次で「時間の決算」</h3>
+        <p>隔週の1対1コーチングで、時間データを見ながら優先順位を再設計。何をやめ、何に投資するかを決めます。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Asset: data compounds -->
+<section class="asset">
+  <div class="wrap" style="text-align:center;">
+    <div class="eyebrow">Compounding Asset</div>
+    <h2 class="sec-h serif">貯まるのは記録ではない。<br>会社の資産だ。</h2>
+    <p class="body-t narrow">日々の時間と判断の記録は、消えていた「社長の頭の中」を言語化していく。それは、あなた個人の改善で終わらない。</p>
+    <div class="flow" style="text-align:left;">
+      <div class="fstep">
+        <div class="t">判断が、記録される</div>
+        <p>何に時間を投じ、何を捨てたか。日々の記録は、経営者の意思決定のログになる。</p>
+      </div>
+      <div class="farrow">→</div>
+      <div class="fstep">
+        <div class="t">暗黙知が、言語になる</div>
+        <p>「社長はなぜそう動くのか」。感覚でやってきた判断基準・優先順位・理念が、言葉として蓄積される。</p>
+      </div>
+      <div class="farrow">→</div>
+      <div class="fstep">
+        <div class="t">言葉が、教育になる</div>
+        <p>言語化された判断基準は、そのまま社員教育と理念浸透の教材になる。あなたがいなくても回る会社へ。</p>
+      </div>
+    </div>
+    <p class="body-t" style="margin-top:44px;">データが貯まるほど、会社は良くなる。<b>時間経営は、事業承継と組織づくりの土台にもなる。</b></p>
+  </div>
+</section>
+
+<!-- Steps -->
+<section>
+  <div class="wrap" style="text-align:center;">
+    <div class="eyebrow">Process</div>
+    <h2 class="sec-h serif">まず、現状を測るところから。</h2>
+    <div class="stepper" style="text-align:left;">
+      <div class="st">
+        <div class="n">壱</div>
+        <div><h3>経営時間分析（無料・30分）</h3><p>直近1週間を一緒に棚卸しし、あなたの「時間のP/L」を作ります。ここまでは無料です。</p></div>
+      </div>
+      <div class="st">
+        <div class="n">弐</div>
+        <div><h3>再設計</h3><p>時間データをもとに、やめること・任せること・投資することを決めます。</p></div>
+      </div>
+      <div class="st">
+        <div class="n">参</div>
+        <div><h3>伴走</h3><p>仕組みが日々を観測し、隔週のコーチングで軌道修正。数字で進捗を確認します。</p></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Results -->
+<section style="background:#fff;border-top:1px solid var(--line);border-bottom:1px solid var(--line);">
+  <div class="wrap" style="text-align:center;">
+    <div class="eyebrow">Field Notes</div>
+    <h2 class="sec-h serif">数字で見る、伴走の現場。</h2>
+    <div class="results" style="text-align:left;">
+      <div class="rcard">
+        <div class="who">教育事業・30代経営者</div>
+        <p>週18時間あった"用途不明の時間"が、2ヶ月で<b>6時間</b>に。空いた時間を新規事業の立ち上げに再投資。</p>
+      </div>
+      <div class="rcard">
+        <div class="who">美容サロン経営・40代</div>
+        <p>現場に入る日を週5日から<b>週3日</b>に。空けた2日で採用と仕組み化を進め、任せられる組織へ。</p>
+      </div>
+      <div class="rcard">
+        <div class="who">コンテンツ事業・個人事業主</div>
+        <p>毎晩のAIレポートで発信が<b>90日間</b>継続。発信経由の売上がゼロから立ち上がった。</p>
+      </div>
+    </div>
+    <p class="r-note">実績は個人の結果であり、成果を保証するものではありません。</p>
+  </div>
+</section>
+
+<!-- Price -->
+<section>
+  <div class="wrap" style="text-align:center;">
+    <div class="eyebrow">Investment</div>
+    <h2 class="sec-h serif">投資対効果で、判断してください。</h2>
+    <div class="price-box">
+      <div class="big">コーチングプログラム — 個別にご案内</div>
+      <p>事業規模と目標に合わせてプログラムを設計するため、料金は無料分析の場でご提案します。<br>無料分析を受けても、契約の義務は一切ありません。</p>
+    </div>
+  </div>
+</section>
+
+<!-- FAQ -->
+<section style="padding-top:0;">
+  <div class="wrap" style="text-align:center;">
+    <div class="eyebrow">Q &amp; A</div>
+    <h2 class="sec-h serif">よくいただく質問</h2>
+    <div class="faq" style="text-align:left;">
+      <div class="fq">
+        <h3>記録が続けられる自信がありません。</h3>
+        <p>記録の努力はほぼ不要です。カレンダーの予定が自動で記録になり、AIが観測します。続けるのはあなたではなく、仕組みです。</p>
+      </div>
+      <div class="fq">
+        <h3>コンサルティングとの違いは何ですか。</h3>
+        <p>答えを渡すのではなく、あなたの意思決定の質と実行力を高めます。事業の主役はあなたのままです。</p>
+      </div>
+      <div class="fq">
+        <h3>どんな経営者に向いていますか。</h3>
+        <p>会社の数字と同じ精度で、自分の時間を扱いたい方。「感覚ではなく数字で」を自分自身にも適用したい方です。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- CTA -->
+<section class="cta">
+  <div class="wrap">
+    <h2>来週も、同じ1週間を<br>過ごしますか。</h2>
+    <p>30分で、あなたの時間の決算書を作ります。<br>数字を見てから、続きを決めてください。</p>
+    <a href="https://timerex.net/s/work.sngw_119d/d2d315fc/" class="btn" target="_blank" rel="noopener">無料の経営時間分析を予約する</a>
+  </div>
+</section>
+
+<footer>
+  <div class="fb serif">時間経営</div>
+  <div><a href="#">利用規約</a>　<a href="#">特定商取引法に基づく表記</a></div>
+  <div style="margin-top:14px;">&copy; 2026 EdVenture</div>
+</footer>
+
+</body>
+</html>
