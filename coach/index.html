@@ -697,6 +697,25 @@ function ProfileTab({ student, detail, onReload }) {
   const [savingCommunity, setSavingCommunity] = useState(false);
   const fileInputRef = useRef(null);
 
+  // Stripeの決済リンクは一度作れば全クライアント共通で使い回すため、
+  // このブラウザ（コーチの端末）にだけ保存しておく。GAS変更不要の軽い作り。
+  // アプリのみ／コーチング付きの2本を登録でき、各クライアント画面でワンタップコピーできる
+  const [payLinkApp, setPayLinkApp] = useState(() => localStorage.getItem("jiroku_paylink_app") || "");
+  const [payLinkCoaching, setPayLinkCoaching] = useState(() => localStorage.getItem("jiroku_paylink_coaching") || "");
+  const [payLinkEditing, setPayLinkEditing] = useState(false);
+  const [copiedMsg, setCopiedMsg] = useState("");
+  const savePayLinks = () => {
+    localStorage.setItem("jiroku_paylink_app", payLinkApp.trim());
+    localStorage.setItem("jiroku_paylink_coaching", payLinkCoaching.trim());
+    setPayLinkEditing(false);
+  };
+  const copyLink = async (url, label) => {
+    if (!url) return;
+    try { await navigator.clipboard.writeText(url); setCopiedMsg(label + "のリンクをコピーしました"); }
+    catch { setCopiedMsg("コピーに失敗しました"); }
+    setTimeout(() => setCopiedMsg(""), 2500);
+  };
+
   useEffect(() => {
     setForm({
       name: p.name || student.name || "", birthdate: p.birthdate || "", gender: p.gender || "", family: p.family || "",
@@ -889,6 +908,31 @@ function ProfileTab({ student, detail, onReload }) {
           ${stripeMsg && html`<span style=${{fontSize:12,color:"var(--accent)",marginLeft:10}}>${stripeMsg}</span>`}
           <label class="lbl" style=${{marginTop:14}}>Stripe連携用メールアドレス（Stripe側の登録名・メールが違う場合のみ入力）</label>
           <input class="inp" value=${form.stripe_email} onChange=${e=>set("stripe_email", e.target.value)} placeholder="未入力なら生徒のメールアドレスで検索します"/>
+        </div>
+
+        <div class="card">
+          <div class="card-label">決済リンク（この場でLINEに送る用）</div>
+          ${!payLinkEditing && (payLinkApp || payLinkCoaching) ? html`
+            <div style=${{display:"flex",flexDirection:"column",gap:8,marginBottom:10}}>
+              ${payLinkApp && html`
+                <button class="btn" style=${{textAlign:"left"}} onClick=${()=>copyLink(payLinkApp,"アプリのみ")}>
+                  📋 アプリのみプランのリンクをコピー
+                </button>`}
+              ${payLinkCoaching && html`
+                <button class="btn" style=${{textAlign:"left"}} onClick=${()=>copyLink(payLinkCoaching,"コーチング付き")}>
+                  📋 コーチング付きプランのリンクをコピー
+                </button>`}
+            </div>
+            ${copiedMsg && html`<div style=${{fontSize:12,color:"var(--green)",marginBottom:8}}>${copiedMsg}</div>`}
+            <button style=${{fontSize:11.5,background:"none",border:"1px solid var(--border)",borderRadius:8,padding:"4px 10px",cursor:"pointer",fontFamily:"inherit"}} onClick=${()=>setPayLinkEditing(true)}>リンクを編集</button>
+          ` : html`
+            <div style=${{fontSize:11.5,color:"var(--sub)",marginBottom:12}}>Stripeで作った決済リンクを一度登録すると、以降どのクライアント画面でもワンタップでコピーしてLINEに貼れます。</div>
+            <label class="lbl">アプリのみプランのリンク（例：月額のPayment Link）</label>
+            <input class="inp" value=${payLinkApp} onChange=${e=>setPayLinkApp(e.target.value)} placeholder="https://buy.stripe.com/..." style=${{marginBottom:10}}/>
+            <label class="lbl">コーチング付きプランのリンク</label>
+            <input class="inp" value=${payLinkCoaching} onChange=${e=>setPayLinkCoaching(e.target.value)} placeholder="https://buy.stripe.com/..." style=${{marginBottom:12}}/>
+            <button class="btn" onClick=${savePayLinks}>リンクを保存</button>
+          `}
         </div>
 
         <div class="card">
