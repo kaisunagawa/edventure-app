@@ -4,9 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>時間経営｜経営者のための時間と意思決定のコーチング — by EdVenture</title>
-<meta name="description" content="会社は経営している。時間は、経営しているか。経営者の時間を「見える資源」に変える、時間と意思決定のコーチング。">
+<meta name="description" content="会社は経営している。時間は、経営しているか。経営者の1週間を数字にして、「何をやめるか」を一緒に決めるコーチング。">
 <meta property="og:title" content="時間経営｜経営者のための時間と意思決定のコーチング">
-<meta property="og:description" content="会社は経営している。時間は、経営しているか。経営者の時間を「見える資源」に変えるコーチング。">
+<meta property="og:description" content="会社は経営している。時間は、経営しているか。経営者の1週間を数字にして、「何をやめるか」を一緒に決めるコーチング。">
 <meta property="og:type" content="website">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -41,8 +41,28 @@
   .hero .brand{display:flex;align-items:baseline;gap:14px;margin-bottom:64px;}
   .hero .brand .name{font-size:19px;font-weight:600;letter-spacing:0.34em;color:#fff;}
   .hero .brand .by{font-size:10.5px;letter-spacing:0.12em;color:rgba(255,255,255,0.45);text-transform:uppercase;}
+  .hero-grid{display:grid;grid-template-columns:1fr 0.72fr;gap:48px;align-items:center;}
   .hero h1{font-size:44px;font-weight:600;line-height:1.75;letter-spacing:0.06em;color:#fff;margin-bottom:34px;}
   .hero p{font-size:15.5px;color:rgba(255,255,255,0.78);line-height:2.15;max-width:560px;margin-bottom:42px;}
+
+  /* Phone mockup（実際のアプリの画面イメージ） */
+  .phone{width:264px;border-radius:36px;background:#05090c;padding:10px;box-shadow:0 26px 60px rgba(0,0,0,0.45);margin:0 auto;}
+  .phone-screen{border-radius:28px;overflow:hidden;background:#F7F8F9;}
+  .phs-head{background:linear-gradient(140deg,#0BA5CC,#0b5563);padding:18px 16px 16px;color:#fff;}
+  .phs-head .d{font-size:10px;opacity:0.75;margin-bottom:8px;display:flex;justify-content:space-between;}
+  .phs-head .g{font-size:16px;font-weight:700;letter-spacing:0.02em;}
+  .phs-body{padding:12px;}
+  .phs-card{background:#fff;border:1px solid #E8EAED;border-radius:12px;padding:12px 13px;margin-bottom:9px;}
+  .phs-card .lb{font-size:9.5px;font-weight:700;color:#8A93A0;letter-spacing:0.06em;margin-bottom:8px;}
+  .phs-bar-row{display:flex;align-items:center;gap:8px;margin-bottom:7px;}
+  .phs-bar-row .t{font-size:10px;color:#3E4650;width:62px;flex-shrink:0;}
+  .phs-bar-row .b{flex:1;height:7px;background:#EFF1F3;border-radius:99px;overflow:hidden;}
+  .phs-bar-row .b i{display:block;height:100%;border-radius:99px;}
+  .phs-report{background:#E6F8FB;border:1px solid #B8ECF3;border-radius:12px;padding:11px 13px;}
+  .phs-report .h{font-size:10px;font-weight:700;color:#0e7490;margin-bottom:5px;}
+  .phs-report .s{font-size:17px;font-weight:800;color:#0e7490;}
+  .phs-report .s small{font-size:10px;}
+  .phs-report .x{font-size:10px;color:#0e7490;line-height:1.7;margin-top:3px;}
   .hero-note{display:block;margin-top:16px;font-size:12.5px;color:rgba(255,255,255,0.5);letter-spacing:0.04em;}
 
   section{padding:92px 0;}
@@ -146,6 +166,7 @@
 
     /* 改行崩れ対策 */
     .hero .brand{flex-direction:column;gap:6px;align-items:flex-start;}
+    .hero-grid{grid-template-columns:1fr;gap:44px;}
     .hero h1{font-size:25px;letter-spacing:0.03em;}
     .sec-h{letter-spacing:0.02em;}
     .pl{padding:28px 20px;}
@@ -174,10 +195,37 @@
       <span class="name serif">時間経営</span>
       <span class="by en">Time Management for Executives — by EdVenture</span>
     </div>
-    <h1 class="serif">会社は経営している。<br>時間は、経営しているか。</h1>
-    <p>売上も利益も、毎月数字で見ている。だが自分の24時間がどこに投資され、どこで消えたかを、数字で言える経営者はほとんどいない。時間経営は、経営者の時間を「見える資源」に変えるコーチングです。</p>
-    <a href="https://timerex.net/s/work.sngw_119d/d2d315fc/" class="btn" target="_blank" rel="noopener">無料の経営時間分析を予約する</a>
-    <span class="hero-note">30分・オンライン。売り込みはしません。</span>
+    <div class="hero-grid">
+      <div>
+        <h1 class="serif">会社は経営している。<br>時間は、経営しているか。</h1>
+        <p>売上や利益は毎月見ているのに、自分の時間の使い方は、意外と誰も見ていません。時間経営は、経営者の1週間を数字にして、「何をやめるか」を一緒に決めていくコーチングです。</p>
+        <a href="https://timerex.net/s/work.sngw_119d/d2d315fc/" class="btn" target="_blank" rel="noopener">無料の経営時間分析を予約する</a>
+        <span class="hero-note">30分・オンライン。売り込みはしません。</span>
+      </div>
+      <div class="hero-visual">
+        <div class="phone">
+          <div class="phone-screen">
+            <div class="phs-head">
+              <div class="d"><span>7月10日 金</span><span class="en">Weekly</span></div>
+              <div class="g">今週の時間、こう使いました</div>
+            </div>
+            <div class="phs-body">
+              <div class="phs-card">
+                <div class="lb">今週の時間の内訳</div>
+                <div class="phs-bar-row"><span class="t">事業を伸ばす</span><span class="b"><i style="width:30%;background:#B08D4A;"></i></span></div>
+                <div class="phs-bar-row"><span class="t">現場・作業</span><span class="b"><i style="width:64%;background:#8A93A0;"></i></span></div>
+                <div class="phs-bar-row" style="margin-bottom:0;"><span class="t">会食・移動</span><span class="b"><i style="width:38%;background:#C4CAD1;"></i></span></div>
+              </div>
+              <div class="phs-report">
+                <div class="h">今日のAIレポート</div>
+                <div class="s">78<small>点</small></div>
+                <div class="x">午前の商談準備に集中できていました。夕方の割り込みは委任を検討しても良さそうです。</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 </header>
 
@@ -217,9 +265,9 @@
         <span class="v en">68<small> 時間</small></span>
       </div>
       <div class="pl-verdict">
-        68時間働いて、事業を前に進める時間は <b>18%</b>。<br>これが、多くの経営者の「時間の決算」の実態です。
+        68時間働いて、事業を前に進める時間は <b>18%</b>。<br>そして"不明な18時間"を1年分積むと——<b>936時間</b>。営業日にして、およそ<b>117日分</b>が消えている計算です。
       </div>
-      <p class="pl-note">問題は怠けではない。<b>計測していない</b>ことだ。測れば、変えられる。</p>
+      <p class="pl-note">問題は怠けではない。<b>計測していない</b>ことだ。しかも時間は在庫できない。先週消えた18時間は、もう戻らない。</p>
     </div>
   </div>
 </section>
@@ -230,11 +278,11 @@
     <div class="eyebrow">The Problem</div>
     <h2 class="sec-h serif">忙しさは、成果の証明ではない。</h2>
     <div style="margin-top:36px;">
-      <div class="pain"><span class="d">一</span><span>朝から晩まで動いているのに、重要な仕事が後回しになっている</span></div>
-      <div class="pain"><span class="d">二</span><span>1日が「対応」で終わり、「前進」がない</span></div>
-      <div class="pain"><span class="d">三</span><span>現場を離れられず、経営者にしかできない仕事に時間を使えていない</span></div>
+      <div class="pain"><span class="d en">1</span><span>気づけばLINEの返信と現場のフォローで、夕方になっている</span></div>
+      <div class="pain"><span class="d en">2</span><span>戦略を考える時間は、いつも「落ち着いたら」と後回しになる</span></div>
+      <div class="pain"><span class="d en">3</span><span>先週、自分が何にどれだけ時間を使ったか、思い出せない</span></div>
     </div>
-    <p class="body-t" style="margin-top:34px;">経営で「なんとなく」を許さないあなたが、自分の時間だけは、なんとなくで動かしている。</p>
+    <p class="body-t" style="margin-top:34px;">会社の数字にはあれだけ厳しいのに、自分の時間はどんぶり勘定。実は、多くの経営者がそうです。</p>
   </div>
 </section>
 
@@ -243,7 +291,7 @@
   <div class="wrap" style="text-align:center;">
     <div class="eyebrow">How It Works</div>
     <h2 class="sec-h serif">あなたは、普段通り過ごすだけ。</h2>
-    <p class="body-t narrow">1時間ごとに手で記録する必要はありません。仕組みが観測し、対話が方向を定めます。</p>
+    <p class="body-t narrow">1時間ごとに手で記録するような手間はありません。忙しい経営者でも続けられる形にしてあります。</p>
     <div class="mech" style="text-align:left;">
       <div class="mcard">
         <div class="k">OBSERVE</div>
@@ -253,7 +301,7 @@
       <div class="mcard">
         <div class="k">ANALYZE</div>
         <h3>AIが毎晩、観測結果を届ける</h3>
-        <p>その日の時間がどう使われたかを、AIが毎晩分析してレポート。秘書のように、あなたの時間を観測し続けます。</p>
+        <p>その日の時間の使い方を、AIが夜にまとめてレポート。翌朝1分で、前日の自分を振り返れます。</p>
       </div>
       <div class="mcard">
         <div class="k">DECIDE</div>
@@ -297,15 +345,15 @@
     <h2 class="sec-h serif">まず、現状を測るところから。</h2>
     <div class="stepper" style="text-align:left;">
       <div class="st">
-        <div class="n">壱</div>
+        <div class="n en">1</div>
         <div><h3>経営時間分析（無料・30分）</h3><p>直近1週間を一緒に棚卸しし、あなたの「時間のP/L」を作ります。ここまでは無料です。</p></div>
       </div>
       <div class="st">
-        <div class="n">弐</div>
+        <div class="n en">2</div>
         <div><h3>再設計</h3><p>時間データをもとに、やめること・任せること・投資することを決めます。</p></div>
       </div>
       <div class="st">
-        <div class="n">参</div>
+        <div class="n en">3</div>
         <div><h3>伴走</h3><p>仕組みが日々を観測し、隔週のコーチングで軌道修正。数字で進捗を確認します。</p></div>
       </div>
     </div>
@@ -355,7 +403,7 @@
     <div class="faq" style="text-align:left;">
       <div class="fq">
         <h3>記録が続けられる自信がありません。</h3>
-        <p>記録の努力はほぼ不要です。カレンダーの予定が自動で記録になり、AIが観測します。続けるのはあなたではなく、仕組みです。</p>
+        <p>ほぼ不要です。カレンダーの予定がそのまま記録になるので、手で入力するのはすきま時間に数タップ程度。三日坊主の心配はいりません。</p>
       </div>
       <div class="fq">
         <h3>コンサルティングとの違いは何ですか。</h3>
@@ -373,8 +421,9 @@
 <section class="cta">
   <div class="wrap">
     <h2>来週も、同じ1週間を<br>過ごしますか。</h2>
-    <p>30分で、あなたの時間の決算書を作ります。<br>数字を見てから、続きを決めてください。</p>
+    <p>この記事を閉じて「また今度」にした瞬間から、来週も18時間が同じように消えていきます。<br>まず30分で、あなたの時間の決算書を作りましょう。数字を見てから、続きを決めてください。</p>
     <a href="https://timerex.net/s/work.sngw_119d/d2d315fc/" class="btn" target="_blank" rel="noopener">無料の経営時間分析を予約する</a>
+    <p style="font-size:12.5px;color:rgba(255,255,255,0.55);margin-top:18px;margin-bottom:0;">無料分析は1対1で行うため、月にご案内できる人数に限りがあります。</p>
   </div>
 </section>
 
