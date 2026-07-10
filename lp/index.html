@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>JIROKU（自録）｜時間の使い方を、見える化する。</title>
+<meta name="description" content="1時間ごとに書き留めるだけ。自分の時間の使い方が見えてきて、なりたい自分に一歩ずつ近づいていく。習慣化アプリ JIROKU。">
+<meta property="og:title" content="JIROKU（自録）｜時間の使い方を、見える化する。">
+<meta property="og:description" content="1時間ごとに書き留めるだけ。自分の時間の使い方が見えてきて、なりたい自分に一歩ずつ近づいていく。">
+<meta property="og:type" content="website">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,700&family=Zen+Kaku+Gothic+New:wght@400;500;700;900&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#FAFAF9; --ink:#161B20; --sub:#6B7280; --line:#EAEAE6;
+    --accent:#0891B2; --accent-d:#0e7490; --accent-soft:#E8F7FA;
+    --hero1:#0891B2; --hero2:#0b5563;
+  }
+  *{margin:0;padding:0;box-sizing:border-box;}
+  html{scroll-behavior:smooth;}
+  body{
+    font-family:'Zen Kaku Gothic New','DM Sans',-apple-system,BlinkMacSystemFont,sans-serif;
+    color:var(--ink); background:var(--bg); line-height:1.9;
+    -webkit-font-smoothing:antialiased; font-weight:400;
+    font-feature-settings:"palt";
+  }
+  .wrap{max-width:640px;margin:0 auto;padding:0 24px;}
+  .en{font-family:'DM Sans',sans-serif;}
+  h1,h2,h3{line-height:1.4;font-weight:700;letter-spacing:0.01em;}
+  .accent{color:var(--accent);}
+
+  .btn{
+    display:inline-flex;align-items:center;gap:10px;background:var(--ink);color:#fff;
+    font-weight:700;font-size:16px;padding:17px 34px;border-radius:999px;text-decoration:none;
+    transition:transform .12s ease, opacity .2s;
+  }
+  .btn:hover{transform:translateY(-2px);opacity:0.92;}
+  .btn svg{transition:transform .15s;}
+  .btn:hover svg{transform:translateX(3px);}
+
+  /* Hero */
+  .hero{padding:64px 0 20px;}
+  .hero-logo{display:flex;align-items:center;gap:10px;margin-bottom:56px;}
+  .hero-logo .mark{width:34px;height:34px;border-radius:50%;background:linear-gradient(135deg,var(--hero1),var(--hero2));display:flex;align-items:center;justify-content:center;}
+  .hero-logo span{font-size:16px;font-weight:700;letter-spacing:3px;color:var(--ink);}
+  .hero h1{font-size:40px;font-weight:900;line-height:1.35;letter-spacing:0.005em;margin-bottom:26px;}
+  .hero h1 .thin{font-weight:400;color:var(--sub);font-size:0.62em;display:block;margin-bottom:14px;letter-spacing:0.04em;}
+  .hero-lead{font-size:16.5px;color:var(--sub);line-height:2;margin-bottom:40px;}
+  .hero-cta-note{display:block;margin-top:16px;font-size:13px;color:var(--sub);letter-spacing:0.02em;}
+
+  .divider{height:1px;background:var(--line);margin:0;}
+
+  /* editorial section */
+  section{padding:72px 0;}
+  .eyebrow{font-family:'DM Sans',sans-serif;font-size:12px;font-weight:700;letter-spacing:0.18em;color:var(--accent);text-transform:uppercase;margin-bottom:20px;}
+  .lead-statement{font-size:26px;font-weight:700;line-height:1.6;letter-spacing:0.01em;margin-bottom:22px;}
+  .body-text{font-size:16px;color:var(--sub);line-height:2.05;}
+  .body-text + .body-text{margin-top:18px;}
+  .body-text b{color:var(--ink);font-weight:700;}
+
+  /* Problem lines */
+  .prob-line{font-size:17px;line-height:1.9;padding:18px 0;border-bottom:1px solid var(--line);color:var(--ink);}
+  .prob-line:first-of-type{border-top:1px solid var(--line);}
+  .prob-line span{color:var(--accent);font-family:'DM Sans',sans-serif;font-weight:700;margin-right:14px;}
+
+  /* Feature editorial rows */
+  .feat-row{padding:36px 0;border-bottom:1px solid var(--line);}
+  .feat-row:last-child{border-bottom:none;}
+  .feat-idx{font-family:'DM Sans',sans-serif;font-size:13px;font-weight:700;color:var(--accent);letter-spacing:0.1em;margin-bottom:10px;}
+  .feat-row h3{font-size:22px;font-weight:700;margin-bottom:12px;letter-spacing:0.01em;}
+  .feat-row p{font-size:15.5px;color:var(--sub);line-height:2;}
+
+  /* Steps */
+  .step{padding:28px 0;border-bottom:1px solid var(--line);display:flex;gap:22px;align-items:baseline;}
+  .step:last-child{border-bottom:none;}
+  .step-n{font-family:'DM Sans',sans-serif;font-size:28px;font-weight:700;color:var(--line);flex-shrink:0;width:44px;line-height:1;}
+  .step h3{font-size:18px;font-weight:700;margin-bottom:5px;}
+  .step p{font-size:14.5px;color:var(--sub);line-height:1.9;}
+
+  /* Pricing — simplified */
+  .price-band{background:#fff;border:1px solid var(--line);border-radius:20px;padding:36px 32px;}
+  .price-row{display:flex;justify-content:space-between;align-items:flex-start;gap:20px;}
+  .price-row + .price-row{margin-top:28px;padding-top:28px;border-top:1px solid var(--line);}
+  .price-info h3{font-size:18px;font-weight:700;margin-bottom:4px;}
+  .price-info p{font-size:13.5px;color:var(--sub);line-height:1.75;}
+  .price-tag{text-align:right;flex-shrink:0;}
+  .price-tag .num{font-family:'DM Sans',sans-serif;font-size:26px;font-weight:700;letter-spacing:-0.01em;white-space:nowrap;}
+  .price-tag .unit{font-size:13px;color:var(--sub);}
+  .price-tag .soft{font-size:14px;color:var(--accent);font-weight:700;white-space:nowrap;}
+
+  /* FAQ */
+  .faq{padding:24px 0;border-bottom:1px solid var(--line);}
+  .faq:first-of-type{border-top:1px solid var(--line);}
+  .faq h3{font-size:16px;font-weight:700;margin-bottom:8px;}
+  .faq p{font-size:14.5px;color:var(--sub);line-height:1.95;}
+
+  /* CTA */
+  .cta{background:linear-gradient(150deg,var(--hero1) 0%,var(--hero2) 100%);border-radius:28px;padding:60px 32px;text-align:center;color:#fff;}
+  .cta h2{font-size:27px;font-weight:900;line-height:1.5;color:#fff;margin-bottom:16px;letter-spacing:0.01em;}
+  .cta p{font-size:15.5px;color:rgba(255,255,255,0.88);line-height:1.95;margin-bottom:32px;}
+  .cta .btn{background:#fff;color:var(--ink);}
+
+  footer{text-align:center;padding:52px 24px 44px;font-size:13px;color:var(--sub);}
+  footer .fmark{letter-spacing:3px;font-weight:700;color:var(--ink);margin-bottom:10px;}
+  footer a{color:var(--sub);text-decoration:none;border-bottom:1px solid var(--line);padding-bottom:1px;}
+
+  @media(max-width:560px){
+    .hero{padding:48px 0 12px;}
+    .hero-logo{margin-bottom:44px;}
+    .hero h1{font-size:31px;}
+    .lead-statement{font-size:21px;}
+    .feat-row h3{font-size:19px;}
+    section{padding:56px 0;}
+    .price-band{padding:26px 22px;}
+    .price-row{flex-direction:column;gap:14px;}
+    .price-tag{text-align:left;}
+    .price-info h3{white-space:nowrap;}
+  }
+</style>
+</head>
+<body>
+
+<!-- Hero -->
+<header class="hero">
+  <div class="wrap">
+    <div class="hero-logo">
+      <span class="mark">
+        <svg width="20" height="20" viewBox="0 0 72 72"><circle cx="36" cy="36" r="25" fill="none" stroke="rgba(255,255,255,0.35)" stroke-width="4.5"/><path d="M36 11 A25 25 0 1 1 14.5 50" fill="none" stroke="#fff" stroke-width="4.5" stroke-linecap="round"/><line x1="36" y1="36" x2="36" y2="24" stroke="#fff" stroke-width="2.4" stroke-linecap="round"/><line x1="36" y1="36" x2="44" y2="41" stroke="#fff" stroke-width="2.1" stroke-linecap="round"/><circle cx="36" cy="36" r="2.3" fill="#fff"/></svg>
+      </span>
+      <span class="en">JIROKU</span>
+    </div>
+    <h1><span class="thin">1日は、思っているより長い。</span>時間の使い方を、<br>見える化する。</h1>
+    <p class="hero-lead">1時間ごとに、やったことを書き留めるだけ。<br>それだけで、自分がどこに時間を使っているのかが見えてくる。<br>なりたい自分に、一歩ずつ近づいていくための習慣アプリです。</p>
+    <a href="https://timerex.net/s/work.sngw_119d/d2d315fc/" class="btn" target="_blank" rel="noopener">
+      無料の時間分析セッションを予約する
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12h14M13 6l6 6-6 6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </a>
+    <span class="hero-cta-note">はじめての方へ｜オンラインでお話しするところから始めています</span>
+  </div>
+</header>
+
+<div style="height:24px;"></div>
+<div class="divider"></div>
+
+<!-- Problem -->
+<section>
+  <div class="wrap">
+    <div class="eyebrow">Why</div>
+    <div class="lead-statement">「やる気が足りない」<br>のではないと思う。</div>
+    <p class="body-text">続けたいことがあるのに、気づけば1日が終わっている。手帳もアプリも、いつのまにか開かなくなった。──それは、あなたの意志が弱いからではありません。</p>
+    <div style="height:32px;"></div>
+    <div class="prob-line"><span class="en">01</span>目標はあるのに、時間だけが過ぎていく</div>
+    <div class="prob-line"><span class="en">02</span>何にどれだけ時間を使ったか、思い出せない</div>
+    <div class="prob-line"><span class="en">03</span>一人だと、つい後回しにしてしまう</div>
+    <div style="height:34px;"></div>
+    <p class="body-text">足りなかったのは、根性ではなく<b>「続く仕組み」</b>。JIROKUは、その仕組みを持ち歩けるようにしました。</p>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- Features -->
+<section>
+  <div class="wrap">
+    <div class="eyebrow">What</div>
+    <div class="lead-statement">書けば書くほど、<br>自分のことが分かってくる。</div>
+    <div style="height:18px;"></div>
+
+    <div class="feat-row">
+      <div class="feat-idx en">01</div>
+      <h3>1時間に一度、書き留めるだけ</h3>
+      <p>何をしていたかを選んで、感じたことを一言。特別な習慣も、複雑な設定もいりません。積み重なった記録が、あなたの1日の地図になります。</p>
+    </div>
+    <div class="feat-row">
+      <div class="feat-idx en">02</div>
+      <h3>毎晩、その日の振り返りが届く</h3>
+      <p>1日の記録をもとに、点数と言葉で振り返りが届きます。うまくいった日も、そうでない日も。責めるためではなく、次に進むために。</p>
+    </div>
+    <div class="feat-row">
+      <div class="feat-idx en">03</div>
+      <h3>続けるほど、あなたに合っていく</h3>
+      <p>あなたの記録や言葉が積み重なるほど、届くフィードバックはあなた自身に近づいていきます。使えば使うほど、自分だけの相棒になります。</p>
+    </div>
+    <div class="feat-row">
+      <div class="feat-idx en">04</div>
+      <h3>頑張っているのは、あなただけじゃない</h3>
+      <p>目標に向けた時間が積み上がり、同じように前に進もうとする仲間の姿も見えます。一人で抱え込まず、続けていける場所です。</p>
+    </div>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- Steps -->
+<section>
+  <div class="wrap">
+    <div class="eyebrow">How</div>
+    <div class="lead-statement">まずは、話すところから。</div>
+    <p class="body-text" style="margin-bottom:28px;">アプリを渡して終わり、にはしたくないんです。だからはじめての方とは、まずオンラインでゆっくりお話しする時間をとっています。</p>
+
+    <div class="step">
+      <div class="step-n en">01</div>
+      <div><h3>時間の使い方を、一緒に見てみる</h3><p>今の1日を振り返りながら、どこに時間が流れているのかを見える化します。（約30分・オンライン）</p></div>
+    </div>
+    <div class="step">
+      <div class="step-n en">02</div>
+      <div><h3>あなたに合う続け方を考える</h3><p>どうすれば無理なく続くか。あなたの目標と暮らしに合わせて、一緒に設計します。</p></div>
+    </div>
+    <div class="step">
+      <div class="step-n en">03</div>
+      <div><h3>翌日から、少しずつ始める</h3><p>まずは1日1回の記録から。気づけば、時間との付き合い方が変わっています。</p></div>
+    </div>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- Pricing -->
+<section>
+  <div class="wrap">
+    <div class="eyebrow">Plan</div>
+    <div class="lead-statement">自分のペースで。<br>あるいは、誰かと一緒に。</div>
+    <div style="height:20px;"></div>
+    <div class="price-band">
+      <div class="price-row">
+        <div class="price-info">
+          <h3>アプリプラン</h3>
+          <p>自分のペースで続けたい方へ。<br>すべての機能が使えます。</p>
+        </div>
+        <div class="price-tag">
+          <div class="num">¥1,980<span class="unit"> / 月</span></div>
+          <div class="unit">7日間の無料お試し付き</div>
+        </div>
+      </div>
+      <div class="price-row">
+        <div class="price-info">
+          <h3>コーチング付きプラン</h3>
+          <p>確実に、そして早く変わりたい方へ。<br>専属のコーチが定期的に伴走します。</p>
+        </div>
+        <div class="price-tag">
+          <div class="soft">個別にご案内</div>
+          <div class="unit">セッション時にご相談ください</div>
+        </div>
+      </div>
+    </div>
+    <p class="body-text" style="font-size:13.5px;margin-top:18px;">どちらが合うかは、無料セッションの中で一緒に考えます。その場で決める必要はありません。</p>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- FAQ -->
+<section>
+  <div class="wrap">
+    <div class="eyebrow">Q &amp; A</div>
+    <div class="lead-statement">よくいただく質問</div>
+    <div style="height:12px;"></div>
+
+    <div class="faq"><h3>記録するの、面倒じゃないですか？</h3><p>1時間に一度、やったことを選んで一言添えるだけ。慣れれば数秒です。むしろ、書くことで頭の中が整理されていきます。</p></div>
+    <div class="faq"><h3>三日坊主なのですが、大丈夫でしょうか。</h3><p>大丈夫です。「気合いで続ける」アプリではありません。振り返りや通知、仲間の存在など、自然と続いていく仕組みがあります。</p></div>
+    <div class="faq"><h3>アプリだけでも変われますか？</h3><p>はい。記録して振り返るだけでも、時間の使い方は驚くほど変わります。より確実に結果を出したい方には、伴走もご用意しています。</p></div>
+    <div class="faq"><h3>セッションを受けたら、契約は必須ですか？</h3><p>いいえ。セッションは「時間の使い方を見える化する」ための時間です。合わないと感じたら、そのままで構いません。</p></div>
+  </div>
+</section>
+
+<!-- CTA -->
+<section>
+  <div class="wrap">
+    <div class="cta">
+      <h2>まずは、あなたの1日を<br>のぞいてみませんか。</h2>
+      <p>無料の時間分析セッションは、いつでも予約できます。<br>気軽な気持ちで、話しに来てください。</p>
+      <a href="https://timerex.net/s/work.sngw_119d/d2d315fc/" class="btn" target="_blank" rel="noopener">
+        無料セッションを予約する
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12h14M13 6l6 6-6 6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </a>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="fmark en">JIROKU</div>
+  <div><a href="#">利用規約</a>　<a href="#">特定商取引法に基づく表記</a></div>
+  <div style="margin-top:14px;">&copy; 2026 JIROKU</div>
+</footer>
+
+</body>
+</html>
