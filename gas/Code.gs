@@ -765,7 +765,8 @@ function getGameStatus(studentEmail) {
     { goal: user.goal2 || "", deadline: user.goal_deadline2 || "" },
     { goal: user.goal3 || "", deadline: user.goal_deadline3 || "" },
   ].filter(g => g.goal);
-  return { ok: true, data: { xp, level, xpInLevel, xpForNextLevel, streak, badges, goals } };
+  const streakFreeze = Number(user.streak_freeze || 0);
+  return { ok: true, data: { xp, level, xpInLevel, xpForNextLevel, streak, streakFreeze, badges, goals } };
 }
 
 // 直近7日間の記録量（ブロック数・活動日数）で全アクティブユーザーを順位付けする。
@@ -2640,8 +2641,8 @@ function hourlyReminder() {
       : -99;
     const hoursWithoutLog = hour - lastLogHour;
 
-    // 7時間以上記録がない場合はコーチメッセージ付き（通知数を抑えるため、以前の5時間からさらに緩和）
-    if (hoursWithoutLog >= 7) {
+    // 6時間以上記録がない場合はコーチメッセージ付き
+    if (hoursWithoutLog >= 6) {
       const apiKey = PropertiesService.getScriptProperties().getProperty("CLAUDE_API_KEY");
       if (apiKey) {
         try {
@@ -2732,6 +2733,15 @@ function updateStreak(studentEmail) {
 
     sheet.getRange(i + 1, streakIdx + 1).setValue(newStreak);
     sheet.getRange(i + 1, lastLogDateIdx + 1).setValue(today);
+
+    // ストリークフリーズの獲得: 7日連続ごとに1個（最大2個まで保有）。
+    // 続けたご褒美として「休んでも消えない保険」が貯まる（Duolingo方式）
+    if (newStreak > 0 && newStreak % 7 === 0) {
+      let freezeIdx = headers.indexOf("streak_freeze");
+      if (freezeIdx === -1) { freezeIdx = headers.length; sheet.getRange(1, freezeIdx + 1).setValue("streak_freeze"); }
+      const freezes = freezeIdx < data[i].length ? Number(data[i][freezeIdx] || 0) : 0;
+      if (freezes < 2) sheet.getRange(i + 1, freezeIdx + 1).setValue(freezes + 1);
+    }
     break;
   }
 }
@@ -2902,6 +2912,8 @@ function applyXPDecay(studentEmail, targetDate) {
   const xpIdx = headers.indexOf("xp");
   const streakIdx = headers.indexOf("streak");
   const lastLogDateIdx = headers.indexOf("last_log_date");
+  let freezeIdx = headers.indexOf("streak_freeze");
+  if (freezeIdx === -1) { freezeIdx = headers.length; sheet.getRange(1, freezeIdx + 1).setValue("streak_freeze"); }
   // 「締めの日」の前日。深夜0時を跨いだ実行でも判定がずれないよう、実行時刻ではなく
   // 対象日を基準に計算する（未指定なら従来通り実行日基準）
   const baseDate = targetDate ? new Date(targetDate + "T00:00:00") : new Date();
@@ -2913,6 +2925,28 @@ function applyXPDecay(studentEmail, targetDate) {
     const rawLLD2 = data[i][lastLogDateIdx];
     const lastLogDate = rawLLD2 instanceof Date ? Utilities.formatDate(rawLLD2, "Asia/Tokyo", "yyyy-MM-dd") : String(rawLLD2 || "");
     const yesterday = formatDate(new Date(baseDate.getTime() - 86400000));
+    const currentStreak = Number(data[i][streakIdx] || 0);
+    const freezes = freezeIdx < data[i].length ? Number(data[i][freezeIdx] || 0) : 0;
+
+    // ストリークフリーズ（Duolingo方式）: 1日休んだだけで連続記録が消えるのは
+    // 酷なので、保有していれば自動で1つ消費してストリークとXPを守る。
+    // last_log_dateを「休んだ日」に進めることで、翌日の記録が連続として扱われる
+    if (freezes > 0 && currentStreak > 0) {
+      sheet.getRange(i + 1, freezeIdx + 1).setValue(freezes - 1);
+      sheet.getRange(i + 1, lastLogDateIdx + 1).setValue(formatDate(baseDate));
+      const lineIdx = headers.indexOf("line_user_id");
+      const fcmIdx = headers.indexOf("fcm_token");
+      try {
+        notifyUserTimeSlot(
+          { line_user_id: data[i][lineIdx], fcm_token: fcmIdx !== -1 ? data[i][fcmIdx] : "" },
+          "🧊 連続記録を守りました",
+          "昨日は記録がありませんでしたが、フリーズを1つ使って" + currentStreak + "日連続を守りました。今日1つ記録すれば継続です",
+          "🧊 フリーズを1つ使って、" + currentStreak + "日連続の記録を守りました。\n今日1つ記録すれば、そのまま継続です！\n📝 " + APP_URL
+        );
+      } catch (e) { /* 通知失敗しても本処理は成立させる */ }
+      Logger.log(studentEmail + ": フリーズ消費でストリーク" + currentStreak + "を維持（残り" + (freezes - 1) + "個）");
+      break;
+    }
 
     // 昨日も記録なしなら減少額を増やす（最大-30）
     const missedYesterday = lastLogDate !== yesterday;
