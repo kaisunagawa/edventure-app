@@ -95,6 +95,9 @@ function doGet(e) {
       case "getDiary":     result = getDiary(studentEmail, e.parameter); break;
       case "saveDiary":    result = saveDiary(studentEmail, e.parameter); break;
       case "getWeeklySummary": result = getWeeklySummary(studentEmail); break;
+      case "getMonthlyReview": result = getMonthlyReview(studentEmail); break;
+      case "saveIntent":   result = saveIntent(studentEmail, e.parameter); break;
+      case "getIntent":    result = getIntent(studentEmail); break;
       case "getTimeUseSummary": result = getTimeUseSummary(studentEmail); break;
       case "scheduleTimerEnd": result = scheduleTimerEnd(studentEmail, e.parameter); break;
       case "cancelTimerEnd":   result = cancelTimerEnd(studentEmail); break;
@@ -166,6 +169,7 @@ function doPost(e) {
       case "sendMessage":  return jsonResponse(sendMessage(studentEmail, body));
       case "saveSettings": return jsonResponse(saveSettings(studentEmail, body));
       case "saveDiary":    return jsonResponse(saveDiary(studentEmail, body));
+      case "saveIntent":   return jsonResponse(saveIntent(studentEmail, body));
       case "syncCalendar": return jsonResponse(syncCalendar(studentEmail, body));
       case "coachSaveProfile":     return jsonResponse(coachSaveProfile(body.coachEmail, body));
       case "coachSaveLead":        return jsonResponse(coachSaveLead(body.coachEmail, body));
@@ -2484,6 +2488,7 @@ function saveSettings(studentEmail, body) {
   const lineIdx     = ensureCol("line_user_id");
   const nicknameIdx = ensureCol("nickname");
   const avatarIdx   = ensureCol("avatar");
+  const restIdx     = ensureCol("rest_days");
 
   for (let i = 1; i < data.length; i++) {
     if (String(data[i][emailIdx]) !== studentEmail) continue;
@@ -2500,9 +2505,19 @@ function saveSettings(studentEmail, body) {
     if (body.line_user_id    !== undefined) sheet.getRange(i + 1, lineIdx     + 1).setValue(body.line_user_id);
     if (body.nickname        !== undefined) sheet.getRange(i + 1, nicknameIdx + 1).setValue(String(body.nickname).trim());
     if (body.avatar          !== undefined) sheet.getRange(i + 1, avatarIdx   + 1).setValue(body.avatar);
+    if (body.rest_days       !== undefined) sheet.getRange(i + 1, restIdx     + 1).setNumberFormat("@").setValue(String(body.rest_days));
     break;
   }
   return { ok: true };
+}
+
+// 休みの曜日設定（"0,6"のようなカンマ区切りの曜日番号。0=日〜6=土）。
+// 休みの日はリマインダーを送らず、XP減衰・ストリークリセットもしない
+function isRestDay(user, date) {
+  const raw = String(user.rest_days || "").trim();
+  if (!raw) return false;
+  const d = date instanceof Date ? date : new Date(String(date) + "T00:00:00");
+  return raw.split(",").map(s => Number(s.trim())).indexOf(d.getDay()) !== -1;
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -2592,6 +2607,8 @@ function hourlyReminder() {
     const end = Number(user.notify_end) || 23;
     const interval = Number(user.notify_interval) || 2;
     if (hour < start || hour > end) return;
+    // 休みの日はリマインダーで急かさない（記録したい人は自発的にすればよい）
+    if (isRestDay(user, new Date())) return;
     // 間隔チェック: 1日1回(interval=24)はstart時のみ、それ以外は間隔で割り切れる時間のみ
     if (interval >= 24) {
       if (hour !== start) return;
@@ -2928,6 +2945,16 @@ function applyXPDecay(studentEmail, targetDate) {
     const currentStreak = Number(data[i][streakIdx] || 0);
     const freezes = freezeIdx < data[i].length ? Number(data[i][freezeIdx] || 0) : 0;
 
+    // 休みの日に記録がなくても罰しない: XP減衰もストリークリセットもフリーズ消費もせず、
+    // last_log_dateだけ進めて翌日の連続性を保つ（休むこと自体を尊重する）
+    const restIdx2 = headers.indexOf("rest_days");
+    const restDays = restIdx2 !== -1 ? String(data[i][restIdx2] || "") : "";
+    if (isRestDay({ rest_days: restDays }, baseDate)) {
+      if (currentStreak > 0) sheet.getRange(i + 1, lastLogDateIdx + 1).setValue(formatDate(baseDate));
+      Logger.log(studentEmail + ": 休みの日のため減衰・リセットなし");
+      break;
+    }
+
     // ストリークフリーズ（Duolingo方式）: 1日休んだだけで連続記録が消えるのは
     // 酷なので、保有していれば自動で1つ消費してストリークとXPを守る。
     // last_log_dateを「休んだ日」に進めることで、翌日の記録が連続として扱われる
@@ -2989,6 +3016,8 @@ function generateReportWithClaude(studentEmail, studentName, logs) {
 - 継続できていることは積極的に称える
 - 全レポート履歴を踏まえてスコアのトレンドや変化を具体的に読み取ること
 - カレンダーの予定と実際の記録を照らし合わせ、予定を実行できたか（計画実行力）の視点も入れる
+- 「今日いちばんやりたいこと」が設定されている日は、それを達成できたかに必ず触れる（達成なら盛大に祝い、未達成なら責めずに何が妨げたかへの気づきを促す）
+- 今日が本人の【休みの日】の場合は採点・言葉選びを休息モードにする。記録が少なくても責めず、休めたこと自体を肯定する
 
 ${ctx}
 
@@ -3192,13 +3221,17 @@ function upsertJournalRow(studentEmail, targetDate, fields) {
   try {
     const sheet = getJournalSheet();
     let headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
-    if (headers.indexOf("auto_summary") === -1) {
-      sheet.getRange(1, headers.length + 1).setValue("auto_summary");
-      headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
-    }
+    ["auto_summary", "intent", "intent_done"].forEach(col => {
+      if (headers.indexOf(col) === -1) {
+        sheet.getRange(1, headers.length + 1).setValue(col);
+        headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+      }
+    });
     const diaryIdx = headers.indexOf("diary");
     const updatedIdx = headers.indexOf("updated_at");
     const summaryIdx = headers.indexOf("auto_summary");
+    const intentIdx = headers.indexOf("intent");
+    const intentDoneIdx = headers.indexOf("intent_done");
     const now = new Date().toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" });
 
     const data = sheet.getDataRange().getValues();
@@ -3209,6 +3242,8 @@ function upsertJournalRow(studentEmail, targetDate, fields) {
       if (String(data[i][1]) === studentEmail && rowDate === targetDate) {
         if (fields.diary !== undefined) sheet.getRange(i + 1, diaryIdx + 1).setValue(fields.diary);
         if (fields.auto_summary !== undefined) sheet.getRange(i + 1, summaryIdx + 1).setValue(fields.auto_summary);
+        if (fields.intent !== undefined) sheet.getRange(i + 1, intentIdx + 1).setValue(fields.intent);
+        if (fields.intent_done !== undefined) sheet.getRange(i + 1, intentDoneIdx + 1).setValue(fields.intent_done);
         sheet.getRange(i + 1, updatedIdx + 1).setValue(now);
         return;
       }
@@ -3217,6 +3252,8 @@ function upsertJournalRow(studentEmail, targetDate, fields) {
     rowArr[1] = studentEmail;
     if (fields.diary !== undefined) rowArr[diaryIdx] = fields.diary;
     if (fields.auto_summary !== undefined) rowArr[summaryIdx] = fields.auto_summary;
+    if (fields.intent !== undefined) rowArr[intentIdx] = fields.intent;
+    if (fields.intent_done !== undefined) rowArr[intentDoneIdx] = fields.intent_done;
     rowArr[updatedIdx] = now;
     const newRow = sheet.getLastRow() + 1;
     sheet.appendRow(rowArr);
@@ -3230,6 +3267,27 @@ function saveDiary(studentEmail, body) {
   if (!body.date) return { ok: false, error: "missing date" };
   upsertJournalRow(studentEmail, String(body.date), { diary: body.diary || "" });
   return { ok: true };
+}
+
+// 朝アプリを開いた時に宣言する「今日いちばんやりたいこと」。Journalシートに保存し、
+// AIコーチの全メッセージ・夜のレポートが達成状況をフォローする
+function saveIntent(studentEmail, body) {
+  if (body.intent === undefined && body.intent_done === undefined) return { ok: false, error: "missing intent" };
+  const fields = {};
+  if (body.intent !== undefined) fields.intent = String(body.intent).trim();
+  if (body.intent_done !== undefined) fields.intent_done = String(body.intent_done);
+  upsertJournalRow(studentEmail, formatDate(new Date()), fields);
+  return { ok: true };
+}
+
+function getIntent(studentEmail) {
+  const today = formatDate(new Date());
+  if (!getSheet("Journal")) return { ok: true, data: null };
+  const row = sheetToObjects(getJournalSheet()).find(r => {
+    const rd = r.date instanceof Date ? Utilities.formatDate(r.date, "Asia/Tokyo", "yyyy-MM-dd") : String(r.date);
+    return r.student_email === studentEmail && rd === today;
+  });
+  return { ok: true, data: row && row.intent ? { intent: row.intent, done: String(row.intent_done) === "true" } : null };
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -3577,11 +3635,35 @@ function buildStudentContext(studentEmail, user, preloaded) {
     }
   } catch (e) { /* シート未作成なら無視 */ }
 
+  // 休みの日の情報。休みの日に仕事や勉強を課すような助言をしないための最重要コンテキスト
+  const nowDate = new Date();
+  const restConfigured = String(user.rest_days || "").trim() !== "";
+  const restDayNames = restConfigured
+    ? String(user.rest_days).split(",").map(n => "日月火水木金土"[Number(String(n).trim())] + "曜").join("・")
+    : "";
+  const restText = restConfigured
+    ? `休みの曜日: ${restDayNames}。今日は${isRestDay(user, nowDate) ? "【休みの日】" : "活動日"}、明日は${isRestDay(user, new Date(nowDate.getTime() + 86400000)) ? "【休みの日】" : "活動日"}。休みの日には仕事・勉強・タスクを課すような助言は絶対にしない（休養・リフレッシュ・好きなことを尊重し、記録も「したければでOK」の温度感にする）。明日が休みの日なら「明日の朝から仕事を頑張ろう」のような活動前提の助言もしない`
+    : "未設定（すべて活動日として扱う）";
+
+  // 本人が今朝アプリで宣言した「今日いちばんやりたいこと」
+  let intentText = "未設定";
+  try {
+    // 全生徒ループ（朝・夜のバッチ）でJournalシートを毎回読み直さないよう、実行内でキャッシュする
+    if (!globalThis.__journalCache) globalThis.__journalCache = sheetToObjects(getJournalSheet());
+    const jRow = globalThis.__journalCache.find(r => {
+      const rd = r.date instanceof Date ? Utilities.formatDate(r.date, "Asia/Tokyo", "yyyy-MM-dd") : String(r.date);
+      return r.student_email === studentEmail && rd === today;
+    });
+    if (jRow && jRow.intent) intentText = jRow.intent + (String(jRow.intent_done) === "true" ? "（✅達成済み）" : "（まだ未達成）");
+  } catch (e) { /* シート未作成なら無視 */ }
+
   return `【生徒名】${user.name}
 【入会日】${user.joined_at || "不明"}
 【連続記録日数】${streak}日
 【全期間の記録】合計${totalDaysRecorded}日・${totalBlocks}時間帯
 【今日のカレンダー予定】${todayPlan || "未同期（予定情報なし）"}
+【休みの日】${restText}
+【今日いちばんやりたいこと（本人が今朝宣言。達成できたか必ず気にかけること）】${intentText}
 【目標と期限】
 ${goalsText}
 【全期間スコアトレンド】${scoreTrend}
@@ -3876,6 +3958,109 @@ function getWeeklySummary(studentEmail) {
   } };
 }
 
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// 月間ふりかえり（毎月1日の朝に、先月分を生徒向けの文章で生成）
+// MonthlySummaryはコーチ引き継ぎ用の文体のため、生徒が読む用は別に作る
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+function getMonthlyReviewSheet() {
+  let sheet = getSheet("MonthlyReview");
+  if (!sheet) {
+    sheet = SpreadsheetApp.openById(SPREADSHEET_ID).insertSheet("MonthlyReview");
+    sheet.appendRow(["month", "student_email", "summary", "active_days", "total_blocks", "goal_related_pct", "avg_score", "created_at"]);
+  }
+  return sheet;
+}
+
+function generateMonthlyReviews() {
+  const now = new Date();
+  const lastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  const monthStr = lastMonth.getFullYear() + "-" + String(lastMonth.getMonth() + 1).padStart(2, "0");
+  const monthStart = monthStr + "-01";
+  const monthEnd = monthStr + "-31";
+  // 前々月（先月との比較用）
+  const prevMonth = new Date(now.getFullYear(), now.getMonth() - 2, 1);
+  const prevStr = prevMonth.getFullYear() + "-" + String(prevMonth.getMonth() + 1).padStart(2, "0");
+
+  const apiKey = PropertiesService.getScriptProperties().getProperty("CLAUDE_API_KEY");
+  if (!apiKey) return;
+  const reviewSheet = getMonthlyReviewSheet();
+  const allLogs = sheetToObjects(getSheet("DailyLog"));
+  const allReports = sheetToObjects(getSheet("Reports"));
+
+  sheetToObjects(getSheet("Users")).filter(u => u.is_active.toUpperCase() === "TRUE").forEach(user => {
+    try {
+      const existing = sheetToObjects(reviewSheet).find(r => r.student_email === user.student_email && r.month === monthStr);
+      if (existing) return;
+
+      const monthLogs = allLogs.filter(l => l.student_email === user.student_email && l.date >= monthStart && l.date <= monthEnd);
+      if (monthLogs.length === 0) return; // 活動なしの月は無理に作らない
+
+      const prevLogs = allLogs.filter(l => l.student_email === user.student_email && l.date >= prevStr + "-01" && l.date <= prevStr + "-31");
+      const monthReports = allReports.filter(r => r.student_email === user.student_email && r.date >= monthStart && r.date <= monthEnd);
+
+      const activeDays = new Set(monthLogs.map(l => l.date)).size;
+      const totalBlocks = monthLogs.length;
+      const goalRelatedPct = Math.round(monthLogs.filter(l => l.goal_related === "true").length / totalBlocks * 100);
+      const avgScore = monthReports.length > 0 ? Math.round(monthReports.reduce((s, r) => s + Number(r.score), 0) / monthReports.length) : null;
+      const taskCounts = monthLogs.reduce((acc, l) => { if (l.task) acc[l.task] = (acc[l.task] || 0) + 1; return acc; }, {});
+      const topTasks = Object.entries(taskCounts).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([t, c]) => `${t}(${c}回)`).join("、");
+      const compareText = prevLogs.length > 0
+        ? `前月（${prevStr}）は${new Set(prevLogs.map(l => l.date)).size}日・${prevLogs.length}時間帯の記録`
+        : "前月の記録なし（比較不可）";
+
+      const prompt = `以下は${user.name}の${monthStr}（先月）1ヶ月間の記録です。本人が読む月間ふりかえりコメントを生成してください。
+
+【先月の統計】
+- 記録日数: ${activeDays}日 / ${totalBlocks}時間帯
+- 目標関連の記録: ${goalRelatedPct}%
+- よく取り組んだこと: ${topTasks || "特になし"}
+- レポート平均スコア: ${avgScore !== null ? avgScore + "点" : "データなし"}
+- 前月との比較: ${compareText}
+
+【先月の記録サンプル（最新50件）】
+${monthLogs.slice(-50).map(l => l.date + " " + l.time_block + " " + l.task + "（" + l.focus_level + (l.memo ? "・" + l.memo : "") + "）").join("\n")}
+
+【要件】
+- 宛名・挨拶・見出しは書かない。本文からいきなり始める
+- 4〜6文程度。1ヶ月で何に時間を使ったか、前月からの変化、良かった点、今月に向けての焦点を含める
+- 抽象的な褒め言葉より、具体的な内容・数字に触れる
+- アメとムチ: よく積み上げた月は盛大に称え、失速した月はごまかさず指摘する（人格ではなく行動を。愛のある言い方で）
+- 文末の絵文字は合計2個まで`;
+
+      const res = UrlFetchApp.fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
+        payload: JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: 500, messages: [{ role: "user", content: prompt }] }),
+        muteHttpExceptions: true
+      });
+      const result = JSON.parse(res.getContentText());
+      if (!result.content || !result.content[0]) return;
+
+      reviewSheet.appendRow([monthStr, user.student_email, result.content[0].text,
+        activeDays, totalBlocks, goalRelatedPct, avgScore !== null ? avgScore : "",
+        new Date().toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" })]);
+      Logger.log(user.student_email + ": " + monthStr + " 月間ふりかえり生成完了");
+    } catch (err) { Logger.log("monthlyReview error: " + err); }
+  });
+}
+
+// 生徒アプリから呼ばれる: 直近の月間ふりかえりを1件返す
+function getMonthlyReview(studentEmail) {
+  if (!getSheet("MonthlyReview")) return { ok: true, data: null };
+  const rows = getFilteredRows("MonthlyReview", "student_email", studentEmail)
+    .sort((a, b) => b.month > a.month ? 1 : -1);
+  if (rows.length === 0) return { ok: true, data: null };
+  const r = rows[0];
+  return { ok: true, data: {
+    month: r.month, summary: r.summary,
+    activeDays: Number(r.active_days) || 0,
+    totalBlocks: Number(r.total_blocks) || 0,
+    goalRelatedPct: Number(r.goal_related_pct) || 0,
+    avgScore: r.avg_score !== "" ? Number(r.avg_score) : null
+  } };
+}
+
 // レポート一覧画面の「時間の使い方」サマリー。直近14日の記録から
 // 1日平均の記録量・平均集中・目標関連の割合・よく時間を使っていることを集計する
 function getTimeUseSummary(studentEmail) {
@@ -4123,12 +4308,13 @@ function setupTriggers() {
   ScriptApp.newTrigger("nightlyReport").timeBased().everyDays(1).atHour(22).create();
   ScriptApp.newTrigger("nightlyCoachMessage").timeBased().everyDays(1).atHour(22).nearMinute(30).create();
   ScriptApp.newTrigger("generateMonthlySummaries").timeBased().onMonthDay(1).atHour(3).create();
+  ScriptApp.newTrigger("generateMonthlyReviews").timeBased().onMonthDay(1).atHour(8).create();
   ScriptApp.newTrigger("generateWeeklySummaries").timeBased().everyWeeks(1).onWeekDay(ScriptApp.WeekDay.MONDAY).atHour(8).create();
   ScriptApp.newTrigger("checkTimerQueue").timeBased().everyMinutes(1).create();
   ScriptApp.newTrigger("hourlyReminder").timeBased().everyHours(1).create();
   ScriptApp.newTrigger("syncStripeTotals").timeBased().everyDays(1).atHour(4).create();
   ScriptApp.newTrigger("syncChatworkMessages").timeBased().everyHours(1).create();
-  console.log("トリガーを設定しました（合計9個）");
+  console.log("トリガーを設定しました（合計10個）");
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

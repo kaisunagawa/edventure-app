@@ -830,6 +830,34 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
   });
   const [editMode, setEditMode] = useState(false);
   const [editItems, setEditItems] = useState([]);
+  // 今日いちばんやりたいこと（朝の宣言）。その日の最初の起動でモーダルを出し、
+  // 宣言した内容をホームに固定表示して、夜のレポートで達成状況をフォローする
+  const [intent, setIntent] = useState(()=>{
+    try { const s=JSON.parse(localStorage.getItem("jiroku_intent")||"null"); return s&&s.date===formatDateStr(new Date())?s:null; } catch(e){ return null; }
+  });
+  const [showIntentModal, setShowIntentModal] = useState(false);
+  const [intentInput, setIntentInput] = useState("");
+  const [intentSaving, setIntentSaving] = useState(false);
+  const saveIntent = async () => {
+    const text = intentInput.trim();
+    if(!text) return;
+    setIntentSaving(true);
+    const next = {date:formatDateStr(new Date()), intent:text, done:false};
+    localStorage.setItem("jiroku_intent", JSON.stringify(next));
+    setIntent(next); setShowIntentModal(false); setIntentSaving(false);
+    gasPostJson("saveIntent", {intent:text});
+  };
+  const skipIntent = () => {
+    localStorage.setItem("jiroku_intent_skip", formatDateStr(new Date()));
+    setShowIntentModal(false);
+  };
+  const markIntentDone = () => {
+    if(!intent || intent.done) return;
+    const next = {...intent, done:true};
+    localStorage.setItem("jiroku_intent", JSON.stringify(next));
+    setIntent(next);
+    gasPostJson("saveIntent", {intent_done:"true"});
+  };
   const [showGoalTimeEdit, setShowGoalTimeEdit] = useState(false);
   const [dailyGoalHours, setDailyGoalHours] = useState(getDailyGoalHours);
   // 0.5〜6時間までは選択肢を並べるだけで済んだが、12時間まで広げると
@@ -891,6 +919,24 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
     const today = formatDateStr(new Date());
     const saved = localStorage.getItem("today_actions_date");
     if(saved !== today){ localStorage.removeItem("today_actions"); localStorage.setItem("today_actions_date", today); setChecked({}); }
+
+    // 今日いちばんやりたいこと: まだ宣言も「あとで」もしていなければ、その日の
+    // 最初の起動時にモーダルで聞く（別端末で宣言済みならサーバーから同期）
+    try {
+      const localIntent = JSON.parse(localStorage.getItem("jiroku_intent")||"null");
+      const hasToday = localIntent && localIntent.date === today;
+      const skipped = localStorage.getItem("jiroku_intent_skip") === today;
+      if(hasToday){ setIntent(localIntent); }
+      else if(!skipped){
+        gasApi("getIntent").then(r=>{
+          if(r.ok && r.data){
+            const next = {date:today, intent:r.data.intent, done:r.data.done};
+            localStorage.setItem("jiroku_intent", JSON.stringify(next));
+            setIntent(next);
+          } else if(new Date().getHours() < 18) setShowIntentModal(true);
+        });
+      }
+    } catch(e){}
   },[isActive]);
 
   const goalsArr = Array.isArray(goalData) ? goalData : (goalData?.goal ? [goalData] : []);
@@ -1010,6 +1056,45 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
     </div>
 
     ${showCommunity&&html`<${CommunityOverlay} onClose=${()=>setShowCommunity(false)}/>`}
+
+    <!-- 今日いちばんやりたいこと -->
+    ${intent&&html`
+      <div style=${{margin:"16px 16px 0",background:"var(--card)",borderRadius:16,border:`1.5px solid ${intent.done?"var(--green)":"var(--accent)"}`,padding:"14px 16px",display:"flex",alignItems:"center",gap:12}}>
+        <div style=${{flex:1,minWidth:0}}>
+          <div style=${{fontSize:11,fontWeight:600,color:"var(--sub)",marginBottom:3}}>⭐ 今日いちばんやりたいこと</div>
+          <div style=${{fontSize:15,fontWeight:700,color:"var(--text)",lineHeight:1.5,textDecoration:intent.done?"line-through":"none",opacity:intent.done?0.6:1}}>${intent.intent}</div>
+        </div>
+        ${intent.done
+          ? html`<div style=${{flexShrink:0,fontSize:13,fontWeight:800,color:"var(--green)"}}>達成🎉</div>`
+          : html`<button onClick=${markIntentDone}
+              style=${{flexShrink:0,padding:"8px 14px",borderRadius:99,border:"none",background:"var(--accent)",color:"#fff",fontSize:12.5,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>達成した！</button>`}
+      </div>
+    `}
+
+    ${showIntentModal&&ReactDOM.createPortal(html`
+      <div style=${{position:"fixed",inset:0,height:"100dvh",background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"flex-end",zIndex:500}}>
+        <div style=${{background:"var(--card)",borderRadius:"20px 20px 0 0",padding:"24px 20px calc(28px + env(safe-area-inset-bottom))",width:"100%",boxSizing:"border-box"}}>
+          <div style=${{fontSize:18,fontWeight:800,marginBottom:4,color:"var(--text)"}}>⭐ 今日いちばんやりたいことは？</div>
+          <div style=${{fontSize:13,color:"var(--sub)",marginBottom:16,lineHeight:1.6}}>1つだけ決めましょう。今日はこれの達成をコーチと一緒に目指します。夜のレポートでも振り返ります。</div>
+          <input class="inp" placeholder="例：企画書を仕上げる、30分走る" value=${intentInput}
+            onInput=${e=>setIntentInput(e.target.value)} style=${{marginBottom:12}}/>
+          ${actionItems.length>0&&html`
+            <div style=${{display:"flex",flexWrap:"wrap",gap:6,marginBottom:16}}>
+              ${actionItems.slice(0,3).map((a,i)=>html`
+                <button key=${i} onClick=${()=>setIntentInput(a)}
+                  style=${{padding:"5px 10px",borderRadius:20,border:`1.5px solid ${intentInput===a?"var(--accent)":"var(--border)"}`,background:intentInput===a?"var(--accent-l)":"transparent",color:intentInput===a?"var(--accent)":"var(--sub)",fontSize:11.5,fontWeight:500,cursor:"pointer",fontFamily:"inherit",maxWidth:"100%",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                  🎯 ${a}
+                </button>
+              `)}
+            </div>
+          `}
+          <button class="btn" disabled=${!intentInput.trim()||intentSaving} onClick=${saveIntent}
+            style=${{opacity:intentInput.trim()?1:0.5}}>これを今日の一番にする</button>
+          <button onClick=${skipIntent}
+            style=${{display:"block",width:"100%",marginTop:10,background:"none",border:"none",color:"var(--sub)",fontSize:13,cursor:"pointer",fontFamily:"inherit",padding:8}}>今日はスキップ</button>
+        </div>
+      </div>
+    `, document.body)}
 
     ${showGoalTimeEdit&&ReactDOM.createPortal(html`
       <div style=${{position:"fixed",inset:0,height:"100dvh",background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"flex-end",zIndex:500}}
@@ -1870,8 +1955,10 @@ function ReportScreen() {
   const [view, setView]=useState("report"); // "report" | "diary"
   const [expandedBreakdown, setExpandedBreakdown]=useState(null);
   const [weeklySummary, setWeeklySummary]=useState(null);
+  const [monthlyReview, setMonthlyReview]=useState(null);
   const [timeUse, setTimeUse]=useState(null);
   const [showWeekly, setShowWeekly]=useState(false);
+  const [showMonthly, setShowMonthly]=useState(false);
 
   useEffect(()=>{
     gasApi("getReportList").then(r=>{
@@ -1882,6 +1969,7 @@ function ReportScreen() {
       setListLoading(false);
     });
     gasApi("getWeeklySummary").then(r=>{ if(r.ok && r.data) setWeeklySummary(r.data); });
+    gasApi("getMonthlyReview").then(r=>{ if(r.ok && r.data) setMonthlyReview(r.data); });
     gasApi("getTimeUseSummary").then(r=>{ if(r.ok && r.data) setTimeUse(r.data); });
   },[]);
 
@@ -1931,6 +2019,31 @@ function ReportScreen() {
                       `)}
                     </div>
                     <p style=${{fontSize:13.5,lineHeight:1.8,color:"var(--text)"}}>${weeklySummary.summary}</p>
+                  </div>
+                `}
+              </div>
+            `}
+            ${monthlyReview&&html`
+              <div class="card" style=${{marginBottom:8}}>
+                <button onClick=${()=>setShowMonthly(!showMonthly)}
+                  style=${{display:"flex",justifyContent:"space-between",alignItems:"center",width:"100%",background:"none",border:"none",padding:0,cursor:"pointer",fontFamily:"inherit",textAlign:"left"}}>
+                  <div>
+                    <div class="card-label" style=${{marginBottom:2}}>🗓 先月のふりかえり</div>
+                    <div style=${{fontSize:11,color:"var(--sub)"}}>${monthlyReview.month}${monthlyReview.avgScore!==null?` · 平均${monthlyReview.avgScore}点`:""}</div>
+                  </div>
+                  <div style=${{color:"var(--sub)",fontSize:14}}>${showMonthly?"▲":"▼"}</div>
+                </button>
+                ${showMonthly&&html`
+                  <div style=${{marginTop:12}}>
+                    <div style=${{display:"flex",gap:8,marginBottom:12}}>
+                      ${[["記録日数",monthlyReview.activeDays+"日"],["記録",monthlyReview.totalBlocks+"時間帯"],["目標関連",monthlyReview.goalRelatedPct+"%"]].map(([l,v])=>html`
+                        <div key=${l} style=${{flex:1,background:"var(--bg)",borderRadius:10,padding:"10px 6px",textAlign:"center"}}>
+                          <div style=${{fontSize:13,fontWeight:800,color:"var(--accent)",lineHeight:1.3}}>${v}</div>
+                          <div style=${{fontSize:10,color:"var(--sub)",marginTop:3}}>${l}</div>
+                        </div>
+                      `)}
+                    </div>
+                    <p style=${{fontSize:13.5,lineHeight:1.8,color:"var(--text)"}}>${monthlyReview.summary}</p>
                   </div>
                 `}
               </div>
@@ -2088,13 +2201,41 @@ const ALARM_STYLES = [
 const getAlarmStyle = () => ALARM_STYLES.find(s=>s.key===localStorage.getItem("timer_alarm_style")) || ALARM_STYLES[1];
 let sharedAudioCtx = null;
 function getSharedAudioCtx() {
-  if(!sharedAudioCtx) sharedAudioCtx = new (window.AudioContext||window.webkitAudioContext)();
+  // iOSはバックグラウンドに回るとAudioContextを勝手にclosedにすることがあるため、
+  // その場合は作り直す（closedのcontextはresumeできず、音が一切鳴らなくなる）
+  if(!sharedAudioCtx || sharedAudioCtx.state === "closed") sharedAudioCtx = new (window.AudioContext||window.webkitAudioContext)();
   return sharedAudioCtx;
+}
+// 音が鳴らせなかった時の保険: クリック音サンプルを連打してアラーム代わりにする
+// （HTMLAudioはWeb Audioと復帰条件が異なるため、片方が死んでいても鳴る可能性がある）
+let fallbackAlarmEl = null;
+function playFallbackAlarm() {
+  try {
+    if(!fallbackAlarmEl) fallbackAlarmEl = new Audio(TIMER_CLICK_SRC);
+    fallbackAlarmEl.volume = 1;
+    let n = 0;
+    const rep = () => { if(n++>=6) return; fallbackAlarmEl.currentTime = 0; fallbackAlarmEl.play().catch(()=>{}); setTimeout(rep, 250); };
+    rep();
+  } catch(e){}
 }
 // 指定スタイルで「ピピピ…」を合成して鳴らす。テスト再生・タイマー完了時の両方から呼ばれる
 function scheduleAlarmBeeps(style) {
   const ctx = getSharedAudioCtx();
-  if(ctx.state === "suspended") ctx.resume();
+  // iOSでは電話やバックグラウンド遷移後に"interrupted"や"suspended"のまま戻ってくる。
+  // resumeは非同期なので、完了を待ってからオシレーターを組み立てる（suspended中に
+  // 組み立てると鳴らないことがある）。0.6秒待っても復帰しなければ保険の音に切り替える
+  if(ctx.state !== "running") {
+    let done = false;
+    const p = ctx.resume && ctx.resume();
+    if(p && p.then) {
+      p.then(()=>{ if(!done){ done = true; buildAlarmBeeps(ctx, style); } }).catch(()=>{ if(!done){ done = true; playFallbackAlarm(); } });
+      setTimeout(()=>{ if(!done){ done = true; playFallbackAlarm(); } }, 600);
+      return;
+    }
+  }
+  buildAlarmBeeps(ctx, style);
+}
+function buildAlarmBeeps(ctx, style) {
   const beepsPerGroup = 3;
   const beepSec = style.beepMs/1000, gapSec = style.gapMs/1000;
   const groupDurSec = beepsPerGroup*(beepSec+gapSec);
@@ -2537,6 +2678,14 @@ const FAQ_ITEMS = [
     a:"記録1件につき+10XP、メモを書くと+5XP、その日最初の記録には連続日数ボーナスが付きます。\nXPは1つの記録につき1回だけ（初めて自己評価を入れたタイミング）付きます。評価を付けずに保存して後から評価を足した時もちゃんと付きますが、何度更新しても増えません。過去の日付への後付け記録ではXPは付きません。\n記録なしの日はXPが減り、連続記録もリセットされます。ただし🧊フリーズを持っていれば自動で守られます（下の項目参照）。" },
   { q:"1日休んだら連続記録は消えちゃう？（🧊フリーズ）",
     a:"7日連続で記録するごとに「フリーズ🧊」が1個貯まります（最大2個）。\n記録できない日があっても、フリーズを持っていれば自動で1個使われて、連続記録とXPがそのまま守られます。使われた時は通知でお知らせします。\nホーム画面の🔥連続日数の横に、持っているフリーズの数（🧊×1など）が表示されます。" },
+  { q:"休みの日はどうすればいい？",
+    a:"設定の「時間帯と通知」で休みの曜日を選べます。\n休みの日はリマインダーが届かず、記録しなくてもXPが減ったり連続記録が途切れたりしません（フリーズも消費されません）。\nコーチからのメッセージやレポートも、休みの日は休息を尊重した内容になります。もちろん記録したい場合は普通に記録できます。" },
+  { q:"「今日いちばんやりたいこと」って何？",
+    a:"その日最初にアプリを開いた時に、今日いちばんやりたいことを1つ宣言できます。\n宣言した内容はホーム画面に表示され、達成したら「達成した！」ボタンでチェックできます。\nコーチからのメッセージや夜のAIレポートも、この宣言の達成をサポート・評価してくれます。スキップも可能です。" },
+  { q:"1週間・1ヶ月のふりかえりはどこで見られる？",
+    a:"レポート画面の上部に表示されます。\n「📅 今週のまとめ」は毎週月曜の朝に先週分（月〜日）が、「🗓 先月のふりかえり」は毎月1日の朝に先月分が自動生成されます。\n記録日数・目標関連の割合などの統計と、AIコーチによる振り返りコメントが読めます。" },
+  { q:"タイマーの音が鳴らない",
+    a:"iPhoneのマナーモード（消音スイッチ）がオンだと音は鳴りません（振動でお知らせします）。\nまた音量ボタンでメディア音量が下がっていないかも確認してください。\nタイマー画面右上の「🔊 音をテスト」で事前に確認できます。設定の「タイマー」ではアラーム音の種類も変えられます。" },
   { q:"記録し忘れた日を後から入れたい",
     a:"記録タブの日付の「‹」で過去の日に戻ると、追加・編集ができます。\nAIコーチはちゃんとその記録も見てくれます（ただしXPは付きません）。" },
   { q:"タイマーの使い方は？",
@@ -2696,12 +2845,19 @@ function SettingsScreen({onToast,onLogout,onGoalSaved,profile,onProfileSaved,onC
     client.requestAccessToken();
   };
 
+  // 休みの曜日（0=日〜6=土）。休みの日はリマインダーなし・XP減衰なし・連続記録も守られる
+  const [restDays,setRestDays]=useState(()=>{
+    try{ return JSON.parse(localStorage.getItem("jiroku_rest_days")||"[]"); }catch(e){ return []; }
+  });
+  const toggleRestDay=(d)=>setRestDays(restDays.includes(d)?restDays.filter(x=>x!==d):[...restDays,d].sort());
+
   // 記録時間帯とLINE通知を同時に保存（両者は常に連動）
   const saveTimeSettings=()=>{
     if(logEnd<=logStart){onToast("終了時間は開始より後にしてください");return;}
     localStorage.setItem("jiroku_log_hours",JSON.stringify({start:logStart,end:logEnd}));
     localStorage.setItem("notifySettings",JSON.stringify({start:logStart,end:logEnd,interval}));
-    gasPost("saveSettings",{notify_start:logStart,notify_end:logEnd,notify_interval:interval});
+    localStorage.setItem("jiroku_rest_days",JSON.stringify(restDays));
+    gasPost("saveSettings",{notify_start:logStart,notify_end:logEnd,notify_interval:interval,rest_days:restDays.join(",")});
     onToast("時間帯と通知設定を保存しました");
   };
   const saveGoal=()=>{
@@ -2868,6 +3024,21 @@ function SettingsScreen({onToast,onLogout,onGoalSaved,profile,onProfileSaved,onC
               ${Array.from({length:20},(_,i)=>i+6).map(h=>html`<option key=${h} value=${h}>${String(h).padStart(2,"0")}:00</option>`)}
             </select>
           </div>
+        </div>
+        <div style=${{fontSize:12,color:"var(--sub)",marginBottom:10,fontWeight:500}}>休みの曜日</div>
+        <div style=${{display:"flex",gap:5,marginBottom:8}}>
+          ${["日","月","火","水","木","金","土"].map((label,d)=>{
+            const on=restDays.includes(d);
+            return html`<button key=${d} onClick=${()=>toggleRestDay(d)}
+              style=${{flex:1,padding:"8px 0",borderRadius:10,border:`1.5px solid ${on?"var(--accent)":"var(--border)"}`,
+              background:on?"var(--accent)":"transparent",color:on?"#fff":d===0?"var(--red)":d===6?"var(--accent)":"var(--text)",
+              fontSize:13,cursor:"pointer",fontWeight:on?700:400,fontFamily:"inherit",transition:"all .15s"}}>
+              ${label}
+            </button>`;
+          })}
+        </div>
+        <div style=${{fontSize:11,color:"var(--sub)",marginBottom:16,lineHeight:1.6,padding:"8px 10px",background:"var(--bg)",borderRadius:8}}>
+          休みの日はリマインダーが届かず、記録しなくてもXPや連続記録は減りません。コーチのメッセージも休息を尊重した内容になります
         </div>
         <div style=${{fontSize:12,color:"var(--sub)",marginBottom:10,fontWeight:500}}>LINE通知の間隔</div>
         <div style=${{display:"flex",gap:6,flexWrap:"wrap",marginBottom:10}}>
