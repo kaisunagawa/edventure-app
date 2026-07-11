@@ -98,6 +98,8 @@ function doGet(e) {
       case "getMonthlyReview": result = getMonthlyReview(studentEmail); break;
       case "saveIntent":   result = saveIntent(studentEmail, e.parameter); break;
       case "getIntent":    result = getIntent(studentEmail); break;
+      case "saveTodayActions": result = saveTodayActions(studentEmail, e.parameter); break;
+      case "getTodayActions":  result = getTodayActions(studentEmail); break;
       case "getTimeUseSummary": result = getTimeUseSummary(studentEmail); break;
       case "scheduleTimerEnd": result = scheduleTimerEnd(studentEmail, e.parameter); break;
       case "cancelTimerEnd":   result = cancelTimerEnd(studentEmail); break;
@@ -170,6 +172,7 @@ function doPost(e) {
       case "saveSettings": return jsonResponse(saveSettings(studentEmail, body));
       case "saveDiary":    return jsonResponse(saveDiary(studentEmail, body));
       case "saveIntent":   return jsonResponse(saveIntent(studentEmail, body));
+      case "saveTodayActions": return jsonResponse(saveTodayActions(studentEmail, body));
       case "syncCalendar": return jsonResponse(syncCalendar(studentEmail, body));
       case "coachSaveProfile":     return jsonResponse(coachSaveProfile(body.coachEmail, body));
       case "coachSaveLead":        return jsonResponse(coachSaveLead(body.coachEmail, body));
@@ -3221,7 +3224,7 @@ function upsertJournalRow(studentEmail, targetDate, fields) {
   try {
     const sheet = getJournalSheet();
     let headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
-    ["auto_summary", "intent", "intent_done"].forEach(col => {
+    ["auto_summary", "intent", "intent_done", "actions", "actions_checked"].forEach(col => {
       if (headers.indexOf(col) === -1) {
         sheet.getRange(1, headers.length + 1).setValue(col);
         headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
@@ -3232,6 +3235,8 @@ function upsertJournalRow(studentEmail, targetDate, fields) {
     const summaryIdx = headers.indexOf("auto_summary");
     const intentIdx = headers.indexOf("intent");
     const intentDoneIdx = headers.indexOf("intent_done");
+    const actionsIdx = headers.indexOf("actions");
+    const checkedIdx = headers.indexOf("actions_checked");
     const now = new Date().toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" });
 
     const data = sheet.getDataRange().getValues();
@@ -3244,6 +3249,8 @@ function upsertJournalRow(studentEmail, targetDate, fields) {
         if (fields.auto_summary !== undefined) sheet.getRange(i + 1, summaryIdx + 1).setValue(fields.auto_summary);
         if (fields.intent !== undefined) sheet.getRange(i + 1, intentIdx + 1).setValue(fields.intent);
         if (fields.intent_done !== undefined) sheet.getRange(i + 1, intentDoneIdx + 1).setValue(fields.intent_done);
+        if (fields.actions !== undefined) sheet.getRange(i + 1, actionsIdx + 1).setValue(fields.actions);
+        if (fields.actions_checked !== undefined) sheet.getRange(i + 1, checkedIdx + 1).setValue(fields.actions_checked);
         sheet.getRange(i + 1, updatedIdx + 1).setValue(now);
         return;
       }
@@ -3254,6 +3261,8 @@ function upsertJournalRow(studentEmail, targetDate, fields) {
     if (fields.auto_summary !== undefined) rowArr[summaryIdx] = fields.auto_summary;
     if (fields.intent !== undefined) rowArr[intentIdx] = fields.intent;
     if (fields.intent_done !== undefined) rowArr[intentDoneIdx] = fields.intent_done;
+    if (fields.actions !== undefined) rowArr[actionsIdx] = fields.actions;
+    if (fields.actions_checked !== undefined) rowArr[checkedIdx] = fields.actions_checked;
     rowArr[updatedIdx] = now;
     const newRow = sheet.getLastRow() + 1;
     sheet.appendRow(rowArr);
@@ -3278,6 +3287,31 @@ function saveIntent(studentEmail, body) {
   if (body.intent_done !== undefined) fields.intent_done = String(body.intent_done);
   upsertJournalRow(studentEmail, formatDate(new Date()), fields);
   return { ok: true };
+}
+
+// 今日のアクション（編集したチェックリストとチェック状態）の端末間同期。
+// 以前はlocalStorageのみで、PCで編集した内容が携帯に反映されなかった
+function saveTodayActions(studentEmail, body) {
+  const fields = {};
+  if (body.actions !== undefined) fields.actions = String(body.actions);          // JSON配列文字列 or ""（AIアクションに戻す）
+  if (body.checked !== undefined) fields.actions_checked = String(body.checked);  // JSONオブジェクト文字列
+  if (Object.keys(fields).length === 0) return { ok: false, error: "missing params" };
+  upsertJournalRow(studentEmail, formatDate(new Date()), fields);
+  return { ok: true };
+}
+
+function getTodayActions(studentEmail) {
+  const today = formatDate(new Date());
+  if (!getSheet("Journal")) return { ok: true, data: null };
+  const row = sheetToObjects(getJournalSheet()).find(r => {
+    const rd = r.date instanceof Date ? Utilities.formatDate(r.date, "Asia/Tokyo", "yyyy-MM-dd") : String(r.date);
+    return r.student_email === studentEmail && rd === today;
+  });
+  if (!row) return { ok: true, data: null };
+  let actions = null, checked = null;
+  try { if (row.actions) actions = JSON.parse(row.actions); } catch (e) {}
+  try { if (row.actions_checked) checked = JSON.parse(row.actions_checked); } catch (e) {}
+  return { ok: true, data: { actions, checked } };
 }
 
 function getIntent(studentEmail) {

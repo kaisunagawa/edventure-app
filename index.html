@@ -920,6 +920,23 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
     const saved = localStorage.getItem("today_actions_date");
     if(saved !== today){ localStorage.removeItem("today_actions"); localStorage.setItem("today_actions_date", today); setChecked({}); }
 
+    // 今日のアクションの端末間同期: 別端末で編集したチェックリスト・チェック状態を取り込む。
+    // この端末で今日まだ編集していなければサーバー側を採用し、チェックは両端末の和集合にする
+    gasApi("getTodayActions").then(r=>{
+      if(!r.ok || !r.data) return;
+      if(r.data.actions !== null && localStorage.getItem("jiroku_custom_actions_"+today) === null){
+        setCustomActions(r.data.actions);
+        localStorage.setItem("jiroku_custom_actions_"+today, JSON.stringify(r.data.actions));
+      }
+      if(r.data.checked && Object.keys(r.data.checked).length > 0){
+        setChecked(prev=>{
+          const merged = {...r.data.checked, ...prev};
+          localStorage.setItem("today_actions", JSON.stringify(merged));
+          return merged;
+        });
+      }
+    });
+
     // 今日いちばんやりたいこと: まだ宣言も「あとで」もしていなければ、その日の
     // 最初の起動時にモーダルで聞く（別端末で宣言済みならサーバーから同期）
     try {
@@ -967,6 +984,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
     const next = {...checked, [key]: !checked[key]};
     setChecked(next);
     localStorage.setItem("today_actions", JSON.stringify(next));
+    gasPostJson("saveTodayActions", {checked: JSON.stringify(next)}); // 他端末にも同期
   };
 
   const openEdit = () => {
@@ -980,6 +998,8 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
     else { setCustomActions(filtered); localStorage.setItem("jiroku_custom_actions_"+todayKey, JSON.stringify(filtered)); }
     setChecked({});
     localStorage.removeItem("today_actions");
+    // 他端末にも同期（空=AIアクションに戻す。チェックもリセット）
+    gasPostJson("saveTodayActions", {actions: filtered.length===0?"":JSON.stringify(filtered), checked:"{}"});
     setEditMode(false);
   };
 
