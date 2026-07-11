@@ -1,4 +1,4 @@
-const CACHE = "jiroku-v5";
+const CACHE = "jiroku-v6";
 
 // タイマー終了などをバックグラウンドでも通知するためのFirebase Cloud Messaging。
 // 別ファイル（firebase-messaging-sw.js）として登録すると、同じスコープ('/')の
@@ -26,10 +26,11 @@ try {
     // 標準クリック挙動は効かないため、リンク先をdataとして持たせて
     // notificationclickハンドラで自前で開く
     const link = (payload.data && payload.data.link) || (payload.fcmOptions && payload.fcmOptions.link) || "/";
-    // 同じ内容の通知が二重に届くケース（端末側に古いService Worker登録が残っている等）
-    // があっても表示が1件に集約されるよう、内容から作った固定tagを指定する。
+    // 同じ内容の通知が二重に届いても1件に集約されるよう、タイトル＋本文から作った
+    // 固定tagを指定する。以前はmessageIdを優先していたが、サーバー側から2回送られた
+    // 場合はメッセージIDが別になり集約されなかったため、内容ベースに変更した。
     // 同じtagのshowNotificationは追加ではなく置き換えになるため、重複表示を防げる
-    const tag = payload.messageId || (title + "|" + body);
+    const tag = "jiroku|" + title + "|" + body;
     self.registration.showNotification(title, { body, icon: "icon-192.png", badge: "icon-192.png", data: { url: link }, tag });
   });
 } catch (e) { /* FCMなしでもキャッシュ機能は動かす */ }

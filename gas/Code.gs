@@ -3272,6 +3272,17 @@ function sendFcmPushDetailed(token, title, body) {
     const projectId = PropertiesService.getScriptProperties().getProperty("FCM_PROJECT_ID");
     if (!projectId) return { ok: false, error: "FCM_PROJECT_ID未設定" };
     if (!token) return { ok: false, error: "トークンなし" };
+
+    // 同じ端末に同じ内容のプッシュを5分以内に2回送らない送信側ガード。
+    // トリガーの二重発火・シートの重複行など、原因がどこにあっても重複配信を止める
+    try {
+      const dedupKey = "push_" + Utilities.base64EncodeWebSafe(
+        Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, token + "|" + title + "|" + body)
+      );
+      const cache = CacheService.getScriptCache();
+      if (cache.get(dedupKey)) return { ok: true, deduped: true };
+      cache.put(dedupKey, "1", 300);
+    } catch (e) { /* キャッシュ不調時は通常送信にフォールバック */ }
     const accessToken = getFcmAccessToken();
     if (!accessToken) return { ok: false, error: "アクセストークン取得失敗（FCM_CLIENT_EMAIL/PRIVATE_KEY未設定か不正）" };
     const payload = {
