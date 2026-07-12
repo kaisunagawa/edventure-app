@@ -65,24 +65,56 @@
     // 生徒アプリ・コーチCRMと同じGAS Web Appを使う（新規バックエンド不要）
     const GAS_URL = "https://script.google.com/macros/s/AKfycbzJ-QEpPVnmp-LFU5Jxww4VFP1qaseMtwCrzKxAA6ZULr1y3h_UeKzVdhHnl5ze57U/exec";
 
+    // 元ネタのsource文字列（例: "2026-07-10：補助金の書類作成に3時間..."）から
+    // 日付を抜き出す。次回生成時にこの日付を除外し、毎日投稿しても同じ元ネタの
+    // 焼き直しが出ないようにするため
+    const extractDate = (source) => {
+      const m = String(source || "").match(/\d{4}-\d{2}-\d{2}/);
+      return m ? m[0] : null;
+    };
+
     function App() {
       const [email, setEmail] = useState(localStorage.getItem("jiroku_content_email") || "work.sunagawa@gmail.com");
       const [days, setDays] = useState(30);
+      const [count, setCount] = useState(7);
       const [loading, setLoading] = useState(false);
       const [ideas, setIdeas] = useState(null);
       const [error, setError] = useState("");
       const [sourceCount, setSourceCount] = useState(null);
+      const [usedDates, setUsedDates] = useState(() => {
+        try { return JSON.parse(localStorage.getItem("jiroku_content_used_dates") || "[]"); } catch (e) { return []; }
+      });
+      const [postedIdx, setPostedIdx] = useState({});
 
       const generate = async () => {
-        setLoading(true); setError(""); setIdeas(null);
+        setLoading(true); setError(""); setIdeas(null); setPostedIdx({});
         localStorage.setItem("jiroku_content_email", email);
         try {
-          const url = GAS_URL + "?action=generateSnsIdeas&studentEmail=" + encodeURIComponent(email) + "&days=" + days;
+          const url = GAS_URL + "?action=generateSnsIdeas&studentEmail=" + encodeURIComponent(email)
+            + "&days=" + days + "&count=" + count + "&excludeDates=" + encodeURIComponent(usedDates.join(","));
           const res = await fetch(url).then(r => r.json());
           if (res.ok) { setIdeas(res.data); setSourceCount(res.sourceCount); }
           else setError(res.error || "生成に失敗しました");
         } catch (e) { setError("通信エラー: " + e); }
         setLoading(false);
+      };
+
+      // 「投稿済みにする」: このネタの元ネタ日付を使用済みリストに追加し、
+      // 次回の生成では除外されるようにする（毎日投稿しても同じネタが出ない）
+      const markPosted = (idea, i) => {
+        const date = extractDate(idea.source);
+        if (date && usedDates.indexOf(date) === -1) {
+          const next = [...usedDates, date];
+          setUsedDates(next);
+          localStorage.setItem("jiroku_content_used_dates", JSON.stringify(next));
+        }
+        setPostedIdx(prev => ({ ...prev, [i]: true }));
+      };
+
+      const resetUsed = () => {
+        if (!confirm("使用済みネタの記録をリセットします。過去の記録から再度ネタが出せるようになります。よろしいですか？")) return;
+        setUsedDates([]);
+        localStorage.removeItem("jiroku_content_used_dates");
       };
 
       return html`
@@ -94,15 +126,30 @@
             <label>対象メールアドレス</label>
             <input value=${email} onInput=${e => setEmail(e.target.value)} style=${{marginBottom: 14}} />
             <label>対象期間</label>
-            <select value=${days} onChange=${e => setDays(Number(e.target.value))}>
+            <select value=${days} onChange=${e => setDays(Number(e.target.value))} style=${{marginBottom: 14}}>
+              <option value="1">今日のみ</option>
+              <option value="3">直近3日</option>
               <option value="7">直近7日</option>
               <option value="14">直近14日</option>
               <option value="30">直近30日</option>
               <option value="60">直近60日</option>
               <option value="90">直近90日</option>
             </select>
+            <label>生成する本数（毎日投稿するなら多めがおすすめ）</label>
+            <select value=${count} onChange=${e => setCount(Number(e.target.value))}>
+              <option value="5">5個（5日分）</option>
+              <option value="7">7個（1週間分）</option>
+              <option value="14">14個（2週間分）</option>
+              <option value="20">20個（約1ヶ月分）</option>
+            </select>
             <button disabled=${loading} onClick=${generate}>${loading ? "生成中…（30秒ほどかかります）" : "ネタを生成する"}</button>
             ${error && html`<div class="err">${error}</div>`}
+            ${usedDates.length > 0 && html`
+              <div class="sub" style=${{marginTop: 12, display: "flex", justifyContent: "space-between", alignItems: "center"}}>
+                <span>投稿済みとして除外中: ${usedDates.length}日分</span>
+                <a href="#" onClick=${e => { e.preventDefault(); resetUsed(); }} style=${{color: "var(--accent)", fontWeight: 600}}>リセット</a>
+              </div>
+            `}
           </div>
 
           ${loading && html`<div class="spin"></div>`}
@@ -114,10 +161,12 @@
           `}
 
           ${ideas && ideas.map((idea, i) => html`
-            <div class="card" key=${i}>
-              <div class="idea-head">
-                <span class="idea-num">${i + 1}</span>
-                <div class="hook">${idea.hook}</div>
+            <div class="card" key=${i} style=${{opacity: postedIdx[i] ? 0.55 : 1}}>
+              <div class="idea-head" style=${{justifyContent: "space-between"}}>
+                <div style=${{display: "flex", alignItems: "center", gap: 10, minWidth: 0}}>
+                  <span class="idea-num">${i + 1}</span>
+                  <div class="hook">${idea.hook}</div>
+                </div>
               </div>
               <div class="label">切り口</div>
               <div style=${{fontSize: 13.5}}>${idea.angle}</div>
@@ -128,6 +177,10 @@
               <div class="label">キャプション案</div>
               <div class="caption">${idea.caption_idea}</div>
               <div class="source">📎 元ネタ: ${idea.source}</div>
+              <button onClick=${() => markPosted(idea, i)} disabled=${postedIdx[i]}
+                style=${{marginTop: 12, background: postedIdx[i] ? "var(--border)" : "var(--accent)", color: postedIdx[i] ? "var(--sub)" : "#fff"}}>
+                ${postedIdx[i] ? "✓ 投稿済み" : "投稿したらタップ（次回このネタは除外）"}
+              </button>
             </div>
           `)}
         </div>

@@ -4112,9 +4112,13 @@ function generateSnsIdeas(studentEmail, body) {
 
   const days = Number(body.days) || 30;
   const cutoff = formatDate(new Date(Date.now() - days * 86400000));
+  const count = Math.min(20, Math.max(1, Number(body.count) || 5));
+  // 毎日投稿すると同じ日の記録から何度もネタを作ってしまうため、フロント側で
+  // 「使用済みの元ネタ日付」をlocalStorageに記憶して渡してもらい、ここで除外する
+  const excludeDates = String(body.excludeDates || "").split(",").map(s => s.trim()).filter(Boolean);
 
   const logs = getFilteredRows("DailyLog", "student_email", studentEmail)
-    .filter(l => l.date >= cutoff && l.memo && l.memo.trim())
+    .filter(l => l.date >= cutoff && l.memo && l.memo.trim() && excludeDates.indexOf(l.date) === -1)
     .sort((a, b) => a.date > b.date ? 1 : -1);
 
   const journalRows = getSheet("Journal")
@@ -4126,11 +4130,11 @@ function generateSnsIdeas(studentEmail, body) {
     : [];
   const diaryEntries = journalRows.filter(r => {
     const rd = r.date instanceof Date ? formatDate(r.date) : String(r.date);
-    return rd >= cutoff && r.diary && r.diary.trim();
+    return rd >= cutoff && r.diary && r.diary.trim() && excludeDates.indexOf(rd) === -1;
   });
 
   if (logs.length === 0 && diaryEntries.length === 0) {
-    return { ok: false, error: "直近" + days + "日分にメモ・日記の記録がありません" };
+    return { ok: false, error: "この期間には未使用の記録・日記がありません（期間を広げるか、使用済みネタをリセットしてください）" };
   }
 
   const logsText = logs.map(l => l.date + " " + l.time_block + " " + l.task + "：" + l.memo).join("\n");
@@ -4148,8 +4152,9 @@ ${logsText || "なし"}
 ${diaryText || "なし"}
 
 【依頼】
-この人がSNS（Instagram/TikTokのリール、または通常投稿）で発信するためのネタを5個、上記の実際の記録から具体的に拾って提案してください。
+この人がSNS（Instagram/TikTokのリール、または通常投稿）で発信するためのネタを${count}個、上記の実際の記録から具体的に拾って提案してください。
 一般論やテンプレート的なネタではなく、実際に書かれた出来事・数字・感情の動きを起点にすること。
+毎日1本ずつ投稿する前提のため、${count}個は互いに切り口が重ならないようにすること（同じ出来事を使う場合も、違う角度から語ること）。
 
 各ネタについて:
 - hook: 冒頭3秒で惹きつける一言（具体的な数字や意外性のある事実を使う）
