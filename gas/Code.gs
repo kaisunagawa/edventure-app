@@ -112,6 +112,9 @@ function doGet(e) {
       case "snsDeleteAccount": result = snsDeleteAccount(studentEmail, e.parameter); break;
       case "snsSaveMetrics":  result = snsSaveMetrics(studentEmail, e.parameter); break;
       case "snsGetMetrics":   result = snsGetMetrics(studentEmail, e.parameter); break;
+      case "snsListPosts":    result = snsListPosts(studentEmail, e.parameter); break;
+      case "snsSavePost":     result = snsSavePost(studentEmail, e.parameter); break;
+      case "snsDeletePost":   result = snsDeletePost(studentEmail, e.parameter); break;
       default: result = { ok: false, error: "Unknown action: " + action };
     }
     return jsonResponse(result, callback);
@@ -183,6 +186,7 @@ function doPost(e) {
       case "saveContentProfile": return jsonResponse(saveContentProfile(studentEmail, body));
       case "snsSaveAccount": return jsonResponse(snsSaveAccount(studentEmail, body));
       case "snsSaveMetrics": return jsonResponse(snsSaveMetrics(studentEmail, body));
+      case "snsSavePost":    return jsonResponse(snsSavePost(studentEmail, body));
       case "saveTodayActions": return jsonResponse(saveTodayActions(studentEmail, body));
       case "syncCalendar": return jsonResponse(syncCalendar(studentEmail, body));
       case "coachSaveProfile":     return jsonResponse(coachSaveProfile(body.coachEmail, body));
@@ -4264,6 +4268,94 @@ function snsGetMetrics(studentEmail, body) {
   return { ok: true, data: rows };
 }
 
+// 投稿ログ: 1本ごとの投稿（フック・テーマ・成績）を記録する。
+// 「どの投稿が伸びたか」をAIが分析してネタ提案に反映するための土台。
+// フェーズ2でAPI連携したら、このシートに自動で書き込まれる形に置き換わる
+function getSnsPostsSheet() {
+  let sheet = getSheet("SnsPosts");
+  if (!sheet) {
+    sheet = SpreadsheetApp.openById(SPREADSHEET_ID).insertSheet("SnsPosts");
+    sheet.appendRow(["post_id", "student_email", "platform", "posted_at", "hook", "theme", "url", "views", "likes", "comments", "saves", "follows_gained", "memo", "updated_at"]);
+  }
+  return sheet;
+}
+
+function snsListPosts(studentEmail, body) {
+  if (!getSheet("SnsPosts")) return { ok: true, data: [] };
+  const platform = body && body.platform ? String(body.platform) : null;
+  const rows = sheetToObjects(getSnsPostsSheet())
+    .filter(r => r.student_email === studentEmail && (!platform || r.platform === platform))
+    .map(r => ({
+      postId: r.post_id, platform: r.platform,
+      postedAt: r.posted_at instanceof Date ? Utilities.formatDate(r.posted_at, "Asia/Tokyo", "yyyy-MM-dd") : String(r.posted_at),
+      hook: r.hook || "", theme: r.theme || "", url: r.url || "",
+      views: r.views !== "" ? Number(r.views) : null,
+      likes: r.likes !== "" ? Number(r.likes) : null,
+      comments: r.comments !== "" ? Number(r.comments) : null,
+      saves: r.saves !== "" ? Number(r.saves) : null,
+      followsGained: r.follows_gained !== "" ? Number(r.follows_gained) : null,
+      memo: r.memo || ""
+    }))
+    .sort((a, b) => b.postedAt > a.postedAt ? 1 : -1);
+  return { ok: true, data: rows };
+}
+
+function snsSavePost(studentEmail, body) {
+  const sheet = getSnsPostsSheet();
+  const now = new Date().toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" });
+  const num = v => (v === undefined || v === null || v === "") ? "" : Number(v);
+  const postId = String(body.postId || "") || Utilities.getUuid().substring(0, 8);
+  const rowVals = [postId, studentEmail, String(body.platform || ""),
+    String(body.postedAt || formatDate(new Date())),
+    body.hook || "", body.theme || "", body.url || "",
+    num(body.views), num(body.likes), num(body.comments), num(body.saves), num(body.followsGained),
+    body.memo || "", now];
+  const data = sheet.getDataRange().getValues();
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][0]) === postId && String(data[i][1]) === studentEmail) {
+      sheet.getRange(i + 1, 1, 1, rowVals.length).setValues([rowVals]);
+      return { ok: true, updated: true, postId: postId };
+    }
+  }
+  sheet.appendRow(rowVals);
+  return { ok: true, postId: postId };
+}
+
+function snsDeletePost(studentEmail, body) {
+  const sheet = getSnsPostsSheet();
+  const data = sheet.getDataRange().getValues();
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][0]) === String(body.postId) && String(data[i][1]) === studentEmail) {
+      sheet.deleteRow(i + 1);
+      return { ok: true };
+    }
+  }
+  return { ok: false, error: "投稿が見つかりません" };
+}
+
+// 過去投稿の成績をAIプロンプト用にまとめる（generateSnsIdeasから使う）。
+// 「どのテーマ・フックが伸びたか」を成績付きで渡し、勝ちパターンの分析材料にする
+function buildSnsPostsContext(studentEmail) {
+  try {
+    if (!getSheet("SnsPosts")) return "";
+    const posts = snsListPosts(studentEmail, {}).data.slice(0, 30);
+    if (posts.length === 0) return "";
+    const lines = posts.map(p => {
+      const stats = [];
+      if (p.views !== null) stats.push("再生/リーチ" + p.views);
+      if (p.likes !== null) stats.push("いいね" + p.likes);
+      if (p.comments !== null) stats.push("コメント" + p.comments);
+      if (p.saves !== null) stats.push("保存" + p.saves);
+      if (p.followsGained !== null) stats.push("フォロー増" + p.followsGained);
+      return p.postedAt + " [" + p.platform + "] 「" + (p.hook || p.theme) + "」" +
+        (p.theme && p.hook ? "（テーマ: " + p.theme + "）" : "") +
+        (stats.length ? " → " + stats.join("・") : " → 成績未入力") +
+        (p.memo ? "（メモ: " + p.memo + "）" : "");
+    });
+    return "\n【過去の投稿と成績（最重要の分析材料。伸びた投稿のテーマ・フックの型を分析し、その勝ちパターンに寄せること。既に投稿済みの内容と同じネタは避けること）】\n" + lines.join("\n");
+  } catch (e) { return ""; }
+}
+
 // 直近のSNS数値をAIプロンプト用のテキストにまとめる（generateSnsIdeasから使う）。
 // 数値の伸び・停滞を踏まえた台本提案ができるようにするための連携ポイント
 function buildSnsMetricsContext(studentEmail) {
@@ -4373,6 +4465,7 @@ function generateSnsIdeas(studentEmail, body) {
 
   const prompt = `以下は本人が直近${days}日間にJIROKUアプリへ書いた「行動の記録メモ」と「日記」です。これらは全て実際に起きた出来事・本人の言葉です。
 ${profileText}
+${buildSnsPostsContext(studentEmail)}
 ${buildSnsMetricsContext(studentEmail)}
 
 【記録メモ（時間帯ごとの振り返り）】

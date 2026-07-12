@@ -138,6 +138,37 @@
       const [newHandle, setNewHandle] = useState("");
       const [newUrl, setNewUrl] = useState("");
 
+      // 投稿ログ
+      const [posts, setPosts] = useState([]);
+      const [postForm, setPostForm] = useState({ postId: "", platform: "instagram", postedAt: todayStr(), hook: "", theme: "", url: "", views: "", likes: "", comments: "", saves: "", followsGained: "", memo: "" });
+      const loadPosts = async (targetEmail) => {
+        try {
+          const res = await fetch(GAS_URL + "?action=snsListPosts&studentEmail=" + encodeURIComponent(targetEmail)).then(r => r.json());
+          if (res.ok) setPosts(res.data);
+        } catch (e) {}
+      };
+      const savePost = async () => {
+        if (!postForm.hook.trim() && !postForm.theme.trim()) { setMsg({ type: "err", text: "フックかテーマを入力してください" }); return; }
+        setSaving(true);
+        const res = await fetch(GAS_URL, { method: "POST", body: JSON.stringify({ action: "snsSavePost", studentEmail: email, ...postForm }) }).then(r => r.json());
+        setSaving(false);
+        if (res.ok) {
+          setMsg({ type: "ok", text: res.updated ? "投稿ログを更新しました" : "投稿を記録しました" });
+          setPostForm({ postId: "", platform: postForm.platform, postedAt: todayStr(), hook: "", theme: "", url: "", views: "", likes: "", comments: "", saves: "", followsGained: "", memo: "" });
+          loadPosts(email);
+        } else setMsg({ type: "err", text: res.error || "保存に失敗しました" });
+      };
+      const editPost = (p) => {
+        setPostForm({ postId: p.postId, platform: p.platform, postedAt: p.postedAt, hook: p.hook, theme: p.theme, url: p.url,
+          views: p.views ?? "", likes: p.likes ?? "", comments: p.comments ?? "", saves: p.saves ?? "", followsGained: p.followsGained ?? "", memo: p.memo });
+        window.scrollTo({ top: 0, behavior: "smooth" });
+      };
+      const deletePost = async (p) => {
+        if (!confirm("この投稿ログを削除しますか？")) return;
+        await fetch(GAS_URL + "?action=snsDeletePost&studentEmail=" + encodeURIComponent(email) + "&postId=" + encodeURIComponent(p.postId));
+        loadPosts(email);
+      };
+
       const loadAll = async (targetEmail) => {
         if (!targetEmail) return;
         setLoading(true);
@@ -153,6 +184,7 @@
           }
           if (met.ok) setMetrics(met.data);
         } catch (e) { setMsg({ type: "err", text: "読み込みエラー: " + e }); }
+        loadPosts(targetEmail);
         setLoading(false);
       };
 
@@ -220,6 +252,7 @@
             <div class="chip-row" style=${{marginBottom: 16}}>
               <button class=${"chip" + (view === "dash" ? " on" : "")} onClick=${() => setView("dash")}>📈 ダッシュボード</button>
               <button class=${"chip" + (view === "input" ? " on" : "")} onClick=${() => { setView("input"); setMsg({type:"",text:""}); }}>✏️ 今日の数値を入力</button>
+              <button class=${"chip" + (view === "posts" ? " on" : "")} onClick=${() => { setView("posts"); setMsg({type:"",text:""}); }}>🗒 投稿ログ</button>
               <button class=${"chip" + (view === "accounts" ? " on" : "")} onClick=${() => setView("accounts")}>⚙️ アカウント管理</button>
             </div>
           `}
@@ -276,6 +309,69 @@
               <label>今日の投稿・気づきメモ（任意。AIのネタ提案にも使われます）</label>
               <input value=${inputMemo} onInput=${e => setInputMemo(e.target.value)} placeholder="例: リール投稿、時間術ネタが保存伸びた" />
               <button disabled=${saving} onClick=${saveMetrics}>${saving ? "保存中…" : "この内容で記録する"}</button>
+            </div>
+          `}
+
+          ${!loading && view === "posts" && html`
+            <div class="card">
+              <div class="section-title">${postForm.postId ? "投稿ログを編集" : "投稿を記録する"}</div>
+              <div class="sub">投稿したら1分で記録。数値は後から「編集」で追記できます。ここに溜まった成績をAIが分析して、伸びた型に寄せたネタを提案します</div>
+              <label>プラットフォーム</label>
+              <div class="chip-row" style=${{marginBottom: 12}}>
+                ${(registered.length ? PLATFORMS.filter(p => registered.includes(p.key)) : PLATFORMS).map(p => html`
+                  <button key=${p.key} class=${"chip" + (postForm.platform === p.key ? " on" : "")}
+                    onClick=${() => setPostForm(prev => ({ ...prev, platform: p.key }))}>${p.icon} ${p.label}</button>
+                `)}
+              </div>
+              <label>投稿日</label>
+              <input type="date" value=${postForm.postedAt} onInput=${e => setPostForm(prev => ({ ...prev, postedAt: e.target.value }))} style=${{marginBottom: 12}} />
+              <label>フック（冒頭の一言・タイトル）</label>
+              <input value=${postForm.hook} onInput=${e => setPostForm(prev => ({ ...prev, hook: e.target.value }))} placeholder="例: 1日14時間働いてた僕が週休2日にできた理由" style=${{marginBottom: 12}} />
+              <label>テーマ・内容の要約</label>
+              <input value=${postForm.theme} onInput=${e => setPostForm(prev => ({ ...prev, theme: e.target.value }))} placeholder="例: 時間記録の習慣化のコツ" style=${{marginBottom: 12}} />
+              <label>投稿URL（任意）</label>
+              <input value=${postForm.url} onInput=${e => setPostForm(prev => ({ ...prev, url: e.target.value }))} placeholder="https://..." style=${{marginBottom: 12}} />
+              <div class="metric-grid" style=${{marginBottom: 12}}>
+                ${[["views","再生/リーチ"],["likes","いいね"],["comments","コメント"],["saves","保存/シェア"],["followsGained","フォロー増"]].map(([k, l]) => html`
+                  <div key=${k}>
+                    <label>${l}</label>
+                    <input type="number" inputmode="numeric" value=${postForm[k]}
+                      onInput=${e => setPostForm(prev => ({ ...prev, [k]: e.target.value }))} />
+                  </div>
+                `)}
+              </div>
+              <label>メモ（任意。例: コメントで質問が多かった）</label>
+              <input value=${postForm.memo} onInput=${e => setPostForm(prev => ({ ...prev, memo: e.target.value }))} />
+              <button disabled=${saving} onClick=${savePost}>${saving ? "保存中…" : postForm.postId ? "この内容で更新する" : "投稿を記録する"}</button>
+              ${postForm.postId && html`
+                <button style=${{background: "var(--border)", color: "var(--sub)", marginTop: 8}}
+                  onClick=${() => setPostForm({ postId: "", platform: postForm.platform, postedAt: todayStr(), hook: "", theme: "", url: "", views: "", likes: "", comments: "", saves: "", followsGained: "", memo: "" })}>
+                  編集をやめて新規記録に戻る
+                </button>
+              `}
+            </div>
+
+            <div class="card">
+              <div class="section-title">投稿履歴（${posts.length}件）</div>
+              ${posts.length === 0 && html`<div class="sub" style=${{marginBottom: 0}}>まだ投稿ログがありません</div>`}
+              ${posts.map(p => html`
+                <div key=${p.postId} style=${{padding: "12px 0", borderBottom: "1px solid var(--border)"}}>
+                  <div style=${{display: "flex", justifyContent: "space-between", gap: 8, alignItems: "baseline"}}>
+                    <div style=${{fontWeight: 700, fontSize: 14, lineHeight: 1.5}}>${pinfo(p.platform).icon} ${p.hook || p.theme}</div>
+                    <div style=${{fontSize: 11, color: "var(--sub)", flexShrink: 0}}>${p.postedAt.substring(5)}</div>
+                  </div>
+                  ${p.theme && p.hook && html`<div style=${{fontSize: 12, color: "var(--sub)", marginTop: 2}}>${p.theme}</div>`}
+                  <div style=${{fontSize: 12, color: "var(--sub)", marginTop: 4}}>
+                    ${p.views !== null ? "再生" + p.views.toLocaleString() + " " : ""}${p.likes !== null ? "👍" + p.likes.toLocaleString() + " " : ""}${p.comments !== null ? "💬" + p.comments.toLocaleString() + " " : ""}${p.saves !== null ? "🔖" + p.saves.toLocaleString() + " " : ""}${p.followsGained !== null ? "➕" + p.followsGained.toLocaleString() : ""}
+                    ${p.views === null && p.likes === null && p.comments === null && p.saves === null && p.followsGained === null ? "成績未入力" : ""}
+                  </div>
+                  <div style=${{display: "flex", gap: 14, marginTop: 6}}>
+                    <a href="#" class="link" style=${{fontSize: 12}} onClick=${e => { e.preventDefault(); editPost(p); }}>数値を編集</a>
+                    ${p.url && html`<a class="link" href=${p.url} target="_blank" style=${{fontSize: 12}}>投稿を開く ↗</a>`}
+                    <a href="#" style=${{fontSize: 12, color: "var(--red)", textDecoration: "none", fontWeight: 600}} onClick=${e => { e.preventDefault(); deletePost(p); }}>削除</a>
+                  </div>
+                </div>
+              `)}
             </div>
           `}
 
