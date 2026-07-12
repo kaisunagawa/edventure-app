@@ -107,6 +107,11 @@ function doGet(e) {
       case "generateSnsIdeas": result = generateSnsIdeas(studentEmail, e.parameter); break;
       case "getContentProfile": result = getContentProfile(studentEmail); break;
       case "saveContentProfile": result = saveContentProfile(studentEmail, e.parameter); break;
+      case "snsListAccounts": result = snsListAccounts(studentEmail); break;
+      case "snsSaveAccount":  result = snsSaveAccount(studentEmail, e.parameter); break;
+      case "snsDeleteAccount": result = snsDeleteAccount(studentEmail, e.parameter); break;
+      case "snsSaveMetrics":  result = snsSaveMetrics(studentEmail, e.parameter); break;
+      case "snsGetMetrics":   result = snsGetMetrics(studentEmail, e.parameter); break;
       default: result = { ok: false, error: "Unknown action: " + action };
     }
     return jsonResponse(result, callback);
@@ -176,6 +181,8 @@ function doPost(e) {
       case "saveDiary":    return jsonResponse(saveDiary(studentEmail, body));
       case "saveIntent":   return jsonResponse(saveIntent(studentEmail, body));
       case "saveContentProfile": return jsonResponse(saveContentProfile(studentEmail, body));
+      case "snsSaveAccount": return jsonResponse(snsSaveAccount(studentEmail, body));
+      case "snsSaveMetrics": return jsonResponse(snsSaveMetrics(studentEmail, body));
       case "saveTodayActions": return jsonResponse(saveTodayActions(studentEmail, body));
       case "syncCalendar": return jsonResponse(syncCalendar(studentEmail, body));
       case "coachSaveProfile":     return jsonResponse(coachSaveProfile(body.coachEmail, body));
@@ -4144,6 +4151,140 @@ function saveContentProfile(studentEmail, body) {
   return { ok: true };
 }
 
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// SNS運用ダッシュボード（sns/ ページ用）
+// フェーズ1: アカウント登録＋日次数値の手入力＋推移表示。
+// 将来Meta/YouTube等のAPI連携（フェーズ2）に置き換わっても、
+// SnsMetricsシートの形はそのまま使える設計にしている
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+const SNS_OPS_PLATFORMS = ["instagram", "threads", "tiktok", "youtube"];
+
+function getSnsAccountsSheet() {
+  let sheet = getSheet("SnsAccounts");
+  if (!sheet) {
+    sheet = SpreadsheetApp.openById(SPREADSHEET_ID).insertSheet("SnsAccounts");
+    sheet.appendRow(["student_email", "platform", "handle", "url", "created_at"]);
+  }
+  return sheet;
+}
+
+function getSnsMetricsSheet() {
+  let sheet = getSheet("SnsMetrics");
+  if (!sheet) {
+    sheet = SpreadsheetApp.openById(SPREADSHEET_ID).insertSheet("SnsMetrics");
+    sheet.appendRow(["date", "student_email", "platform", "followers", "reach", "impressions", "likes", "comments", "saves", "posts", "memo", "updated_at"]);
+  }
+  return sheet;
+}
+
+function snsListAccounts(studentEmail) {
+  const rows = sheetToObjects(getSnsAccountsSheet()).filter(r => r.student_email === studentEmail);
+  return { ok: true, data: rows.map(r => ({ platform: r.platform, handle: r.handle, url: r.url })) };
+}
+
+function snsSaveAccount(studentEmail, body) {
+  const platform = String(body.platform || "");
+  if (SNS_OPS_PLATFORMS.indexOf(platform) === -1) return { ok: false, error: "不明なプラットフォーム" };
+  const sheet = getSnsAccountsSheet();
+  const data = sheet.getDataRange().getValues();
+  const now = new Date().toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" });
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][0]) === studentEmail && String(data[i][1]) === platform) {
+      sheet.getRange(i + 1, 3).setValue(body.handle || "");
+      sheet.getRange(i + 1, 4).setValue(body.url || "");
+      return { ok: true };
+    }
+  }
+  sheet.appendRow([studentEmail, platform, body.handle || "", body.url || "", now]);
+  return { ok: true };
+}
+
+function snsDeleteAccount(studentEmail, body) {
+  const sheet = getSnsAccountsSheet();
+  const data = sheet.getDataRange().getValues();
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][0]) === studentEmail && String(data[i][1]) === String(body.platform)) {
+      sheet.deleteRow(i + 1);
+      return { ok: true };
+    }
+  }
+  return { ok: false, error: "アカウントが見つかりません" };
+}
+
+// 日次の数値を保存（同じ日×同じプラットフォームなら上書き＝後から修正できる）
+function snsSaveMetrics(studentEmail, body) {
+  const platform = String(body.platform || "");
+  const date = String(body.date || formatDate(new Date()));
+  if (SNS_OPS_PLATFORMS.indexOf(platform) === -1) return { ok: false, error: "不明なプラットフォーム" };
+  const sheet = getSnsMetricsSheet();
+  const data = sheet.getDataRange().getValues();
+  const now = new Date().toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" });
+  const num = v => (v === undefined || v === null || v === "") ? "" : Number(v);
+  const rowVals = [date, studentEmail, platform,
+    num(body.followers), num(body.reach), num(body.impressions),
+    num(body.likes), num(body.comments), num(body.saves), num(body.posts),
+    body.memo || "", now];
+  for (let i = 1; i < data.length; i++) {
+    const rowDate = data[i][0] instanceof Date ? Utilities.formatDate(data[i][0], "Asia/Tokyo", "yyyy-MM-dd") : String(data[i][0]);
+    if (String(data[i][1]) === studentEmail && String(data[i][2]) === platform && rowDate === date) {
+      sheet.getRange(i + 1, 1, 1, rowVals.length).setValues([rowVals]);
+      sheet.getRange(i + 1, 1).setNumberFormat("@").setValue(date);
+      return { ok: true, updated: true };
+    }
+  }
+  const newRow = sheet.getLastRow() + 1;
+  sheet.appendRow(rowVals);
+  sheet.getRange(newRow, 1).setNumberFormat("@").setValue(date);
+  return { ok: true };
+}
+
+function snsGetMetrics(studentEmail, body) {
+  const days = Number(body.days) || 30;
+  const cutoff = formatDate(new Date(Date.now() - days * 86400000));
+  const platform = body.platform ? String(body.platform) : null;
+  const rows = sheetToObjects(getSnsMetricsSheet())
+    .filter(r => {
+      const rd = r.date instanceof Date ? Utilities.formatDate(r.date, "Asia/Tokyo", "yyyy-MM-dd") : String(r.date);
+      return r.student_email === studentEmail && rd >= cutoff && (!platform || r.platform === platform);
+    })
+    .map(r => ({
+      date: r.date instanceof Date ? Utilities.formatDate(r.date, "Asia/Tokyo", "yyyy-MM-dd") : String(r.date),
+      platform: r.platform,
+      followers: r.followers !== "" ? Number(r.followers) : null,
+      reach: r.reach !== "" ? Number(r.reach) : null,
+      impressions: r.impressions !== "" ? Number(r.impressions) : null,
+      likes: r.likes !== "" ? Number(r.likes) : null,
+      comments: r.comments !== "" ? Number(r.comments) : null,
+      saves: r.saves !== "" ? Number(r.saves) : null,
+      posts: r.posts !== "" ? Number(r.posts) : null,
+      memo: r.memo || ""
+    }))
+    .sort((a, b) => a.date > b.date ? 1 : -1);
+  return { ok: true, data: rows };
+}
+
+// 直近のSNS数値をAIプロンプト用のテキストにまとめる（generateSnsIdeasから使う）。
+// 数値の伸び・停滞を踏まえた台本提案ができるようにするための連携ポイント
+function buildSnsMetricsContext(studentEmail) {
+  try {
+    if (!getSheet("SnsMetrics")) return "";
+    const rows = snsGetMetrics(studentEmail, { days: 14 }).data;
+    if (rows.length === 0) return "";
+    const lines = rows.map(r => {
+      const parts = [];
+      if (r.followers !== null) parts.push("フォロワー" + r.followers);
+      if (r.reach !== null) parts.push("リーチ" + r.reach);
+      if (r.impressions !== null) parts.push("インプレッション" + r.impressions);
+      if (r.likes !== null) parts.push("いいね" + r.likes);
+      if (r.comments !== null) parts.push("コメント" + r.comments);
+      if (r.saves !== null) parts.push("保存" + r.saves);
+      return r.date + " [" + r.platform + "] " + parts.join("・") + (r.memo ? "（メモ: " + r.memo + "）" : "");
+    });
+    return "\n【直近14日のSNS実績（数値の伸び・停滞を踏まえて、伸びている型に寄せた提案をすること）】\n" + lines.join("\n");
+  } catch (e) { return ""; }
+}
+
 // プラットフォームごとに最適な出力形式が異なる（動画=台本、テキスト=そのまま投稿できる文章）ため、
 // AIへの指示とレスポンス形式を出し分ける
 const SNS_PLATFORM_INFO = {
@@ -4232,6 +4373,7 @@ function generateSnsIdeas(studentEmail, body) {
 
   const prompt = `以下は本人が直近${days}日間にJIROKUアプリへ書いた「行動の記録メモ」と「日記」です。これらは全て実際に起きた出来事・本人の言葉です。
 ${profileText}
+${buildSnsMetricsContext(studentEmail)}
 
 【記録メモ（時間帯ごとの振り返り）】
 ${logsText || "なし"}

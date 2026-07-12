@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>JIROKU SNS運用ダッシュボード</title>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&family=Noto+Sans+JP:wght@400;500;700&display=swap" rel="stylesheet" />
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/htm/dist/htm.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #F8F8FA; --card: #FFFFFF; --border: #E5E7EB;
+      --text: #1F2937; --sub: #6B7280;
+      --accent: #0891B2; --accent-l: #CFFAFE;
+      --green: #16A34A; --red: #DC2626;
+    }
+    body {
+      background: var(--bg); color: var(--text);
+      font-family: 'Noto Sans JP', 'DM Sans', -apple-system, sans-serif;
+      min-height: 100vh; padding: 24px 16px 60px;
+    }
+    .wrap { max-width: 760px; margin: 0 auto; }
+    h1 { font-size: 20px; font-weight: 800; margin-bottom: 4px; }
+    .sub { font-size: 13px; color: var(--sub); margin-bottom: 20px; }
+    .card { background: var(--card); border: 1px solid var(--border); border-radius: 16px; padding: 20px; margin-bottom: 16px; }
+    label { font-size: 12px; font-weight: 600; color: var(--sub); display: block; margin-bottom: 6px; }
+    select, input {
+      width: 100%; padding: 10px 12px; border-radius: 10px; border: 1.5px solid var(--border);
+      font-size: 14px; font-family: inherit; background: #fff; color: var(--text);
+    }
+    button {
+      background: var(--accent); color: #fff; border: none; border-radius: 10px;
+      padding: 12px 20px; font-size: 14px; font-weight: 700; cursor: pointer;
+      font-family: inherit; width: 100%; margin-top: 14px;
+    }
+    button:disabled { opacity: .5; cursor: default; }
+    .chip {
+      padding: 8px 14px; border-radius: 20px; border: 1.5px solid var(--border);
+      background: #fff; color: var(--text); font-size: 13px; font-weight: 600;
+      cursor: pointer; font-family: inherit; white-space: nowrap; width: auto; margin-top: 0;
+    }
+    .chip.on { border-color: var(--accent); background: var(--accent-l); color: var(--accent); }
+    .chip-row { display: flex; flex-wrap: wrap; gap: 8px; }
+    .metric-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+    @media (max-width: 520px) { .metric-grid { grid-template-columns: repeat(2, 1fr); } }
+    .stat { background: var(--bg); border-radius: 12px; padding: 12px; text-align: center; }
+    .stat .v { font-size: 20px; font-weight: 800; font-family: 'DM Sans', sans-serif; }
+    .stat .l { font-size: 10.5px; color: var(--sub); margin-top: 2px; }
+    .stat .d { font-size: 11px; font-weight: 700; margin-top: 2px; }
+    .up { color: var(--green); } .down { color: var(--red); }
+    .section-title { font-size: 14px; font-weight: 800; margin-bottom: 12px; }
+    .acct-row { display: flex; align-items: center; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid var(--border); }
+    .acct-row:last-child { border-bottom: none; }
+    .err { color: var(--red); font-size: 13px; margin-top: 10px; }
+    .ok { color: var(--green); font-size: 13px; margin-top: 10px; }
+    .spin { width: 20px; height: 20px; border: 2.5px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: sp .7s linear infinite; margin: 30px auto; }
+    @keyframes sp { to { transform: rotate(360deg); } }
+    table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+    th, td { padding: 7px 6px; text-align: right; border-bottom: 1px solid var(--border); white-space: nowrap; }
+    th { color: var(--sub); font-size: 11px; font-weight: 600; }
+    th:first-child, td:first-child { text-align: left; }
+    .table-scroll { overflow-x: auto; }
+    a.link { color: var(--accent); font-weight: 600; text-decoration: none; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="module">
+    import htm from 'https://unpkg.com/htm/dist/htm.module.js';
+    const html = htm.bind(React.createElement);
+    const { useState, useEffect } = React;
+
+    const GAS_URL = "https://script.google.com/macros/s/AKfycbzJ-QEpPVnmp-LFU5Jxww4VFP1qaseMtwCrzKxAA6ZULr1y3h_UeKzVdhHnl5ze57U/exec";
+
+    const PLATFORMS = [
+      { key: "instagram", label: "Instagram", icon: "📸" },
+      { key: "threads",   label: "Threads",   icon: "🧵" },
+      { key: "tiktok",    label: "TikTok",    icon: "🎵" },
+      { key: "youtube",   label: "YouTube",   icon: "▶️" },
+    ];
+    const pinfo = key => PLATFORMS.find(p => p.key === key) || { label: key, icon: "" };
+
+    // 手入力する指標。プラットフォームによって呼び名が違うだけのものは共通枠で扱う
+    const METRIC_FIELDS = [
+      { key: "followers",   label: "フォロワー数" },
+      { key: "reach",       label: "リーチ" },
+      { key: "impressions", label: "インプレッション/再生数" },
+      { key: "likes",       label: "いいね" },
+      { key: "comments",    label: "コメント" },
+      { key: "saves",       label: "保存/シェア" },
+    ];
+
+    const todayStr = () => {
+      const d = new Date();
+      return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+    };
+
+    // 数値推移のミニ折れ線グラフ（ライブラリなしのSVG）
+    function Sparkline({ points, color }) {
+      const vals = points.filter(v => v !== null && v !== undefined);
+      if (vals.length < 2) return html`<div style=${{fontSize: 11, color: "var(--sub)"}}>データ2日分以上で推移を表示</div>`;
+      const w = 300, h = 60, pad = 4;
+      const min = Math.min(...vals), max = Math.max(...vals);
+      const range = max - min || 1;
+      const step = (w - pad * 2) / (points.length - 1);
+      let d = "", started = false;
+      points.forEach((v, i) => {
+        if (v === null || v === undefined) return;
+        const x = pad + i * step;
+        const y = h - pad - ((v - min) / range) * (h - pad * 2);
+        d += (started ? " L" : "M") + x.toFixed(1) + " " + y.toFixed(1);
+        started = true;
+      });
+      return html`<svg viewBox="0 0 ${w} ${h}" style=${{width: "100%", height: 60}}>
+        <path d=${d} fill="none" stroke=${color} stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" />
+      </svg>`;
+    }
+
+    function App() {
+      const [email, setEmail] = useState(localStorage.getItem("jiroku_sns_email") || localStorage.getItem("jiroku_content_email") || "");
+      const [accounts, setAccounts] = useState([]);
+      const [metrics, setMetrics] = useState([]);
+      const [loading, setLoading] = useState(false);
+      const [view, setView] = useState("dash"); // dash | input | accounts
+      const [platform, setPlatform] = useState("instagram");
+      const [msg, setMsg] = useState({ type: "", text: "" });
+
+      // 入力フォーム
+      const [inputDate, setInputDate] = useState(todayStr());
+      const [inputVals, setInputVals] = useState({});
+      const [inputMemo, setInputMemo] = useState("");
+      const [saving, setSaving] = useState(false);
+
+      // アカウント追加フォーム
+      const [newPlatform, setNewPlatform] = useState("instagram");
+      const [newHandle, setNewHandle] = useState("");
+      const [newUrl, setNewUrl] = useState("");
+
+      const loadAll = async (targetEmail) => {
+        if (!targetEmail) return;
+        setLoading(true);
+        try {
+          const [acc, met] = await Promise.all([
+            fetch(GAS_URL + "?action=snsListAccounts&studentEmail=" + encodeURIComponent(targetEmail)).then(r => r.json()),
+            fetch(GAS_URL + "?action=snsGetMetrics&studentEmail=" + encodeURIComponent(targetEmail) + "&days=30").then(r => r.json()),
+          ]);
+          if (acc.ok) {
+            setAccounts(acc.data);
+            if (acc.data.length > 0 && !acc.data.find(a => a.platform === platform)) setPlatform(acc.data[0].platform);
+            if (acc.data.length === 0) setView("accounts");
+          }
+          if (met.ok) setMetrics(met.data);
+        } catch (e) { setMsg({ type: "err", text: "読み込みエラー: " + e }); }
+        setLoading(false);
+      };
+
+      useEffect(() => { if (email) loadAll(email); }, []);
+
+      const confirmEmail = () => {
+        localStorage.setItem("jiroku_sns_email", email);
+        loadAll(email);
+      };
+
+      const saveAccount = async () => {
+        if (!newHandle.trim() && !newUrl.trim()) { setMsg({ type: "err", text: "ハンドル名かURLを入力してください" }); return; }
+        setSaving(true);
+        await fetch(GAS_URL, { method: "POST", body: JSON.stringify({ action: "snsSaveAccount", studentEmail: email, platform: newPlatform, handle: newHandle.trim(), url: newUrl.trim() }) });
+        setNewHandle(""); setNewUrl("");
+        setMsg({ type: "ok", text: "アカウントを登録しました" });
+        setSaving(false);
+        loadAll(email);
+      };
+
+      const saveMetrics = async () => {
+        const hasVal = METRIC_FIELDS.some(f => inputVals[f.key] !== undefined && inputVals[f.key] !== "");
+        if (!hasVal) { setMsg({ type: "err", text: "数値を1つ以上入力してください" }); return; }
+        setSaving(true);
+        const body = { action: "snsSaveMetrics", studentEmail: email, platform, date: inputDate, memo: inputMemo };
+        METRIC_FIELDS.forEach(f => { if (inputVals[f.key] !== undefined && inputVals[f.key] !== "") body[f.key] = inputVals[f.key]; });
+        const res = await fetch(GAS_URL, { method: "POST", body: JSON.stringify(body) }).then(r => r.json());
+        setSaving(false);
+        if (res.ok) {
+          setMsg({ type: "ok", text: res.updated ? "数値を更新しました" : "数値を記録しました" });
+          setInputVals({}); setInputMemo("");
+          setView("dash");
+          loadAll(email);
+        } else setMsg({ type: "err", text: res.error || "保存に失敗しました" });
+      };
+
+      const platformMetrics = metrics.filter(m => m.platform === platform);
+      const latest = platformMetrics[platformMetrics.length - 1] || null;
+      const prev = platformMetrics[platformMetrics.length - 2] || null;
+
+      const delta = (key) => {
+        if (!latest || !prev || latest[key] === null || prev[key] === null) return null;
+        return latest[key] - prev[key];
+      };
+
+      const registered = accounts.map(a => a.platform);
+
+      return html`
+        <div class="wrap">
+          <h1>📊 SNS運用ダッシュボード</h1>
+          <div class="sub">日々の数値を記録して推移を見える化。JIROKUの記録と連携した<a class="link" href="../content/" target="_blank">ネタ出し</a>とセットで使えます</div>
+
+          <div class="card">
+            <label>メールアドレス</label>
+            <div style=${{display: "flex", gap: 8}}>
+              <input value=${email} onInput=${e => setEmail(e.target.value)} placeholder="JIROKUに登録したメールアドレス" />
+              <button style=${{width: "auto", marginTop: 0, flexShrink: 0, padding: "10px 16px"}} onClick=${confirmEmail}>読込</button>
+            </div>
+            ${msg.text && html`<div class=${msg.type}>${msg.text}</div>`}
+          </div>
+
+          ${loading && html`<div class="spin"></div>`}
+
+          ${!loading && email && html`
+            <div class="chip-row" style=${{marginBottom: 16}}>
+              <button class=${"chip" + (view === "dash" ? " on" : "")} onClick=${() => setView("dash")}>📈 ダッシュボード</button>
+              <button class=${"chip" + (view === "input" ? " on" : "")} onClick=${() => { setView("input"); setMsg({type:"",text:""}); }}>✏️ 今日の数値を入力</button>
+              <button class=${"chip" + (view === "accounts" ? " on" : "")} onClick=${() => setView("accounts")}>⚙️ アカウント管理</button>
+            </div>
+          `}
+
+          ${!loading && view === "accounts" && html`
+            <div class="card">
+              <div class="section-title">運用中のアカウント</div>
+              ${accounts.length === 0 && html`<div class="sub">まだ登録がありません。下から追加してください</div>`}
+              ${accounts.map(a => html`
+                <div class="acct-row" key=${a.platform}>
+                  <div>
+                    <span style=${{fontWeight: 700}}>${pinfo(a.platform).icon} ${pinfo(a.platform).label}</span>
+                    <span style=${{color: "var(--sub)", fontSize: 13, marginLeft: 8}}>${a.handle}</span>
+                  </div>
+                  ${a.url && html`<a class="link" href=${a.url} target="_blank" style=${{fontSize: 12}}>開く ↗</a>`}
+                </div>
+              `)}
+            </div>
+            <div class="card">
+              <div class="section-title">アカウントを追加</div>
+              <label>プラットフォーム</label>
+              <select value=${newPlatform} onChange=${e => setNewPlatform(e.target.value)} style=${{marginBottom: 12}}>
+                ${PLATFORMS.map(p => html`<option key=${p.key} value=${p.key}>${p.label}</option>`)}
+              </select>
+              <label>ハンドル名（例: @kai_jiroku）</label>
+              <input value=${newHandle} onInput=${e => setNewHandle(e.target.value)} style=${{marginBottom: 12}} />
+              <label>プロフィールURL（任意）</label>
+              <input value=${newUrl} onInput=${e => setNewUrl(e.target.value)} placeholder="https://..." />
+              <button disabled=${saving} onClick=${saveAccount}>登録する</button>
+            </div>
+          `}
+
+          ${!loading && view === "input" && html`
+            <div class="card">
+              <div class="section-title">今日の数値を入力</div>
+              <div class="sub">インサイト画面を見ながら30秒で入力。全部埋めなくてOK、見える数字だけで大丈夫です</div>
+              <label>プラットフォーム</label>
+              <div class="chip-row" style=${{marginBottom: 12}}>
+                ${(registered.length ? PLATFORMS.filter(p => registered.includes(p.key)) : PLATFORMS).map(p => html`
+                  <button key=${p.key} class=${"chip" + (platform === p.key ? " on" : "")} onClick=${() => setPlatform(p.key)}>${p.icon} ${p.label}</button>
+                `)}
+              </div>
+              <label>日付</label>
+              <input type="date" value=${inputDate} onInput=${e => setInputDate(e.target.value)} style=${{marginBottom: 12}} />
+              <div class="metric-grid" style=${{marginBottom: 12}}>
+                ${METRIC_FIELDS.map(f => html`
+                  <div key=${f.key}>
+                    <label>${f.label}</label>
+                    <input type="number" inputmode="numeric" value=${inputVals[f.key] ?? ""}
+                      onInput=${e => setInputVals(prev => ({ ...prev, [f.key]: e.target.value }))} />
+                  </div>
+                `)}
+              </div>
+              <label>今日の投稿・気づきメモ（任意。AIのネタ提案にも使われます）</label>
+              <input value=${inputMemo} onInput=${e => setInputMemo(e.target.value)} placeholder="例: リール投稿、時間術ネタが保存伸びた" />
+              <button disabled=${saving} onClick=${saveMetrics}>${saving ? "保存中…" : "この内容で記録する"}</button>
+            </div>
+          `}
+
+          ${!loading && view === "dash" && email && html`
+            <div class="chip-row" style=${{marginBottom: 14}}>
+              ${(registered.length ? PLATFORMS.filter(p => registered.includes(p.key)) : PLATFORMS).map(p => html`
+                <button key=${p.key} class=${"chip" + (platform === p.key ? " on" : "")} onClick=${() => setPlatform(p.key)}>${p.icon} ${p.label}</button>
+              `)}
+            </div>
+
+            ${platformMetrics.length === 0 && html`
+              <div class="card" style=${{textAlign: "center", padding: 32}}>
+                <div style=${{fontSize: 15, fontWeight: 700, marginBottom: 6}}>まだデータがありません</div>
+                <div class="sub" style=${{marginBottom: 0}}>「✏️ 今日の数値を入力」から最初の記録をつけましょう</div>
+              </div>
+            `}
+
+            ${latest && html`
+              <div class="card">
+                <div class="section-title">${pinfo(platform).icon} 最新の数値（${latest.date}${prev ? " / 前回比" : ""}）</div>
+                <div class="metric-grid">
+                  ${METRIC_FIELDS.map(f => {
+                    const v = latest[f.key];
+                    const d = delta(f.key);
+                    return html`
+                      <div class="stat" key=${f.key}>
+                        <div class="v">${v !== null ? v.toLocaleString() : "−"}</div>
+                        <div class="l">${f.label}</div>
+                        ${d !== null && d !== 0 && html`<div class=${"d " + (d > 0 ? "up" : "down")}>${d > 0 ? "▲" : "▼"}${Math.abs(d).toLocaleString()}</div>`}
+                      </div>
+                    `;
+                  })}
+                </div>
+              </div>
+
+              <div class="card">
+                <div class="section-title">フォロワー推移（30日）</div>
+                <${Sparkline} points=${platformMetrics.map(m => m.followers)} color="var(--accent)" />
+                <div class="section-title" style=${{marginTop: 18}}>リーチ推移（30日）</div>
+                <${Sparkline} points=${platformMetrics.map(m => m.reach)} color="#F59E0B" />
+              </div>
+
+              <div class="card">
+                <div class="section-title">記録一覧</div>
+                <div class="table-scroll">
+                  <table>
+                    <thead><tr><th>日付</th>${METRIC_FIELDS.map(f => html`<th key=${f.key}>${f.label}</th>`)}</tr></thead>
+                    <tbody>
+                      ${[...platformMetrics].reverse().map(m => html`
+                        <tr key=${m.date}>
+                          <td>${m.date.substring(5)}</td>
+                          ${METRIC_FIELDS.map(f => html`<td key=${f.key}>${m[f.key] !== null ? m[f.key].toLocaleString() : "−"}</td>`)}
+                        </tr>
+                      `)}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            `}
+
+            <div class="card" style=${{background: "var(--accent-l)", borderColor: "var(--accent)"}}>
+              <div class="section-title" style=${{color: "var(--accent)"}}>🎬 今日のネタ・台本を作る</div>
+              <div class="sub" style=${{marginBottom: 0}}>JIROKUの記録とこのダッシュボードの実績を組み合わせて、AIが伸びている型に寄せた台本を提案します</div>
+              <button onClick=${() => window.open("../content/", "_blank")}>ネタ出しページを開く ↗</button>
+            </div>
+          `}
+        </div>
+      `;
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(html`<${App} />`);
+  </script>
+</body>
+</html>
