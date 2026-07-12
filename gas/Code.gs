@@ -3411,12 +3411,15 @@ function sendFcmPushDetailed(token, title, body) {
     } catch (e) { /* キャッシュ不調時は通常送信にフォールバック */ }
     const accessToken = getFcmAccessToken();
     if (!accessToken) return { ok: false, error: "アクセストークン取得失敗（FCM_CLIENT_EMAIL/PRIVATE_KEY未設定か不正）" };
+    // data-onlyメッセージで送る（notificationフィールドは付けない）。
+    // notification付きだとバックグラウンド時に、FCM SDKによる自動表示と
+    // sw.jsのonBackgroundMessageによる自前表示の2経路が両方動いてしまい、
+    // 同じ内容の通知が毎回2連続で届く原因になっていた。data-onlyなら自前表示だけが動く
     const payload = {
       message: {
         token: token,
-        notification: { title: title, body: body },
-        data: { link: APP_URL },
-        webpush: { fcm_options: { link: APP_URL } }
+        data: { title: String(title), body: String(body), link: APP_URL },
+        webpush: { headers: { Urgency: "high" } }
       }
     };
     const res = UrlFetchApp.fetch("https://fcm.googleapis.com/v1/projects/" + projectId + "/messages:send", {

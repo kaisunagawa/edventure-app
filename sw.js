@@ -20,8 +20,11 @@ try {
   });
   const messaging = firebase.messaging();
   messaging.onBackgroundMessage((payload) => {
-    const title = (payload.notification && payload.notification.title) || "JIROKU";
-    const body = (payload.notification && payload.notification.body) || "";
+    // サーバーはdata-onlyメッセージで送ってくる（notificationフィールド付きだと
+    // FCM SDKの自動表示とここでの自前表示が重複し、同じ通知が2連続で届くため）。
+    // 移行期の旧形式（notification付き）にも念のためフォールバック対応
+    const title = (payload.data && payload.data.title) || (payload.notification && payload.notification.title) || "JIROKU";
+    const body = (payload.data && payload.data.body) || (payload.notification && payload.notification.body) || "";
     // 独自にshowNotificationを呼ぶ場合、FCMのwebpush.fcm_options.linkによる
     // 標準クリック挙動は効かないため、リンク先をdataとして持たせて
     // notificationclickハンドラで自前で開く
