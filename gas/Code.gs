@@ -105,6 +105,8 @@ function doGet(e) {
       case "cancelTimerEnd":   result = cancelTimerEnd(studentEmail); break;
       case "registerPushToken": result = registerPushToken(studentEmail, e.parameter); break;
       case "generateSnsIdeas": result = generateSnsIdeas(studentEmail, e.parameter); break;
+      case "getContentProfile": result = getContentProfile(studentEmail); break;
+      case "saveContentProfile": result = saveContentProfile(studentEmail, e.parameter); break;
       default: result = { ok: false, error: "Unknown action: " + action };
     }
     return jsonResponse(result, callback);
@@ -173,6 +175,7 @@ function doPost(e) {
       case "saveSettings": return jsonResponse(saveSettings(studentEmail, body));
       case "saveDiary":    return jsonResponse(saveDiary(studentEmail, body));
       case "saveIntent":   return jsonResponse(saveIntent(studentEmail, body));
+      case "saveContentProfile": return jsonResponse(saveContentProfile(studentEmail, body));
       case "saveTodayActions": return jsonResponse(saveTodayActions(studentEmail, body));
       case "syncCalendar": return jsonResponse(syncCalendar(studentEmail, body));
       case "coachSaveProfile":     return jsonResponse(coachSaveProfile(body.coachEmail, body));
@@ -4100,11 +4103,57 @@ function getMonthlyReview(studentEmail) {
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// SNSコンテンツのネタ出し（自分専用ページ用。全生徒には出さない機能）
+// SNSコンテンツのネタ出し（専用ページ content/ 用。全生徒には出さない機能）
 // 蓄積された記録メモ・日記から、実際の出来事に基づいたリール台本/投稿ネタを
-// AIが提案する。architecture上は既存生徒アプリと切り離し、専用ページ(content/)
-// からこのAPIだけを叩く構成にしている
+// AIが提案する。既存生徒アプリとは切り離し、専用ページからこのAPI群だけを叩く。
+// 将来Kai以外も使う想定のため、初回に「ヒアリング」としてプラットフォーム・
+// ジャンル・ターゲット・トーンをContentProfileシートに保存し、生成時のコンテキストにする
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+function getContentProfileSheet() {
+  let sheet = getSheet("ContentProfile");
+  if (!sheet) {
+    sheet = SpreadsheetApp.openById(SPREADSHEET_ID).insertSheet("ContentProfile");
+    sheet.appendRow(["student_email", "platforms", "niche", "audience", "tone", "goal", "updated_at"]);
+  }
+  return sheet;
+}
+
+function getContentProfile(studentEmail) {
+  const row = sheetToObjects(getContentProfileSheet()).find(r => r.student_email === studentEmail);
+  if (!row) return { ok: true, data: null };
+  return { ok: true, data: {
+    platforms: row.platforms ? row.platforms.split(",") : [],
+    niche: row.niche || "", audience: row.audience || "", tone: row.tone || "", goal: row.goal || ""
+  } };
+}
+
+function saveContentProfile(studentEmail, body) {
+  const sheet = getContentProfileSheet();
+  const data = sheet.getDataRange().getValues();
+  const now = new Date().toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" });
+  const platforms = Array.isArray(body.platforms) ? body.platforms.join(",") : String(body.platforms || "");
+  const row = [studentEmail, platforms, body.niche || "", body.audience || "", body.tone || "", body.goal || "", now];
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][0]) === studentEmail) {
+      sheet.getRange(i + 1, 1, 1, row.length).setValues([row]);
+      return { ok: true };
+    }
+  }
+  sheet.appendRow(row);
+  return { ok: true };
+}
+
+// プラットフォームごとに最適な出力形式が異なる（動画=台本、テキスト=そのまま投稿できる文章）ため、
+// AIへの指示とレスポンス形式を出し分ける
+const SNS_PLATFORM_INFO = {
+  reels:    { label: "Instagramリール", format: "video" },
+  tiktok:   { label: "TikTok", format: "video" },
+  shorts:   { label: "YouTube Shorts", format: "video" },
+  threads:  { label: "Threads", format: "text" },
+  x:        { label: "X（旧Twitter）", format: "text" },
+  post:     { label: "Instagram通常投稿（画像+キャプション）", format: "image" },
+};
 
 function generateSnsIdeas(studentEmail, body) {
   const apiKey = PropertiesService.getScriptProperties().getProperty("CLAUDE_API_KEY");
@@ -4137,13 +4186,52 @@ function generateSnsIdeas(studentEmail, body) {
     return { ok: false, error: "この期間には未使用の記録・日記がありません（期間を広げるか、使用済みネタをリセットしてください）" };
   }
 
+  const platformKey = SNS_PLATFORM_INFO[body.platform] ? body.platform : "reels";
+  const platform = SNS_PLATFORM_INFO[platformKey];
+
+  // ヒアリング内容（プロフィール）があれば、そのジャンル・ターゲット・トーンを踏まえて生成する
+  const profileRow = sheetToObjects(getContentProfileSheet()).find(r => r.student_email === studentEmail);
+  const profileText = profileRow
+    ? `【この人の発信プロフィール】\nジャンル: ${profileRow.niche || "未設定"}\nターゲット層: ${profileRow.audience || "未設定"}\nトーン: ${profileRow.tone || "未設定"}\n発信の目的: ${profileRow.goal || "未設定"}`
+    : "";
+
   const logsText = logs.map(l => l.date + " " + l.time_block + " " + l.task + "：" + l.memo).join("\n");
   const diaryText = diaryEntries.map(r => {
     const rd = r.date instanceof Date ? formatDate(r.date) : String(r.date);
     return rd + "：" + r.diary;
   }).join("\n");
 
+  const outputSpec = platform.format === "text"
+    ? `各ネタについて:
+- hook: 冒頭の一文（スクロールを止める具体的な事実・数字）
+- angle: どんな切り口で語るか（失敗談／気づき／習慣化のコツ／数字の変化など）
+- post_text: ${platform.label}にそのまま投稿できる完成テキスト（改行を含む、150〜400文字程度）
+- source: どの記録・日記の内容を元にしたネタか（日付と要約）
+
+以下のJSON形式のみで返してください（説明文不要）:
+{ "ideas": [ { "hook": "...", "angle": "...", "post_text": "...", "source": "..." } ] }`
+    : platform.format === "image"
+    ? `各ネタについて:
+- hook: 投稿の第一印象を決める一文
+- angle: どんな切り口で語るか
+- visual_idea: どんな写真・画像を使うと良いか（具体的に）
+- caption_idea: 投稿につけるキャプション案（2〜4文、ハッシュタグは含めない）
+- source: どの記録・日記の内容を元にしたネタか（日付と要約）
+
+以下のJSON形式のみで返してください（説明文不要）:
+{ "ideas": [ { "hook": "...", "angle": "...", "visual_idea": "...", "caption_idea": "...", "source": "..." } ] }`
+    : `各ネタについて:
+- hook: 冒頭3秒で惹きつける一言（具体的な数字や意外性のある事実を使う）
+- angle: どんな切り口で語るか（失敗談／気づき／習慣化のコツ／数字の変化など）
+- script_beats: 話す流れを3〜4個の箇条書きで（各箇条は1文、独立して意味が通るように）
+- caption_idea: 投稿につけるキャプションの案（2〜3文、ハッシュタグは含めない）
+- source: どの記録・日記の内容を元にしたネタか（日付と要約）
+
+以下のJSON形式のみで返してください（説明文不要）:
+{ "ideas": [ { "hook": "...", "angle": "...", "script_beats": ["...", "..."], "caption_idea": "...", "source": "..." } ] }`;
+
   const prompt = `以下は本人が直近${days}日間にJIROKUアプリへ書いた「行動の記録メモ」と「日記」です。これらは全て実際に起きた出来事・本人の言葉です。
+${profileText}
 
 【記録メモ（時間帯ごとの振り返り）】
 ${logsText || "なし"}
@@ -4152,30 +4240,19 @@ ${logsText || "なし"}
 ${diaryText || "なし"}
 
 【依頼】
-この人がSNS（Instagram/TikTokのリール、または通常投稿）で発信するためのネタを${count}個、上記の実際の記録から具体的に拾って提案してください。
+この人が「${platform.label}」で発信するためのネタを${count}個、上記の実際の記録から具体的に拾って提案してください。
 一般論やテンプレート的なネタではなく、実際に書かれた出来事・数字・感情の動きを起点にすること。
+発信プロフィールが設定されている場合は、そのジャンル・ターゲット・トーンに合わせること。
 毎日1本ずつ投稿する前提のため、${count}個は互いに切り口が重ならないようにすること（同じ出来事を使う場合も、違う角度から語ること）。
 
-各ネタについて:
-- hook: 冒頭3秒で惹きつける一言（具体的な数字や意外性のある事実を使う）
-- angle: どんな切り口で語るか（失敗談／気づき／習慣化のコツ／数字の変化など）
-- script_beats: リールで話す流れを3〜4個の箇条書きで（各箇条は1文、独立して意味が通るように）
-- source: どの記録・日記の内容を元にしたネタか（日付と要約）
-- caption_idea: 投稿につけるキャプションの案（2〜3文、ハッシュタグは含めない）
-
-以下のJSON形式のみで返してください（説明文不要）:
-{
-  "ideas": [
-    { "hook": "...", "angle": "...", "script_beats": ["...", "..."], "source": "...", "caption_idea": "..." }
-  ]
-}`;
+${outputSpec}`;
 
   const res = UrlFetchApp.fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
     // SNSコンテンツは公開物として質が直接見える成果物のため、他機能のHaikuより
     // 上位のOpusを使う（コスト差は無視できる規模の個人利用のため許容）
-    payload: JSON.stringify({ model: "claude-opus-4-8", max_tokens: 3000, messages: [{ role: "user", content: prompt }] }),
+    payload: JSON.stringify({ model: "claude-opus-4-8", max_tokens: 3500, messages: [{ role: "user", content: prompt }] }),
     muteHttpExceptions: true
   });
 
@@ -4189,7 +4266,11 @@ ${diaryText || "なし"}
     const m = text.match(/\{[\s\S]*\}/);
     if (!m) return { ok: false, error: "JSONが見つかりません: " + text.substring(0, 200) };
     const parsed = JSON.parse(m[0]);
-    return { ok: true, data: parsed.ideas || [], sourceCount: { logs: logs.length, diary: diaryEntries.length } };
+    return {
+      ok: true, data: parsed.ideas || [],
+      format: platform.format, platformLabel: platform.label,
+      sourceCount: { logs: logs.length, diary: diaryEntries.length }
+    };
   } catch (e) {
     return { ok: false, error: "JSONパースエラー: " + e.toString() };
   }

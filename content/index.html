@@ -28,16 +28,25 @@
       border-radius: 16px; padding: 20px; margin-bottom: 16px;
     }
     label { font-size: 12px; font-weight: 600; color: var(--sub); display: block; margin-bottom: 6px; }
-    select, input {
+    select, input, textarea {
       width: 100%; padding: 10px 12px; border-radius: 10px; border: 1.5px solid var(--border);
       font-size: 14px; font-family: inherit; background: #fff; color: var(--text);
     }
+    textarea { resize: vertical; min-height: 60px; }
     button {
       background: var(--accent); color: #fff; border: none; border-radius: 10px;
       padding: 12px 20px; font-size: 14px; font-weight: 700; cursor: pointer;
       font-family: inherit; width: 100%; margin-top: 14px;
     }
     button:disabled { opacity: .5; cursor: default; }
+    .chip-row { display: flex; flex-wrap: wrap; gap: 8px; }
+    .chip {
+      padding: 8px 14px; border-radius: 20px; border: 1.5px solid var(--border);
+      background: #fff; color: var(--text); font-size: 13px; font-weight: 600;
+      cursor: pointer; font-family: inherit; white-space: nowrap;
+    }
+    .chip.on { border-color: var(--accent); background: var(--accent-l); color: var(--accent); }
+    .platform-select { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
     .idea-num {
       display: inline-flex; align-items: center; justify-content: center;
       width: 24px; height: 24px; border-radius: 50%; background: var(--accent-l);
@@ -49,10 +58,18 @@
     .beats { padding-left: 18px; }
     .beats li { font-size: 13.5px; line-height: 1.8; }
     .source { font-size: 11.5px; color: var(--sub); background: var(--bg); border-radius: 8px; padding: 8px 10px; margin-top: 10px; }
-    .caption { font-size: 13.5px; line-height: 1.7; background: var(--bg); border-radius: 10px; padding: 12px; margin-top: 6px; }
+    .caption, .posttext { font-size: 13.5px; line-height: 1.7; background: var(--bg); border-radius: 10px; padding: 12px; margin-top: 6px; white-space: pre-wrap; }
     .err { color: #DC2626; font-size: 13px; margin-top: 10px; }
     .spin { width: 20px; height: 20px; border: 2.5px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: sp .7s linear infinite; margin: 30px auto; }
     @keyframes sp { to { transform: rotate(360deg); } }
+    .platform-tag {
+      display: inline-block; font-size: 11px; font-weight: 700; color: var(--accent);
+      background: var(--accent-l); border-radius: 6px; padding: 3px 8px; margin-bottom: 12px;
+    }
+    .overlay { position: fixed; inset: 0; background: rgba(0,0,0,.4); display: flex; align-items: center; justify-content: center; padding: 20px; z-index: 100; }
+    .modal { background: #fff; border-radius: 18px; padding: 26px; max-width: 480px; width: 100%; max-height: 90vh; overflow-y: auto; }
+    .modal h2 { font-size: 18px; font-weight: 800; margin-bottom: 6px; }
+    .modal .sub { margin-bottom: 20px; }
   </style>
 </head>
 <body>
@@ -60,10 +77,20 @@
   <script type="module">
     import htm from 'https://unpkg.com/htm/dist/htm.module.js';
     const html = htm.bind(React.createElement);
-    const { useState } = React;
+    const { useState, useEffect } = React;
 
     // 生徒アプリ・コーチCRMと同じGAS Web Appを使う（新規バックエンド不要）
     const GAS_URL = "https://script.google.com/macros/s/AKfycbzJ-QEpPVnmp-LFU5Jxww4VFP1qaseMtwCrzKxAA6ZULr1y3h_UeKzVdhHnl5ze57U/exec";
+
+    // GAS側 SNS_PLATFORM_INFO と対応。format差でカードの表示項目を変える
+    const PLATFORMS = [
+      { key: "reels",   label: "Instagramリール", icon: "🎬" },
+      { key: "tiktok",  label: "TikTok", icon: "🎵" },
+      { key: "shorts",  label: "YouTube Shorts", icon: "▶️" },
+      { key: "threads", label: "Threads", icon: "🧵" },
+      { key: "x",       label: "X（旧Twitter）", icon: "✕" },
+      { key: "post",    label: "Instagram通常投稿", icon: "🖼️" },
+    ];
 
     // 元ネタのsource文字列（例: "2026-07-10：補助金の書類作成に3時間..."）から
     // 日付を抜き出す。次回生成時にこの日付を除外し、毎日投稿しても同じ元ネタの
@@ -73,27 +100,124 @@
       return m ? m[0] : null;
     };
 
+    // 初回ヒアリングモーダル: このメールアドレスで初めて使う人に、発信プラットフォーム・
+    // ジャンル・ターゲット・トーン・目的を聞く。GASのContentProfileシートに保存し、
+    // 以降の生成すべてに反映される（Kai以外が使うようになった時の運用を見据えて）
+    function HearingModal({ email, onDone }) {
+      const [platforms, setPlatforms] = useState([]);
+      const [niche, setNiche] = useState("");
+      const [audience, setAudience] = useState("");
+      const [tone, setTone] = useState("");
+      const [goal, setGoal] = useState("");
+      const [saving, setSaving] = useState(false);
+
+      const togglePlatform = (key) => {
+        setPlatforms(prev => prev.includes(key) ? prev.filter(p => p !== key) : [...prev, key]);
+      };
+
+      const save = async () => {
+        if (platforms.length === 0) { alert("発信するSNSを1つ以上選んでください"); return; }
+        if (!niche.trim()) { alert("発信するジャンル・内容を入力してください"); return; }
+        setSaving(true);
+        try {
+          await fetch(GAS_URL, {
+            method: "POST",
+            body: JSON.stringify({ action: "saveContentProfile", studentEmail: email, platforms, niche, audience, tone, goal })
+          });
+        } catch (e) {}
+        onDone({ platforms, niche, audience, tone, goal });
+      };
+
+      return html`
+        <div class="overlay">
+          <div class="modal">
+            <h2>👋 はじめに教えてください</h2>
+            <div class="sub">これを1度設定すると、以降のネタ生成すべてに反映されます（設定はいつでも変更可能）</div>
+
+            <label>発信するSNS（複数選択可）</label>
+            <div class="platform-select">
+              ${PLATFORMS.map(p => html`
+                <button key=${p.key} class=${"chip" + (platforms.includes(p.key) ? " on" : "")}
+                  onClick=${() => togglePlatform(p.key)} style=${{marginTop: 0, width: "auto"}}>
+                  ${p.icon} ${p.label}
+                </button>
+              `)}
+            </div>
+
+            <label>発信するジャンル・内容（例: 時間管理、経営者向けコーチング、副業ノウハウ）</label>
+            <textarea value=${niche} onInput=${e => setNiche(e.target.value)} style=${{marginBottom: 14}}
+              placeholder="どんなテーマで発信しますか？"></textarea>
+
+            <label>ターゲット層（例: 20代の独立志望者、時間に追われている経営者）</label>
+            <input value=${audience} onInput=${e => setAudience(e.target.value)} style=${{marginBottom: 14}}
+              placeholder="誰に届けたいですか？（任意）" />
+
+            <label>発信のトーン（例: 熱血で背中を押す、落ち着いて論理的に）</label>
+            <input value=${tone} onInput=${e => setTone(e.target.value)} style=${{marginBottom: 14}}
+              placeholder="どんな話し方にしたいですか？（任意）" />
+
+            <label>発信の目的（例: コーチング契約につなげたい、まず認知を広げたい）</label>
+            <input value=${goal} onInput=${e => setGoal(e.target.value)}
+              placeholder="このSNSで何を達成したいですか？（任意）" />
+
+            <button disabled=${saving} onClick=${save}>${saving ? "保存中…" : "この内容で始める"}</button>
+          </div>
+        </div>
+      `;
+    }
+
     function App() {
       const [email, setEmail] = useState(localStorage.getItem("jiroku_content_email") || "work.sunagawa@gmail.com");
+      const [profile, setProfile] = useState(null);
+      const [profileLoading, setProfileLoading] = useState(true);
+      const [showHearing, setShowHearing] = useState(false);
+      const [platform, setPlatform] = useState("reels");
       const [days, setDays] = useState(30);
       const [count, setCount] = useState(7);
       const [loading, setLoading] = useState(false);
       const [ideas, setIdeas] = useState(null);
+      const [ideaFormat, setIdeaFormat] = useState("video");
       const [error, setError] = useState("");
       const [sourceCount, setSourceCount] = useState(null);
       const [usedDates, setUsedDates] = useState(() => {
-        try { return JSON.parse(localStorage.getItem("jiroku_content_used_dates") || "[]"); } catch (e) { return []; }
+        try { return JSON.parse(localStorage.getItem("jiroku_content_used_dates_" + email) || "[]"); } catch (e) { return []; }
       });
       const [postedIdx, setPostedIdx] = useState({});
 
+      // メールアドレスごとにプロフィールの有無を確認。未設定ならヒアリングモーダルを出す
+      const loadProfile = async (targetEmail) => {
+        setProfileLoading(true);
+        try {
+          const url = GAS_URL + "?action=getContentProfile&studentEmail=" + encodeURIComponent(targetEmail);
+          const res = await fetch(url).then(r => r.json());
+          if (res.ok && res.data) {
+            setProfile(res.data);
+            if (res.data.platforms && res.data.platforms.length > 0) setPlatform(res.data.platforms[0]);
+            setShowHearing(false);
+          } else {
+            setProfile(null);
+            setShowHearing(true);
+          }
+        } catch (e) { setShowHearing(true); }
+        setProfileLoading(false);
+      };
+
+      useEffect(() => { loadProfile(email); }, []);
+
+      const confirmEmail = () => {
+        localStorage.setItem("jiroku_content_email", email);
+        try { setUsedDates(JSON.parse(localStorage.getItem("jiroku_content_used_dates_" + email) || "[]")); } catch (e) { setUsedDates([]); }
+        loadProfile(email);
+      };
+
       const generate = async () => {
         setLoading(true); setError(""); setIdeas(null); setPostedIdx({});
-        localStorage.setItem("jiroku_content_email", email);
         try {
           const url = GAS_URL + "?action=generateSnsIdeas&studentEmail=" + encodeURIComponent(email)
-            + "&days=" + days + "&count=" + count + "&excludeDates=" + encodeURIComponent(usedDates.join(","));
+            + "&platform=" + platform + "&days=" + days + "&count=" + count
+            + "&excludeDates=" + encodeURIComponent(usedDates.join(","));
           const res = await fetch(url).then(r => r.json());
-          if (res.ok) { setIdeas(res.data); setSourceCount(res.sourceCount); }
+          if (res.ok) { setIdeas(res.data); setIdeaFormat(res.format || "video"); setSourceCount(res.sourceCount); }
           else setError(res.error || "生成に失敗しました");
         } catch (e) { setError("通信エラー: " + e); }
         setLoading(false);
@@ -106,7 +230,7 @@
         if (date && usedDates.indexOf(date) === -1) {
           const next = [...usedDates, date];
           setUsedDates(next);
-          localStorage.setItem("jiroku_content_used_dates", JSON.stringify(next));
+          localStorage.setItem("jiroku_content_used_dates_" + email, JSON.stringify(next));
         }
         setPostedIdx(prev => ({ ...prev, [i]: true }));
       };
@@ -114,17 +238,46 @@
       const resetUsed = () => {
         if (!confirm("使用済みネタの記録をリセットします。過去の記録から再度ネタが出せるようになります。よろしいですか？")) return;
         setUsedDates([]);
-        localStorage.removeItem("jiroku_content_used_dates");
+        localStorage.removeItem("jiroku_content_used_dates_" + email);
       };
+
+      const platformOptions = profile && profile.platforms && profile.platforms.length > 0
+        ? PLATFORMS.filter(p => profile.platforms.includes(p.key))
+        : PLATFORMS;
+
+      if (profileLoading) return html`<div class="wrap"><div class="spin"></div></div>`;
 
       return html`
         <div class="wrap">
           <h1>📱 コンテンツネタ出し</h1>
           <div class="sub">JIROKUに溜まった記録・日記から、実際の出来事に基づいたSNSネタをAIが提案します</div>
 
+          ${showHearing && html`<${HearingModal} email=${email} onDone=${p => { setProfile(p); if (p.platforms?.length) setPlatform(p.platforms[0]); setShowHearing(false); }} />`}
+
           <div class="card">
             <label>対象メールアドレス</label>
-            <input value=${email} onInput=${e => setEmail(e.target.value)} style=${{marginBottom: 14}} />
+            <div style=${{display: "flex", gap: 8, marginBottom: 14}}>
+              <input value=${email} onInput=${e => setEmail(e.target.value)} />
+              <button style=${{width: "auto", marginTop: 0, flexShrink: 0, padding: "10px 16px"}} onClick=${confirmEmail}>切替</button>
+            </div>
+
+            ${profile && html`
+              <div class="sub" style=${{marginBottom: 14, display: "flex", justifyContent: "space-between", alignItems: "center"}}>
+                <span>ジャンル: ${profile.niche || "未設定"}</span>
+                <a href="#" onClick=${e => { e.preventDefault(); setShowHearing(true); }} style=${{color: "var(--accent)", fontWeight: 600}}>設定を変更</a>
+              </div>
+            `}
+
+            <label>発信先のSNS</label>
+            <div class="platform-select">
+              ${platformOptions.map(p => html`
+                <button key=${p.key} class=${"chip" + (platform === p.key ? " on" : "")}
+                  onClick=${() => setPlatform(p.key)} style=${{marginTop: 0, width: "auto"}}>
+                  ${p.icon} ${p.label}
+                </button>
+              `)}
+            </div>
+
             <label>対象期間</label>
             <select value=${days} onChange=${e => setDays(Number(e.target.value))} style=${{marginBottom: 14}}>
               <option value="1">今日のみ</option>
@@ -162,20 +315,35 @@
 
           ${ideas && ideas.map((idea, i) => html`
             <div class="card" key=${i} style=${{opacity: postedIdx[i] ? 0.55 : 1}}>
-              <div class="idea-head" style=${{justifyContent: "space-between"}}>
-                <div style=${{display: "flex", alignItems: "center", gap: 10, minWidth: 0}}>
-                  <span class="idea-num">${i + 1}</span>
-                  <div class="hook">${idea.hook}</div>
-                </div>
+              <div class="platform-tag">${(PLATFORMS.find(p => p.key === platform) || {}).icon} ${(PLATFORMS.find(p => p.key === platform) || {}).label}</div>
+              <div class="idea-head">
+                <span class="idea-num">${i + 1}</span>
+                <div class="hook">${idea.hook}</div>
               </div>
               <div class="label">切り口</div>
               <div style=${{fontSize: 13.5}}>${idea.angle}</div>
-              <div class="label">台本の流れ</div>
-              <ul class="beats">
-                ${(idea.script_beats || []).map((b, j) => html`<li key=${j}>${b}</li>`)}
-              </ul>
-              <div class="label">キャプション案</div>
-              <div class="caption">${idea.caption_idea}</div>
+
+              ${ideaFormat === "text" && html`
+                <div class="label">投稿テキスト（そのまま使えます）</div>
+                <div class="posttext">${idea.post_text}</div>
+              `}
+
+              ${ideaFormat === "video" && html`
+                <div class="label">台本の流れ</div>
+                <ul class="beats">
+                  ${(idea.script_beats || []).map((b, j) => html`<li key=${j}>${b}</li>`)}
+                </ul>
+                <div class="label">キャプション案</div>
+                <div class="caption">${idea.caption_idea}</div>
+              `}
+
+              ${ideaFormat === "image" && html`
+                <div class="label">画像・写真のアイデア</div>
+                <div style=${{fontSize: 13.5}}>${idea.visual_idea}</div>
+                <div class="label">キャプション案</div>
+                <div class="caption">${idea.caption_idea}</div>
+              `}
+
               <div class="source">📎 元ネタ: ${idea.source}</div>
               <button onClick=${() => markPosted(idea, i)} disabled=${postedIdx[i]}
                 style=${{marginTop: 12, background: postedIdx[i] ? "var(--border)" : "var(--accent)", color: postedIdx[i] ? "var(--sub)" : "#fff"}}>
