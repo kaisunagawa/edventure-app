@@ -4348,7 +4348,8 @@ function setupTriggers() {
   ScriptApp.newTrigger("hourlyReminder").timeBased().everyHours(1).create();
   ScriptApp.newTrigger("syncStripeTotals").timeBased().everyDays(1).atHour(4).create();
   ScriptApp.newTrigger("syncChatworkMessages").timeBased().everyHours(1).create();
-  console.log("トリガーを設定しました（合計10個）");
+  ScriptApp.newTrigger("checkGrowthMilestones").timeBased().everyWeeks(1).onWeekDay(ScriptApp.WeekDay.MONDAY).atHour(9).create();
+  console.log("トリガーを設定しました（合計11個）");
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -4390,6 +4391,62 @@ function generateReportForDate(targetDate) {
 // ADMIN_EMAIL として登録した値を読む（コードを貼り替えても消えない）。
 function adminEmail() {
   return PropertiesService.getScriptProperties().getProperty("ADMIN_EMAIL") || "";
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// 成長マイルストーン監視（週1実行）
+// アクティブユーザー数がしきい値を超えたら、その規模で着手すべき
+// セキュリティ・インフラ対応を管理者にメール+LINE/プッシュで通知する。
+// 一度通知したしきい値はスクリプトプロパティに記録して再通知しない
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+const GROWTH_MILESTONES = [
+  { count: 300, todo:
+    "①ユーザーごとのアクセストークン認証を導入（現状はメールアドレスだけで本人になりすませる）\n" +
+    "②APIのレート制限（CacheServiceで同一ユーザー毎分N回まで）\n" +
+    "③スプレッドシートの週次自動バックアップ" },
+  { count: 500, todo:
+    "①コーチ権限チェックの総点検（coachOwnsStudentの漏れ確認）\n" +
+    "②プライバシーポリシー・利用規約の正式公開（LPフッターのリンク設置）\n" +
+    "③アクセス監査ログの記録開始\n" +
+    "④Supabase等へのDB移行の検討開始（スプレッドシートの性能限界が近い）" },
+  { count: 1000, todo:
+    "①スプレッドシート→Supabase等への移行を実行（行レベルセキュリティで自分のデータしか読めない構造に）\n" +
+    "②Googleログイン（OAuth）ベースの正式な認証へ切り替え\n" +
+    "③外部のセキュリティ脆弱性診断を1回受ける\n" +
+    "④個人情報保護法の安全管理措置を文書化（漏洩時の報告体制など）" },
+];
+
+function checkGrowthMilestones() {
+  const users = sheetToObjects(getSheet("Users"));
+  const activeUsers = users.filter(u => String(u.is_active || "").toUpperCase() === "TRUE").length;
+  const props = PropertiesService.getScriptProperties();
+  let notified = [];
+  try { notified = JSON.parse(props.getProperty("GROWTH_NOTIFIED") || "[]"); } catch (e) {}
+
+  GROWTH_MILESTONES.forEach(m => {
+    if (activeUsers < m.count || notified.indexOf(m.count) !== -1) return;
+
+    const subject = "【JIROKU】ユーザー数が" + m.count + "人を突破 — セキュリティ対応のタイミングです";
+    const bodyText = "アクティブユーザー数が " + activeUsers + " 人になり、" + m.count + "人のしきい値を超えました。\n\n" +
+      "この規模で着手すべき対応:\n" + m.todo + "\n\n" +
+      "（ロードマップに基づく自動リマインドです。着手する時はClaude Codeに「" + m.count + "人のセキュリティ対応を始めたい」と伝えてください）";
+
+    const admin = adminEmail();
+    if (admin) {
+      try { MailApp.sendEmail(admin, subject, bodyText); } catch (e) { Logger.log("milestone mail error: " + e); }
+      // 管理者がUsersシートにもいる場合はLINE/プッシュでも知らせる（メールより気づきやすい）
+      try {
+        const adminUser = users.find(u => u.student_email === admin);
+        if (adminUser) notifyUserTimeSlot(adminUser, "🚨 " + m.count + "人突破", "セキュリティ対応のタイミングです。メールに詳細を送りました", "🚨 " + subject + "\n\n" + bodyText);
+      } catch (e) { Logger.log("milestone notify error: " + e); }
+    }
+
+    notified.push(m.count);
+    Logger.log("マイルストーン通知: " + m.count + "人（現在" + activeUsers + "人）");
+  });
+
+  props.setProperty("GROWTH_NOTIFIED", JSON.stringify(notified));
 }
 
 function generateYesterdayReport() {
