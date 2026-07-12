@@ -1081,18 +1081,20 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
     <!-- 今日いちばんやりたいこと -->
     ${intent&&html`
       <button onClick=${toggleIntentDone}
-        style=${{display:"flex",width:"calc(100% - 32px)",margin:"16px 16px 0",background:"var(--card)",borderRadius:16,border:"1.5px solid var(--accent)",padding:"14px 16px",alignItems:"center",gap:12,textAlign:"left",cursor:"pointer",fontFamily:"inherit"}}>
-        <!-- チェックボックス: 未達成は輪郭のみの丸、達成済みは塗りつぶし+チェック。もう一度タップで取り消せる -->
-        <div style=${{flexShrink:0,width:26,height:26,borderRadius:"50%",border:"2px solid var(--accent)",background:intent.done?"var(--accent)":"transparent",display:"flex",alignItems:"center",justifyContent:"center",transition:"all .15s"}}>
-          ${intent.done&&html`<span style=${{color:"#fff",fontSize:14,fontWeight:800,lineHeight:1}}>✓</span>`}
-        </div>
+        style=${{display:"flex",width:"calc(100% - 32px)",margin:"16px 16px 0",background:"var(--card)",borderRadius:16,border:"1.5px solid var(--accent)",padding:"14px 16px",alignItems:"flex-start",gap:12,textAlign:"left",cursor:"pointer",fontFamily:"inherit"}}>
         <div style=${{flex:1,minWidth:0}}>
-          <div style=${{fontSize:11,fontWeight:600,color:"var(--sub)",marginBottom:3}}>⭐ 今日いちばんやりたいこと</div>
-          <div style=${{fontSize:15,fontWeight:700,color:"var(--text)",lineHeight:1.5,textDecoration:intent.done?"line-through":"none",opacity:intent.done?0.6:1}}>${intent.intent}</div>
+          <div style=${{fontSize:11,fontWeight:600,color:"var(--sub)",marginBottom:6}}>⭐ 今日いちばんやりたいこと</div>
+          <!-- 丸チェックボックスは本文テキストと同じ行に置き、縦位置を揃える -->
+          <div style=${{display:"flex",alignItems:"center",gap:10}}>
+            <div style=${{flexShrink:0,width:24,height:24,borderRadius:"50%",border:"2px solid var(--accent)",background:intent.done?"var(--accent)":"transparent",display:"flex",alignItems:"center",justifyContent:"center",transition:"all .15s"}}>
+              ${intent.done&&html`<span style=${{color:"#fff",fontSize:13,fontWeight:800,lineHeight:1}}>✓</span>`}
+            </div>
+            <div style=${{flex:1,minWidth:0,fontSize:15,fontWeight:700,color:"var(--text)",lineHeight:1.4,textDecoration:intent.done?"line-through":"none",opacity:intent.done?0.6:1}}>${intent.intent}</div>
+          </div>
         </div>
         ${intent.done
-          ? html`<div style=${{flexShrink:0,fontSize:11,fontWeight:600,color:"var(--sub)",textAlign:"right",lineHeight:1.4}}><span style=${{fontSize:12,fontWeight:800,color:"var(--accent)"}}>達成🎉</span><br/>タップで戻す</div>`
-          : html`<div style=${{flexShrink:0,fontSize:11,fontWeight:600,color:"var(--sub)",textAlign:"right",lineHeight:1.4}}>タップして<br/>達成にする</div>`}
+          ? html`<div style=${{flexShrink:0,fontSize:11,fontWeight:600,color:"var(--sub)",textAlign:"right",lineHeight:1.4,marginTop:2}}><span style=${{fontSize:12,fontWeight:800,color:"var(--accent)"}}>達成🎉</span><br/>タップで戻す</div>`
+          : html`<div style=${{flexShrink:0,fontSize:11,fontWeight:600,color:"var(--sub)",textAlign:"right",lineHeight:1.4,marginTop:2}}>タップして<br/>達成にする</div>`}
       </button>
     `}
 
