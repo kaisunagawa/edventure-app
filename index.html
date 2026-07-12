@@ -851,12 +851,13 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
     localStorage.setItem("jiroku_intent_skip", formatDateStr(new Date()));
     setShowIntentModal(false);
   };
-  const markIntentDone = () => {
-    if(!intent || intent.done) return;
-    const next = {...intent, done:true};
+  // 達成⇄未達成のトグル（間違えて押しても、もう一度タップで戻せる）
+  const toggleIntentDone = () => {
+    if(!intent) return;
+    const next = {...intent, done:!intent.done};
     localStorage.setItem("jiroku_intent", JSON.stringify(next));
     setIntent(next);
-    gasPostJson("saveIntent", {intent_done:"true"});
+    gasPostJson("saveIntent", {intent_done: next.done ? "true" : "false"});
   };
   const [showGoalTimeEdit, setShowGoalTimeEdit] = useState(false);
   const [dailyGoalHours, setDailyGoalHours] = useState(getDailyGoalHours);
@@ -1079,10 +1080,10 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
 
     <!-- 今日いちばんやりたいこと -->
     ${intent&&html`
-      <button onClick=${()=>!intent.done&&markIntentDone()}
-        style=${{display:"flex",width:"calc(100% - 32px)",margin:"16px 16px 0",background:"var(--card)",borderRadius:16,border:`1.5px solid ${intent.done?"var(--green)":"var(--accent)"}`,padding:"14px 16px",alignItems:"center",gap:12,textAlign:"left",cursor:intent.done?"default":"pointer",fontFamily:"inherit"}}>
-        <!-- チェックボックス: 未達成は輪郭のみの丸、達成済みは緑塗りつぶし+チェック。タップ操作であることが一目でわかる -->
-        <div style=${{flexShrink:0,width:26,height:26,borderRadius:"50%",border:`2px solid ${intent.done?"var(--green)":"var(--accent)"}`,background:intent.done?"var(--green)":"transparent",display:"flex",alignItems:"center",justifyContent:"center",transition:"all .15s"}}>
+      <button onClick=${toggleIntentDone}
+        style=${{display:"flex",width:"calc(100% - 32px)",margin:"16px 16px 0",background:"var(--card)",borderRadius:16,border:"1.5px solid var(--accent)",padding:"14px 16px",alignItems:"center",gap:12,textAlign:"left",cursor:"pointer",fontFamily:"inherit"}}>
+        <!-- チェックボックス: 未達成は輪郭のみの丸、達成済みは塗りつぶし+チェック。もう一度タップで取り消せる -->
+        <div style=${{flexShrink:0,width:26,height:26,borderRadius:"50%",border:"2px solid var(--accent)",background:intent.done?"var(--accent)":"transparent",display:"flex",alignItems:"center",justifyContent:"center",transition:"all .15s"}}>
           ${intent.done&&html`<span style=${{color:"#fff",fontSize:14,fontWeight:800,lineHeight:1}}>✓</span>`}
         </div>
         <div style=${{flex:1,minWidth:0}}>
@@ -1090,7 +1091,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
           <div style=${{fontSize:15,fontWeight:700,color:"var(--text)",lineHeight:1.5,textDecoration:intent.done?"line-through":"none",opacity:intent.done?0.6:1}}>${intent.intent}</div>
         </div>
         ${intent.done
-          ? html`<div style=${{flexShrink:0,fontSize:12,fontWeight:800,color:"var(--green)"}}>達成🎉</div>`
+          ? html`<div style=${{flexShrink:0,fontSize:11,fontWeight:600,color:"var(--sub)",textAlign:"right",lineHeight:1.4}}><span style=${{fontSize:12,fontWeight:800,color:"var(--accent)"}}>達成🎉</span><br/>タップで戻す</div>`
           : html`<div style=${{flexShrink:0,fontSize:11,fontWeight:600,color:"var(--sub)",textAlign:"right",lineHeight:1.4}}>タップして<br/>達成にする</div>`}
       </button>
     `}
