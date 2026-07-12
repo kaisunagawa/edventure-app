@@ -4168,7 +4168,9 @@ ${diaryText || "なし"}
   const res = UrlFetchApp.fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
-    payload: JSON.stringify({ model: "claude-sonnet-5", max_tokens: 3000, messages: [{ role: "user", content: prompt }] }),
+    // SNSコンテンツは公開物として質が直接見える成果物のため、他機能のHaikuより
+    // 上位のOpusを使う（コスト差は無視できる規模の個人利用のため許容）
+    payload: JSON.stringify({ model: "claude-opus-4-8", max_tokens: 3000, messages: [{ role: "user", content: prompt }] }),
     muteHttpExceptions: true
   });
 
