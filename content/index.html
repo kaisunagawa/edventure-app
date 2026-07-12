@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>JIROKU コンテンツネタ出し</title>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&family=Noto+Sans+JP:wght@400;500;700&display=swap" rel="stylesheet" />
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/htm/dist/htm.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #F8F8FA; --card: #FFFFFF; --border: #E5E7EB;
+      --text: #1F2937; --sub: #6B7280;
+      --accent: #0891B2; --accent-l: #CFFAFE;
+    }
+    body {
+      background: var(--bg); color: var(--text);
+      font-family: 'Noto Sans JP', 'DM Sans', -apple-system, sans-serif;
+      min-height: 100vh; padding: 24px 16px 60px;
+    }
+    .wrap { max-width: 720px; margin: 0 auto; }
+    h1 { font-size: 20px; font-weight: 800; margin-bottom: 4px; }
+    .sub { font-size: 13px; color: var(--sub); margin-bottom: 24px; }
+    .card {
+      background: var(--card); border: 1px solid var(--border);
+      border-radius: 16px; padding: 20px; margin-bottom: 16px;
+    }
+    label { font-size: 12px; font-weight: 600; color: var(--sub); display: block; margin-bottom: 6px; }
+    select, input {
+      width: 100%; padding: 10px 12px; border-radius: 10px; border: 1.5px solid var(--border);
+      font-size: 14px; font-family: inherit; background: #fff; color: var(--text);
+    }
+    button {
+      background: var(--accent); color: #fff; border: none; border-radius: 10px;
+      padding: 12px 20px; font-size: 14px; font-weight: 700; cursor: pointer;
+      font-family: inherit; width: 100%; margin-top: 14px;
+    }
+    button:disabled { opacity: .5; cursor: default; }
+    .idea-num {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 24px; height: 24px; border-radius: 50%; background: var(--accent-l);
+      color: var(--accent); font-size: 12px; font-weight: 800; flex-shrink: 0;
+    }
+    .idea-head { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+    .hook { font-size: 16px; font-weight: 700; line-height: 1.5; }
+    .label { font-size: 11px; font-weight: 700; color: var(--sub); margin: 12px 0 4px; letter-spacing: .02em; }
+    .beats { padding-left: 18px; }
+    .beats li { font-size: 13.5px; line-height: 1.8; }
+    .source { font-size: 11.5px; color: var(--sub); background: var(--bg); border-radius: 8px; padding: 8px 10px; margin-top: 10px; }
+    .caption { font-size: 13.5px; line-height: 1.7; background: var(--bg); border-radius: 10px; padding: 12px; margin-top: 6px; }
+    .err { color: #DC2626; font-size: 13px; margin-top: 10px; }
+    .spin { width: 20px; height: 20px; border: 2.5px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: sp .7s linear infinite; margin: 30px auto; }
+    @keyframes sp { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="module">
+    import htm from 'https://unpkg.com/htm/dist/htm.module.js';
+    const html = htm.bind(React.createElement);
+    const { useState } = React;
+
+    // 生徒アプリ・コーチCRMと同じGAS Web Appを使う（新規バックエンド不要）
+    const GAS_URL = "https://script.google.com/macros/s/AKfycbzJ-QEpPVnmp-LFU5Jxww4VFP1qaseMtwCrzKxAA6ZULr1y3h_UeKzVdhHnl5ze57U/exec";
+
+    function App() {
+      const [email, setEmail] = useState(localStorage.getItem("jiroku_content_email") || "work.sunagawa@gmail.com");
+      const [days, setDays] = useState(30);
+      const [loading, setLoading] = useState(false);
+      const [ideas, setIdeas] = useState(null);
+      const [error, setError] = useState("");
+      const [sourceCount, setSourceCount] = useState(null);
+
+      const generate = async () => {
+        setLoading(true); setError(""); setIdeas(null);
+        localStorage.setItem("jiroku_content_email", email);
+        try {
+          const url = GAS_URL + "?action=generateSnsIdeas&studentEmail=" + encodeURIComponent(email) + "&days=" + days;
+          const res = await fetch(url).then(r => r.json());
+          if (res.ok) { setIdeas(res.data); setSourceCount(res.sourceCount); }
+          else setError(res.error || "生成に失敗しました");
+        } catch (e) { setError("通信エラー: " + e); }
+        setLoading(false);
+      };
+
+      return html`
+        <div class="wrap">
+          <h1>📱 コンテンツネタ出し</h1>
+          <div class="sub">JIROKUに溜まった記録・日記から、実際の出来事に基づいたSNSネタをAIが提案します</div>
+
+          <div class="card">
+            <label>対象メールアドレス</label>
+            <input value=${email} onInput=${e => setEmail(e.target.value)} style=${{marginBottom: 14}} />
+            <label>対象期間</label>
+            <select value=${days} onChange=${e => setDays(Number(e.target.value))}>
+              <option value="7">直近7日</option>
+              <option value="14">直近14日</option>
+              <option value="30">直近30日</option>
+              <option value="60">直近60日</option>
+              <option value="90">直近90日</option>
+            </select>
+            <button disabled=${loading} onClick=${generate}>${loading ? "生成中…（30秒ほどかかります）" : "ネタを生成する"}</button>
+            ${error && html`<div class="err">${error}</div>`}
+          </div>
+
+          ${loading && html`<div class="spin"></div>`}
+
+          ${sourceCount && html`
+            <div class="sub" style=${{marginBottom: 12}}>
+              素材: 記録メモ${sourceCount.logs}件・日記${sourceCount.diary}件から生成
+            </div>
+          `}
+
+          ${ideas && ideas.map((idea, i) => html`
+            <div class="card" key=${i}>
+              <div class="idea-head">
+                <span class="idea-num">${i + 1}</span>
+                <div class="hook">${idea.hook}</div>
+              </div>
+              <div class="label">切り口</div>
+              <div style=${{fontSize: 13.5}}>${idea.angle}</div>
+              <div class="label">台本の流れ</div>
+              <ul class="beats">
+                ${(idea.script_beats || []).map((b, j) => html`<li key=${j}>${b}</li>`)}
+              </ul>
+              <div class="label">キャプション案</div>
+              <div class="caption">${idea.caption_idea}</div>
+              <div class="source">📎 元ネタ: ${idea.source}</div>
+            </div>
+          `)}
+        </div>
+      `;
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(html`<${App} />`);
+  </script>
+</body>
+</html>

@@ -104,6 +104,7 @@ function doGet(e) {
       case "scheduleTimerEnd": result = scheduleTimerEnd(studentEmail, e.parameter); break;
       case "cancelTimerEnd":   result = cancelTimerEnd(studentEmail); break;
       case "registerPushToken": result = registerPushToken(studentEmail, e.parameter); break;
+      case "generateSnsIdeas": result = generateSnsIdeas(studentEmail, e.parameter); break;
       default: result = { ok: false, error: "Unknown action: " + action };
     }
     return jsonResponse(result, callback);
@@ -4096,6 +4097,95 @@ function getMonthlyReview(studentEmail) {
     goalRelatedPct: Number(r.goal_related_pct) || 0,
     avgScore: r.avg_score !== "" ? Number(r.avg_score) : null
   } };
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// SNSコンテンツのネタ出し（自分専用ページ用。全生徒には出さない機能）
+// 蓄積された記録メモ・日記から、実際の出来事に基づいたリール台本/投稿ネタを
+// AIが提案する。architecture上は既存生徒アプリと切り離し、専用ページ(content/)
+// からこのAPIだけを叩く構成にしている
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+function generateSnsIdeas(studentEmail, body) {
+  const apiKey = PropertiesService.getScriptProperties().getProperty("CLAUDE_API_KEY");
+  if (!apiKey) return { ok: false, error: "CLAUDE_API_KEY未設定" };
+
+  const days = Number(body.days) || 30;
+  const cutoff = formatDate(new Date(Date.now() - days * 86400000));
+
+  const logs = getFilteredRows("DailyLog", "student_email", studentEmail)
+    .filter(l => l.date >= cutoff && l.memo && l.memo.trim())
+    .sort((a, b) => a.date > b.date ? 1 : -1);
+
+  const journalRows = getSheet("Journal")
+    ? sheetToObjects(getJournalSheet()).filter(r => r.student_email === studentEmail).sort((a, b) => {
+        const ad = a.date instanceof Date ? formatDate(a.date) : String(a.date);
+        const bd = b.date instanceof Date ? formatDate(b.date) : String(b.date);
+        return ad > bd ? 1 : -1;
+      })
+    : [];
+  const diaryEntries = journalRows.filter(r => {
+    const rd = r.date instanceof Date ? formatDate(r.date) : String(r.date);
+    return rd >= cutoff && r.diary && r.diary.trim();
+  });
+
+  if (logs.length === 0 && diaryEntries.length === 0) {
+    return { ok: false, error: "直近" + days + "日分にメモ・日記の記録がありません" };
+  }
+
+  const logsText = logs.map(l => l.date + " " + l.time_block + " " + l.task + "：" + l.memo).join("\n");
+  const diaryText = diaryEntries.map(r => {
+    const rd = r.date instanceof Date ? formatDate(r.date) : String(r.date);
+    return rd + "：" + r.diary;
+  }).join("\n");
+
+  const prompt = `以下は本人が直近${days}日間にJIROKUアプリへ書いた「行動の記録メモ」と「日記」です。これらは全て実際に起きた出来事・本人の言葉です。
+
+【記録メモ（時間帯ごとの振り返り）】
+${logsText || "なし"}
+
+【日記】
+${diaryText || "なし"}
+
+【依頼】
+この人がSNS（Instagram/TikTokのリール、または通常投稿）で発信するためのネタを5個、上記の実際の記録から具体的に拾って提案してください。
+一般論やテンプレート的なネタではなく、実際に書かれた出来事・数字・感情の動きを起点にすること。
+
+各ネタについて:
+- hook: 冒頭3秒で惹きつける一言（具体的な数字や意外性のある事実を使う）
+- angle: どんな切り口で語るか（失敗談／気づき／習慣化のコツ／数字の変化など）
+- script_beats: リールで話す流れを3〜4個の箇条書きで（各箇条は1文、独立して意味が通るように）
+- source: どの記録・日記の内容を元にしたネタか（日付と要約）
+- caption_idea: 投稿につけるキャプションの案（2〜3文、ハッシュタグは含めない）
+
+以下のJSON形式のみで返してください（説明文不要）:
+{
+  "ideas": [
+    { "hook": "...", "angle": "...", "script_beats": ["...", "..."], "source": "...", "caption_idea": "..." }
+  ]
+}`;
+
+  const res = UrlFetchApp.fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
+    payload: JSON.stringify({ model: "claude-sonnet-5", max_tokens: 3000, messages: [{ role: "user", content: prompt }] }),
+    muteHttpExceptions: true
+  });
+
+  const rawText = res.getContentText();
+  const result = JSON.parse(rawText);
+  if (!result.content || !result.content[0]) {
+    return { ok: false, error: "APIエラー: " + rawText.substring(0, 300) };
+  }
+  try {
+    const text = result.content[0].text.trim();
+    const m = text.match(/\{[\s\S]*\}/);
+    if (!m) return { ok: false, error: "JSONが見つかりません: " + text.substring(0, 200) };
+    const parsed = JSON.parse(m[0]);
+    return { ok: true, data: parsed.ideas || [], sourceCount: { logs: logs.length, diary: diaryEntries.length } };
+  } catch (e) {
+    return { ok: false, error: "JSONパースエラー: " + e.toString() };
+  }
 }
 
 // レポート一覧画面の「時間の使い方」サマリー。直近14日の記録から
