@@ -1079,16 +1079,20 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
 
     <!-- 今日いちばんやりたいこと -->
     ${intent&&html`
-      <div style=${{margin:"16px 16px 0",background:"var(--card)",borderRadius:16,border:`1.5px solid ${intent.done?"var(--green)":"var(--accent)"}`,padding:"14px 16px",display:"flex",alignItems:"center",gap:12}}>
+      <button onClick=${()=>!intent.done&&markIntentDone()}
+        style=${{display:"flex",width:"calc(100% - 32px)",margin:"16px 16px 0",background:"var(--card)",borderRadius:16,border:`1.5px solid ${intent.done?"var(--green)":"var(--accent)"}`,padding:"14px 16px",alignItems:"center",gap:12,textAlign:"left",cursor:intent.done?"default":"pointer",fontFamily:"inherit"}}>
+        <!-- チェックボックス: 未達成は輪郭のみの丸、達成済みは緑塗りつぶし+チェック。タップ操作であることが一目でわかる -->
+        <div style=${{flexShrink:0,width:26,height:26,borderRadius:"50%",border:`2px solid ${intent.done?"var(--green)":"var(--accent)"}`,background:intent.done?"var(--green)":"transparent",display:"flex",alignItems:"center",justifyContent:"center",transition:"all .15s"}}>
+          ${intent.done&&html`<span style=${{color:"#fff",fontSize:14,fontWeight:800,lineHeight:1}}>✓</span>`}
+        </div>
         <div style=${{flex:1,minWidth:0}}>
           <div style=${{fontSize:11,fontWeight:600,color:"var(--sub)",marginBottom:3}}>⭐ 今日いちばんやりたいこと</div>
           <div style=${{fontSize:15,fontWeight:700,color:"var(--text)",lineHeight:1.5,textDecoration:intent.done?"line-through":"none",opacity:intent.done?0.6:1}}>${intent.intent}</div>
         </div>
         ${intent.done
-          ? html`<div style=${{flexShrink:0,fontSize:13,fontWeight:800,color:"var(--green)"}}>達成🎉</div>`
-          : html`<button onClick=${markIntentDone}
-              style=${{flexShrink:0,padding:"8px 14px",borderRadius:99,border:"none",background:"var(--accent)",color:"#fff",fontSize:12.5,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>達成した！</button>`}
-      </div>
+          ? html`<div style=${{flexShrink:0,fontSize:12,fontWeight:800,color:"var(--green)"}}>達成🎉</div>`
+          : html`<div style=${{flexShrink:0,fontSize:11,fontWeight:600,color:"var(--sub)",textAlign:"right",lineHeight:1.4}}>タップして<br/>達成にする</div>`}
+      </button>
     `}
 
     ${showIntentModal&&ReactDOM.createPortal(html`
