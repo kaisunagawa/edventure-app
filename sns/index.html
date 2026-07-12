@@ -74,13 +74,18 @@
 
     const GAS_URL = "https://script.google.com/macros/s/AKfycbzJ-QEpPVnmp-LFU5Jxww4VFP1qaseMtwCrzKxAA6ZULr1y3h_UeKzVdhHnl5ze57U/exec";
 
+    // 各SNSのブランドカラーでUIを出し分ける（選択中のプラットフォームの世界観に切り替わる）
     const PLATFORMS = [
-      { key: "instagram", label: "Instagram", icon: "📸" },
-      { key: "threads",   label: "Threads",   icon: "🧵" },
-      { key: "tiktok",    label: "TikTok",    icon: "🎵" },
-      { key: "youtube",   label: "YouTube",   icon: "▶️" },
+      { key: "instagram", label: "Instagram", icon: "📸",
+        grad: "linear-gradient(45deg, #833AB4 0%, #E1306C 50%, #FCB045 100%)", solid: "#E1306C", auto: false },
+      { key: "threads",   label: "Threads",   icon: "🧵",
+        grad: "linear-gradient(135deg, #1C1C1E 0%, #3A3A3C 100%)", solid: "#1C1C1E", auto: false },
+      { key: "tiktok",    label: "TikTok",    icon: "🎵",
+        grad: "linear-gradient(135deg, #010101 0%, #2A2A2E 60%, #010101 100%)", solid: "#FE2C55", auto: false },
+      { key: "youtube",   label: "YouTube",   icon: "▶️",
+        grad: "linear-gradient(135deg, #B31217 0%, #FF0000 100%)", solid: "#FF0000", auto: true },
     ];
-    const pinfo = key => PLATFORMS.find(p => p.key === key) || { label: key, icon: "" };
+    const pinfo = key => PLATFORMS.find(p => p.key === key) || { label: key, icon: "", grad: "var(--accent)", solid: "var(--accent)" };
 
     // 手入力する指標。プラットフォームによって呼び名が違うだけのものは共通枠で扱う
     const METRIC_FIELDS = [
@@ -292,7 +297,8 @@
               <label>プラットフォーム</label>
               <div class="chip-row" style=${{marginBottom: 12}}>
                 ${(registered.length ? PLATFORMS.filter(p => registered.includes(p.key)) : PLATFORMS).map(p => html`
-                  <button key=${p.key} class=${"chip" + (platform === p.key ? " on" : "")} onClick=${() => setPlatform(p.key)}>${p.icon} ${p.label}</button>
+                  <button key=${p.key} class="chip" onClick=${() => setPlatform(p.key)}
+                    style=${platform === p.key ? { background: p.grad, color: "#fff", borderColor: "transparent" } : {}}>${p.icon} ${p.label}</button>
                 `)}
               </div>
               <label>日付</label>
@@ -319,8 +325,8 @@
               <label>プラットフォーム</label>
               <div class="chip-row" style=${{marginBottom: 12}}>
                 ${(registered.length ? PLATFORMS.filter(p => registered.includes(p.key)) : PLATFORMS).map(p => html`
-                  <button key=${p.key} class=${"chip" + (postForm.platform === p.key ? " on" : "")}
-                    onClick=${() => setPostForm(prev => ({ ...prev, platform: p.key }))}>${p.icon} ${p.label}</button>
+                  <button key=${p.key} class="chip" onClick=${() => setPostForm(prev => ({ ...prev, platform: p.key }))}
+                    style=${postForm.platform === p.key ? { background: p.grad, color: "#fff", borderColor: "transparent" } : {}}>${p.icon} ${p.label}</button>
                 `)}
               </div>
               <label>投稿日</label>
@@ -382,10 +388,32 @@
               `)}
             </div>
 
+            ${(() => {
+              // 選択中SNSのブランドカラーのヒーローカード（アカウント名＋フォロワー数）
+              const acct = accounts.find(a => a.platform === platform);
+              const pi = pinfo(platform);
+              const d = delta("followers");
+              return html`
+                <div style=${{background: pi.grad, borderRadius: 18, padding: "22px 20px", marginBottom: 16, color: "#fff", boxShadow: "0 8px 24px rgba(0,0,0,.12)"}}>
+                  <div style=${{display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12}}>
+                    <div style=${{minWidth: 0}}>
+                      <div style=${{fontSize: 12, opacity: .85, fontWeight: 600}}>${pi.icon} ${pi.label}</div>
+                      <div style=${{fontSize: 18, fontWeight: 800, marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap"}}>${acct ? acct.handle : "アカウント未登録"}</div>
+                    </div>
+                    <div style=${{textAlign: "right", flexShrink: 0}}>
+                      <div style=${{fontSize: 28, fontWeight: 800, fontFamily: "'DM Sans', sans-serif", lineHeight: 1}}>${latest && latest.followers !== null ? latest.followers.toLocaleString() : "−"}</div>
+                      <div style=${{fontSize: 11, opacity: .85, marginTop: 4}}>フォロワー${d ? " " + (d > 0 ? "▲" : "▼") + Math.abs(d).toLocaleString() : ""}</div>
+                    </div>
+                  </div>
+                  ${pi.auto && html`<div style=${{fontSize: 11, opacity: .85, marginTop: 12}}>⚡ 毎日21時に数値を自動取得（APIキー設定時）。手入力は補完用です</div>`}
+                </div>
+              `;
+            })()}
+
             ${platformMetrics.length === 0 && html`
               <div class="card" style=${{textAlign: "center", padding: 32}}>
                 <div style=${{fontSize: 15, fontWeight: 700, marginBottom: 6}}>まだデータがありません</div>
-                <div class="sub" style=${{marginBottom: 0}}>「✏️ 今日の数値を入力」から最初の記録をつけましょう</div>
+                <div class="sub" style=${{marginBottom: 0}}>「✏️ 今日の数値を入力」から最初の記録をつけましょう${pinfo(platform).auto ? "（YouTubeはAPIキー設定で自動化できます）" : ""}</div>
               </div>
             `}
 
@@ -409,7 +437,7 @@
 
               <div class="card">
                 <div class="section-title">フォロワー推移（30日）</div>
-                <${Sparkline} points=${platformMetrics.map(m => m.followers)} color="var(--accent)" />
+                <${Sparkline} points=${platformMetrics.map(m => m.followers)} color=${pinfo(platform).solid} />
                 <div class="section-title" style=${{marginTop: 18}}>リーチ推移（30日）</div>
                 <${Sparkline} points=${platformMetrics.map(m => m.reach)} color="#F59E0B" />
               </div>

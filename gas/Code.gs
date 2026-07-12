@@ -4356,6 +4356,56 @@ function buildSnsPostsContext(studentEmail) {
   } catch (e) { return ""; }
 }
 
+// ━━━ SNS数値の自動取得（フェーズ2） ━━━
+// 毎日夜に全登録アカウントの数値をAPIから取得してSnsMetricsに書き込む。
+// YouTube: YT_API_KEYスクリプトプロパティがあれば公開統計を自動取得（審査不要）
+// Instagram/Threads: Meta開発者アプリの審査通過後にトークンを設定して有効化する（現状スタブ）
+// TikTok: 開発者審査の通過後に有効化（現状スタブ）
+function snsAutoFetchAll() {
+  if (!getSheet("SnsAccounts")) return;
+  sheetToObjects(getSnsAccountsSheet()).forEach(a => {
+    try {
+      if (a.platform === "youtube") snsFetchYoutubeStats(a);
+      // instagram / threads / tiktok は各APIの審査・トークン設定後にここへ追加する
+    } catch (e) { Logger.log("snsAutoFetch error (" + a.student_email + "/" + a.platform + "): " + e); }
+  });
+}
+
+function snsFetchYoutubeStats(account) {
+  const key = PropertiesService.getScriptProperties().getProperty("YT_API_KEY");
+  if (!key) return; // キー未設定なら手入力運用のまま
+  const channelId = resolveYoutubeChannelId(account, key);
+  if (!channelId) { Logger.log("YouTubeチャンネル特定失敗: " + account.handle + " / " + account.url); return; }
+  const res = UrlFetchApp.fetch("https://www.googleapis.com/youtube/v3/channels?part=statistics&id=" + channelId + "&key=" + key, { muteHttpExceptions: true });
+  const data = JSON.parse(res.getContentText());
+  const stats = data.items && data.items[0] && data.items[0].statistics;
+  if (!stats) { Logger.log("YouTube統計取得失敗: " + res.getContentText().substring(0, 200)); return; }
+  // 公開統計で取れるのは登録者数・累計再生数・動画本数。リーチ等の詳細は
+  // 本人のOAuth（Analytics API）が必要なため、フェーズ2bで対応する
+  snsSaveMetrics(account.student_email, {
+    platform: "youtube",
+    date: formatDate(new Date()),
+    followers: Number(stats.subscriberCount || 0),
+    impressions: Number(stats.viewCount || 0),
+    posts: Number(stats.videoCount || 0),
+    memo: "API自動取得（登録者・累計再生・本数）"
+  });
+  Logger.log("YouTube自動取得OK: " + account.student_email + " subscribers=" + stats.subscriberCount);
+}
+
+// チャンネルURL(channel/UC…)・@ハンドルURL・ハンドル名のみ、の3形式からチャンネルIDを解決する
+function resolveYoutubeChannelId(account, key) {
+  const url = String(account.url || "");
+  let m = url.match(/channel\/(UC[\w-]+)/);
+  if (m) return m[1];
+  const handleMatch = url.match(/@([\w.\-]+)/) || String(account.handle || "").match(/@?([\w.\-]+)/);
+  const handle = handleMatch ? handleMatch[1] : null;
+  if (!handle) return null;
+  const res = UrlFetchApp.fetch("https://www.googleapis.com/youtube/v3/channels?part=id&forHandle=" + encodeURIComponent("@" + handle) + "&key=" + key, { muteHttpExceptions: true });
+  const data = JSON.parse(res.getContentText());
+  return data.items && data.items[0] ? data.items[0].id : null;
+}
+
 // 直近のSNS数値をAIプロンプト用のテキストにまとめる（generateSnsIdeasから使う）。
 // 数値の伸び・停滞を踏まえた台本提案ができるようにするための連携ポイント
 function buildSnsMetricsContext(studentEmail) {
@@ -4765,7 +4815,8 @@ function setupTriggers() {
   ScriptApp.newTrigger("syncStripeTotals").timeBased().everyDays(1).atHour(4).create();
   ScriptApp.newTrigger("syncChatworkMessages").timeBased().everyHours(1).create();
   ScriptApp.newTrigger("checkGrowthMilestones").timeBased().everyWeeks(1).onWeekDay(ScriptApp.WeekDay.MONDAY).atHour(9).create();
-  console.log("トリガーを設定しました（合計11個）");
+  ScriptApp.newTrigger("snsAutoFetchAll").timeBased().everyDays(1).atHour(21).create();
+  console.log("トリガーを設定しました（合計12個）");
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
