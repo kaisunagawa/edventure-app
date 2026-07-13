@@ -3864,16 +3864,28 @@ function buildStudentContext(studentEmail, user, preloaded) {
   const totalBlocks = allLogs.length;
   const totalDaysRecorded = new Set(allLogs.map(l => l.date)).size;
 
-  // 今日のカレンダー予定（アプリが同期したキャッシュ。JSON形式と旧テキスト形式の両対応）
-  let todayPlan = getCachedCalendar(studentEmail, today);
-  if (todayPlan) {
+  // カレンダーキャッシュ（JSON形式と旧テキスト形式の両対応）を読みやすい文字列に整形する
+  const formatCalPlan = (dateStr) => {
+    let plan = getCachedCalendar(studentEmail, dateStr);
+    if (!plan) return null;
     try {
-      const evs = JSON.parse(todayPlan);
-      todayPlan = evs.length > 0
+      const evs = JSON.parse(plan);
+      return evs.length > 0
         ? evs.map(function(e){ return e.allDay ? ("終日 " + e.title) : (e.time + "〜 " + e.title); }).join(" / ")
         : "予定なし";
-    } catch (e) { /* 旧テキスト形式はそのまま使う */ }
-  }
+    } catch (e) { return plan; /* 旧テキスト形式はそのまま */ }
+  };
+  // 今日と明日の日付・曜日・カレンダー予定を明示する。
+  // 以前はAIに「今日の予定」だけを日付ラベルなしで渡していたため、AIが「明日」を
+  // 推測で書いてズレる（例:「明日は大学講義」が昨日・今日どちらのレポートにも出る）
+  // 事故が起きていた。今日/明日を実日付・曜日つきで渡し、明日の予定も別途渡すことで解消する
+  const DOW = ["日","月","火","水","木","金","土"];
+  const nowD = new Date();
+  const tomorrow = formatDate(new Date(nowD.getTime() + 86400000));
+  const todayDow = DOW[nowD.getDay()];
+  const tomorrowDow = DOW[new Date(nowD.getTime() + 86400000).getDay()];
+  const todayPlan = formatCalPlan(today);
+  const tomorrowPlan = formatCalPlan(tomorrow);
 
   // 直近のコーチングセッション（人間のコーチとの面談記録）。
   // AIコーチはこれを踏まえてフォローアップする＝コーチングの続きを日々担う
@@ -3927,11 +3939,15 @@ function buildStudentContext(studentEmail, user, preloaded) {
     if (jRow && jRow.intent) intentText = jRow.intent + (String(jRow.intent_done) === "true" ? "（✅達成済み）" : "（まだ未達成）");
   } catch (e) { /* シート未作成なら無視 */ }
 
-  return `【生徒名】${user.name}
+  return `【本日の日付】${today}（${todayDow}曜日）
+【明日の日付】${tomorrow}（${tomorrowDow}曜日）
+※「今日」「明日」に言及する時は、必ず上の実際の日付・曜日に基づくこと。相対的な日付を推測で書かない。カレンダー予定は下の日付ラベルどおりに扱い、今日の予定を「明日」と書くような取り違えをしない
+【生徒名】${user.name}
 【入会日】${user.joined_at || "不明"}
 【連続記録日数】${streak}日
 【全期間の記録】合計${totalDaysRecorded}日・${totalBlocks}時間帯
-【今日のカレンダー予定】${todayPlan || "未同期（予定情報なし）"}
+【今日（${today} ${todayDow}）のカレンダー予定】${todayPlan || "未同期（予定情報なし）"}
+【明日（${tomorrow} ${tomorrowDow}）のカレンダー予定】${tomorrowPlan || "未同期（予定情報なし）"}
 【休みの日】${restText}
 【今日いちばんやりたいこと（本人が今朝宣言。達成できたか必ず気にかけること）】${intentText}
 【目標と期限】

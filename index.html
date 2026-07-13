@@ -914,6 +914,9 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
       fetchCalendarEvents(formatDateStr(new Date())).then(evs=>{
         if(evs&&evs.length) setSchedule(evs.map(e=>({time:e.time,title:e.title,sub:e.sub})));
       });
+      // 明日の予定もサーバーに同期しておく（夜のレポート・朝のメッセージが「明日は〜」を
+      // 実際の予定に基づいて正しく言えるようにするため。fetchはsyncCalendarで裏で保存される）
+      fetchCalendarEvents(addDays(formatDateStr(new Date()),1)).catch(()=>{});
     }
 
     // 日付が変わったらチェック状態リセット
