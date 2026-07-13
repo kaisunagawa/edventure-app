@@ -1034,10 +1034,38 @@ function ChatworkImportModal({ onClose, onAddClient }) {
   `;
 }
 
-// ── セッション管理: SNS→予約→実施→仕分けの見込み客パイプライン ──
-const LEAD_STATUSES = ["予約前", "予約済", "実施済", "アプリのみ", "コーチング", "見送り"];
+// ── セッション管理: SNS→LINE登録→予約→実施→仕分けの見込み客パイプライン ──
+// セッションで聞くべき質問テンプレート。上から順に聞けば
+// アイスブレイク→課題の深掘り→理想→セールス判断→クロージングの流れになる。
+// 回答はSessionLeadsのanswers列にJSON（{質問id: 回答}）で保存される
+const SESSION_QUESTIONS = [
+  { section: "1. 現状把握（アイスブレイク）", items: [
+    { id: "job",     q: "今なにをされている方？", hint: "仕事・立場・1日の大まかな流れ" },
+    { id: "trigger", q: "今回申し込んだきっかけは？", hint: "どの投稿・どんな言葉に反応したか（刺さった訴求が分かる）" },
+  ]},
+  { section: "2. 課題・ペインの深掘り", items: [
+    { id: "pain",    q: "時間の使い方でいちばん困っていることは？", hint: "本人の言葉のままメモする（後のセールスで同じ言葉を返す）" },
+    { id: "cost",    q: "それによって何を失っている？", hint: "機会・お金・健康・家族との時間。金額換算できると強い" },
+    { id: "tried",   q: "これまで試したこと、続かなかった理由は？", hint: "手帳・アプリ・朝活など。「なぜ続かなかったか」が提案の材料になる" },
+  ]},
+  { section: "3. 理想・目標", items: [
+    { id: "ideal",   q: "3ヶ月後、どうなっていたら最高？", hint: "できるだけ具体的に。数字・情景まで引き出す" },
+    { id: "why_now", q: "なぜ「今」それを実現したい？", hint: "緊急性の確認。ここが弱いと成約後も続かない" },
+  ]},
+  { section: "4. セールス判断材料", items: [
+    { id: "invest",  q: "自己投資の経験は？", hint: "過去にコーチング・教材・スクール等にいくら使ったか" },
+    { id: "decide",  q: "意思決定は自分ひとりでできる？", hint: "配偶者・会社の承認が要るなら、その場で決められない前提で組み立てる" },
+    { id: "heat",    q: "今日の変わりたい気持ちは10点満点で何点？", hint: "8点未満なら「何があれば10点になる？」を聞く" },
+  ]},
+  { section: "5. 提案・クロージング", items: [
+    { id: "offer",   q: "提案したプランと反応", hint: "アプリのみ(月1,980円) / コーチング(個別提案) どちらをどう提案し、どんな反応だったか" },
+    { id: "next",    q: "保留の場合：理由と次のアクション・期日", hint: "「いつまでに」「何を」を必ず握る。期日のない保留は失注" },
+  ]},
+];
+
+const LEAD_STATUSES = ["予約前", "LINE登録", "予約済", "実施済", "アプリのみ", "コーチング", "見送り"];
 const LEAD_STATUS_COLOR = {
-  "予約前": "#9CA3AF", "予約済": "#0891B2", "実施済": "#8B5CF6",
+  "予約前": "#9CA3AF", "LINE登録": "#06C755", "予約済": "#0891B2", "実施済": "#8B5CF6",
   "アプリのみ": "#22C55E", "コーチング": "#F59E0B", "見送り": "#EF4444"
 };
 function SessionManager() {
@@ -1048,14 +1076,27 @@ function SessionManager() {
   const reload = () => api("coachListLeads").then(r => { if (r.ok) setLeads(r.data); });
   useEffect(() => { reload(); }, []);
 
-  const blank = () => ({ lead_id: "", name: "", contact: "", status: "予約前", memo: "" });
+  const blank = () => ({ lead_id: "", name: "", contact: "", status: "予約前", memo: "", answersObj: {} });
+  // シートのanswers列（JSON文字列）を編集用オブジェクトに展開してから開く
+  const openLead = (l) => {
+    let answersObj = {};
+    try { if (l.answers) answersObj = JSON.parse(l.answers); } catch (e) {}
+    setEditing({ ...l, answersObj });
+  };
   const save = async () => {
     if (!editing.name.trim()) return;
     setSaving(true);
-    const r = await apiPost("coachSaveLead", editing);
+    const payload = { ...editing, answers: JSON.stringify(editing.answersObj || {}) };
+    delete payload.answersObj;
+    const r = await apiPost("coachSaveLead", payload);
     setSaving(false);
     if (r.ok) { setEditing(null); reload(); }
   };
+  const setAnswer = (id, v) => setEditing(e => ({ ...e, answersObj: { ...(e.answersObj || {}), [id]: v } }));
+  const answeredCount = (l) => {
+    try { const a = JSON.parse(l.answers || "{}"); return Object.values(a).filter(v => String(v).trim()).length; } catch (e) { return 0; }
+  };
+  const totalQuestions = SESSION_QUESTIONS.reduce((n, s) => n + s.items.length, 0);
   const del = async (lead) => {
     if (!confirm(lead.name + " さんをセッション管理から削除しますか？")) return;
     const r = await apiPost("coachDeleteLead", { lead_id: lead.lead_id });
@@ -1086,8 +1127,22 @@ function SessionManager() {
                 style=${{padding:"6px 12px",borderRadius:20,border:`1.5px solid ${editing.status===s?LEAD_STATUS_COLOR[s]:"var(--border)"}`,background:editing.status===s?LEAD_STATUS_COLOR[s]:"transparent",color:editing.status===s?"#fff":"var(--sub)",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>${s}</button>
             `)}
           </div>
-          <label class="lbl">メモ</label>
-          <textarea class="txa" value=${editing.memo} onChange=${e=>setField("memo",e.target.value)} placeholder="セッションで聞いた悩み・目標・所感など" style=${{marginBottom:12}}/>
+          <div class="card-label" style=${{marginTop:6}}>ヒアリングシート（上から順に聞けばセッションの流れになります）</div>
+          ${SESSION_QUESTIONS.map(sec => html`
+            <div key=${sec.section} style=${{marginBottom:14}}>
+              <div style=${{fontSize:12.5,fontWeight:800,color:"var(--accent)",marginBottom:8,paddingBottom:4,borderBottom:"1px solid var(--border)"}}>${sec.section}</div>
+              ${sec.items.map(item => html`
+                <div key=${item.id} style=${{marginBottom:10}}>
+                  <label class="lbl">${item.q}</label>
+                  <div style=${{fontSize:11,color:"var(--sub)",marginBottom:4}}>💡 ${item.hint}</div>
+                  <textarea class="txa" rows="2" value=${(editing.answersObj||{})[item.id]||""}
+                    onChange=${e=>setAnswer(item.id, e.target.value)} style=${{minHeight:44}}/>
+                </div>
+              `)}
+            </div>
+          `)}
+          <label class="lbl">フリーメモ（質問に収まらない所感など）</label>
+          <textarea class="txa" value=${editing.memo} onChange=${e=>setField("memo",e.target.value)} placeholder="セッションの所感・人柄・次回に向けた作戦など" style=${{marginBottom:12}}/>
           <div style=${{display:"flex",gap:8}}>
             <button class="btn" onClick=${save} disabled=${saving||!editing.name.trim()}>${saving?"保存中...":"保存する"}</button>
             <button style=${{background:"none",border:"1px solid var(--border)",borderRadius:8,padding:"0 16px",cursor:"pointer",fontFamily:"inherit"}} onClick=${()=>setEditing(null)}>キャンセル</button>
@@ -1109,10 +1164,13 @@ function SessionManager() {
               <span style=${{fontSize:12,color:"var(--sub)"}}>${group.length}件</span>
             </div>
             ${group.map(l => html`
-              <div key=${l.lead_id} class="card" style=${{marginBottom:8,cursor:"pointer"}} onClick=${()=>setEditing({...l})}>
+              <div key=${l.lead_id} class="card" style=${{marginBottom:8,cursor:"pointer"}} onClick=${()=>openLead(l)}>
                 <div style=${{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:12}}>
                   <div style=${{flex:1}}>
-                    <div style=${{fontSize:15,fontWeight:700,marginBottom:2}}>${l.name}${l.contact?html`<span style=${{fontSize:12,color:"var(--sub)",fontWeight:400,marginLeft:8}}>${l.contact}</span>`:""}</div>
+                    <div style=${{fontSize:15,fontWeight:700,marginBottom:2}}>
+                      ${l.name}${l.contact?html`<span style=${{fontSize:12,color:"var(--sub)",fontWeight:400,marginLeft:8}}>${l.contact}</span>`:""}
+                      <span style=${{fontSize:11,fontWeight:600,marginLeft:8,padding:"2px 8px",borderRadius:10,background:answeredCount(l)>=totalQuestions?"#DCFCE7":"var(--bg)",color:answeredCount(l)>=totalQuestions?"#16A34A":"var(--sub)"}}>ヒアリング ${answeredCount(l)}/${totalQuestions}</span>
+                    </div>
                     ${l.memo && html`<div style=${{fontSize:13,color:"var(--sub)",lineHeight:1.6,whiteSpace:"pre-wrap"}}>${l.memo}</div>`}
                   </div>
                   <button onClick=${e=>{e.stopPropagation();del(l);}} style=${{background:"none",border:"none",color:"var(--sub)",fontSize:11.5,cursor:"pointer",fontFamily:"inherit",flexShrink:0}}>削除</button>

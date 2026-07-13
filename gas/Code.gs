@@ -1223,7 +1223,7 @@ function getSessionLeadsSheet() {
   let sheet = getSheet("SessionLeads");
   if (!sheet) {
     sheet = SpreadsheetApp.openById(SPREADSHEET_ID).insertSheet("SessionLeads");
-    sheet.appendRow(["lead_id", "coach_email", "name", "contact", "status", "memo", "created_at", "updated_at"]);
+    sheet.appendRow(["lead_id", "coach_email", "name", "contact", "status", "memo", "created_at", "updated_at", "answers"]);
   }
   return sheet;
 }
@@ -1248,6 +1248,10 @@ function coachSaveLead(coachEmail, body) {
   const now = new Date().toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" });
   const leadId = String(body.lead_id || "");
 
+  // ヒアリング質問への回答（JSON文字列）。列がなければ自動追加（既存シートの自己修復）
+  let answersIdx = headers.indexOf("answers");
+  if (answersIdx === -1) { answersIdx = headers.length; sheet.getRange(1, answersIdx + 1).setValue("answers"); headers.push("answers"); }
+
   if (leadId) {
     for (let i = 1; i < data.length; i++) {
       if (String(data[i][idIdx]) === leadId) {
@@ -1256,6 +1260,7 @@ function coachSaveLead(coachEmail, body) {
         sheet.getRange(i + 1, headers.indexOf("contact") + 1).setValue(String(body.contact || ""));
         sheet.getRange(i + 1, headers.indexOf("status") + 1).setValue(String(body.status || "予約前"));
         sheet.getRange(i + 1, headers.indexOf("memo") + 1).setValue(String(body.memo || "").slice(0, 1000));
+        if (body.answers !== undefined) sheet.getRange(i + 1, answersIdx + 1).setValue(String(body.answers).slice(0, 20000));
         sheet.getRange(i + 1, headers.indexOf("updated_at") + 1).setValue(now);
         return { ok: true, lead_id: leadId };
       }
@@ -1271,6 +1276,7 @@ function coachSaveLead(coachEmail, body) {
     if (h === "contact") return String(body.contact || "");
     if (h === "status") return String(body.status || "予約前");
     if (h === "memo") return String(body.memo || "").slice(0, 1000);
+    if (h === "answers") return body.answers !== undefined ? String(body.answers).slice(0, 20000) : "";
     if (h === "created_at" || h === "updated_at") return now;
     return "";
   });
