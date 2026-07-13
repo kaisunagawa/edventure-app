@@ -3483,7 +3483,7 @@ function upsertJournalRow(studentEmail, targetDate, fields) {
   try {
     const sheet = getJournalSheet();
     let headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
-    ["auto_summary", "intent", "intent_done", "actions", "actions_checked"].forEach(col => {
+    ["auto_summary", "intent", "intent_done", "actions", "actions_checked", "intent_hours"].forEach(col => {
       if (headers.indexOf(col) === -1) {
         sheet.getRange(1, headers.length + 1).setValue(col);
         headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
@@ -3496,6 +3496,7 @@ function upsertJournalRow(studentEmail, targetDate, fields) {
     const intentDoneIdx = headers.indexOf("intent_done");
     const actionsIdx = headers.indexOf("actions");
     const checkedIdx = headers.indexOf("actions_checked");
+    const intentHoursIdx = headers.indexOf("intent_hours");
     const now = new Date().toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" });
 
     const data = sheet.getDataRange().getValues();
@@ -3510,6 +3511,7 @@ function upsertJournalRow(studentEmail, targetDate, fields) {
         if (fields.intent_done !== undefined) sheet.getRange(i + 1, intentDoneIdx + 1).setValue(fields.intent_done);
         if (fields.actions !== undefined) sheet.getRange(i + 1, actionsIdx + 1).setValue(fields.actions);
         if (fields.actions_checked !== undefined) sheet.getRange(i + 1, checkedIdx + 1).setValue(fields.actions_checked);
+        if (fields.intent_hours !== undefined) sheet.getRange(i + 1, intentHoursIdx + 1).setValue(fields.intent_hours);
         sheet.getRange(i + 1, updatedIdx + 1).setValue(now);
         return;
       }
@@ -3522,6 +3524,7 @@ function upsertJournalRow(studentEmail, targetDate, fields) {
     if (fields.intent_done !== undefined) rowArr[intentDoneIdx] = fields.intent_done;
     if (fields.actions !== undefined) rowArr[actionsIdx] = fields.actions;
     if (fields.actions_checked !== undefined) rowArr[checkedIdx] = fields.actions_checked;
+    if (fields.intent_hours !== undefined) rowArr[intentHoursIdx] = fields.intent_hours;
     rowArr[updatedIdx] = now;
     const newRow = sheet.getLastRow() + 1;
     sheet.appendRow(rowArr);
@@ -3540,10 +3543,11 @@ function saveDiary(studentEmail, body) {
 // 朝アプリを開いた時に宣言する「今日いちばんやりたいこと」。Journalシートに保存し、
 // AIコーチの全メッセージ・夜のレポートが達成状況をフォローする
 function saveIntent(studentEmail, body) {
-  if (body.intent === undefined && body.intent_done === undefined) return { ok: false, error: "missing intent" };
+  if (body.intent === undefined && body.intent_done === undefined && body.hours === undefined) return { ok: false, error: "missing intent" };
   const fields = {};
   if (body.intent !== undefined) fields.intent = String(body.intent).trim();
   if (body.intent_done !== undefined) fields.intent_done = String(body.intent_done);
+  if (body.hours !== undefined) fields.intent_hours = String(body.hours);
   upsertJournalRow(studentEmail, formatDate(new Date()), fields);
   return { ok: true };
 }
@@ -3580,7 +3584,7 @@ function getIntent(studentEmail) {
     const rd = r.date instanceof Date ? Utilities.formatDate(r.date, "Asia/Tokyo", "yyyy-MM-dd") : String(r.date);
     return r.student_email === studentEmail && rd === today;
   });
-  return { ok: true, data: row && row.intent ? { intent: row.intent, done: String(row.intent_done) === "true" } : null };
+  return { ok: true, data: row && row.intent ? { intent: row.intent, done: String(row.intent_done) === "true", hours: row.intent_hours ? Number(row.intent_hours) : null } : null };
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -3988,7 +3992,7 @@ function buildStudentContext(studentEmail, user, preloaded) {
       const rd = r.date instanceof Date ? Utilities.formatDate(r.date, "Asia/Tokyo", "yyyy-MM-dd") : String(r.date);
       return r.student_email === studentEmail && rd === today;
     });
-    if (jRow && jRow.intent) intentText = jRow.intent + (String(jRow.intent_done) === "true" ? "（✅達成済み）" : "（まだ未達成）");
+    if (jRow && jRow.intent) intentText = jRow.intent + (jRow.intent_hours ? "（目標" + jRow.intent_hours + "時間）" : "") + (String(jRow.intent_done) === "true" ? "（✅達成済み）" : "（まだ未達成）");
   } catch (e) { /* シート未作成なら無視 */ }
 
   // セカンドブレインの蓄積（時間の使い道マップ・気づき集）をコーチの文脈に流し込む。
