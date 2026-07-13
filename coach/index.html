@@ -309,6 +309,17 @@ function StudentMain({ student, onNoteSaved }) {
   const verifyNote = (noteId) => {
     api("coachVerifyNote", { note_id: noteId }).then(r => { if (r.ok) reloadDetail(); });
   };
+  // 課金状態の変更（半自動運用: Stripe入金を確認したら「決済済みにする」を押す）
+  const [planSaving, setPlanSaving] = useState(false);
+  const setPlan = async (status, label) => {
+    if (status === "expired" && !confirm(student.name + " さんの利用を停止（制限）しますか？")) return;
+    if (status === "paid" && !confirm(student.name + " さんを「決済済み（本利用）」にします。Stripeで入金を確認済みですか？")) return;
+    setPlanSaving(true);
+    const r = await apiPost("coachSetPlanStatus", { targetEmail: student.email, status });
+    setPlanSaving(false);
+    if (r.ok) reloadDetail();
+    else alert(r.error || "変更に失敗しました");
+  };
 
   useEffect(() => {
     setDetail(null); setPrep(null); setTab("overview");
@@ -510,6 +521,29 @@ function StudentMain({ student, onNoteSaved }) {
                   入会日: ${detail.joined_at || "不明"}
                 </div>
               </div>
+
+              ${(() => {
+                const a = detail.accessState || { access: "full", plan: "grandfathered", trialDaysLeft: null };
+                const planLabel = {
+                  paid: "💳 決済済み（本利用）", trial: "🎁 無料トライアル中",
+                  expired: "⛔ 停止中（制限）", free: "🆓 無料招待", grandfathered: "既存ユーザー（制限なし）"
+                }[a.plan] || a.plan;
+                const planColor = { paid: "#16A34A", trial: "#0891B2", expired: "#EF4444", free: "#8B5CF6", grandfathered: "#9CA3AF" }[a.plan] || "#9CA3AF";
+                return html`
+                  <div class="card" style=${{border:`1.5px solid ${planColor}`}}>
+                    <div class="card-label">課金・利用状態</div>
+                    <div style=${{fontSize:14,fontWeight:700,color:planColor,marginBottom:4}}>${planLabel}</div>
+                    ${a.plan === "trial" && html`<div style=${{fontSize:12,color:"var(--sub)",marginBottom:10}}>トライアル残り ${a.trialDaysLeft}日 ${a.access==="limited"?"（期限切れ・機能制限中）":""}</div>`}
+                    ${a.access === "limited" && a.plan !== "trial" && html`<div style=${{fontSize:12,color:"var(--red)",marginBottom:10}}>現在アプリの一部機能が制限されています</div>`}
+                    <div style=${{fontSize:11.5,color:"var(--sub)",marginBottom:10,lineHeight:1.6}}>Stripeで入金を確認したら「決済済みにする」を押すと本利用が開放されます。</div>
+                    <div style=${{display:"flex",flexWrap:"wrap",gap:6}}>
+                      <button class="btn" style=${{fontSize:12,opacity:planSaving?0.6:1}} disabled=${planSaving} onClick=${()=>setPlan("paid")}>決済済みにする</button>
+                      <button style=${{fontSize:11.5,padding:"6px 10px",borderRadius:8,border:"1px solid var(--border)",background:"none",cursor:"pointer",fontFamily:"inherit"}} disabled=${planSaving} onClick=${()=>setPlan("trial")}>トライアル再設定</button>
+                      <button style=${{fontSize:11.5,padding:"6px 10px",borderRadius:8,border:"1px solid var(--border)",background:"none",cursor:"pointer",fontFamily:"inherit",color:"var(--red)"}} disabled=${planSaving} onClick=${()=>setPlan("expired")}>利用停止</button>
+                    </div>
+                  </div>
+                `;
+              })()}
 
               ${(detail.profile?.instagram || detail.profile?.tiktok) && html`
                 <div class="card">

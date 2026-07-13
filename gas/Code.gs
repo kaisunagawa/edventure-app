@@ -75,6 +75,7 @@ function doGet(e) {
       case "coachListLeads":       result = coachListLeads(e.parameter.coachEmail); break;
       case "coachSaveLead":        result = coachSaveLead(e.parameter.coachEmail, e.parameter); break;
       case "coachDeleteLead":      result = coachDeleteLead(e.parameter.coachEmail, e.parameter); break;
+      case "coachSetPlanStatus":   result = coachSetPlanStatus(e.parameter.coachEmail, e.parameter); break;
       case "adminFixChatworkMisassignment": result = adminFixChatworkMisassignment(e.parameter.coachEmail, e.parameter.wrongEmail, e.parameter.correctEmail, e.parameter.correctName); break;
       case "coachListChatworkContacts": result = coachListChatworkContacts(e.parameter.coachEmail); break;
       case "coachSyncChatworkOne": result = coachSyncChatworkOne(e.parameter.coachEmail, e.parameter); break;
@@ -193,6 +194,7 @@ function doPost(e) {
       case "coachSaveProfile":     return jsonResponse(coachSaveProfile(body.coachEmail, body));
       case "coachSaveLead":        return jsonResponse(coachSaveLead(body.coachEmail, body));
       case "coachGenerateSalesTalk": return jsonResponse(coachGenerateSalesTalk(body.coachEmail, body));
+      case "coachSetPlanStatus":   return jsonResponse(coachSetPlanStatus(body.coachEmail, body));
       case "coachUploadFile":      return jsonResponse(coachUploadFile(body.coachEmail, body));
       case "coachDeleteFile":      return jsonResponse(coachDeleteFile(body.coachEmail, body));
       case "coachDeleteNote":      return jsonResponse(coachDeleteNote(body.coachEmail, body));
@@ -243,6 +245,8 @@ function registerUser(studentEmail, body) {
   const idxEnd       = ensureHeader("notify_end");
   const idxNickname  = ensureHeader("nickname");
   const idxAvatar    = ensureHeader("avatar");
+  const idxPlan      = ensureHeader("plan_status");
+  const idxTrial     = ensureHeader("trial_start");
 
   const newRow = new Array(headers.length).fill("");
   newRow[idxEmail]  = studentEmail;
@@ -259,6 +263,9 @@ function registerUser(studentEmail, body) {
   newRow[idxEnd]    = 23;
   newRow[idxNickname] = (body.nickname || body.name || "").trim();
   newRow[idxAvatar]   = body.avatar || "🦊";
+  // 新規登録は7日間の無料トライアルから開始（既存ユーザーはplan_status空欄のまま＝制限なし）
+  newRow[idxPlan]     = "trial";
+  newRow[idxTrial]    = today;
   sheet.appendRow(newRow);
 
   return { ok: true, data: { name: body.name, nickname: newRow[idxNickname], avatar: newRow[idxAvatar], coachName: "コーチ", coach_email: "" } };
@@ -270,10 +277,36 @@ function getStreak(studentEmail) {
   return { ok: true, data: Number(user.streak || 0) };
 }
 
+// トライアル日数（無料期間）
+const TRIAL_DAYS = 7;
+
+// ユーザーの利用状態を判定する。ソフトゲートの唯一の判断ロジック。
+// 【重要】plan_statusが空欄のユーザー（＝この機能導入前からの既存ユーザー全員）は
+// 必ず "full"（制限なし）として扱う。既存200人が誤ってロックされるのを防ぐため
+function computeAccessState(user) {
+  const plan = String(user.plan_status || "").trim().toLowerCase();
+  // 既存ユーザー（空欄）・有料・無料招待は常にフルアクセス
+  if (plan === "" || plan === "paid" || plan === "free") {
+    return { access: "full", plan: plan || "grandfathered", trialDaysLeft: null };
+  }
+  if (plan === "trial") {
+    const startRaw = user.trial_start;
+    const start = startRaw instanceof Date ? startRaw
+      : (startRaw ? new Date(String(startRaw) + "T00:00:00") : null);
+    if (!start || isNaN(start)) return { access: "full", plan: "trial", trialDaysLeft: TRIAL_DAYS };
+    const elapsed = Math.floor((Date.now() - start.getTime()) / 86400000);
+    const daysLeft = TRIAL_DAYS - elapsed;
+    return { access: daysLeft > 0 ? "full" : "limited", plan: "trial", trialDaysLeft: Math.max(0, daysLeft) };
+  }
+  if (plan === "expired") return { access: "limited", plan: "expired", trialDaysLeft: 0 };
+  return { access: "full", plan: plan, trialDaysLeft: null };
+}
+
 function getUser(studentEmail) {
   const user = sheetToObjects(getSheet("Users")).find(u => u.student_email === studentEmail && u.is_active.toUpperCase() === "TRUE");
   if (!user) return { ok: false, error: "User not found" };
   const coach = sheetToObjects(getSheet("Coaches")).find(c => c.coach_email === user.coach_email);
+  const accessState = computeAccessState(user);
   return { ok: true, data: {
     name: user.name,
     nickname: user.nickname || user.name,
@@ -281,7 +314,10 @@ function getUser(studentEmail) {
     coach_email: user.coach_email,
     coachName: (coach && coach.coach_name) ? coach.coach_name : "コーチ",
     lineLinked: !!user.line_user_id,
-    showInCommunity: String(user.show_in_community || "").toUpperCase() !== "FALSE"
+    showInCommunity: String(user.show_in_community || "").toUpperCase() !== "FALSE",
+    access: accessState.access,          // "full" | "limited"
+    plan: accessState.plan,              // grandfathered | trial | paid | free | expired
+    trialDaysLeft: accessState.trialDaysLeft
   } };
 }
 
@@ -1435,6 +1471,42 @@ function coachAddClient(coachEmail, body) {
   return { ok: true };
 }
 
+// コーチが生徒の課金状態を設定する（半自動運用の要）。
+// Stripe入金をコーチが確認 → このAPIで plan_status を paid にして本利用を開放。
+// status: "paid"（決済済み・無期限フル）/ "trial"（トライアル再設定）/ "free"（無料招待）/ "expired"（停止）
+function coachSetPlanStatus(coachEmail, body) {
+  if (!verifyCoach(coachEmail)) return { ok: false, error: "not a coach" };
+  const targetEmail = String(body.targetEmail || "").trim().toLowerCase();
+  const status = String(body.status || "").trim().toLowerCase();
+  if (!targetEmail) return { ok: false, error: "targetEmail required" };
+  if (["paid", "trial", "free", "expired"].indexOf(status) === -1) return { ok: false, error: "invalid status" };
+
+  const sheet = getSheet("Users");
+  const data = sheet.getDataRange().getValues();
+  let headers = data[0];
+  const ensureCol = (name) => {
+    let idx = headers.indexOf(name);
+    if (idx === -1) { idx = headers.length; sheet.getRange(1, idx + 1).setValue(name); headers.push(name); }
+    return idx;
+  };
+  const emailIdx = headers.indexOf("student_email");
+  const coachIdx = headers.indexOf("coach_email");
+  const planIdx = ensureCol("plan_status");
+  const trialIdx = ensureCol("trial_start");
+
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][emailIdx]).trim().toLowerCase() === targetEmail) {
+      // 担当コーチ以外の生徒は操作できない（管理者は除く）
+      const owner = String(data[i][coachIdx] || "");
+      if (owner && owner !== coachEmail && !verifyAdmin(coachEmail)) return { ok: false, error: "担当外の生徒です" };
+      sheet.getRange(i + 1, planIdx + 1).setValue(status);
+      if (status === "trial") sheet.getRange(i + 1, trialIdx + 1).setNumberFormat("@").setValue(formatDate(new Date()));
+      return { ok: true, plan_status: status };
+    }
+  }
+  return { ok: false, error: "生徒が見つかりません（このメールでアプリ登録が必要）" };
+}
+
 // 「みんなの頑張り」（コミュニティランキング）に表示するかどうかを
 // コーチ側から生徒ごとに設定する。列がまだ無い古いUsersシートにも
 // 自動で列を追加する（他の自己修復パターンと同様）
@@ -1801,6 +1873,7 @@ function coachGetStudentDetail(coachEmail, studentEmail) {
     streak: Number(user.streak || 0),
     joined_at: user.joined_at || "",
     joinedJiroku: joinedJiroku,
+    accessState: computeAccessState(user),
     goals: [
       { goal: user.goal, deadline: user.goal_deadline },
       { goal: user.goal2, deadline: user.goal_deadline2 },
