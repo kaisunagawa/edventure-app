@@ -860,6 +860,19 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
     setIntent(next);
     gasPostJson("saveIntent", {intent_done: next.done ? "true" : "false"});
   };
+  // 週次ふりかえり（月曜に今週のまとめが出たら、ホームで振り返り＋来週の一言を記入）
+  const [weekly, setWeekly] = useState(null);
+  const [weekReflection, setWeekReflection] = useState("");
+  const [weekIntention, setWeekIntention] = useState("");
+  const [weekSaving, setWeekSaving] = useState(false);
+  const [weekDismissed, setWeekDismissed] = useState(false);
+  const saveWeekly = async () => {
+    if(!weekly) return;
+    setWeekSaving(true);
+    const r = await gasPostJson("saveWeeklyReflection", {week_start:weekly.weekStart, reflection:weekReflection.trim(), intention:weekIntention.trim()});
+    setWeekSaving(false);
+    if(r.ok){ setWeekly({...weekly, reflected:true, reflection:weekReflection.trim(), nextIntention:weekIntention.trim()}); }
+  };
   const [showGoalTimeEdit, setShowGoalTimeEdit] = useState(false);
   const [dailyGoalHours, setDailyGoalHours] = useState(getDailyGoalHours);
   // 0.5〜6時間までは選択肢を並べるだけで済んだが、12時間まで広げると
@@ -882,6 +895,15 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
     if(cachedReport) { try { setReport(JSON.parse(cachedReport)); } catch(e){} }
     if(cachedRanking) { try { setRanking(JSON.parse(cachedRanking)); } catch(e){} }
     if(cachedStatus) { try { setStatusSummary(JSON.parse(cachedStatus)); } catch(e){} }
+
+    // 週次ふりかえり: 今週のまとめが出ていて未記入なら、ホームに記入カードを出す
+    gasApi("getWeeklySummary").then(r=>{
+      if(r.ok && r.data){
+        setWeekly(r.data);
+        if(r.data.reflection) setWeekReflection(r.data.reflection);
+        if(r.data.nextIntention) setWeekIntention(r.data.nextIntention);
+      }
+    });
 
     // 並列フェッチ
     Promise.all([
@@ -1081,6 +1103,47 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
     </div>
 
     ${showCommunity&&html`<${CommunityOverlay} onClose=${()=>setShowCommunity(false)}/>`}
+
+    <!-- 週次ふりかえり（今週のまとめ＋振り返り記入＋来週の一言）。未記入かつ未閉じの時だけ大きく出す -->
+    ${weekly && !weekly.reflected && !weekDismissed && html`
+      <div style=${{margin:"16px 16px 0",background:"var(--card)",borderRadius:16,border:"1.5px solid var(--accent)",overflow:"hidden"}}>
+        <div style=${{background:"linear-gradient(135deg, var(--hero1) 0%, var(--hero2) 100%)",padding:"16px 18px"}}>
+          <div style=${{fontSize:11,fontWeight:700,color:"rgba(255,255,255,0.75)",letterSpacing:"0.08em",marginBottom:3}}>WEEKLY REVIEW</div>
+          <div style=${{fontSize:17,fontWeight:800,color:"#fff"}}>今週をふりかえろう</div>
+          <div style=${{fontSize:11.5,color:"rgba(255,255,255,0.8)",marginTop:2}}>${weekly.weekStart.substring(5)}〜${weekly.weekEnd.substring(5)}${weekly.avgScore!==null?` · 平均${weekly.avgScore}点`:""}</div>
+        </div>
+        <div style=${{padding:"14px 16px 16px"}}>
+          <div style=${{display:"flex",gap:8,marginBottom:12}}>
+            ${[["記録",weekly.totalBlocks+"時間帯"],["目標関連",weekly.goalRelatedPct+"%"],["連続記録",weekly.streakEnd+"日"]].map(([l,v])=>html`
+              <div key=${l} style=${{flex:1,background:"var(--bg)",borderRadius:10,padding:"9px 6px",textAlign:"center"}}>
+                <div style=${{fontSize:13,fontWeight:800,color:"var(--accent)",lineHeight:1.3}}>${v}</div>
+                <div style=${{fontSize:10,color:"var(--sub)",marginTop:2}}>${l}</div>
+              </div>
+            `)}
+          </div>
+          <p style=${{fontSize:13,lineHeight:1.85,color:"var(--text)",marginBottom:14}}>${weekly.summary}</p>
+          <label class="form-lbl" style=${{fontSize:11}}>今週をふりかえって（自由に）</label>
+          <textarea class="txa" placeholder="うまくいったこと・課題・気づいたことなど" value=${weekReflection}
+            onInput=${e=>setWeekReflection(e.target.value)} style=${{minHeight:60,marginBottom:12}}/>
+          <label class="form-lbl" style=${{fontSize:11}}>来週はどんな1週間にしたい？（一言）</label>
+          <input class="inp" placeholder="例：毎朝9時から2時間、集中して開発する" value=${weekIntention}
+            onInput=${e=>setWeekIntention(e.target.value)} style=${{marginBottom:14}}/>
+          <button class="btn" disabled=${weekSaving||(!weekReflection.trim()&&!weekIntention.trim())}
+            style=${{opacity:(weekReflection.trim()||weekIntention.trim())?1:0.5}} onClick=${saveWeekly}>${weekSaving?"保存中…":"記録する"}</button>
+          <button onClick=${()=>setWeekDismissed(true)}
+            style=${{display:"block",width:"100%",marginTop:8,background:"none",border:"none",color:"var(--sub)",fontSize:12.5,cursor:"pointer",fontFamily:"inherit",padding:6}}>あとで</button>
+        </div>
+      </div>
+    `}
+    ${weekly && weekly.reflected && weekly.nextIntention && !weekDismissed && html`
+      <div style=${{margin:"16px 16px 0",background:"var(--card)",borderRadius:16,border:"1px solid var(--border)",padding:"14px 16px",display:"flex",alignItems:"center",gap:12}}>
+        <div style=${{flex:1,minWidth:0}}>
+          <div style=${{fontSize:11,fontWeight:600,color:"var(--sub)",marginBottom:3}}>🗓 今週こうしたい</div>
+          <div style=${{fontSize:14,fontWeight:700,color:"var(--text)",lineHeight:1.5}}>${weekly.nextIntention}</div>
+        </div>
+        <button onClick=${()=>setWeekDismissed(true)} style=${{flexShrink:0,background:"none",border:"none",color:"var(--sub)",fontSize:18,cursor:"pointer",lineHeight:1,padding:"0 2px"}}>×</button>
+      </div>
+    `}
 
     <!-- 今日いちばんやりたいこと -->
     ${intent&&html`

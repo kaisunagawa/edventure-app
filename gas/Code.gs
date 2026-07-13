@@ -98,6 +98,7 @@ function doGet(e) {
       case "getDiary":     result = getDiary(studentEmail, e.parameter); break;
       case "saveDiary":    result = saveDiary(studentEmail, e.parameter); break;
       case "getWeeklySummary": result = getWeeklySummary(studentEmail); break;
+      case "saveWeeklyReflection": result = saveWeeklyReflection(studentEmail, e.parameter); break;
       case "askMyPast":    result = askMyPast(studentEmail, e.parameter); break;
       case "getInsights":  result = getInsights(studentEmail); break;
       case "refreshInsights": result = generateInsightsForUser(studentEmail, true); break;
@@ -193,6 +194,7 @@ function doPost(e) {
       case "saveDiary":    return jsonResponse(saveDiary(studentEmail, body));
       case "saveIntent":   return jsonResponse(saveIntent(studentEmail, body));
       case "askMyPast":    return jsonResponse(askMyPast(studentEmail, body));
+      case "saveWeeklyReflection": return jsonResponse(saveWeeklyReflection(studentEmail, body));
       case "saveContentProfile": return jsonResponse(saveContentProfile(studentEmail, body));
       case "snsSaveAccount": return jsonResponse(snsSaveAccount(studentEmail, body));
       case "snsSaveMetrics": return jsonResponse(snsSaveMetrics(studentEmail, body));
@@ -4007,6 +4009,19 @@ function buildStudentContext(studentEmail, user, preloaded) {
     }
   } catch (e) { /* 無視 */ }
 
+  // 本人が週次ふりかえりで書いた「来週の一言」。その週のコーチングの軸として尊重する
+  let weeklyIntentionText = "未設定";
+  try {
+    if (getSheet("WeeklySummary")) {
+      if (!globalThis.__weeklyCache) globalThis.__weeklyCache = sheetToObjects(getWeeklySummarySheet());
+      const rows = globalThis.__weeklyCache.filter(r => r.student_email === studentEmail)
+        .sort((a, b) => (b.week_start > a.week_start ? 1 : -1));
+      if (rows.length && rows[0].next_week_intention && String(rows[0].next_week_intention).trim()) {
+        weeklyIntentionText = rows[0].next_week_intention + (rows[0].user_reflection ? "（先週のふりかえり: " + rows[0].user_reflection + "）" : "");
+      }
+    }
+  } catch (e) { /* 無視 */ }
+
   let insightsText = "未生成";
   try {
     if (getSheet("Insights")) {
@@ -4032,6 +4047,7 @@ function buildStudentContext(studentEmail, user, preloaded) {
 【明日（${tomorrow} ${tomorrowDow}）のカレンダー予定】${tomorrowPlan || "未同期（予定情報なし）"}
 【休みの日】${restText}
 【今日いちばんやりたいこと（本人が今朝宣言。達成できたか必ず気にかけること）】${intentText}
+【今週こうしたい（本人が週の初めに宣言した来週の一言。今週の声かけの軸として尊重する）】${weeklyIntentionText}
 【目標と期限】
 ${goalsText}
 【全期間スコアトレンド】${scoreTrend}
@@ -4407,8 +4423,43 @@ function getWeeklySummary(studentEmail) {
     avgScore: r.avg_score !== "" ? Number(r.avg_score) : null,
     totalBlocks: Number(r.total_blocks) || 0,
     goalRelatedPct: Number(r.goal_related_pct) || 0,
-    streakEnd: Number(r.streak_end) || 0
+    streakEnd: Number(r.streak_end) || 0,
+    // 本人がこの週のふりかえりを記入済みか（未記入ならホームで記入を促す）
+    reflection: r.user_reflection || "",
+    nextIntention: r.next_week_intention || "",
+    reflected: !!(r.user_reflection && String(r.user_reflection).trim())
   } };
+}
+
+// 本人が書く週次ふりかえり＋来週の一言を保存する。week_startで対象週を特定する。
+// next_week_intentionはコーチの文脈にも渡され、翌週の声かけに反映される
+function saveWeeklyReflection(studentEmail, body) {
+  const weekStart = String(body.week_start || "").trim();
+  if (!weekStart) return { ok: false, error: "week_start required" };
+  const sheet = getWeeklySummarySheet();
+  const data = sheet.getDataRange().getValues();
+  let headers = data[0];
+  const ensureCol = (name) => {
+    let idx = headers.indexOf(name);
+    if (idx === -1) { idx = headers.length; sheet.getRange(1, idx + 1).setValue(name); headers.push(name); }
+    return idx;
+  };
+  const wsIdx = headers.indexOf("week_start");
+  const emIdx = headers.indexOf("student_email");
+  const refIdx = ensureCol("user_reflection");
+  const intIdx = ensureCol("next_week_intention");
+  const atIdx = ensureCol("reflected_at");
+  const now = new Date().toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" });
+  for (let i = 1; i < data.length; i++) {
+    const rowWs = data[i][wsIdx] instanceof Date ? formatDate(data[i][wsIdx]) : String(data[i][wsIdx]);
+    if (String(data[i][emIdx]) === studentEmail && rowWs === weekStart) {
+      if (body.reflection !== undefined) sheet.getRange(i + 1, refIdx + 1).setValue(String(body.reflection).slice(0, 2000));
+      if (body.intention !== undefined) sheet.getRange(i + 1, intIdx + 1).setValue(String(body.intention).slice(0, 500));
+      sheet.getRange(i + 1, atIdx + 1).setValue(now);
+      return { ok: true };
+    }
+  }
+  return { ok: false, error: "対象の週次サマリーが見つかりません" };
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
