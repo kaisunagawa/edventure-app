@@ -746,6 +746,7 @@ const S = (p) => { const s={width:p.s||22,height:p.s||22,fill:"none",stroke:"cur
   if(p.n==="pencil") return html`<svg viewBox="0 0 24 24" style=${s}><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>`;
   if(p.n==="message")return html`<svg viewBox="0 0 24 24" style=${s}><path d="M21 11.5a8.38 8.38 0 01-.9 3.8 8.5 8.5 0 01-7.6 4.7 8.38 8.38 0 01-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 01-.9-3.8 8.5 8.5 0 014.7-7.6 8.38 8.38 0 013.8-.9h.5a8.48 8.48 0 018 8v.5z"/></svg>`;
   if(p.n==="target") return html`<svg viewBox="0 0 24 24" style=${s}><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1" fill="currentColor"/></svg>`;
+  if(p.n==="bulb")   return html`<svg viewBox="0 0 24 24" style=${s}><path d="M9 18h6"/><path d="M10 21h4"/><path d="M12 3a6 6 0 00-4 10.5c.8.7 1 1.3 1 2.5h6c0-1.2.2-1.8 1-2.5A6 6 0 0012 3z"/></svg>`;
   if(p.n==="rocket") return html`<svg viewBox="0 0 24 24" style=${s}><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 00-2.91-.09z"/><path d="M12 15l-3-3a22 22 0 012-3.95A12.88 12.88 0 0122 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 01-4 2z"/><path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0"/><path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"/></svg>`;
   if(p.n==="flame")  return html`<svg viewBox="0 0 24 24" style=${s}><path d="M8.5 14.5A2.5 2.5 0 0011 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 11-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 002.5 2.5z"/></svg>`;
   return null;
@@ -1996,20 +1997,10 @@ function BreakdownRadar({breakdown}) {
   `;
 }
 
-function ReportScreen() {
-  const todayStr=formatDateStr(new Date());
-  const [date, setDate]=useState(null); // null = list view
-  const [report, setReport]=useState(null);
-  const [logs, setLogs]=useState([]);
-  const [loading, setLoading]=useState(false);
-  const [reportList, setReportList]=useState([]);
-  const [listLoading, setListLoading]=useState(true);
-  const [view, setView]=useState("report"); // "report" | "diary"
-  const [expandedBreakdown, setExpandedBreakdown]=useState(null);
-  const [weeklySummary, setWeeklySummary]=useState(null);
-  const [monthlyReview, setMonthlyReview]=useState(null);
-  const [timeUse, setTimeUse]=useState(null);
-  // 過去の自分に問いかける（セカンドブレイン）
+// セカンドブレイン画面（気づきタブ）: 蓄積した記録を能動的に振り返る場所。
+// レポート（毎日の採点）とは役割を分け、「自分を深く知る」体験に独立させている
+function SecondBrainScreen({isActive}){
+  // 過去の自分に問いかける
   const [askQ, setAskQ]=useState("");
   const [askLoading, setAskLoading]=useState(false);
   const [askResult, setAskResult]=useState(null);
@@ -2024,11 +2015,16 @@ function ReportScreen() {
     if(r.ok) setAskResult(r.data);
     else setAskError(r.error||"うまく答えられませんでした");
   };
-  // あなたの気づき集（Insights）
+  // あなたの気づき集
   const [insights, setInsights]=useState(null);
-  const [insightsOpen, setInsightsOpen]=useState(false);
   const [insightsLoading, setInsightsLoading]=useState(false);
   const [insightsError, setInsightsError]=useState("");
+  const [loadedOnce, setLoadedOnce]=useState(false);
+  useEffect(()=>{
+    if(!isActive||loadedOnce) return;
+    setLoadedOnce(true);
+    gasApi("getInsights").then(r=>{ if(r.ok && r.data) setInsights(r.data); });
+  },[isActive]);
   const refreshInsights=async()=>{
     setInsightsLoading(true); setInsightsError("");
     const r=await gasApi("refreshInsights");
@@ -2036,6 +2032,92 @@ function ReportScreen() {
     if(r.ok) setInsights(r.data);
     else setInsightsError(r.error||"生成に失敗しました");
   };
+
+  return html`<div style=${{paddingBottom:32}}>
+    <div class="ph"><div class="ph-title-accent">気づき</div></div>
+    <div style=${{padding:"0 16px"}}>
+      <div style=${{fontSize:12.5,color:"var(--sub)",marginBottom:16,lineHeight:1.7}}>
+        あなたが積み重ねてきた記録は、あなただけのセカンドブレインです。過去の自分に問いかけたり、繰り返しの気づきを見つけたりできます。
+      </div>
+
+      <!-- 過去の自分に聞く -->
+      <div class="card" style=${{marginBottom:12,border:"1.5px solid var(--accent)"}}>
+        <div class="card-label" style=${{marginBottom:2}}>🧠 過去の自分に聞く</div>
+        <div style=${{fontSize:11.5,color:"var(--sub)",marginBottom:10,lineHeight:1.6}}>これまでの記録・日記をもとに、AIがあなた自身の言葉を引用して答えます。</div>
+        <div style=${{display:"flex",gap:8,marginBottom:10}}>
+          <input class="inp" placeholder="例：集中できているのはどんな時？" value=${askQ}
+            onInput=${e=>setAskQ(e.target.value)} onKeyDown=${e=>{if(e.key==="Enter")runAsk();}} style=${{flex:1}}/>
+          <button class="btn" style=${{width:"auto",flexShrink:0,padding:"0 16px",opacity:askLoading||!askQ.trim()?0.5:1}}
+            disabled=${askLoading||!askQ.trim()} onClick=${()=>runAsk()}>${askLoading?"…":"聞く"}</button>
+        </div>
+        ${!askResult&&!askLoading&&html`
+          <div style=${{display:"flex",flexWrap:"wrap",gap:6}}>
+            ${ASK_SUGGESTIONS.map((s,i)=>html`
+              <button key=${i} onClick=${()=>runAsk(s)}
+                style=${{padding:"5px 10px",borderRadius:20,border:"1.5px solid var(--border)",background:"transparent",color:"var(--sub)",fontSize:11.5,fontWeight:500,cursor:"pointer",fontFamily:"inherit"}}>${s}</button>
+            `)}
+          </div>
+        `}
+        ${askLoading&&html`<div style=${{display:"flex",alignItems:"center",gap:10,padding:"6px 0",color:"var(--sub)",fontSize:12.5}}><div class="spin" style=${{borderColor:"var(--border)",borderTopColor:"var(--accent)",width:16,height:16,borderWidth:2}}/>過去の記録を読み返しています…</div>`}
+        ${askError&&html`<div style=${{fontSize:12.5,color:"var(--red)",lineHeight:1.6}}>${askError}</div>`}
+        ${askResult&&html`
+          <div style=${{marginTop:4}}>
+            <div style=${{fontSize:13.5,lineHeight:1.9,color:"var(--text)",whiteSpace:"pre-line"}}>${askResult.answer}</div>
+            ${askResult.evidence&&askResult.evidence.length>0&&html`
+              <div style=${{marginTop:10,paddingTop:10,borderTop:"1px solid var(--border)"}}>
+                <div style=${{fontSize:11,fontWeight:700,color:"var(--sub)",marginBottom:6}}>根拠にした記録</div>
+                ${askResult.evidence.map((e,i)=>html`
+                  <div key=${i} style=${{fontSize:12,color:"var(--sub)",lineHeight:1.6,marginBottom:5}}>
+                    <span style=${{color:"var(--accent)",fontWeight:600}}>${e.date}</span> 「${e.quote}」
+                  </div>
+                `)}
+              </div>
+            `}
+            ${askResult.insight&&html`
+              <div style=${{marginTop:10,background:"var(--accent-l)",color:"var(--accent)",borderRadius:10,padding:"10px 12px",fontSize:12.5,fontWeight:600,lineHeight:1.6}}>💡 ${askResult.insight}</div>
+            `}
+            <button onClick=${()=>{setAskResult(null);setAskQ("");}}
+              style=${{marginTop:10,background:"none",border:"none",color:"var(--sub)",fontSize:12,cursor:"pointer",fontFamily:"inherit",padding:0,textDecoration:"underline"}}>別のことを聞く</button>
+          </div>
+        `}
+      </div>
+
+      <!-- あなたの気づき集 -->
+      <div class="card">
+        <div class="card-label" style=${{marginBottom:2}}>📚 あなたの気づき集</div>
+        <div style=${{fontSize:11.5,color:"var(--sub)",marginBottom:12,lineHeight:1.6}}>${insights?`記録から見つけた${insights.items.length}個のパターン（強み・注意点）`:"記録が溜まると、あなたの傾向や繰り返しの学びをAIが蒸留します。"}</div>
+        ${insights&&insights.items.map((it,i)=>html`
+          <div key=${i} style=${{padding:"12px 13px",borderRadius:10,background:"var(--bg)",marginBottom:8,borderLeft:`3px solid ${it.type==="caution"?"var(--amber)":"var(--green)"}`}}>
+            <div style=${{fontSize:14,fontWeight:700,color:"var(--text)",marginBottom:4}}>${it.type==="caution"?"⚠️":"💪"} ${it.title}</div>
+            <div style=${{fontSize:12.5,color:"var(--text)",lineHeight:1.8}}>${it.detail}</div>
+            ${it.evidence&&html`<div style=${{fontSize:11,color:"var(--sub)",marginTop:6,lineHeight:1.6}}>📎 ${it.evidence}</div>`}
+          </div>
+        `)}
+        ${insightsError&&html`<div style=${{fontSize:12.5,color:"var(--red)",lineHeight:1.6,marginBottom:8}}>${insightsError}</div>`}
+        <div style=${{display:"flex",alignItems:"center",gap:10,marginTop:6}}>
+          <button onClick=${refreshInsights} disabled=${insightsLoading}
+            style=${{background:insights?"none":"var(--accent)",border:insights?"1px solid var(--border)":"none",borderRadius:8,padding:"9px 16px",fontSize:12.5,fontWeight:700,color:insights?"var(--accent)":"#fff",cursor:"pointer",fontFamily:"inherit"}}>
+            ${insightsLoading?"蒸留中…(30秒ほど)":insights?"最新の記録で更新する":"気づきを見つける"}</button>
+          ${insights&&insights.updatedAt&&html`<span style=${{fontSize:11,color:"var(--sub)"}}>更新: ${String(insights.updatedAt).substring(0,10)}</span>`}
+        </div>
+      </div>
+    </div>
+  </div>`;
+}
+
+function ReportScreen() {
+  const todayStr=formatDateStr(new Date());
+  const [date, setDate]=useState(null); // null = list view
+  const [report, setReport]=useState(null);
+  const [logs, setLogs]=useState([]);
+  const [loading, setLoading]=useState(false);
+  const [reportList, setReportList]=useState([]);
+  const [listLoading, setListLoading]=useState(true);
+  const [view, setView]=useState("report"); // "report" | "diary"
+  const [expandedBreakdown, setExpandedBreakdown]=useState(null);
+  const [weeklySummary, setWeeklySummary]=useState(null);
+  const [monthlyReview, setMonthlyReview]=useState(null);
+  const [timeUse, setTimeUse]=useState(null);
   const [showWeekly, setShowWeekly]=useState(false);
   const [showMonthly, setShowMonthly]=useState(false);
 
@@ -2049,7 +2131,6 @@ function ReportScreen() {
     });
     gasApi("getWeeklySummary").then(r=>{ if(r.ok && r.data) setWeeklySummary(r.data); });
     gasApi("getMonthlyReview").then(r=>{ if(r.ok && r.data) setMonthlyReview(r.data); });
-    gasApi("getInsights").then(r=>{ if(r.ok && r.data) setInsights(r.data); });
     gasApi("getTimeUseSummary").then(r=>{ if(r.ok && r.data) setTimeUse(r.data); });
   },[]);
 
@@ -2078,78 +2159,6 @@ function ReportScreen() {
             <div class="empty-body">記録を入力すると<br/>毎晩22時にAIがレポートを生成します</div>
           </div>`
         : html`<div>
-            <!-- 過去の自分に問いかける（セカンドブレイン）: 蓄積した記録からAIが答える -->
-            <div class="card" style=${{marginBottom:8,border:"1.5px solid var(--accent)"}}>
-              <div class="card-label" style=${{marginBottom:2}}>🧠 過去の自分に聞く</div>
-              <div style=${{fontSize:11.5,color:"var(--sub)",marginBottom:10,lineHeight:1.6}}>これまでの記録・日記をもとに、AIがあなた自身の言葉を引用して答えます。</div>
-              <div style=${{display:"flex",gap:8,marginBottom:10}}>
-                <input class="inp" placeholder="例：集中できているのはどんな時？" value=${askQ}
-                  onInput=${e=>setAskQ(e.target.value)} onKeyDown=${e=>{if(e.key==="Enter")runAsk();}} style=${{flex:1}}/>
-                <button class="btn" style=${{width:"auto",flexShrink:0,padding:"0 16px",opacity:askLoading||!askQ.trim()?0.5:1}}
-                  disabled=${askLoading||!askQ.trim()} onClick=${()=>runAsk()}>${askLoading?"…":"聞く"}</button>
-              </div>
-              ${!askResult&&!askLoading&&html`
-                <div style=${{display:"flex",flexWrap:"wrap",gap:6}}>
-                  ${ASK_SUGGESTIONS.map((s,i)=>html`
-                    <button key=${i} onClick=${()=>runAsk(s)}
-                      style=${{padding:"5px 10px",borderRadius:20,border:"1.5px solid var(--border)",background:"transparent",color:"var(--sub)",fontSize:11.5,fontWeight:500,cursor:"pointer",fontFamily:"inherit"}}>${s}</button>
-                  `)}
-                </div>
-              `}
-              ${askLoading&&html`<div style=${{display:"flex",alignItems:"center",gap:10,padding:"6px 0",color:"var(--sub)",fontSize:12.5}}><div class="spin" style=${{borderColor:"var(--border)",borderTopColor:"var(--accent)",width:16,height:16,borderWidth:2}}/>過去の記録を読み返しています…</div>`}
-              ${askError&&html`<div style=${{fontSize:12.5,color:"var(--red)",lineHeight:1.6}}>${askError}</div>`}
-              ${askResult&&html`
-                <div style=${{marginTop:4}}>
-                  <div style=${{fontSize:13.5,lineHeight:1.9,color:"var(--text)",whiteSpace:"pre-line"}}>${askResult.answer}</div>
-                  ${askResult.evidence&&askResult.evidence.length>0&&html`
-                    <div style=${{marginTop:10,paddingTop:10,borderTop:"1px solid var(--border)"}}>
-                      <div style=${{fontSize:11,fontWeight:700,color:"var(--sub)",marginBottom:6}}>根拠にした記録</div>
-                      ${askResult.evidence.map((e,i)=>html`
-                        <div key=${i} style=${{fontSize:12,color:"var(--sub)",lineHeight:1.6,marginBottom:5}}>
-                          <span style=${{color:"var(--accent)",fontWeight:600}}>${e.date}</span> 「${e.quote}」
-                        </div>
-                      `)}
-                    </div>
-                  `}
-                  ${askResult.insight&&html`
-                    <div style=${{marginTop:10,background:"var(--accent-l)",color:"var(--accent)",borderRadius:10,padding:"10px 12px",fontSize:12.5,fontWeight:600,lineHeight:1.6}}>💡 ${askResult.insight}</div>
-                  `}
-                  <button onClick=${()=>{setAskResult(null);setAskQ("");}}
-                    style=${{marginTop:10,background:"none",border:"none",color:"var(--sub)",fontSize:12,cursor:"pointer",fontFamily:"inherit",padding:0,textDecoration:"underline"}}>別のことを聞く</button>
-                </div>
-              `}
-            </div>
-
-            <!-- あなたの気づき集（Insights）: 蓄積メモから繰り返しの学びを蒸留 -->
-            <div class="card" style=${{marginBottom:8}}>
-              <button onClick=${()=>setInsightsOpen(!insightsOpen)}
-                style=${{display:"flex",justifyContent:"space-between",alignItems:"center",width:"100%",background:"none",border:"none",padding:0,cursor:"pointer",fontFamily:"inherit",textAlign:"left"}}>
-                <div>
-                  <div class="card-label" style=${{marginBottom:2}}>📚 あなたの気づき集</div>
-                  <div style=${{fontSize:11,color:"var(--sub)"}}>${insights?`記録から見つけた${insights.items.length}個のパターン`:"記録が溜まると、あなたの傾向をAIが蒸留します"}</div>
-                </div>
-                <div style=${{color:"var(--sub)",fontSize:14}}>${insightsOpen?"▲":"▼"}</div>
-              </button>
-              ${insightsOpen&&html`
-                <div style=${{marginTop:12}}>
-                  ${insights&&insights.items.map((it,i)=>html`
-                    <div key=${i} style=${{padding:"11px 12px",borderRadius:10,background:"var(--bg)",marginBottom:8,borderLeft:`3px solid ${it.type==="caution"?"var(--amber)":"var(--green)"}`}}>
-                      <div style=${{fontSize:13.5,fontWeight:700,color:"var(--text)",marginBottom:3}}>${it.type==="caution"?"⚠️":"💪"} ${it.title}</div>
-                      <div style=${{fontSize:12.5,color:"var(--text)",lineHeight:1.7}}>${it.detail}</div>
-                      ${it.evidence&&html`<div style=${{fontSize:11,color:"var(--sub)",marginTop:5,lineHeight:1.5}}>📎 ${it.evidence}</div>`}
-                    </div>
-                  `)}
-                  ${insightsError&&html`<div style=${{fontSize:12.5,color:"var(--red)",lineHeight:1.6,marginBottom:8}}>${insightsError}</div>`}
-                  <div style=${{display:"flex",alignItems:"center",gap:10,marginTop:4}}>
-                    <button onClick=${refreshInsights} disabled=${insightsLoading}
-                      style=${{background:"none",border:"1px solid var(--border)",borderRadius:8,padding:"7px 14px",fontSize:12,fontWeight:600,color:"var(--accent)",cursor:"pointer",fontFamily:"inherit"}}>
-                      ${insightsLoading?"蒸留中…(30秒ほど)":insights?"最新の記録で更新する":"気づきを見つける"}</button>
-                    ${insights&&insights.updatedAt&&html`<span style=${{fontSize:11,color:"var(--sub)"}}>更新: ${String(insights.updatedAt).substring(0,10)}</span>`}
-                  </div>
-                </div>
-              `}
-            </div>
-
             ${weeklySummary&&html`
               <div class="card" style=${{marginBottom:8}}>
                 <button onClick=${()=>setShowWeekly(!showWeekly)}
@@ -2844,6 +2853,12 @@ const FAQ_CATEGORIES = [
     { q:"休みの日はどうすればいい？",
       a:"設定の「時間帯と通知」で休みの曜日を選べます。\n休みの日はリマインダーが届かず、記録しなくてもXPが減ったり連続記録が途切れたりしません（フリーズも消費されません）。\nコーチからのメッセージやレポートも、休みの日は休息を尊重した内容になります。もちろん記録したい場合は普通に記録できます。" },
   ]},
+  { cat:"気づき（セカンドブレイン）", icon:"🧠", items:[
+    { q:"「気づき」タブって何ができるの？",
+      a:"あなたが積み重ねた記録は、あなただけのセカンドブレイン（第二の脳）になります。「気づき」タブでは2つのことができます。\n①過去の自分に聞く：「集中できているのはどんな時？」などと質問すると、AIがあなた自身の過去の記録・日記を引用して答えます。\n②あなたの気づき集：溜まった記録から、繰り返し現れるあなたの強みや悪い癖をAIが見つけて一覧にします。\n記録を続けるほど、自分のことがどんどん見えてきます。" },
+    { q:"「あなたの気づき集」はいつ更新される？",
+      a:"毎月1日に自動で最新の記録から作り直されます。\nすぐ更新したい時は、気づき集の下の「最新の記録で更新する」を押せば、その場で作り直せます（30秒ほどかかります）。" },
+  ]},
   { cat:"レポート・ふりかえり", icon:"📊", items:[
     { q:"AIレポートはいつ届く？",
       a:"毎晩22時に、その日の記録をもとにスコアとフィードバックが届きます。22時30分にはコーチからの一言も。\n1件も記録がない日はレポートは作られず、XPが減ってしまうので、1日1記録を目指しましょう。" },
@@ -3347,7 +3362,7 @@ function SettingsScreen({onToast,onLogout,onGoalSaved,profile,onProfileSaved,onC
   </div>`;
 }
 
-const TABS=[{id:"home",l:"ホーム",n:"home"},{id:"timer",l:"タイマー",n:"timer"},{id:"log",l:"記録",n:"clock"},{id:"report",l:"レポート",n:"chart"},{id:"settings",l:"設定",n:"gear"}];
+const TABS=[{id:"home",l:"ホーム",n:"home"},{id:"timer",l:"タイマー",n:"timer"},{id:"log",l:"記録",n:"clock"},{id:"report",l:"レポート",n:"chart"},{id:"brain",l:"気づき",n:"bulb"},{id:"settings",l:"設定",n:"gear"}];
 const AVATAR_OPTIONS=["🦊","🐱","🐶","🐻","🐼","🦉","🐧","🦁","🐢","🐰","🐹","🐨","🐵","🐺","🦄","🐴","🐥","🐻‍❄️","🦋","🦭"];
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
@@ -3978,6 +3993,7 @@ function App() {
           <div style=${{display:tab==="home"?"block":"none"}}><${HomeScreen} goalData=${goalData} onGoalSaved=${setGoalData} profile=${profile} isActive=${tab==="home"} showInCommunity=${user.showInCommunity!==false} onGoTimer=${()=>setTab("timer")}/></div>
           <div style=${{display:tab==="log"?"block":"none"}}><${LogScreen} onToast=${setToast} isActive=${tab==="log"}/></div>
           <div style=${{display:tab==="report"?"block":"none"}}><${ReportScreen}/></div>
+          <div style=${{display:tab==="brain"?"block":"none"}}><${SecondBrainScreen} isActive=${tab==="brain"}/></div>
           <div style=${{display:tab==="timer"?"block":"none",height:"100%"}}><${TimerScreen} onToast=${setToast} isActive=${tab==="timer"}/></div>
           <div style=${{display:tab==="settings"?"block":"none"}}><${SettingsScreen} onToast=${setToast} onLogout=${logout} onGoalSaved=${setGoalData} profile=${profile} onProfileSaved=${setProfile} onCalLinked=${()=>setCalLinked(true)}/></div>
         </div>
