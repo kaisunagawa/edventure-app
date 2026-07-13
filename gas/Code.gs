@@ -192,6 +192,7 @@ function doPost(e) {
       case "syncCalendar": return jsonResponse(syncCalendar(studentEmail, body));
       case "coachSaveProfile":     return jsonResponse(coachSaveProfile(body.coachEmail, body));
       case "coachSaveLead":        return jsonResponse(coachSaveLead(body.coachEmail, body));
+      case "coachGenerateSalesTalk": return jsonResponse(coachGenerateSalesTalk(body.coachEmail, body));
       case "coachUploadFile":      return jsonResponse(coachUploadFile(body.coachEmail, body));
       case "coachDeleteFile":      return jsonResponse(coachDeleteFile(body.coachEmail, body));
       case "coachDeleteNote":      return jsonResponse(coachDeleteNote(body.coachEmail, body));
@@ -1282,6 +1283,88 @@ function coachSaveLead(coachEmail, body) {
   });
   sheet.appendRow(row);
   return { ok: true, lead_id: newId };
+}
+
+// ヒアリング内容とタイプ（アプリ利用/コーチング/経営者）から、その相手専用の
+// セールストーク台本をAIが生成する。生成結果はリードのsales_talk列に保存され、
+// 次に開いた時も見られる。公開こそしないが成約に直結する成果物のためOpusを使う
+function coachGenerateSalesTalk(coachEmail, body) {
+  if (!verifyCoach(coachEmail)) return { ok: false, error: "not a coach" };
+  const apiKey = PropertiesService.getScriptProperties().getProperty("CLAUDE_API_KEY");
+  if (!apiKey) return { ok: false, error: "CLAUDE_API_KEY未設定" };
+
+  const type = String(body.type || "未判定");
+  const qa = String(body.qa || "").slice(0, 8000);
+  const name = String(body.name || "見込み客");
+  if (!qa.trim()) return { ok: false, error: "ヒアリング内容が空です。先に質問への回答を入力してください" };
+
+  const typeGuide = {
+    "アプリ利用": "月1,980円（7日間無料トライアルあり）のアプリのみプラン。ハードルは低いので、迷わせず「まず7日間試す」への即決を促す。同時に、伸びしろがある相手なら将来のコーチングへの布石も1文だけ入れる",
+    "コーチング": "コーチングプラン（3ヶ月33万円・6ヶ月66万円・1年125万円、税込）。金額を伝える前に価値と変化の确度を十分に積み上げる。決断の場面では沈黙を恐れない。分割の選択肢も用意",
+    "経営者": "経営者向け「時間経営」プログラム（個別提案・高単価）。生産性ではなく「経営判断の質」「時間の決算書」「記録が会社の資産・事業承継になる」という経営の言葉で語る。安売りせず、対等なパートナーとして提案する",
+    "未判定": "まだタイプが定まっていない。ヒアリング内容からアプリのみ/コーチング/経営者向けのどれが最適かをまず判定し、その判定理由も添えること"
+  };
+
+  const prompt = `あなたはJIROKU（時間記録アプリ＋時間管理コーチング）のトップセールスコーチです。以下のヒアリング内容をもとに、この相手専用のセールストーク台本を作ってください。
+
+【相手】${name}さん（見込みタイプ: ${type}）
+【タイプ別の提案方針】${typeGuide[type] || typeGuide["未判定"]}
+
+【ヒアリング内容（コーチが実際に聞き取った回答）】
+${qa}
+
+【セールスの原則】
+- 相手が話した言葉をそのまま引用して使う（「先ほど◯◯とおっしゃっていましたが」）
+- 売り込みではなく「相手の理想を実現する手段」として提示する
+- 課題を放置した場合のコスト（失っている時間・お金・機会）を、相手の回答から具体的に言語化する
+- 即決を迫らないが、その場で「次のアクションと期日」は必ず決める
+- 誇張・保証・煽りはしない。誠実に
+
+以下のJSON形式のみで返してください（説明文不要）:
+{
+  "judged_type": "<アプリ利用|コーチング|経営者 のどれが最適かの判定（typeが未判定の場合のみ理由も）>",
+  "opening": "<セールスパートの入り方。相手の言葉を引用した共感と課題の要約（2-3文の話し言葉）>",
+  "bridge": "<課題を放置した場合のコストと、理想との橋渡し（2-3文の話し言葉）>",
+  "pitch": "<プラン提示のトーク。価格の伝え方まで含む（3-4文の話し言葉）>",
+  "objections": [ { "objection": "<想定される反論・懸念>", "response": "<切り返しトーク（話し言葉）>" } ],
+  "closing": "<クロージングのトーク。次のアクションと期日を決める形（2-3文の話し言葉）>",
+  "caution": "<この相手に対して言ってはいけないこと・注意点を1-2文>"
+}
+objectionsは、ヒアリング内容から予想されるものを2〜3個。`;
+
+  const res = UrlFetchApp.fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
+    payload: JSON.stringify({ model: "claude-opus-4-8", max_tokens: 2500, messages: [{ role: "user", content: prompt }] }),
+    muteHttpExceptions: true
+  });
+  const result = JSON.parse(res.getContentText());
+  if (!result.content || !result.content[0]) return { ok: false, error: "APIエラー: " + res.getContentText().substring(0, 200) };
+
+  try {
+    const text = result.content[0].text.trim();
+    const m = text.match(/\{[\s\S]*\}/);
+    if (!m) return { ok: false, error: "JSONが見つかりません" };
+    const parsed = JSON.parse(m[0]);
+
+    // リードに紐付けて保存（次に開いた時も見られるように）。sales_talk列は自己修復で追加
+    if (body.lead_id) {
+      const sheet = getSessionLeadsSheet();
+      const data = sheet.getDataRange().getValues();
+      const headers = data[0];
+      let talkIdx = headers.indexOf("sales_talk");
+      if (talkIdx === -1) { talkIdx = headers.length; sheet.getRange(1, talkIdx + 1).setValue("sales_talk"); }
+      for (let i = 1; i < data.length; i++) {
+        if (String(data[i][headers.indexOf("lead_id")]) === String(body.lead_id) && String(data[i][headers.indexOf("coach_email")]) === coachEmail) {
+          sheet.getRange(i + 1, talkIdx + 1).setValue(JSON.stringify(parsed).slice(0, 20000));
+          break;
+        }
+      }
+    }
+    return { ok: true, data: parsed };
+  } catch (e) {
+    return { ok: false, error: "JSONパースエラー: " + e.toString() };
+  }
 }
 
 function coachDeleteLead(coachEmail, body) {

@@ -1063,6 +1063,27 @@ const SESSION_QUESTIONS = [
   ]},
 ];
 
+// 見込みタイプ。ヒアリングの途中で仕分けし、タイプ別の深掘り質問と
+// タイプに合ったセールストーク生成につなげる
+const LEAD_TYPES = ["未判定", "アプリ利用", "コーチング", "経営者"];
+const LEAD_TYPE_COLOR = { "未判定": "#9CA3AF", "アプリ利用": "#22C55E", "コーチング": "#F59E0B", "経営者": "#8B5CF6" };
+const TYPE_QUESTIONS = {
+  "アプリ利用": [
+    { id: "app_devices", q: "スマホで毎日記録できそう？", hint: "利用イメージの確認。通知の好みも聞けるとオンボーディングが楽" },
+    { id: "app_start",   q: "7日間の無料トライアル、いつから始める？", hint: "「今日この場で登録まで一緒にやる」が最強。リンクを送って画面共有で完了させる" },
+  ],
+  "コーチング": [
+    { id: "co_support",  q: "伴走者がいたら何が変わりそう？", hint: "本人の口から「サポートの価値」を言語化させる（自分で言った価値は否定できない）" },
+    { id: "co_schedule", q: "週1の面談時間は確保できる？", hint: "現実的な受講イメージの確認。曜日・時間帯まで仮決めできると成約後スムーズ" },
+    { id: "co_period",   q: "3ヶ月・6ヶ月・1年、どのイメージ？", hint: "期間の相場観を先に作る。目標の大きさと期間を紐付けて話す" },
+  ],
+  "経営者": [
+    { id: "ex_team",     q: "チーム・会社の規模は？", hint: "従業員数・事業内容。時間経営の効果が波及する範囲を把握" },
+    { id: "ex_hourly",   q: "ご自身の時給換算だといくらぐらい？", hint: "「その時給の時間が◯時間、△△に消えている」という提案の土台になる" },
+    { id: "ex_delegate", q: "本当は手放したいのに手放せていない業務は？", hint: "委譲できない理由（暗黙知・属人化）→記録が資産になる話につなげる" },
+  ],
+};
+
 const LEAD_STATUSES = ["予約前", "LINE登録", "予約済", "実施済", "アプリのみ", "コーチング", "見送り"];
 const LEAD_STATUS_COLOR = {
   "予約前": "#9CA3AF", "LINE登録": "#06C755", "予約済": "#0891B2", "実施済": "#8B5CF6",
@@ -1077,11 +1098,41 @@ function SessionManager() {
   useEffect(() => { reload(); }, []);
 
   const blank = () => ({ lead_id: "", name: "", contact: "", status: "予約前", memo: "", answersObj: {} });
-  // シートのanswers列（JSON文字列）を編集用オブジェクトに展開してから開く
+  // シートのanswers列（JSON文字列）とsales_talk列を編集用オブジェクトに展開してから開く
   const openLead = (l) => {
     let answersObj = {};
     try { if (l.answers) answersObj = JSON.parse(l.answers); } catch (e) {}
-    setEditing({ ...l, answersObj });
+    let salesTalk = null;
+    try { if (l.sales_talk) salesTalk = JSON.parse(l.sales_talk); } catch (e) {}
+    setEditing({ ...l, answersObj, salesTalk });
+  };
+
+  // ヒアリング回答（共通＋タイプ別）をQ&Aテキストに組み立ててAIに渡し、
+  // この相手専用のセールストーク台本を生成する
+  const [genLoading, setGenLoading] = useState(false);
+  const [genError, setGenError] = useState("");
+  const genTalk = async () => {
+    const a = editing.answersObj || {};
+    const type = a.lead_type || "未判定";
+    const qaLines = [];
+    SESSION_QUESTIONS.forEach(sec => sec.items.forEach(item => {
+      if (a[item.id] && String(a[item.id]).trim()) qaLines.push("Q: " + item.q + "\nA: " + a[item.id]);
+    }));
+    (TYPE_QUESTIONS[type] || []).forEach(item => {
+      if (a[item.id] && String(a[item.id]).trim()) qaLines.push("Q: " + item.q + "\nA: " + a[item.id]);
+    });
+    if (qaLines.length === 0) { setGenError("先にヒアリングの回答を1つ以上入力してください"); return; }
+    setGenLoading(true); setGenError("");
+    // 生成前に現在の回答を保存しておく（生成中に閉じても回答が消えないように）
+    const payload = { ...editing, answers: JSON.stringify(a) };
+    delete payload.answersObj; delete payload.salesTalk;
+    const saved = await apiPost("coachSaveLead", payload);
+    const leadId = editing.lead_id || (saved.ok ? saved.lead_id : "");
+    if (leadId && !editing.lead_id) setField("lead_id", leadId);
+    const r = await apiPost("coachGenerateSalesTalk", { lead_id: leadId, name: editing.name, type, qa: qaLines.join("\n\n") });
+    setGenLoading(false);
+    if (r.ok) setEditing(e => ({ ...e, salesTalk: r.data }));
+    else setGenError(r.error || "生成に失敗しました");
   };
   const save = async () => {
     if (!editing.name.trim()) return;
@@ -1094,7 +1145,10 @@ function SessionManager() {
   };
   const setAnswer = (id, v) => setEditing(e => ({ ...e, answersObj: { ...(e.answersObj || {}), [id]: v } }));
   const answeredCount = (l) => {
-    try { const a = JSON.parse(l.answers || "{}"); return Object.values(a).filter(v => String(v).trim()).length; } catch (e) { return 0; }
+    try { const a = JSON.parse(l.answers || "{}"); return Object.entries(a).filter(([k, v]) => k !== "lead_type" && String(v).trim()).length; } catch (e) { return 0; }
+  };
+  const typeOf = (l) => {
+    try { return JSON.parse(l.answers || "{}").lead_type || null; } catch (e) { return null; }
   };
   const totalQuestions = SESSION_QUESTIONS.reduce((n, s) => n + s.items.length, 0);
   const del = async (lead) => {
@@ -1127,6 +1181,13 @@ function SessionManager() {
                 style=${{padding:"6px 12px",borderRadius:20,border:`1.5px solid ${editing.status===s?LEAD_STATUS_COLOR[s]:"var(--border)"}`,background:editing.status===s?LEAD_STATUS_COLOR[s]:"transparent",color:editing.status===s?"#fff":"var(--sub)",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>${s}</button>
             `)}
           </div>
+          <label class="lbl">見込みタイプ（ヒアリングしながら仕分ける。タイプ別の質問とセールストークが変わります）</label>
+          <div style=${{display:"flex",flexWrap:"wrap",gap:6,marginBottom:14}}>
+            ${LEAD_TYPES.map(t=>html`
+              <button key=${t} onClick=${()=>setAnswer("lead_type",t)}
+                style=${{padding:"6px 12px",borderRadius:20,border:`1.5px solid ${(editing.answersObj||{}).lead_type===t||(!((editing.answersObj||{}).lead_type)&&t==="未判定")?LEAD_TYPE_COLOR[t]:"var(--border)"}`,background:(editing.answersObj||{}).lead_type===t||(!((editing.answersObj||{}).lead_type)&&t==="未判定")?LEAD_TYPE_COLOR[t]:"transparent",color:(editing.answersObj||{}).lead_type===t||(!((editing.answersObj||{}).lead_type)&&t==="未判定")?"#fff":"var(--sub)",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>${t}</button>
+            `)}
+          </div>
           <div class="card-label" style=${{marginTop:6}}>ヒアリングシート（上から順に聞けばセッションの流れになります）</div>
           ${SESSION_QUESTIONS.map(sec => html`
             <div key=${sec.section} style=${{marginBottom:14}}>
@@ -1141,8 +1202,70 @@ function SessionManager() {
               `)}
             </div>
           `)}
+          ${(() => {
+            const type = (editing.answersObj||{}).lead_type || "未判定";
+            const extras = TYPE_QUESTIONS[type];
+            if (!extras) return null;
+            return html`
+              <div style=${{marginBottom:14}}>
+                <div style=${{fontSize:12.5,fontWeight:800,color:LEAD_TYPE_COLOR[type],marginBottom:8,paddingBottom:4,borderBottom:"1px solid var(--border)"}}>＋ ${type}タイプの深掘り質問</div>
+                ${extras.map(item => html`
+                  <div key=${item.id} style=${{marginBottom:10}}>
+                    <label class="lbl">${item.q}</label>
+                    <div style=${{fontSize:11,color:"var(--sub)",marginBottom:4}}>💡 ${item.hint}</div>
+                    <textarea class="txa" rows="2" value=${(editing.answersObj||{})[item.id]||""}
+                      onChange=${e=>setAnswer(item.id, e.target.value)} style=${{minHeight:44}}/>
+                  </div>
+                `)}
+              </div>
+            `;
+          })()}
           <label class="lbl">フリーメモ（質問に収まらない所感など）</label>
           <textarea class="txa" value=${editing.memo} onChange=${e=>setField("memo",e.target.value)} placeholder="セッションの所感・人柄・次回に向けた作戦など" style=${{marginBottom:12}}/>
+
+          <!-- ヒアリング内容からこの相手専用のセールストークをAIが生成 -->
+          <div style=${{background:"var(--bg)",borderRadius:12,padding:"14px 16px",marginBottom:12}}>
+            <div style=${{display:"flex",justifyContent:"space-between",alignItems:"center",gap:10}}>
+              <div>
+                <div style=${{fontSize:13,fontWeight:800}}>💬 セールストークを生成</div>
+                <div style=${{fontSize:11.5,color:"var(--sub)",marginTop:2}}>ヒアリング回答とタイプをもとに、この方専用のトーク台本をAIが作ります（回答は自動保存されます）</div>
+              </div>
+              <button class="btn" style=${{flexShrink:0,fontSize:12}} onClick=${genTalk} disabled=${genLoading}>${genLoading?"生成中…(30秒ほど)":editing.salesTalk?"作り直す":"生成する"}</button>
+            </div>
+            ${genError && html`<div style=${{fontSize:12,color:"var(--red)",marginTop:8}}>${genError}</div>`}
+            ${editing.salesTalk && html`
+              <div style=${{marginTop:12,borderTop:"1px solid var(--border)",paddingTop:12}}>
+                ${editing.salesTalk.judged_type && html`<div style=${{fontSize:12,marginBottom:10}}><b>🎯 判定タイプ:</b> ${editing.salesTalk.judged_type}</div>`}
+                ${[["① 入り方（共感と課題の要約）",editing.salesTalk.opening],["② 橋渡し（放置コスト→理想）",editing.salesTalk.bridge],["③ プラン提示",editing.salesTalk.pitch]].map(([label,text])=>text&&html`
+                  <div key=${label} style=${{marginBottom:10}}>
+                    <div style=${{fontSize:11.5,fontWeight:700,color:"var(--accent)",marginBottom:3}}>${label}</div>
+                    <div style=${{fontSize:13,lineHeight:1.8,whiteSpace:"pre-wrap"}}>${text}</div>
+                  </div>
+                `)}
+                ${Array.isArray(editing.salesTalk.objections)&&editing.salesTalk.objections.length>0&&html`
+                  <div style=${{marginBottom:10}}>
+                    <div style=${{fontSize:11.5,fontWeight:700,color:"var(--accent)",marginBottom:3}}>④ 想定される反論と切り返し</div>
+                    ${editing.salesTalk.objections.map((o,i)=>html`
+                      <div key=${i} style=${{fontSize:13,lineHeight:1.7,marginBottom:6}}>
+                        <div style=${{fontWeight:600}}>「${o.objection}」</div>
+                        <div style=${{color:"var(--sub)"}}>→ ${o.response}</div>
+                      </div>
+                    `)}
+                  </div>
+                `}
+                ${editing.salesTalk.closing && html`
+                  <div style=${{marginBottom:10}}>
+                    <div style=${{fontSize:11.5,fontWeight:700,color:"var(--accent)",marginBottom:3}}>⑤ クロージング</div>
+                    <div style=${{fontSize:13,lineHeight:1.8,whiteSpace:"pre-wrap"}}>${editing.salesTalk.closing}</div>
+                  </div>
+                `}
+                ${editing.salesTalk.caution && html`
+                  <div style=${{fontSize:12,color:"#B45309",background:"#FFFBEB",borderRadius:8,padding:"8px 10px"}}>⚠️ ${editing.salesTalk.caution}</div>
+                `}
+              </div>
+            `}
+          </div>
+
           <div style=${{display:"flex",gap:8}}>
             <button class="btn" onClick=${save} disabled=${saving||!editing.name.trim()}>${saving?"保存中...":"保存する"}</button>
             <button style=${{background:"none",border:"1px solid var(--border)",borderRadius:8,padding:"0 16px",cursor:"pointer",fontFamily:"inherit"}} onClick=${()=>setEditing(null)}>キャンセル</button>
@@ -1170,6 +1293,8 @@ function SessionManager() {
                     <div style=${{fontSize:15,fontWeight:700,marginBottom:2}}>
                       ${l.name}${l.contact?html`<span style=${{fontSize:12,color:"var(--sub)",fontWeight:400,marginLeft:8}}>${l.contact}</span>`:""}
                       <span style=${{fontSize:11,fontWeight:600,marginLeft:8,padding:"2px 8px",borderRadius:10,background:answeredCount(l)>=totalQuestions?"#DCFCE7":"var(--bg)",color:answeredCount(l)>=totalQuestions?"#16A34A":"var(--sub)"}}>ヒアリング ${answeredCount(l)}/${totalQuestions}</span>
+                      ${typeOf(l)&&typeOf(l)!=="未判定"&&html`<span style=${{fontSize:11,fontWeight:700,marginLeft:6,padding:"2px 8px",borderRadius:10,background:LEAD_TYPE_COLOR[typeOf(l)],color:"#fff"}}>${typeOf(l)}</span>`}
+                      ${l.sales_talk&&html`<span style=${{fontSize:11,fontWeight:600,marginLeft:6,padding:"2px 8px",borderRadius:10,background:"var(--accent-l, #CFFAFE)",color:"var(--accent)"}}>💬 トーク済</span>`}
                     </div>
                     ${l.memo && html`<div style=${{fontSize:13,color:"var(--sub)",lineHeight:1.6,whiteSpace:"pre-wrap"}}>${l.memo}</div>`}
                   </div>
