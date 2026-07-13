@@ -3979,12 +3979,13 @@ function App() {
   const [showTutorial,setShowTutorial]=useState(!localStorage.getItem("tutorial_seen"));
   // 新機能のお知らせ（アプリを開いた時に1回だけ表示）。IDを変えれば次の告知を出せる。
   // チュートリアル中の新規ユーザーには出さない（既存ユーザーへの告知が目的のため）
+  // チュートリアル中は下でreturnするので出ない。それ以外の全員に未読なら表示する
   const ANNOUNCE_ID="brain_2026_07";
-  const [showAnnounce,setShowAnnounce]=useState(()=>!!localStorage.getItem("tutorial_seen") && localStorage.getItem("announce_seen")!==ANNOUNCE_ID);
+  const [showAnnounce,setShowAnnounce]=useState(()=>localStorage.getItem("announce_seen")!==ANNOUNCE_ID);
   const dismissAnnounce=()=>{ localStorage.setItem("announce_seen",ANNOUNCE_ID); setShowAnnounce(false); };
   // チュートリアル終了後は記録タブに着地させる（登録だけして使い始めない人が多いため、
   // 最初の1件を記録するところまで自然に誘導する）。スキップ時も同様に記録タブへ
-  const dismissTutorial=()=>{ localStorage.setItem("tutorial_seen","1"); setShowTutorial(false); setTab("log"); };
+  const dismissTutorial=()=>{ localStorage.setItem("tutorial_seen","1"); localStorage.setItem("announce_seen","brain_2026_07"); setShowTutorial(false); setTab("log"); };
   const [goalData,setGoalData]=useState(()=>{
     const g=localStorage.getItem("jiroku_goals"); if(g) try{return JSON.parse(g);}catch(e){}
     const old=localStorage.getItem("jiroku_goal"); if(old) try{const p=JSON.parse(old); if(p.goal) return [p];}catch(e){}
