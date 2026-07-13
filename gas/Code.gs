@@ -99,6 +99,8 @@ function doGet(e) {
       case "saveDiary":    result = saveDiary(studentEmail, e.parameter); break;
       case "getWeeklySummary": result = getWeeklySummary(studentEmail); break;
       case "askMyPast":    result = askMyPast(studentEmail, e.parameter); break;
+      case "getInsights":  result = getInsights(studentEmail); break;
+      case "refreshInsights": result = generateInsightsForUser(studentEmail, true); break;
       case "getMonthlyReview": result = getMonthlyReview(studentEmail); break;
       case "saveIntent":   result = saveIntent(studentEmail, e.parameter); break;
       case "getIntent":    result = getIntent(studentEmail); break;
@@ -4474,6 +4476,135 @@ function getMonthlyReview(studentEmail) {
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// あなたの気づき集（Insights・セカンドブレイン機能②）
+// 蓄積したメモ・日記からAIが「繰り返し現れる学び・パターン」を抽出して蒸留する。
+// 生の記録→知恵、という第二の脳の完成形。月1で自動更新＋本人が手動更新も可能
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+function getInsightsSheet() {
+  let sheet = getSheet("Insights");
+  if (!sheet) {
+    sheet = SpreadsheetApp.openById(SPREADSHEET_ID).insertSheet("Insights");
+    sheet.appendRow(["student_email", "insights_json", "source_count", "updated_at"]);
+  }
+  return sheet;
+}
+
+function getInsights(studentEmail) {
+  if (!getSheet("Insights")) return { ok: true, data: null };
+  const row = sheetToObjects(getInsightsSheet()).find(r => r.student_email === studentEmail);
+  if (!row || !row.insights_json) return { ok: true, data: null };
+  let items = [];
+  try { items = JSON.parse(row.insights_json); } catch (e) {}
+  return { ok: true, data: { items: items, updatedAt: row.updated_at || "", sourceCount: Number(row.source_count) || 0 } };
+}
+
+// 1人分の気づきを生成してInsightsシートに保存（upsert）。
+// throttle=trueのとき、直近に更新済みなら再生成せず既存を返す（手動更新の連打・コスト対策）
+function generateInsightsForUser(studentEmail, throttle) {
+  const apiKey = PropertiesService.getScriptProperties().getProperty("CLAUDE_API_KEY");
+  if (!apiKey) return { ok: false, error: "CLAUDE_API_KEY未設定" };
+
+  if (throttle) {
+    const existing = sheetToObjects(getInsightsSheet()).find(r => r.student_email === studentEmail);
+    if (existing && existing.updated_at) {
+      const updated = new Date(existing.updated_at);
+      if (!isNaN(updated) && (Date.now() - updated.getTime()) < 6 * 3600 * 1000) {
+        let items = [];
+        try { items = JSON.parse(existing.insights_json); } catch (e) {}
+        return { ok: true, throttled: true, data: { items: items, updatedAt: existing.updated_at, sourceCount: Number(existing.source_count) || 0 } };
+      }
+    }
+  }
+
+  const cutoff = formatDate(new Date(Date.now() - 180 * 86400000));
+  const user = sheetToObjects(getSheet("Users")).find(u => u.student_email === studentEmail);
+  const name = user ? user.name : "この人";
+
+  const logs = getFilteredRows("DailyLog", "student_email", studentEmail)
+    .filter(l => l.date >= cutoff && l.memo && l.memo.trim())
+    .sort((a, b) => a.date > b.date ? 1 : -1);
+  const journalRows = getSheet("Journal")
+    ? sheetToObjects(getJournalSheet()).filter(r => {
+        const rd = r.date instanceof Date ? formatDate(r.date) : String(r.date);
+        return r.student_email === studentEmail && rd >= cutoff && r.diary && r.diary.trim();
+      })
+    : [];
+
+  // 気づきの蒸留には、繰り返しパターンを見るためある程度の量が必要
+  if (logs.length + journalRows.length < 8) {
+    return { ok: false, error: "まだ気づきを見つけるには記録が少なめです。メモ付きで記録を続けると、あなたの傾向や学びが蒸留されていきます（現在" + (logs.length + journalRows.length) + "件）" };
+  }
+
+  const logsText = logs.map(l => l.date + " " + l.task + "：" + l.memo).join("\n");
+  const diaryText = journalRows.map(r => {
+    const rd = r.date instanceof Date ? formatDate(r.date) : String(r.date);
+    return rd + "：" + r.diary;
+  }).join("\n");
+  let material = "【時間の記録メモ】\n" + (logsText || "なし") + "\n\n【日記】\n" + (diaryText || "なし");
+  if (material.length > 26000) material = material.slice(material.length - 26000);
+
+  const prompt = `以下は${name}さんがJIROKUに書き溜めてきた実際の記録・日記です（すべて本人の言葉）。この蓄積から、${name}さん自身が繰り返し経験している「気づき・傾向・パターン」を抽出して、本人だけの"気づき集"として蒸留してください。
+
+${material}
+
+【抽出のルール】
+- 1回きりの出来事ではなく、複数回・繰り返し現れているパターンを優先する
+- 良い傾向（うまくいく条件・強み）と、注意すべき傾向（つまずくパターン・悪い癖）の両方をバランスよく
+- 抽象的な一般論ではなく、この人の記録から実際に読み取れる固有のものにする
+- 各気づきに、本人が「たしかに」と思えるよう記録からの根拠を1つ添える
+
+5〜7個の気づきを、以下のJSON形式のみで返してください（説明文不要）:
+{
+  "insights": [
+    { "title": "<気づきの見出し（15字前後・言い切り）>", "detail": "<どういうことか・どんな時に現れるか（2-3文の話し言葉）>", "evidence": "<記録からの根拠を一言（日付や本人の言葉を含める）>", "type": "<strength か caution>" }
+  ]
+}`;
+
+  const res = UrlFetchApp.fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
+    payload: JSON.stringify({ model: "claude-opus-4-8", max_tokens: 2500, messages: [{ role: "user", content: prompt }] }),
+    muteHttpExceptions: true
+  });
+  const result = JSON.parse(res.getContentText());
+  const textBlock = result.content && Array.isArray(result.content)
+    ? result.content.find(function(b){ return b && typeof b.text === "string"; }) : null;
+  if (!textBlock) return { ok: false, error: "APIエラー: " + res.getContentText().substring(0, 200) };
+  try {
+    const text = textBlock.text.trim();
+    const m = text.match(/\{[\s\S]*\}/);
+    if (!m) return { ok: false, error: "気づきの解析に失敗しました" };
+    const parsed = JSON.parse(m[0]);
+    const items = parsed.insights || [];
+    const sourceCount = logs.length + journalRows.length;
+    const now = new Date().toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" });
+
+    // Insightsシートへupsert
+    const sheet = getInsightsSheet();
+    const data = sheet.getDataRange().getValues();
+    const rowVals = [studentEmail, JSON.stringify(items).slice(0, 40000), sourceCount, now];
+    let found = false;
+    for (let i = 1; i < data.length; i++) {
+      if (String(data[i][0]) === studentEmail) { sheet.getRange(i + 1, 1, 1, rowVals.length).setValues([rowVals]); found = true; break; }
+    }
+    if (!found) sheet.appendRow(rowVals);
+
+    return { ok: true, data: { items: items, updatedAt: now, sourceCount: sourceCount } };
+  } catch (e) {
+    return { ok: false, error: "気づきの解析に失敗しました: " + e.toString() };
+  }
+}
+
+// 毎月1日に全アクティブユーザーの気づき集を自動更新する（月次バッチ）
+function generateAllInsights() {
+  sheetToObjects(getSheet("Users")).filter(u => u.is_active.toUpperCase() === "TRUE").forEach(user => {
+    try { generateInsightsForUser(user.student_email, false); }
+    catch (e) { Logger.log("insights error " + user.student_email + ": " + e); }
+  });
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // 過去の自分に問いかける（セカンドブレイン機能）
 // 蓄積された記録メモ・日記・レポートから、本人の問いにAIが本人の言葉を引用して答える。
 // Obsidian等の受け身な知識庫と違い、JIROKUは能動的に過去を検索して洞察を返せるのが強み
@@ -4542,14 +4673,17 @@ evidenceは根拠にした記録を1〜4件。`;
   const res = UrlFetchApp.fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
-    // 本人の人生データを扱う中核体験なので、他機能のHaikuより上位のSonnetを使う
-    payload: JSON.stringify({ model: "claude-sonnet-5", max_tokens: 1500, messages: [{ role: "user", content: prompt }] }),
+    // 本人の人生データを扱う中核体験なので、他機能のHaikuより上位のモデルを使う
+    payload: JSON.stringify({ model: "claude-opus-4-8", max_tokens: 1500, messages: [{ role: "user", content: prompt }] }),
     muteHttpExceptions: true
   });
   const result = JSON.parse(res.getContentText());
-  if (!result.content || !result.content[0]) return { ok: false, error: "APIエラー: " + res.getContentText().substring(0, 200) };
+  // content配列から確実にテキストブロックを拾う（thinkingブロック等が先頭に来ても壊れないように）
+  const textBlock = result.content && Array.isArray(result.content)
+    ? result.content.find(function(b){ return b && typeof b.text === "string"; }) : null;
+  if (!textBlock) return { ok: false, error: "APIエラー: " + res.getContentText().substring(0, 200) };
   try {
-    const text = result.content[0].text.trim();
+    const text = textBlock.text.trim();
     const m = text.match(/\{[\s\S]*\}/);
     if (!m) return { ok: false, error: "回答の解析に失敗しました" };
     const parsed = JSON.parse(m[0]);
@@ -5255,6 +5389,7 @@ function setupTriggers() {
   ScriptApp.newTrigger("nightlyCoachMessage").timeBased().everyDays(1).atHour(22).nearMinute(30).create();
   ScriptApp.newTrigger("generateMonthlySummaries").timeBased().onMonthDay(1).atHour(3).create();
   ScriptApp.newTrigger("generateMonthlyReviews").timeBased().onMonthDay(1).atHour(8).create();
+  ScriptApp.newTrigger("generateAllInsights").timeBased().onMonthDay(1).atHour(5).create();
   ScriptApp.newTrigger("generateWeeklySummaries").timeBased().everyWeeks(1).onWeekDay(ScriptApp.WeekDay.MONDAY).atHour(8).create();
   ScriptApp.newTrigger("checkTimerQueue").timeBased().everyMinutes(1).create();
   ScriptApp.newTrigger("hourlyReminder").timeBased().everyHours(1).create();
@@ -5262,7 +5397,7 @@ function setupTriggers() {
   ScriptApp.newTrigger("syncChatworkMessages").timeBased().everyHours(1).create();
   ScriptApp.newTrigger("checkGrowthMilestones").timeBased().everyWeeks(1).onWeekDay(ScriptApp.WeekDay.MONDAY).atHour(9).create();
   ScriptApp.newTrigger("snsAutoFetchAll").timeBased().everyDays(1).atHour(21).create();
-  console.log("トリガーを設定しました（合計12個）");
+  console.log("トリガーを設定しました（合計13個）");
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

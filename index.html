@@ -2024,6 +2024,18 @@ function ReportScreen() {
     if(r.ok) setAskResult(r.data);
     else setAskError(r.error||"うまく答えられませんでした");
   };
+  // あなたの気づき集（Insights）
+  const [insights, setInsights]=useState(null);
+  const [insightsOpen, setInsightsOpen]=useState(false);
+  const [insightsLoading, setInsightsLoading]=useState(false);
+  const [insightsError, setInsightsError]=useState("");
+  const refreshInsights=async()=>{
+    setInsightsLoading(true); setInsightsError("");
+    const r=await gasApi("refreshInsights");
+    setInsightsLoading(false);
+    if(r.ok) setInsights(r.data);
+    else setInsightsError(r.error||"生成に失敗しました");
+  };
   const [showWeekly, setShowWeekly]=useState(false);
   const [showMonthly, setShowMonthly]=useState(false);
 
@@ -2037,6 +2049,7 @@ function ReportScreen() {
     });
     gasApi("getWeeklySummary").then(r=>{ if(r.ok && r.data) setWeeklySummary(r.data); });
     gasApi("getMonthlyReview").then(r=>{ if(r.ok && r.data) setMonthlyReview(r.data); });
+    gasApi("getInsights").then(r=>{ if(r.ok && r.data) setInsights(r.data); });
     gasApi("getTimeUseSummary").then(r=>{ if(r.ok && r.data) setTimeUse(r.data); });
   },[]);
 
@@ -2106,6 +2119,37 @@ function ReportScreen() {
                 </div>
               `}
             </div>
+
+            <!-- あなたの気づき集（Insights）: 蓄積メモから繰り返しの学びを蒸留 -->
+            <div class="card" style=${{marginBottom:8}}>
+              <button onClick=${()=>setInsightsOpen(!insightsOpen)}
+                style=${{display:"flex",justifyContent:"space-between",alignItems:"center",width:"100%",background:"none",border:"none",padding:0,cursor:"pointer",fontFamily:"inherit",textAlign:"left"}}>
+                <div>
+                  <div class="card-label" style=${{marginBottom:2}}>📚 あなたの気づき集</div>
+                  <div style=${{fontSize:11,color:"var(--sub)"}}>${insights?`記録から見つけた${insights.items.length}個のパターン`:"記録が溜まると、あなたの傾向をAIが蒸留します"}</div>
+                </div>
+                <div style=${{color:"var(--sub)",fontSize:14}}>${insightsOpen?"▲":"▼"}</div>
+              </button>
+              ${insightsOpen&&html`
+                <div style=${{marginTop:12}}>
+                  ${insights&&insights.items.map((it,i)=>html`
+                    <div key=${i} style=${{padding:"11px 12px",borderRadius:10,background:"var(--bg)",marginBottom:8,borderLeft:`3px solid ${it.type==="caution"?"var(--amber)":"var(--green)"}`}}>
+                      <div style=${{fontSize:13.5,fontWeight:700,color:"var(--text)",marginBottom:3}}>${it.type==="caution"?"⚠️":"💪"} ${it.title}</div>
+                      <div style=${{fontSize:12.5,color:"var(--text)",lineHeight:1.7}}>${it.detail}</div>
+                      ${it.evidence&&html`<div style=${{fontSize:11,color:"var(--sub)",marginTop:5,lineHeight:1.5}}>📎 ${it.evidence}</div>`}
+                    </div>
+                  `)}
+                  ${insightsError&&html`<div style=${{fontSize:12.5,color:"var(--red)",lineHeight:1.6,marginBottom:8}}>${insightsError}</div>`}
+                  <div style=${{display:"flex",alignItems:"center",gap:10,marginTop:4}}>
+                    <button onClick=${refreshInsights} disabled=${insightsLoading}
+                      style=${{background:"none",border:"1px solid var(--border)",borderRadius:8,padding:"7px 14px",fontSize:12,fontWeight:600,color:"var(--accent)",cursor:"pointer",fontFamily:"inherit"}}>
+                      ${insightsLoading?"蒸留中…(30秒ほど)":insights?"最新の記録で更新する":"気づきを見つける"}</button>
+                    ${insights&&insights.updatedAt&&html`<span style=${{fontSize:11,color:"var(--sub)"}}>更新: ${String(insights.updatedAt).substring(0,10)}</span>`}
+                  </div>
+                </div>
+              `}
+            </div>
+
             ${weeklySummary&&html`
               <div class="card" style=${{marginBottom:8}}>
                 <button onClick=${()=>setShowWeekly(!showWeekly)}
