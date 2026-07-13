@@ -103,6 +103,7 @@ function doGet(e) {
       case "refreshInsights": result = generateInsightsForUser(studentEmail, true); break;
       case "getTimeThemes": result = getTimeThemes(studentEmail); break;
       case "refreshTimeThemes": result = generateTimeThemesForUser(studentEmail, true); break;
+      case "exportMyData": result = exportMyData(studentEmail, e.parameter); break;
       case "getMonthlyReview": result = getMonthlyReview(studentEmail); break;
       case "saveIntent":   result = saveIntent(studentEmail, e.parameter); break;
       case "getIntent":    result = getIntent(studentEmail); break;
@@ -4765,6 +4766,62 @@ function generateAllTimeThemes() {
     try { generateTimeThemesForUser(user.student_email, false); }
     catch (e) { Logger.log("timeThemes error " + user.student_email + ": " + e); }
   });
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// データの書き出し（セカンドブレイン機能④・データ所有）
+// 自分の全記録・日記をMarkdown/CSVで持ち出せる。Obsidian等への移行にも使え、
+// 「自分のデータは自分のもの」という信頼につながる。閲覧は本人のみ
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+function exportMyData(studentEmail, body) {
+  const format = String((body && body.format) || "markdown").toLowerCase();
+  const user = sheetToObjects(getSheet("Users")).find(u => u.student_email === studentEmail);
+  const name = user ? user.name : studentEmail;
+
+  const logs = getFilteredRows("DailyLog", "student_email", studentEmail)
+    .sort((a, b) => (a.date + a.time_block) > (b.date + b.time_block) ? 1 : -1);
+  const diaries = getSheet("Journal")
+    ? sheetToObjects(getJournalSheet()).filter(r => r.student_email === studentEmail && r.diary && String(r.diary).trim())
+        .map(r => ({ date: r.date instanceof Date ? formatDate(r.date) : String(r.date), diary: r.diary }))
+        .sort((a, b) => a.date > b.date ? 1 : -1)
+    : [];
+  const diaryByDate = {};
+  diaries.forEach(d => { diaryByDate[d.date] = d.diary; });
+
+  if (format === "csv") {
+    // Excel等で開けるよう、ダブルクオートエスケープ＋改行を空白化したCSV
+    const esc = (v) => '"' + String(v == null ? "" : v).replace(/"/g, '""').replace(/[\r\n]+/g, " ") + '"';
+    const rows = [["date", "time_block", "task", "focus_level", "goal_related", "memo"].map(esc).join(",")];
+    logs.forEach(l => {
+      rows.push([l.date, l.time_block, l.task, l.focus_level, l.goal_related, l.memo].map(esc).join(","));
+    });
+    return { ok: true, filename: "jiroku_records_" + formatDate(new Date()) + ".csv", mime: "text/csv", content: "﻿" + rows.join("\r\n") };
+  }
+
+  // Markdown: 日付ごとに見出し、その日の記録と日記をまとめる
+  const byDate = {};
+  logs.forEach(l => { if (!byDate[l.date]) byDate[l.date] = []; byDate[l.date].push(l); });
+  const allDates = Array.from(new Set(Object.keys(byDate).concat(Object.keys(diaryByDate)))).sort();
+
+  let md = "# " + name + " の記録（JIROKU書き出し）\n\n";
+  md += "書き出し日: " + formatDate(new Date()) + " / 記録 " + logs.length + "件・日記 " + diaries.length + "件\n\n";
+  allDates.forEach(date => {
+    md += "## " + date + "\n\n";
+    (byDate[date] || []).sort((a, b) => a.time_block > b.time_block ? 1 : -1).forEach(l => {
+      md += "- **" + l.time_block + "** " + (l.task || "") +
+        (l.focus_level ? "（" + l.focus_level + (l.goal_related === "true" ? "・目標関連" : "") + "）" : "") + "\n";
+      if (l.memo && String(l.memo).trim()) {
+        md += "  " + String(l.memo).replace(/\r?\n/g, "\n  ") + "\n";
+      }
+    });
+    if (diaryByDate[date]) {
+      md += "\n> 日記: " + String(diaryByDate[date]).replace(/\r?\n/g, "\n> ") + "\n";
+    }
+    md += "\n";
+  });
+
+  return { ok: true, filename: "jiroku_records_" + formatDate(new Date()) + ".md", mime: "text/markdown", content: md };
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

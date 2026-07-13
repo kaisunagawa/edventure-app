@@ -2985,6 +2985,24 @@ function SettingsScreen({onToast,onLogout,onGoalSaved,profile,onProfileSaved,onC
   const [nickname,setNickname]=useState(profile?.nickname||CURRENT_USER.name);
   const [avatar,setAvatar]=useState(profile?.avatar||"🦊");
   const [showAllAvatars,setShowAllAvatars]=useState(false);
+  // 自分の記録の書き出し（データ所有）。取得した内容をブラウザでファイル化してダウンロード
+  const [exporting,setExporting]=useState("");
+  const exportData=async(format)=>{
+    setExporting(format);
+    try{
+      const r=await gasApi("exportMyData",{format});
+      if(r.ok&&r.content){
+        const blob=new Blob([r.content],{type:(r.mime||"text/plain")+";charset=utf-8"});
+        const url=URL.createObjectURL(blob);
+        const a=document.createElement("a");
+        a.href=url; a.download=r.filename||("jiroku."+(format==="csv"?"csv":"md"));
+        document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(()=>URL.revokeObjectURL(url),1000);
+        onToast("記録を書き出しました");
+      } else onToast(r.error||"書き出しに失敗しました");
+    }catch(e){ onToast("書き出しに失敗しました"); }
+    setExporting("");
+  };
   const saveProfile=async()=>{
     if(!nickname.trim()){ onToast("ニックネームを入力してください"); return; }
     const nn=nickname.trim();
@@ -3405,6 +3423,16 @@ function SettingsScreen({onToast,onLogout,onGoalSaved,profile,onProfileSaved,onC
             </div>`
           : html`<button class="btn" onClick=${enablePush} disabled=${pushLoading}>${pushLoading?"設定中...":"プッシュ通知を有効にする"}</button>`
         }
+      </div>
+
+      <!-- データの書き出し -->
+      <div style=${{background:"var(--card)",borderRadius:16,border:"1px solid var(--border)",padding:"18px",marginBottom:12}}>
+        <${SectionHeader} icon="📤" title="データの書き出し"/>
+        <div style=${{fontSize:12,color:"var(--sub)",marginBottom:14,lineHeight:1.6}}>あなたの記録・日記はあなたのものです。いつでも自分の端末に書き出せます（Markdown / CSV）。</div>
+        <div style=${{display:"flex",gap:8}}>
+          <button class="btn" style=${{flex:1,opacity:exporting?0.6:1}} disabled=${!!exporting} onClick=${()=>exportData("markdown")}>${exporting==="markdown"?"書き出し中…":"Markdownで書き出す"}</button>
+          <button style=${{flex:1,background:"none",border:"1px solid var(--border)",borderRadius:8,padding:"0 12px",fontSize:14,fontWeight:600,color:"var(--text)",cursor:"pointer",fontFamily:"inherit",opacity:exporting?0.6:1}} disabled=${!!exporting} onClick=${()=>exportData("csv")}>${exporting==="csv"?"書き出し中…":"CSVで書き出す"}</button>
+        </div>
       </div>
 
       <!-- 使い方 Q&A -->
