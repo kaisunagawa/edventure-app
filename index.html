@@ -1359,12 +1359,13 @@ function trimRanking(list) {
 function CommunityOverlay({onClose}) {
   const [list,setList]=useState(null);
   const [reportRanking,setReportRanking]=useState(null);
+  const [streakRanking,setStreakRanking]=useState(null);
   const [achievements,setAchievements]=useState(null);
   const [message,setMessage]=useState("");
   const [sending,setSending]=useState(false);
 
   const load=()=>{
-    gasApi("getCommunity").then(r=>{ if(r.ok) { setList(r.data); setReportRanking(r.reportRanking||[]); } });
+    gasApi("getCommunity").then(r=>{ if(r.ok) { setList(r.data); setReportRanking(r.reportRanking||[]); setStreakRanking(r.streakRanking||[]); } });
     gasApi("getAchievements").then(r=>{ if(r.ok) setAchievements(r.data); });
   };
   useEffect(()=>{ load(); },[]);
@@ -1428,6 +1429,29 @@ function CommunityOverlay({onClose}) {
             `;
           })()}
           ${reportRanking&&reportRanking.length===0&&html`<div style=${{padding:20,textAlign:"center",color:"var(--sub)",fontSize:13}}>まだデータがありません</div>`}
+        </div>
+
+        <div style=${{background:"var(--card)",borderRadius:16,border:"1px solid var(--border)",overflow:"hidden",marginBottom:16}}>
+          <div style=${{padding:"14px 16px",borderBottom:"1px solid var(--border)"}}>
+            <div style=${{fontSize:12,fontWeight:700,color:"var(--text)"}}>連続記録ランキング</div>
+            <div style=${{fontSize:10.5,color:"var(--sub)",marginTop:2}}>🔥 記録を続けている日数で競います（🧊はフリーズ保有数）</div>
+          </div>
+          ${streakRanking===null&&html`<div style=${{padding:20,textAlign:"center",color:"var(--sub)",fontSize:13}}>読み込み中...</div>`}
+          ${streakRanking&&(()=>{
+            const {top,me,meRank}=trimRanking(streakRanking);
+            return html`
+              ${top.map((u,i)=>html`
+                <${RankingRow} key=${i} rank=${i+1} avatar=${u.avatar} nickname=${u.nickname} isMe=${u.isMe}
+                  scoreValue=${u.streak} scoreUnit="日" sub=${u.freeze>0?`🧊${u.freeze}`:null} isLast=${!me&&i===top.length-1}/>
+              `)}
+              ${me&&html`
+                <div style=${{textAlign:"center",fontSize:12,color:"var(--sub)",padding:"6px 0",borderBottom:"1px solid var(--border)"}}>⋮</div>
+                <${RankingRow} rank=${meRank} avatar=${me.avatar} nickname=${me.nickname} isMe=${true}
+                  scoreValue=${me.streak} scoreUnit="日" sub=${me.freeze>0?`🧊${me.freeze}`:null} isLast=${true}/>
+              `}
+            `;
+          })()}
+          ${streakRanking&&streakRanking.length===0&&html`<div style=${{padding:20,textAlign:"center",color:"var(--sub)",fontSize:13}}>まだデータがありません</div>`}
         </div>
 
         <div style=${{background:"var(--card)",borderRadius:16,border:"1px solid var(--border)",padding:16,marginBottom:16}}>

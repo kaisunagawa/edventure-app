@@ -83,6 +83,7 @@ function doGet(e) {
       case "coachSetShowInCommunity": result = coachSetShowInCommunity(e.parameter.coachEmail, e.parameter); break;
       case "adminBackfillReportReasons": result = adminBackfillReportReasons(e.parameter.coachEmail); break;
       case "adminRunNightlyReport": result = adminRunNightlyReport(e.parameter.coachEmail); break;
+      case "adminRepairStreaksFreeze": result = adminRepairStreaksFreeze(e.parameter.coachEmail, e.parameter.confirm); break;
       case "adminBackfillReportsForDate": result = adminBackfillReportsForDate(e.parameter.coachEmail, e.parameter.date); break;
       case "adminRunNightlyCoachMessage": result = adminRunNightlyCoachMessage(e.parameter.coachEmail); break;
       case "adminBroadcastLine": result = adminBroadcastLine(e.parameter.coachEmail, e.parameter.message, e.parameter.confirm); break;
@@ -971,7 +972,23 @@ function getCommunity(studentEmail) {
     .filter(u => u.reportScore !== null && u.reportDate === latestDate)
     .sort((a, b) => b.reportScore - a.reportScore);
 
-  return { ok: true, data: list, reportRanking: reportRanking };
+  // 連続記録ランキング（🔥ストリークの長さで競う。記録を継続する動機づけ）。
+  // 0日の人は載せない（まだ記録が続いていない人を晒さないため）
+  const streakRanking = users
+    .map(u => {
+      const isMe = u.student_email === studentEmail;
+      return {
+        isMe,
+        nickname: maskName(u, isMe),
+        avatar: maskAvatar(u, isMe),
+        streak: Number(u.streak || 0),
+        freeze: Number(u.streak_freeze || 0)
+      };
+    })
+    .filter(u => u.streak > 0)
+    .sort((a, b) => b.streak - a.streak);
+
+  return { ok: true, data: list, reportRanking: reportRanking, streakRanking: streakRanking };
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -4127,6 +4144,87 @@ function adminRecomputeStreaks() {
     sheet.getRange(i + 1, lastLogDateIdx + 1).setValue(last);
     Logger.log(email + ": streak=" + streak + " last_log_date=" + last);
   }
+}
+
+// フリーズを考慮して全員のストリークを正しく再計算する。
+// 背景: ストリークフリーズ機能は2026-07-11に実装されたが、それ以前から長い連続記録が
+// あったユーザーは、過去に達成済みの「7日ごとのフリーズ」が遡って付与されていなかった。
+// そのため機能実装直後の1日欠けで、本来フリーズで守られるはずのストリークがリセットされた。
+// この関数は全記録履歴からフリーズ経済（7日ごとに1個獲得・最大2個・1日の欠けを1個で橋渡し）を
+// シミュレートし、本来あるべきstreak/streak_freeze/last_log_dateを復元する。
+// confirm !== "yes" のときは書き込まず差分だけ返す（必ず先にドライランで確認すること）
+function adminRepairStreaksFreeze(email, confirm) {
+  if (!verifyAdmin(email)) return { ok: false, error: "not admin" };
+  const sheet = getSheet("Users");
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0];
+  const emailIdx = headers.indexOf("student_email");
+  let streakIdx = headers.indexOf("streak");
+  let lastLogDateIdx = headers.indexOf("last_log_date");
+  let freezeIdx = headers.indexOf("streak_freeze");
+  if (freezeIdx === -1) { freezeIdx = headers.length; sheet.getRange(1, freezeIdx + 1).setValue("streak_freeze"); headers.push("streak_freeze"); }
+  if (streakIdx === -1 || lastLogDateIdx === -1) return { ok: false, error: "streak/last_log_date列がありません" };
+
+  const daysBetween = (a, b) => Math.round((new Date(b + "T00:00:00") - new Date(a + "T00:00:00")) / 86400000);
+  const today = formatDate(new Date());
+  const yesterday = formatDate(new Date(Date.now() - 86400000));
+
+  // 記録日をユーザー別に集約
+  const datesByEmail = new Map();
+  sheetToObjects(getSheet("DailyLog")).forEach(l => {
+    const em = String(l.student_email || "");
+    if (!em || !l.date) return;
+    if (!datesByEmail.has(em)) datesByEmail.set(em, new Set());
+    datesByEmail.get(em).add(String(l.date).substring(0, 10));
+  });
+
+  const results = [];
+  for (let i = 1; i < data.length; i++) {
+    const em = String(data[i][emailIdx]);
+    const set = datesByEmail.get(em);
+    if (!set || set.size === 0) continue;
+    const dates = Array.from(set).sort();
+
+    // フリーズ経済をシミュレート
+    let streak = 0, freeze = 0, prev = null;
+    for (const d of dates) {
+      if (prev === null) { streak = 1; }
+      else {
+        const gap = daysBetween(prev, d);
+        if (gap === 1) streak += 1;
+        else if (gap === 2 && freeze > 0) { freeze -= 1; streak += 1; } // 1日の欠けをフリーズで橋渡し
+        else streak = 1; // 2日以上の欠け、またはフリーズなしの欠け → リセット
+      }
+      if (streak > 0 && streak % 7 === 0 && freeze < 2) freeze += 1; // 7日ごとに獲得
+      prev = d;
+    }
+
+    // 今日時点でストリークが生きているか判定
+    const gapToToday = daysBetween(prev, today);
+    let finalStreak, finalFreeze, finalLastLog;
+    if (gapToToday <= 1) { finalStreak = streak; finalFreeze = freeze; finalLastLog = prev; }
+    else if (gapToToday === 2 && freeze > 0) { finalStreak = streak; finalFreeze = freeze - 1; finalLastLog = yesterday; }
+    else { finalStreak = 0; finalFreeze = freeze; finalLastLog = prev; }
+
+    const curStreak = Number(data[i][streakIdx] || 0);
+    const curFreeze = freezeIdx < data[i].length ? Number(data[i][freezeIdx] || 0) : 0;
+    const changed = curStreak !== finalStreak || curFreeze !== finalFreeze;
+
+    results.push({
+      email: em, name: String(data[i][headers.indexOf("name")] || ""),
+      before: { streak: curStreak, freeze: curFreeze },
+      after: { streak: finalStreak, freeze: finalFreeze },
+      lastRecord: prev, changed: changed
+    });
+
+    if (confirm === "yes" && changed) {
+      sheet.getRange(i + 1, streakIdx + 1).setValue(finalStreak);
+      sheet.getRange(i + 1, freezeIdx + 1).setValue(finalFreeze);
+      sheet.getRange(i + 1, lastLogDateIdx + 1).setNumberFormat("@").setValue(finalLastLog);
+    }
+  }
+
+  return { ok: true, dryRun: confirm !== "yes", changedCount: results.filter(r => r.changed).length, results: results };
 }
 
 // 2026-07-07 0:06の誤実行（夜間バッチが日付を跨ぎ「翌日の記録0件」と誤判定した
