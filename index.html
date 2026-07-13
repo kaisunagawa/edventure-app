@@ -2046,12 +2046,22 @@ function SecondBrainScreen({isActive}){
   };
   const THEME_COLORS=["#0891B2","#F59E0B","#8B5CF6","#22C55E","#EC4899","#14B8A6"];
 
+  // 気づき・テーマをタップすると、その内容についてAIに深掘り質問できるようにする。
+  // 「過去に聞く」カードへスクロールして回答を見せる（.screenがスクロール要素）
+  const askRef=React.useRef(null);
+  const askAbout=(q)=>{ runAsk(q); setTimeout(()=>{ try{ askRef.current&&askRef.current.scrollIntoView({behavior:"smooth",block:"start"}); }catch(e){} },50); };
+
   return html`<div style=${{paddingBottom:32}}>
-    <div class="ph"><div class="ph-title-accent">気づき</div></div>
-    <div style=${{padding:"0 16px"}}>
-      <div style=${{fontSize:12.5,color:"var(--sub)",marginBottom:16,lineHeight:1.7}}>
-        あなたが積み重ねてきた記録は、あなただけのセカンドブレインです。過去の自分に問いかけたり、繰り返しの気づきを見つけたりできます。
+    <!-- Second Brain ヒーロー -->
+    <div style=${{background:"linear-gradient(135deg, var(--hero1) 0%, var(--hero2) 100%)",padding:"26px 20px 22px",position:"relative",overflow:"hidden"}}>
+      <svg style=${{position:"absolute",bottom:-26,right:-20,opacity:0.10}} width="130" height="130" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.2"><path d="M9 18h6"/><path d="M10 21h4"/><path d="M12 3a6 6 0 00-4 10.5c.8.7 1 1.3 1 2.5h6c0-1.2.2-1.8 1-2.5A6 6 0 0012 3z"/></svg>
+      <div style=${{fontSize:11,fontWeight:700,color:"rgba(255,255,255,0.7)",letterSpacing:"0.14em",marginBottom:4}}>YOUR SECOND BRAIN</div>
+      <div style=${{fontSize:23,fontWeight:800,color:"#fff",letterSpacing:"-.5px",marginBottom:6}}>気づき</div>
+      <div style=${{fontSize:12.5,color:"rgba(255,255,255,0.85)",lineHeight:1.7,maxWidth:300}}>
+        あなたが積み重ねた記録は、あなただけの「第二の脳」。過去の自分に問いかけ、傾向を見つけ、時間の使い道を知る場所です。
       </div>
+    </div>
+    <div style=${{padding:"16px 16px 0"}}>
 
       <!-- 時間の使い道マップ -->
       <div class="card" style=${{marginBottom:12}}>
@@ -2074,6 +2084,8 @@ function SecondBrainScreen({isActive}){
                   </div>
                   ${t.examples&&html`<div style=${{fontSize:11,color:"var(--sub)",marginLeft:18,lineHeight:1.5}}>${t.examples}</div>`}
                   ${t.comment&&html`<div style=${{fontSize:12,color:"var(--text)",marginLeft:18,marginTop:3,lineHeight:1.6}}>${t.comment}</div>`}
+                  <button onClick=${()=>askAbout(`「${t.name}」に使っている時間は、目標に近づく良い使い方？もっと良くするには？`)}
+                    style=${{marginLeft:18,marginTop:5,background:"none",border:"none",color:"var(--accent)",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit",padding:0}}>この使い方を深掘りする →</button>
                 </div>
               `;
             })}
@@ -2090,7 +2102,7 @@ function SecondBrainScreen({isActive}){
       </div>
 
       <!-- 過去の自分に聞く -->
-      <div class="card" style=${{marginBottom:12,border:"1.5px solid var(--accent)"}}>
+      <div ref=${askRef} class="card" style=${{marginBottom:12,border:"1.5px solid var(--accent)"}}>
         <div class="card-label" style=${{marginBottom:2}}>🧠 過去の自分に聞く</div>
         <div style=${{fontSize:11.5,color:"var(--sub)",marginBottom:10,lineHeight:1.6}}>これまでの記録・日記をもとに、AIがあなた自身の言葉を引用して答えます。</div>
         <div style=${{display:"flex",gap:8,marginBottom:10}}>
@@ -2144,6 +2156,8 @@ function SecondBrainScreen({isActive}){
               <div style=${{fontSize:14,fontWeight:700,color:"var(--text)",marginBottom:4}}>${it.title}</div>
               <div style=${{fontSize:12.5,color:"var(--text)",lineHeight:1.8}}>${it.detail}</div>
               ${it.evidence&&html`<div style=${{fontSize:11,color:"var(--sub)",marginTop:6,lineHeight:1.6}}>${it.evidence}</div>`}
+              <button onClick=${()=>askAbout(isCaution?`「${it.title}」を直すにはどうしたらいい？過去の記録から具体的に教えて`:`「${it.title}」という強みを、もっと活かすにはどうしたらいい？`)}
+                style=${{marginTop:8,background:"none",border:"none",color:"var(--accent)",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit",padding:0}}>${isCaution?"直し方を聞く":"活かし方を聞く"} →</button>
             </div>
           `;
         })}
@@ -3167,6 +3181,8 @@ function SettingsScreen({onToast,onLogout,onGoalSaved,profile,onProfileSaved,onC
       <div style=${{fontSize:14,fontWeight:700,color:"var(--text)"}}>${title}</div>
     </div>
   `;
+  // 設定をグループに区切る小見出し（アカウント / 目標と記録 / 連携 / データ / 情報）
+  const GroupLabel = (t) => html`<div style=${{fontSize:11,fontWeight:700,color:"var(--sub)",letterSpacing:"0.06em",margin:"6px 4px 10px"}}>${t}</div>`;
 
   return html`<div style=${{paddingBottom:48}}>
 
@@ -3189,6 +3205,7 @@ function SettingsScreen({onToast,onLogout,onGoalSaved,profile,onProfileSaved,onC
 
     <div style=${{padding:"16px 16px 0"}}>
 
+      ${GroupLabel("アカウント")}
       <!-- プロフィール -->
       <div style=${{background:"var(--card)",borderRadius:16,border:"1px solid var(--border)",padding:"18px",marginBottom:12}}>
         <${SectionHeader} icon="🙂" title="プロフィール"/>
@@ -3213,6 +3230,7 @@ function SettingsScreen({onToast,onLogout,onGoalSaved,profile,onProfileSaved,onC
         <button class="btn" onClick=${saveProfile}>保存する</button>
       </div>
 
+      ${GroupLabel("目標と記録")}
       <!-- 目標 -->
       <div style=${{background:"var(--card)",borderRadius:16,border:"1px solid var(--border)",padding:"18px",marginBottom:12}}>
         <${SectionHeader} icon="🎯" title="目標・期限"/>
@@ -3340,36 +3358,7 @@ function SettingsScreen({onToast,onLogout,onGoalSaved,profile,onProfileSaved,onC
         <button class="btn" onClick=${saveTimeSettings}>保存する</button>
       </div>
 
-      <!-- 階級システム -->
-      <div style=${{background:"var(--card)",borderRadius:16,border:"1px solid var(--border)",padding:"18px",marginBottom:12}}>
-        <${SectionHeader} icon="🏆" title="階級システム"/>
-        <div style=${{display:"flex",gap:8,marginBottom:14}}>
-          <div style=${{flex:1,background:"var(--bg)",borderRadius:10,padding:"12px",fontSize:12,lineHeight:1.8,color:"var(--sub)"}}>
-            <div style=${{fontWeight:700,color:"var(--text)",marginBottom:4,fontSize:13}}>XPの貯め方</div>
-            記録した日：<b style=${{color:"var(--accent)"}}>+10〜25 XP</b><br/>
-            メモを書く：<b style=${{color:"var(--accent)"}}>+5 XP</b><br/>
-            連続ボーナスあり
-          </div>
-          <div style=${{flex:1,background:"var(--bg)",borderRadius:10,padding:"12px",fontSize:12,lineHeight:1.8,color:"var(--sub)"}}>
-            <div style=${{fontWeight:700,color:"var(--text)",marginBottom:4,fontSize:13}}>記録なしの日</div>
-            1日：<b style=${{color:"var(--red)"}}>−15 XP</b><br/>
-            2日連続：<b style=${{color:"var(--red)"}}>−30 XP</b><br/>
-            ストリークリセット
-          </div>
-        </div>
-        <div style=${{display:"flex",flexDirection:"column",gap:6}}>
-          ${RANK_RULES.map(r=>html`
-            <div key=${r.name} style=${{display:"flex",alignItems:"center",gap:10,padding:"9px 12px",borderRadius:10,background:"var(--bg)",border:"1px solid var(--border)"}}>
-              <span style=${{width:8,height:8,borderRadius:"50%",background:r.color,flexShrink:0}}/>
-              <div style=${{flex:1}}>
-                <span style=${{fontSize:13,fontWeight:700,color:"var(--text)"}}>${r.name}</span>
-                <span style=${{fontSize:11,color:"var(--sub)",marginLeft:6}}>${r.sub}</span>
-              </div>
-              <span style=${{fontSize:11,fontWeight:700,color:r.color,flexShrink:0}}>${r.lv}</span>
-            </div>
-          `)}
-        </div>
-      </div>
+      ${GroupLabel("連携")}
 
       <!-- カレンダー -->
       <div style=${{background:"var(--card)",borderRadius:16,border:"1px solid var(--border)",padding:"18px",marginBottom:12}}>
@@ -3425,6 +3414,7 @@ function SettingsScreen({onToast,onLogout,onGoalSaved,profile,onProfileSaved,onC
         }
       </div>
 
+      ${GroupLabel("データ")}
       <!-- データの書き出し -->
       <div style=${{background:"var(--card)",borderRadius:16,border:"1px solid var(--border)",padding:"18px",marginBottom:12}}>
         <${SectionHeader} icon="📤" title="データの書き出し"/>
@@ -3432,6 +3422,38 @@ function SettingsScreen({onToast,onLogout,onGoalSaved,profile,onProfileSaved,onC
         <div style=${{display:"flex",gap:8}}>
           <button class="btn" style=${{flex:1,opacity:exporting?0.6:1}} disabled=${!!exporting} onClick=${()=>exportData("markdown")}>${exporting==="markdown"?"書き出し中…":"Markdownで書き出す"}</button>
           <button style=${{flex:1,background:"none",border:"1px solid var(--border)",borderRadius:8,padding:"0 12px",fontSize:14,fontWeight:600,color:"var(--text)",cursor:"pointer",fontFamily:"inherit",opacity:exporting?0.6:1}} disabled=${!!exporting} onClick=${()=>exportData("csv")}>${exporting==="csv"?"書き出し中…":"CSVで書き出す"}</button>
+        </div>
+      </div>
+
+      ${GroupLabel("情報・ヘルプ")}
+      <!-- 階級システム -->
+      <div style=${{background:"var(--card)",borderRadius:16,border:"1px solid var(--border)",padding:"18px",marginBottom:12}}>
+        <${SectionHeader} icon="🏆" title="階級システム"/>
+        <div style=${{display:"flex",gap:8,marginBottom:14}}>
+          <div style=${{flex:1,background:"var(--bg)",borderRadius:10,padding:"12px",fontSize:12,lineHeight:1.8,color:"var(--sub)"}}>
+            <div style=${{fontWeight:700,color:"var(--text)",marginBottom:4,fontSize:13}}>XPの貯め方</div>
+            記録した日：<b style=${{color:"var(--accent)"}}>+10〜25 XP</b><br/>
+            メモを書く：<b style=${{color:"var(--accent)"}}>+5 XP</b><br/>
+            連続ボーナスあり
+          </div>
+          <div style=${{flex:1,background:"var(--bg)",borderRadius:10,padding:"12px",fontSize:12,lineHeight:1.8,color:"var(--sub)"}}>
+            <div style=${{fontWeight:700,color:"var(--text)",marginBottom:4,fontSize:13}}>記録なしの日</div>
+            1日：<b style=${{color:"var(--red)"}}>−15 XP</b><br/>
+            2日連続：<b style=${{color:"var(--red)"}}>−30 XP</b><br/>
+            ストリークリセット
+          </div>
+        </div>
+        <div style=${{display:"flex",flexDirection:"column",gap:6}}>
+          ${RANK_RULES.map(r=>html`
+            <div key=${r.name} style=${{display:"flex",alignItems:"center",gap:10,padding:"9px 12px",borderRadius:10,background:"var(--bg)",border:"1px solid var(--border)"}}>
+              <span style=${{width:8,height:8,borderRadius:"50%",background:r.color,flexShrink:0}}/>
+              <div style=${{flex:1}}>
+                <span style=${{fontSize:13,fontWeight:700,color:"var(--text)"}}>${r.name}</span>
+                <span style=${{fontSize:11,color:"var(--sub)",marginLeft:6}}>${r.sub}</span>
+              </div>
+              <span style=${{fontSize:11,fontWeight:700,color:r.color,flexShrink:0}}>${r.lv}</span>
+            </div>
+          `)}
         </div>
       </div>
 
