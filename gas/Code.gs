@@ -101,6 +101,8 @@ function doGet(e) {
       case "askMyPast":    result = askMyPast(studentEmail, e.parameter); break;
       case "getInsights":  result = getInsights(studentEmail); break;
       case "refreshInsights": result = generateInsightsForUser(studentEmail, true); break;
+      case "getTimeThemes": result = getTimeThemes(studentEmail); break;
+      case "refreshTimeThemes": result = generateTimeThemesForUser(studentEmail, true); break;
       case "getMonthlyReview": result = getMonthlyReview(studentEmail); break;
       case "saveIntent":   result = saveIntent(studentEmail, e.parameter); break;
       case "getIntent":    result = getIntent(studentEmail); break;
@@ -4605,6 +4607,131 @@ function generateAllInsights() {
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// 時間の使い道マップ（セカンドブレイン機能③）
+// 記録をAIが自動でテーマ別にクラスタリングし「時間がどのテーマに何時間分かれているか」を
+// 可視化する。ユーザーにタグ付けを求めず、ツールが自動でやる（JIROKUの思想に沿う）
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+function getTimeThemesSheet() {
+  let sheet = getSheet("TimeThemes");
+  if (!sheet) {
+    sheet = SpreadsheetApp.openById(SPREADSHEET_ID).insertSheet("TimeThemes");
+    sheet.appendRow(["student_email", "themes_json", "period_days", "total_blocks", "updated_at"]);
+  }
+  return sheet;
+}
+
+function getTimeThemes(studentEmail) {
+  if (!getSheet("TimeThemes")) return { ok: true, data: null };
+  const row = sheetToObjects(getTimeThemesSheet()).find(r => r.student_email === studentEmail);
+  if (!row || !row.themes_json) return { ok: true, data: null };
+  let payload = { themes: [], summary: "" };
+  try {
+    const parsed = JSON.parse(row.themes_json);
+    // 保存形式は{themes,summary}。古い配列だけの形式にも一応対応
+    if (Array.isArray(parsed)) payload.themes = parsed;
+    else { payload.themes = parsed.themes || []; payload.summary = parsed.summary || ""; }
+  } catch (e) {}
+  return { ok: true, data: { themes: payload.themes, summary: payload.summary, periodDays: Number(row.period_days) || 30, totalBlocks: Number(row.total_blocks) || 0, updatedAt: row.updated_at || "" } };
+}
+
+function generateTimeThemesForUser(studentEmail, throttle) {
+  const apiKey = PropertiesService.getScriptProperties().getProperty("CLAUDE_API_KEY");
+  if (!apiKey) return { ok: false, error: "CLAUDE_API_KEY未設定" };
+
+  if (throttle) {
+    const existing = sheetToObjects(getTimeThemesSheet()).find(r => r.student_email === studentEmail);
+    if (existing && existing.updated_at) {
+      const updated = new Date(existing.updated_at);
+      if (!isNaN(updated) && (Date.now() - updated.getTime()) < 6 * 3600 * 1000) {
+        let themes = [];
+        try { themes = JSON.parse(existing.themes_json); } catch (e) {}
+        return { ok: true, throttled: true, data: { themes: themes, periodDays: Number(existing.period_days) || 30, totalBlocks: Number(existing.total_blocks) || 0, updatedAt: existing.updated_at } };
+      }
+    }
+  }
+
+  const periodDays = 30;
+  const cutoff = formatDate(new Date(Date.now() - periodDays * 86400000));
+  const logs = getFilteredRows("DailyLog", "student_email", studentEmail)
+    .filter(l => l.date >= cutoff && l.task && l.task.trim())
+    .sort((a, b) => a.date > b.date ? 1 : -1);
+  if (logs.length < 8) {
+    return { ok: false, error: "まだ分類できるほど記録がありません（現在" + logs.length + "件・直近30日）。記録を続けると、時間の使い道が見えてきます" };
+  }
+  const totalBlocks = logs.length;
+
+  // タスク名を集計してAIに渡す（メモは長いので、この機能ではタスク名の頻度が主材料）
+  const taskCounts = {};
+  logs.forEach(l => { const t = String(l.task).trim(); taskCounts[t] = (taskCounts[t] || 0) + 1; });
+  const taskList = Object.entries(taskCounts).sort((a, b) => b[1] - a[1])
+    .map(function(e){ return e[0] + "（" + e[1] + "時間帯）"; }).join("\n");
+  const goalRelated = logs.filter(l => l.goal_related === "true").length;
+
+  const prompt = `以下は、ある人が直近30日間にJIROKUに記録した「時間の使い道」の一覧です（タスク名と、その時間帯数）。合計${totalBlocks}時間帯・うち目標関連${goalRelated}時間帯。
+
+${taskList}
+
+これらを意味のある3〜6個の「テーマ」にグルーピングし、各テーマに何時間帯が費やされているか集計してください。
+
+【ルール】
+- 似た活動はまとめる（例：「テレアポ」「商談」「営業リスト作成」→「営業活動」）
+- テーマ名は一目で分かる短い名詞（10字前後）
+- 各テーマのblocksの合計が全体（${totalBlocks}）とほぼ一致するようにする（端数は最も近いテーマに寄せる）
+- 多い順に並べる
+- 各テーマに、それが目標に近いか（前進しているか）のひとことコメントを添える
+
+以下のJSON形式のみで返してください（説明文不要）:
+{
+  "themes": [
+    { "name": "<テーマ名>", "blocks": <時間帯数の整数>, "examples": "<含まれる代表的なタスク2-3個>", "comment": "<このテーマへの一言（目標との距離・気づき）>" }
+  ],
+  "summary": "<時間の使い道全体を1-2文で総括（どこに偏っているか・バランス）>"
+}`;
+
+  const res = UrlFetchApp.fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
+    payload: JSON.stringify({ model: "claude-opus-4-8", max_tokens: 2000, messages: [{ role: "user", content: prompt }] }),
+    muteHttpExceptions: true
+  });
+  const result = JSON.parse(res.getContentText());
+  const textBlock = result.content && Array.isArray(result.content)
+    ? result.content.find(function(b){ return b && typeof b.text === "string"; }) : null;
+  if (!textBlock) return { ok: false, error: "APIエラー: " + res.getContentText().substring(0, 200) };
+  try {
+    const text = textBlock.text.trim();
+    const m = text.match(/\{[\s\S]*\}/);
+    if (!m) return { ok: false, error: "分類の解析に失敗しました" };
+    const parsed = JSON.parse(m[0]);
+    const themes = parsed.themes || [];
+    if (parsed.summary) themes._summary = parsed.summary; // 保存用に埋め込む
+    const payload = { themes: parsed.themes || [], summary: parsed.summary || "" };
+    const now = new Date().toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" });
+
+    const sheet = getTimeThemesSheet();
+    const data = sheet.getDataRange().getValues();
+    const rowVals = [studentEmail, JSON.stringify(payload).slice(0, 40000), periodDays, totalBlocks, now];
+    let found = false;
+    for (let i = 1; i < data.length; i++) {
+      if (String(data[i][0]) === studentEmail) { sheet.getRange(i + 1, 1, 1, rowVals.length).setValues([rowVals]); found = true; break; }
+    }
+    if (!found) sheet.appendRow(rowVals);
+
+    return { ok: true, data: { themes: payload.themes, summary: payload.summary, periodDays: periodDays, totalBlocks: totalBlocks, updatedAt: now } };
+  } catch (e) {
+    return { ok: false, error: "分類の解析に失敗しました: " + e.toString() };
+  }
+}
+
+function generateAllTimeThemes() {
+  sheetToObjects(getSheet("Users")).filter(u => u.is_active.toUpperCase() === "TRUE").forEach(user => {
+    try { generateTimeThemesForUser(user.student_email, false); }
+    catch (e) { Logger.log("timeThemes error " + user.student_email + ": " + e); }
+  });
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // 過去の自分に問いかける（セカンドブレイン機能）
 // 蓄積された記録メモ・日記・レポートから、本人の問いにAIが本人の言葉を引用して答える。
 // Obsidian等の受け身な知識庫と違い、JIROKUは能動的に過去を検索して洞察を返せるのが強み
@@ -5390,6 +5517,7 @@ function setupTriggers() {
   ScriptApp.newTrigger("generateMonthlySummaries").timeBased().onMonthDay(1).atHour(3).create();
   ScriptApp.newTrigger("generateMonthlyReviews").timeBased().onMonthDay(1).atHour(8).create();
   ScriptApp.newTrigger("generateAllInsights").timeBased().onMonthDay(1).atHour(5).create();
+  ScriptApp.newTrigger("generateAllTimeThemes").timeBased().onMonthDay(1).atHour(6).create();
   ScriptApp.newTrigger("generateWeeklySummaries").timeBased().everyWeeks(1).onWeekDay(ScriptApp.WeekDay.MONDAY).atHour(8).create();
   ScriptApp.newTrigger("checkTimerQueue").timeBased().everyMinutes(1).create();
   ScriptApp.newTrigger("hourlyReminder").timeBased().everyHours(1).create();
@@ -5397,7 +5525,7 @@ function setupTriggers() {
   ScriptApp.newTrigger("syncChatworkMessages").timeBased().everyHours(1).create();
   ScriptApp.newTrigger("checkGrowthMilestones").timeBased().everyWeeks(1).onWeekDay(ScriptApp.WeekDay.MONDAY).atHour(9).create();
   ScriptApp.newTrigger("snsAutoFetchAll").timeBased().everyDays(1).atHour(21).create();
-  console.log("トリガーを設定しました（合計13個）");
+  console.log("トリガーを設定しました（合計14個）");
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

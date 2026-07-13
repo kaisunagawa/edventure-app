@@ -2019,11 +2019,16 @@ function SecondBrainScreen({isActive}){
   const [insights, setInsights]=useState(null);
   const [insightsLoading, setInsightsLoading]=useState(false);
   const [insightsError, setInsightsError]=useState("");
+  // 時間の使い道マップ
+  const [themes, setThemes]=useState(null);
+  const [themesLoading, setThemesLoading]=useState(false);
+  const [themesError, setThemesError]=useState("");
   const [loadedOnce, setLoadedOnce]=useState(false);
   useEffect(()=>{
     if(!isActive||loadedOnce) return;
     setLoadedOnce(true);
     gasApi("getInsights").then(r=>{ if(r.ok && r.data) setInsights(r.data); });
+    gasApi("getTimeThemes").then(r=>{ if(r.ok && r.data) setThemes(r.data); });
   },[isActive]);
   const refreshInsights=async()=>{
     setInsightsLoading(true); setInsightsError("");
@@ -2032,12 +2037,56 @@ function SecondBrainScreen({isActive}){
     if(r.ok) setInsights(r.data);
     else setInsightsError(r.error||"生成に失敗しました");
   };
+  const refreshThemes=async()=>{
+    setThemesLoading(true); setThemesError("");
+    const r=await gasApi("refreshTimeThemes");
+    setThemesLoading(false);
+    if(r.ok) setThemes(r.data);
+    else setThemesError(r.error||"生成に失敗しました");
+  };
+  const THEME_COLORS=["#0891B2","#F59E0B","#8B5CF6","#22C55E","#EC4899","#14B8A6"];
 
   return html`<div style=${{paddingBottom:32}}>
     <div class="ph"><div class="ph-title-accent">気づき</div></div>
     <div style=${{padding:"0 16px"}}>
       <div style=${{fontSize:12.5,color:"var(--sub)",marginBottom:16,lineHeight:1.7}}>
         あなたが積み重ねてきた記録は、あなただけのセカンドブレインです。過去の自分に問いかけたり、繰り返しの気づきを見つけたりできます。
+      </div>
+
+      <!-- 時間の使い道マップ -->
+      <div class="card" style=${{marginBottom:12}}>
+        <div class="card-label" style=${{marginBottom:2}}>🗺 時間の使い道マップ</div>
+        <div style=${{fontSize:11.5,color:"var(--sub)",marginBottom:12,lineHeight:1.6}}>${themes&&themes.themes.length?`直近30日・${themes.totalBlocks}時間帯を${themes.themes.length}テーマに自動分類`:"直近30日の記録を、AIが自動でテーマ別に分類します。"}</div>
+        ${themes&&themes.themes.length>0&&(()=>{
+          const total=themes.themes.reduce((s,t)=>s+(Number(t.blocks)||0),0)||1;
+          return html`
+            <div style=${{display:"flex",height:12,borderRadius:6,overflow:"hidden",marginBottom:14}}>
+              ${themes.themes.map((t,i)=>html`<div key=${i} style=${{width:(Number(t.blocks)/total*100)+"%",background:THEME_COLORS[i%THEME_COLORS.length]}}/>`)}
+            </div>
+            ${themes.themes.map((t,i)=>{
+              const pct=Math.round(Number(t.blocks)/total*100);
+              return html`
+                <div key=${i} style=${{marginBottom:12}}>
+                  <div style=${{display:"flex",alignItems:"center",gap:8,marginBottom:3}}>
+                    <span style=${{width:10,height:10,borderRadius:3,background:THEME_COLORS[i%THEME_COLORS.length],flexShrink:0}}/>
+                    <span style=${{fontSize:13.5,fontWeight:700,color:"var(--text)",flex:1}}>${t.name}</span>
+                    <span style=${{fontSize:12.5,fontWeight:700,color:"var(--sub)"}}>${t.blocks}h・${pct}%</span>
+                  </div>
+                  ${t.examples&&html`<div style=${{fontSize:11,color:"var(--sub)",marginLeft:18,lineHeight:1.5}}>${t.examples}</div>`}
+                  ${t.comment&&html`<div style=${{fontSize:12,color:"var(--text)",marginLeft:18,marginTop:3,lineHeight:1.6}}>${t.comment}</div>`}
+                </div>
+              `;
+            })}
+            ${themes.summary&&html`<div style=${{fontSize:12.5,color:"var(--accent)",background:"var(--accent-l)",borderRadius:10,padding:"10px 12px",lineHeight:1.7,marginTop:4,marginBottom:6}}>💡 ${themes.summary}</div>`}
+          `;
+        })()}
+        ${themesError&&html`<div style=${{fontSize:12.5,color:"var(--red)",lineHeight:1.6,marginBottom:8}}>${themesError}</div>`}
+        <div style=${{display:"flex",alignItems:"center",gap:10,marginTop:6}}>
+          <button onClick=${refreshThemes} disabled=${themesLoading}
+            style=${{background:themes?"none":"var(--accent)",border:themes?"1px solid var(--border)":"none",borderRadius:8,padding:"9px 16px",fontSize:12.5,fontWeight:700,color:themes?"var(--accent)":"#fff",cursor:"pointer",fontFamily:"inherit"}}>
+            ${themesLoading?"分類中…(30秒ほど)":themes?"最新の記録で更新する":"時間の使い道を見る"}</button>
+          ${themes&&themes.updatedAt&&html`<span style=${{fontSize:11,color:"var(--sub)"}}>更新: ${String(themes.updatedAt).substring(0,10)}</span>`}
+        </div>
       </div>
 
       <!-- 過去の自分に聞く -->
