@@ -83,6 +83,7 @@ function doGet(e) {
       case "coachSetShowInCommunity": result = coachSetShowInCommunity(e.parameter.coachEmail, e.parameter); break;
       case "adminBackfillReportReasons": result = adminBackfillReportReasons(e.parameter.coachEmail); break;
       case "adminRunNightlyReport": result = adminRunNightlyReport(e.parameter.coachEmail); break;
+      case "adminSetupTriggers": result = adminSetupTriggers(e.parameter.coachEmail); break;
       case "adminRepairStreaksFreeze": result = adminRepairStreaksFreeze(e.parameter.coachEmail, e.parameter.confirm); break;
       case "adminBackfillReportsForDate": result = adminBackfillReportsForDate(e.parameter.coachEmail, e.parameter.date); break;
       case "adminRunNightlyCoachMessage": result = adminRunNightlyCoachMessage(e.parameter.coachEmail); break;
@@ -5652,6 +5653,19 @@ function setupSheets() {
     if (s.getLastRow() === 0) s.appendRow(headers);
   });
   console.log("シート作成完了");
+}
+
+// 管理者がWeb API経由でトリガーを再設定するためのラッパー（editorを開かずに実行できる）。
+// setupTriggersは全トリガーを削除して張り直すため、管理者のみ許可
+function adminSetupTriggers(email) {
+  if (!verifyAdmin(email)) return { ok: false, error: "not admin" };
+  try {
+    setupTriggers();
+    const count = ScriptApp.getProjectTriggers().length;
+    return { ok: true, triggerCount: count };
+  } catch (e) {
+    return { ok: false, error: String(e) };
+  }
 }
 
 function setupTriggers() {
