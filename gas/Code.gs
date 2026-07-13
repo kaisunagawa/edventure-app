@@ -3798,6 +3798,27 @@ function getCachedCalendar(studentEmail, dateStr) {
 function buildStudentContext(studentEmail, user, preloaded) {
   const today = formatDate(new Date());
 
+  // 日付文字列(YYYY-MM-DD)に「今日/昨日/N日前/明日/N日後」の相対ラベルと曜日を付ける。
+  // AIに日数計算をさせると「先日」「昨日」を取り違えるため、コード側で確定させて渡す。
+  // これにより過去・未来すべての日付言及の時間軸が揃う
+  const DOW_LABEL = ["日","月","火","水","木","金","土"];
+  const todayMidnight = new Date(today + "T00:00:00");
+  const dateLabel = (dateStr) => {
+    const s = String(dateStr || "").substring(0, 10);
+    const d = new Date(s + "T00:00:00");
+    if (isNaN(d)) return dateStr;
+    const diff = Math.round((d - todayMidnight) / 86400000);
+    let rel;
+    if (diff === 0) rel = "今日";
+    else if (diff === -1) rel = "昨日";
+    else if (diff === -2) rel = "一昨日";
+    else if (diff < 0) rel = (-diff) + "日前";
+    else if (diff === 1) rel = "明日";
+    else if (diff === 2) rel = "明後日";
+    else rel = diff + "日後";
+    return s + "（" + DOW_LABEL[d.getDay()] + "・" + rel + "）";
+  };
+
   // 直近14日の生ログ
   const fourteenDaysAgo = formatDate(new Date(Date.now() - 14 * 86400000));
   const allLogs = preloaded && preloaded.logs
@@ -3815,7 +3836,7 @@ function buildStudentContext(studentEmail, user, preloaded) {
       const entries = dayLogs
         .sort((a,b) => a.time_block > b.time_block ? 1 : -1)
         .map(l => l.time_block + " " + l.task + "（" + l.focus_level + (l.goal_related === "true" ? "・目標関連" : "") + (l.memo ? "・" + l.memo : "") + "）");
-      return date + ":\n  " + entries.join("\n  ");
+      return dateLabel(date) + ":\n  " + entries.join("\n  ");
     })
     .join("\n") || "記録なし";
 
@@ -3836,9 +3857,9 @@ function buildStudentContext(studentEmail, user, preloaded) {
   ).sort((a,b) => b.date > a.date ? 1 : -1);
   const recentReports = allReports.filter(r => r.date >= thirtyDaysAgo);
   const reportsText = recentReports.length > 0
-    ? recentReports.map(r => `${r.date}: ${r.score}点 / 良：${r.highlights} / 改善：${r.improvement}`).join("\n")
+    ? recentReports.map(r => `${dateLabel(r.date)}: ${r.score}点 / 良：${r.highlights} / 改善：${r.improvement}`).join("\n")
     : allReports.length > 0
-      ? allReports.slice(0,7).map(r => `${r.date}: ${r.score}点 / 良：${r.highlights} / 改善：${r.improvement}`).join("\n")
+      ? allReports.slice(0,7).map(r => `${dateLabel(r.date)}: ${r.score}点 / 良：${r.highlights} / 改善：${r.improvement}`).join("\n")
       : "まだレポートなし";
 
   // 全期間スコアトレンド
@@ -3897,7 +3918,7 @@ function buildStudentContext(studentEmail, user, preloaded) {
     ).sort((a,b)=>b.date>a.date?1:-1).slice(0, 3);
     if (coachingNotes.length > 0) {
       coachingText = coachingNotes.map(n =>
-        `【${n.date}】${n.content}` +
+        `【${dateLabel(n.date)}】${n.content}` +
         (n.promises ? `\n  約束事項: ${n.promises}` : "") +
         (n.next_theme ? `\n  次回テーマ: ${n.next_theme}` : "")
       ).join("\n");
@@ -3913,7 +3934,12 @@ function buildStudentContext(studentEmail, user, preloaded) {
       : sheetToObjects(getChatworkMessagesSheet()).filter(m => m.student_email === studentEmail)
     ).sort((a,b)=>b.send_time>a.send_time?1:-1).slice(0, 15).reverse();
     if (messages.length > 0) {
-      chatworkText = messages.map(m => `${m.send_time} ${m.sender_name}: ${m.body}`).join("\n");
+      // send_time（"YYYY-MM-DD HH:mm"等）の日付部分に相対ラベルを付け、時刻は残す
+      chatworkText = messages.map(m => {
+        const st = String(m.send_time || "");
+        const timePart = st.length > 10 ? st.substring(10).trim() : "";
+        return `${dateLabel(st)}${timePart ? " " + timePart : ""} ${m.sender_name}: ${m.body}`;
+      }).join("\n");
     }
   } catch (e) { /* シート未作成なら無視 */ }
 
@@ -3941,7 +3967,7 @@ function buildStudentContext(studentEmail, user, preloaded) {
 
   return `【本日の日付】${today}（${todayDow}曜日）
 【明日の日付】${tomorrow}（${tomorrowDow}曜日）
-※「今日」「明日」に言及する時は、必ず上の実際の日付・曜日に基づくこと。相対的な日付を推測で書かない。カレンダー予定は下の日付ラベルどおりに扱い、今日の予定を「明日」と書くような取り違えをしない
+※日付の扱いは厳守：この文脈内のログ・レポート・面談記録・カレンダー予定などの日付には全て「（曜日・今日/昨日/N日前/明日/N日後）」という相対ラベルが付いている。これは確定情報なので、「昨日」「先日」「この前」等の時間表現は必ずこのラベルどおりに書き、自分で日数を計算し直したり推測で書いたりしない。今日の予定を「明日」と書くような取り違えは禁止
 【生徒名】${user.name}
 【入会日】${user.joined_at || "不明"}
 【連続記録日数】${streak}日
