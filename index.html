@@ -1105,8 +1105,8 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
 
     ${showCommunity&&html`<${CommunityOverlay} onClose=${()=>setShowCommunity(false)}/>`}
 
-    <!-- 週次ふりかえり（今週のまとめ＋振り返り記入＋来週の一言）。未記入かつ未閉じの時だけ大きく出す -->
-    ${weekly && !weekly.reflected && !weekDismissed && html`
+    <!-- 週次ふりかえり（今週のまとめ＋振り返り記入＋来週の一言）。週末（土日）に、未記入かつ未閉じの時だけ大きく出す -->
+    ${weekly && !weekly.reflected && !weekDismissed && [0,6].includes(new Date().getDay()) && html`
       <div style=${{margin:"16px 16px 0",background:"var(--card)",borderRadius:16,border:"1.5px solid var(--accent)",overflow:"hidden"}}>
         <div style=${{background:"linear-gradient(135deg, var(--hero1) 0%, var(--hero2) 100%)",padding:"16px 18px"}}>
           <div style=${{fontSize:11,fontWeight:700,color:"rgba(255,255,255,0.75)",letterSpacing:"0.08em",marginBottom:3}}>WEEKLY REVIEW</div>

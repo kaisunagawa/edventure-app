@@ -4331,10 +4331,13 @@ function getWeeklySummarySheet() {
 }
 
 function generateWeeklySummaries() {
-  // 直前に終わった月〜日の週を対象にする（今日が月曜日の朝に実行される想定）
+  // 週末（土曜の朝）に、今週の月〜金を対象に生成する。生徒は土日にふりかえって
+  // 来週の一言を書く、という週末の儀式にするため。曜日に依存せず今週の月曜を起点に計算
   const now = new Date();
-  const weekEnd = addDaysToDate(now, -1);       // 昨日（日曜）
-  const weekStart = addDaysToDate(now, -7);     // 先週の月曜
+  const dow = now.getDay();                     // 日=0, 月=1, ... 土=6
+  const mondayOffset = (dow === 0) ? -6 : (1 - dow); // 今週の月曜までの日数
+  const weekStart = addDaysToDate(now, mondayOffset);   // 今週の月曜
+  const weekEnd = addDaysToDate(now, -1);       // 昨日（土曜実行なら金曜まで）
   const weekStartStr = formatDate(weekStart);
   const weekEndStr = formatDate(weekEnd);
 
@@ -5680,7 +5683,7 @@ function setupTriggers() {
   ScriptApp.newTrigger("generateMonthlyReviews").timeBased().onMonthDay(1).atHour(8).create();
   ScriptApp.newTrigger("generateAllInsights").timeBased().onMonthDay(1).atHour(5).create();
   ScriptApp.newTrigger("generateAllTimeThemes").timeBased().onMonthDay(1).atHour(6).create();
-  ScriptApp.newTrigger("generateWeeklySummaries").timeBased().everyWeeks(1).onWeekDay(ScriptApp.WeekDay.MONDAY).atHour(8).create();
+  ScriptApp.newTrigger("generateWeeklySummaries").timeBased().everyWeeks(1).onWeekDay(ScriptApp.WeekDay.SATURDAY).atHour(8).create();
   ScriptApp.newTrigger("checkTimerQueue").timeBased().everyMinutes(1).create();
   ScriptApp.newTrigger("hourlyReminder").timeBased().everyHours(1).create();
   ScriptApp.newTrigger("syncStripeTotals").timeBased().everyDays(1).atHour(4).create();
