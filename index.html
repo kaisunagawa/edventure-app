@@ -2135,13 +2135,18 @@ function SecondBrainScreen({isActive}){
       <div class="card">
         <div class="card-label" style=${{marginBottom:2}}>📚 あなたの気づき集</div>
         <div style=${{fontSize:11.5,color:"var(--sub)",marginBottom:12,lineHeight:1.6}}>${insights?`記録から見つけた${insights.items.length}個のパターン（強み・注意点）`:"記録が溜まると、あなたの傾向や繰り返しの学びをAIが蒸留します。"}</div>
-        ${insights&&insights.items.map((it,i)=>html`
-          <div key=${i} style=${{padding:"12px 13px",borderRadius:10,background:"var(--bg)",marginBottom:8,borderLeft:`3px solid ${it.type==="caution"?"var(--amber)":"var(--green)"}`}}>
-            <div style=${{fontSize:14,fontWeight:700,color:"var(--text)",marginBottom:4}}>${it.type==="caution"?"⚠️":"💪"} ${it.title}</div>
-            <div style=${{fontSize:12.5,color:"var(--text)",lineHeight:1.8}}>${it.detail}</div>
-            ${it.evidence&&html`<div style=${{fontSize:11,color:"var(--sub)",marginTop:6,lineHeight:1.6}}>📎 ${it.evidence}</div>`}
-          </div>
-        `)}
+        ${insights&&insights.items.map((it,i)=>{
+          const isCaution=it.type==="caution";
+          const tagColor=isCaution?"#A98446":"#5F8A76"; // くすんだオーカー／セージグリーン（控えめ）
+          return html`
+            <div key=${i} style=${{padding:"12px 14px",borderRadius:10,background:"var(--bg)",border:"1px solid var(--border)",marginBottom:8}}>
+              <div style=${{fontSize:10.5,fontWeight:700,color:tagColor,letterSpacing:"0.04em",marginBottom:4}}>${isCaution?"気をつけたい癖":"強み"}</div>
+              <div style=${{fontSize:14,fontWeight:700,color:"var(--text)",marginBottom:4}}>${it.title}</div>
+              <div style=${{fontSize:12.5,color:"var(--text)",lineHeight:1.8}}>${it.detail}</div>
+              ${it.evidence&&html`<div style=${{fontSize:11,color:"var(--sub)",marginTop:6,lineHeight:1.6}}>${it.evidence}</div>`}
+            </div>
+          `;
+        })}
         ${insightsError&&html`<div style=${{fontSize:12.5,color:"var(--red)",lineHeight:1.6,marginBottom:8}}>${insightsError}</div>`}
         <div style=${{display:"flex",alignItems:"center",gap:10,marginTop:6}}>
           <button onClick=${refreshInsights} disabled=${insightsLoading}
