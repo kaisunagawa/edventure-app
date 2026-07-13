@@ -82,6 +82,7 @@ function doGet(e) {
       case "coachSetShowInCommunity": result = coachSetShowInCommunity(e.parameter.coachEmail, e.parameter); break;
       case "adminBackfillReportReasons": result = adminBackfillReportReasons(e.parameter.coachEmail); break;
       case "adminRunNightlyReport": result = adminRunNightlyReport(e.parameter.coachEmail); break;
+      case "adminBackfillReportsForDate": result = adminBackfillReportsForDate(e.parameter.coachEmail, e.parameter.date); break;
       case "adminRunNightlyCoachMessage": result = adminRunNightlyCoachMessage(e.parameter.coachEmail); break;
       case "adminBroadcastLine": result = adminBroadcastLine(e.parameter.coachEmail, e.parameter.message, e.parameter.confirm); break;
       case "adminDiagnosePush": result = adminDiagnosePush(e.parameter.coachEmail, e.parameter.targetEmail); break;
@@ -2791,33 +2792,62 @@ function nightlyTargetDate() {
   return formatDate(now);
 }
 
+// 生徒1人ずつ順にAI呼び出し→保存するため、生徒数が増えるとGASの実行時間上限
+// （6分）に達して途中で強制終了することがある。この場合エラーとしても記録されず、
+// シートの後ろの方にいる生徒ほどレポートが生成されないまま無言で欠落していた
+// （2026-07-13に発覚・修正）。対策として経過時間を監視し、上限に近づいたら
+// 「どこまで処理したか」をスクリプトプロパティに保存して安全に中断、
+// 1分後に自動再開するトリガーを1回だけ作る（この続き実行トリガーは発火後に自動削除される）
+const NIGHTLY_REPORT_TIME_BUDGET_MS = 5 * 60 * 1000; // GAS上限6分に対して5分で切り上げる
+
 function nightlyReport() {
   const today = nightlyTargetDate();
   const isSameDay = today === formatDate(new Date());
-  sheetToObjects(getSheet("Users")).filter(u => u.is_active.toUpperCase() === "TRUE").forEach(user => {
+  const startedAt = Date.now();
+
+  const props = PropertiesService.getScriptProperties();
+  const resumeDate = props.getProperty("NIGHTLY_REPORT_RESUME_DATE");
+  const startIndex = (resumeDate === today) ? Number(props.getProperty("NIGHTLY_REPORT_RESUME_INDEX") || 0) : 0;
+
+  const users = sheetToObjects(getSheet("Users")).filter(u => u.is_active.toUpperCase() === "TRUE");
+
+  for (let i = startIndex; i < users.length; i++) {
+    if (Date.now() - startedAt > NIGHTLY_REPORT_TIME_BUDGET_MS) {
+      // 時間切れ: 続きから再開できるよう位置を保存し、1分後に自分自身を再実行するトリガーを張る
+      props.setProperty("NIGHTLY_REPORT_RESUME_DATE", today);
+      props.setProperty("NIGHTLY_REPORT_RESUME_INDEX", String(i));
+      ScriptApp.newTrigger("nightlyReport").timeBased().after(60 * 1000).create();
+      Logger.log("nightlyReport: 時間切れのため" + i + "人目から中断・1分後に再開します（全" + users.length + "人）");
+      return;
+    }
+    const user = users[i];
     try {
       const logs = getLogs(user.student_email, { date: today }).data;
 
       // ログなし → XP減少・ストリークリセット
       if (logs.length === 0) {
         applyXPDecay(user.student_email, today);
-        return;
+        continue;
       }
 
       // 既存レポートがあればスキップ（重複防止）
       const existing = sheetToObjects(getSheet("Reports")).find(r => r.student_email === user.student_email && r.date === today);
-      if (existing) { Logger.log(user.student_email + ": 本日のレポートは既に存在します"); return; }
+      if (existing) { Logger.log(user.student_email + ": 本日のレポートは既に存在します"); continue; }
 
       // 日付を跨いだ後の実行では、updateStreakが「翌日」を記録日として
       // 誤登録してしまうためスキップする（記録保存時にも更新されているので実害はない）
       if (isSameDay) updateStreak(user.student_email);
       const report = generateReportWithClaude(user.student_email, user.name, logs);
-      if (!report) return;
+      if (!report) continue;
       appendReportRow(today, user.student_email, report);
       sendReportLineMessage(user, report);
       notifyCoachOnReport(user, report);
     } catch (err) { Logger.log(err); }
-  });
+  }
+
+  // 全員処理完了。再開用の状態が残っていればクリアする
+  props.deleteProperty("NIGHTLY_REPORT_RESUME_DATE");
+  props.deleteProperty("NIGHTLY_REPORT_RESUME_INDEX");
 }
 
 function sendReportLineMessage(user, report) {
@@ -2857,6 +2887,32 @@ function adminRunNightlyReport(email) {
     }
   });
   return { ok: true, targetDate: targetDate, results: results };
+}
+
+// 特定の日付でレポート欠落を補完する管理用エンドポイント。nightlyReportの
+// GAS実行時間切れで生成されなかった過去分をまとめて埋めるために使う
+// （2026-07-13の欠落発覚時に追加。既存レポート・ログなしはスキップするので何度呼んでも安全）
+function adminBackfillReportsForDate(email, date) {
+  if (!verifyAdmin(email)) return { ok: false, error: "not admin" };
+  if (!date) return { ok: false, error: "missing date" };
+  const results = [];
+  sheetToObjects(getSheet("Users")).filter(u => u.is_active.toUpperCase() === "TRUE").forEach(user => {
+    try {
+      const logs = getLogs(user.student_email, { date: date }).data;
+      if (logs.length === 0) { results.push({ email: user.student_email, status: "no-logs" }); return; }
+      const existing = sheetToObjects(getSheet("Reports")).find(r => r.student_email === user.student_email && r.date === date);
+      if (existing) { results.push({ email: user.student_email, status: "already-exists" }); return; }
+      const report = generateReportWithClaude(user.student_email, user.name, logs);
+      if (!report) { results.push({ email: user.student_email, status: "ai-failed", reason: REPORT_GEN_LAST_ERROR }); return; }
+      appendReportRow(date, user.student_email, report);
+      // 補完実行なので、過去分のLINE通知は本人に再送しない（コーチ通知もしない）。
+      // レポート自体（ランキング・レポート画面）だけを埋める
+      results.push({ email: user.student_email, status: "sent", score: report.score });
+    } catch (err) {
+      results.push({ email: user.student_email, status: "error", error: String(err) });
+    }
+  });
+  return { ok: true, targetDate: date, results: results };
 }
 
 function adminRunNightlyCoachMessage(email) {
