@@ -3247,6 +3247,22 @@ function SettingsScreen({onToast,onLogout,onGoalSaved,profile,onProfileSaved,onC
   // 設定をグループに区切る小見出し（アカウント / 目標と記録 / 連携 / データ / 情報）
   const GroupLabel = (t) => html`<div style=${{fontSize:11,fontWeight:700,color:"var(--sub)",letterSpacing:"0.06em",margin:"6px 4px 10px"}}>${t}</div>`;
 
+  // 折りたたみ式セクション。項目名だけ並べ、タップした所だけ開く（設定が長いため見やすく）。
+  // 一度に1つだけ開くアコーディオン。sub に「連携済み」等の状態を右に小さく出せる
+  const [openSec,setOpenSec]=useState("");
+  const Sec = ({k, icon, title, sub, children}) => html`
+    <div class="card" style=${{padding:0,marginBottom:10,overflow:"hidden"}}>
+      <button onClick=${()=>setOpenSec(openSec===k?"":k)}
+        style=${{display:"flex",alignItems:"center",gap:10,width:"100%",background:"none",border:"none",padding:"15px 16px",cursor:"pointer",fontFamily:"inherit",textAlign:"left"}}>
+        <span style=${{fontSize:16,flexShrink:0}}>${icon}</span>
+        <span style=${{fontSize:14,fontWeight:700,color:"var(--text)",flex:1}}>${title}</span>
+        ${sub&&html`<span style=${{fontSize:11.5,color:"var(--sub)",flexShrink:0}}>${sub}</span>`}
+        <span style=${{fontSize:13,color:"var(--sub)",flexShrink:0,transform:openSec===k?"rotate(180deg)":"none",transition:"transform .15s"}}>▾</span>
+      </button>
+      ${openSec===k&&html`<div style=${{padding:"0 16px 18px"}}>${children}</div>`}
+    </div>
+  `;
+
   return html`<div style=${{paddingBottom:48}}>
 
     <!-- Hero -->
@@ -3270,8 +3286,7 @@ function SettingsScreen({onToast,onLogout,onGoalSaved,profile,onProfileSaved,onC
 
       ${GroupLabel("アカウント")}
       <!-- プロフィール -->
-      <div style=${{background:"var(--card)",borderRadius:16,border:"1px solid var(--border)",padding:"18px",marginBottom:12}}>
-        <${SectionHeader} icon="🙂" title="プロフィール"/>
+      <${Sec} k="profile" icon="🙂" title="プロフィール">
         <label class="form-lbl" style=${{fontSize:11}}>ニックネーム（他の人に表示される名前）</label>
         <input class="inp" value=${nickname} maxLength=${20} onChange=${e=>setNickname(e.target.value)} style=${{marginBottom:14}}/>
         <div class="form-lbl" style=${{fontSize:11,marginBottom:8}}>アバター</div>
@@ -3291,12 +3306,11 @@ function SettingsScreen({onToast,onLogout,onGoalSaved,profile,onProfileSaved,onC
         `}
         ${showAllAvatars&&html`<div style=${{marginBottom:14}}/>`}
         <button class="btn" onClick=${saveProfile}>保存する</button>
-      </div>
+      <//>
 
       ${GroupLabel("目標と記録")}
       <!-- 目標 -->
-      <div style=${{background:"var(--card)",borderRadius:16,border:"1px solid var(--border)",padding:"18px",marginBottom:12}}>
-        <${SectionHeader} icon="🎯" title="目標・期限"/>
+      <${Sec} k="goals" icon="🎯" title="目標・期限">
         ${goals.map((g,i)=>html`
           <div key=${i} style=${{background:"var(--bg)",borderRadius:12,padding:"14px",marginBottom:10,border:"1px solid var(--border)"}}>
             <div style=${{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
@@ -3320,11 +3334,10 @@ function SettingsScreen({onToast,onLogout,onGoalSaved,profile,onProfileSaved,onC
           </button>
         `}
         <button class="btn" onClick=${saveGoal}>保存する</button>
-      </div>
+      <//>
 
       <!-- タイマー -->
-      <div style=${{background:"var(--card)",borderRadius:16,border:"1px solid var(--border)",padding:"18px",marginBottom:12}}>
-        <${SectionHeader} icon="⏱" title="タイマー設定"/>
+      <${Sec} k="timer" icon="⏱" title="タイマー設定">
         <div style=${{fontSize:12,color:"var(--sub)",marginBottom:10,fontWeight:500}}>集中時間プリセット（最大3つ）</div>
         <div style=${{display:"flex",flexWrap:"wrap",gap:8,marginBottom:18}}>
           ${PRESET_OPTIONS.map(min=>html`
@@ -3368,11 +3381,10 @@ function SettingsScreen({onToast,onLogout,onGoalSaved,profile,onProfileSaved,onC
           `)}
         </div>
         <button class="btn" onClick=${saveTimerSettings}>保存する</button>
-      </div>
+      <//>
 
       <!-- 時間帯と通知（記録画面の表示範囲とLINE通知が連動） -->
-      <div style=${{background:"var(--card)",borderRadius:16,border:"1px solid var(--border)",padding:"18px",marginBottom:12}}>
-        <${SectionHeader} icon="🕐" title="時間帯と通知"/>
+      <${Sec} k="notif" icon="🕐" title="時間帯と通知">
         <div style=${{fontSize:12,color:"var(--sub)",marginBottom:14,lineHeight:1.6}}>記録する時間帯です。記録画面の表示とLINEリマインダーの両方に反映されます</div>
         <div style=${{display:"flex",alignItems:"center",gap:10,marginBottom:16}}>
           <div style=${{flex:1}}>
@@ -3419,13 +3431,12 @@ function SettingsScreen({onToast,onLogout,onGoalSaved,profile,onProfileSaved,onC
           ${interval===1?"毎時間リマインドが届きます":interval===24?"1日の開始時間に1回届きます":`${interval}時間ごとにリマインドが届きます`}（22時以降はレポートのみ）
         </div>
         <button class="btn" onClick=${saveTimeSettings}>保存する</button>
-      </div>
+      <//>
 
       ${GroupLabel("連携")}
 
       <!-- カレンダー -->
-      <div style=${{background:"var(--card)",borderRadius:16,border:"1px solid var(--border)",padding:"18px",marginBottom:12}}>
-        <${SectionHeader} icon="📅" title="Googleカレンダー連携"/>
+      <${Sec} k="calendar" icon="📅" title="Googleカレンダー連携" sub=${calLinked?"連携済み":""}>
         <p style=${{fontSize:13,color:"var(--sub)",lineHeight:1.7,marginBottom:14}}>${calLinked?"連携済みです。ホームに今日の予定が表示され、記録の「何をしましたか？」に予定が自動入力されます。":"連携すると、ホームに今日の予定が表示され、記録の「何をしましたか？」にカレンダーの予定が自動で入ります。記録の手間が大幅に減ります。"}</p>
         ${calLinked
           ? html`<div>
@@ -3463,11 +3474,10 @@ function SettingsScreen({onToast,onLogout,onGoalSaved,profile,onProfileSaved,onC
             </div>`
           : html`<button class="btn" onClick=${linkCalendar} disabled=${calLoading}>${calLoading?"連携中...":"Googleカレンダーを連携する"}</button>`
         }
-      </div>
+      <//>
 
       <!-- プッシュ通知 -->
-      <div style=${{background:"var(--card)",borderRadius:16,border:"1px solid var(--border)",padding:"18px",marginBottom:12}}>
-        <${SectionHeader} icon="🔔" title="プッシュ通知"/>
+      <${Sec} k="push" icon="🔔" title="プッシュ通知" sub=${pushEnabled?"有効":""}>
         <p style=${{fontSize:13,color:"var(--sub)",lineHeight:1.7,marginBottom:14}}>${pushEnabled?"有効になっています。アプリを閉じていたり画面がロックされていても、タイマー終了・記録リマインダーなどの通知が届きます。":"タイマーの音はアプリを開いている間しか鳴りません。有効にすると、アプリを閉じていてもタイマー終了・記録リマインダーなどの通知が端末に届きます。"}</p>
         ${pushEnabled
           ? html`<div style=${{display:"flex",alignItems:"center",gap:8,color:"var(--accent)",fontWeight:700,fontSize:14,padding:"10px 14px",background:"var(--accent-l)",borderRadius:10}}>
@@ -3475,23 +3485,21 @@ function SettingsScreen({onToast,onLogout,onGoalSaved,profile,onProfileSaved,onC
             </div>`
           : html`<button class="btn" onClick=${enablePush} disabled=${pushLoading}>${pushLoading?"設定中...":"プッシュ通知を有効にする"}</button>`
         }
-      </div>
+      <//>
 
       ${GroupLabel("データ")}
       <!-- データの書き出し -->
-      <div style=${{background:"var(--card)",borderRadius:16,border:"1px solid var(--border)",padding:"18px",marginBottom:12}}>
-        <${SectionHeader} icon="📤" title="データの書き出し"/>
+      <${Sec} k="export" icon="📤" title="データの書き出し">
         <div style=${{fontSize:12,color:"var(--sub)",marginBottom:14,lineHeight:1.6}}>あなたの記録・日記はあなたのものです。いつでも自分の端末に書き出せます（Markdown / CSV）。</div>
         <div style=${{display:"flex",gap:8}}>
           <button class="btn" style=${{flex:1,opacity:exporting?0.6:1}} disabled=${!!exporting} onClick=${()=>exportData("markdown")}>${exporting==="markdown"?"書き出し中…":"Markdownで書き出す"}</button>
           <button style=${{flex:1,background:"none",border:"1px solid var(--border)",borderRadius:8,padding:"0 12px",fontSize:14,fontWeight:600,color:"var(--text)",cursor:"pointer",fontFamily:"inherit",opacity:exporting?0.6:1}} disabled=${!!exporting} onClick=${()=>exportData("csv")}>${exporting==="csv"?"書き出し中…":"CSVで書き出す"}</button>
         </div>
-      </div>
+      <//>
 
       ${GroupLabel("情報・ヘルプ")}
       <!-- 階級システム -->
-      <div style=${{background:"var(--card)",borderRadius:16,border:"1px solid var(--border)",padding:"18px",marginBottom:12}}>
-        <${SectionHeader} icon="🏆" title="階級システム"/>
+      <${Sec} k="rank" icon="🏆" title="階級システム">
         <div style=${{display:"flex",gap:8,marginBottom:14}}>
           <div style=${{flex:1,background:"var(--bg)",borderRadius:10,padding:"12px",fontSize:12,lineHeight:1.8,color:"var(--sub)"}}>
             <div style=${{fontWeight:700,color:"var(--text)",marginBottom:4,fontSize:13}}>XPの貯め方</div>
@@ -3518,7 +3526,7 @@ function SettingsScreen({onToast,onLogout,onGoalSaved,profile,onProfileSaved,onC
             </div>
           `)}
         </div>
-      </div>
+      <//>
 
       <!-- 使い方 Q&A -->
       <${FAQSection}/>
