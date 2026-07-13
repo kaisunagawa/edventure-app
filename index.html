@@ -2009,6 +2009,21 @@ function ReportScreen() {
   const [weeklySummary, setWeeklySummary]=useState(null);
   const [monthlyReview, setMonthlyReview]=useState(null);
   const [timeUse, setTimeUse]=useState(null);
+  // 過去の自分に問いかける（セカンドブレイン）
+  const [askQ, setAskQ]=useState("");
+  const [askLoading, setAskLoading]=useState(false);
+  const [askResult, setAskResult]=useState(null);
+  const [askError, setAskError]=useState("");
+  const ASK_SUGGESTIONS=["最近つまずいていることは何？","集中できているのはどんな時？","自分の成長を感じるところは？","繰り返している悪い癖はある？"];
+  const runAsk=async(q)=>{
+    const question=(q||askQ).trim();
+    if(!question||askLoading) return;
+    setAskLoading(true); setAskError(""); setAskResult(null); setAskQ(question);
+    const r=await gasPostJson("askMyPast",{question});
+    setAskLoading(false);
+    if(r.ok) setAskResult(r.data);
+    else setAskError(r.error||"うまく答えられませんでした");
+  };
   const [showWeekly, setShowWeekly]=useState(false);
   const [showMonthly, setShowMonthly]=useState(false);
 
@@ -2050,6 +2065,47 @@ function ReportScreen() {
             <div class="empty-body">記録を入力すると<br/>毎晩22時にAIがレポートを生成します</div>
           </div>`
         : html`<div>
+            <!-- 過去の自分に問いかける（セカンドブレイン）: 蓄積した記録からAIが答える -->
+            <div class="card" style=${{marginBottom:8,border:"1.5px solid var(--accent)"}}>
+              <div class="card-label" style=${{marginBottom:2}}>🧠 過去の自分に聞く</div>
+              <div style=${{fontSize:11.5,color:"var(--sub)",marginBottom:10,lineHeight:1.6}}>これまでの記録・日記をもとに、AIがあなた自身の言葉を引用して答えます。</div>
+              <div style=${{display:"flex",gap:8,marginBottom:10}}>
+                <input class="inp" placeholder="例：集中できているのはどんな時？" value=${askQ}
+                  onInput=${e=>setAskQ(e.target.value)} onKeyDown=${e=>{if(e.key==="Enter")runAsk();}} style=${{flex:1}}/>
+                <button class="btn" style=${{width:"auto",flexShrink:0,padding:"0 16px",opacity:askLoading||!askQ.trim()?0.5:1}}
+                  disabled=${askLoading||!askQ.trim()} onClick=${()=>runAsk()}>${askLoading?"…":"聞く"}</button>
+              </div>
+              ${!askResult&&!askLoading&&html`
+                <div style=${{display:"flex",flexWrap:"wrap",gap:6}}>
+                  ${ASK_SUGGESTIONS.map((s,i)=>html`
+                    <button key=${i} onClick=${()=>runAsk(s)}
+                      style=${{padding:"5px 10px",borderRadius:20,border:"1.5px solid var(--border)",background:"transparent",color:"var(--sub)",fontSize:11.5,fontWeight:500,cursor:"pointer",fontFamily:"inherit"}}>${s}</button>
+                  `)}
+                </div>
+              `}
+              ${askLoading&&html`<div style=${{display:"flex",alignItems:"center",gap:10,padding:"6px 0",color:"var(--sub)",fontSize:12.5}}><div class="spin" style=${{borderColor:"var(--border)",borderTopColor:"var(--accent)",width:16,height:16,borderWidth:2}}/>過去の記録を読み返しています…</div>`}
+              ${askError&&html`<div style=${{fontSize:12.5,color:"var(--red)",lineHeight:1.6}}>${askError}</div>`}
+              ${askResult&&html`
+                <div style=${{marginTop:4}}>
+                  <div style=${{fontSize:13.5,lineHeight:1.9,color:"var(--text)",whiteSpace:"pre-line"}}>${askResult.answer}</div>
+                  ${askResult.evidence&&askResult.evidence.length>0&&html`
+                    <div style=${{marginTop:10,paddingTop:10,borderTop:"1px solid var(--border)"}}>
+                      <div style=${{fontSize:11,fontWeight:700,color:"var(--sub)",marginBottom:6}}>根拠にした記録</div>
+                      ${askResult.evidence.map((e,i)=>html`
+                        <div key=${i} style=${{fontSize:12,color:"var(--sub)",lineHeight:1.6,marginBottom:5}}>
+                          <span style=${{color:"var(--accent)",fontWeight:600}}>${e.date}</span> 「${e.quote}」
+                        </div>
+                      `)}
+                    </div>
+                  `}
+                  ${askResult.insight&&html`
+                    <div style=${{marginTop:10,background:"var(--accent-l)",color:"var(--accent)",borderRadius:10,padding:"10px 12px",fontSize:12.5,fontWeight:600,lineHeight:1.6}}>💡 ${askResult.insight}</div>
+                  `}
+                  <button onClick=${()=>{setAskResult(null);setAskQ("");}}
+                    style=${{marginTop:10,background:"none",border:"none",color:"var(--sub)",fontSize:12,cursor:"pointer",fontFamily:"inherit",padding:0,textDecoration:"underline"}}>別のことを聞く</button>
+                </div>
+              `}
+            </div>
             ${weeklySummary&&html`
               <div class="card" style=${{marginBottom:8}}>
                 <button onClick=${()=>setShowWeekly(!showWeekly)}

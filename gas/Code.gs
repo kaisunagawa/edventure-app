@@ -98,6 +98,7 @@ function doGet(e) {
       case "getDiary":     result = getDiary(studentEmail, e.parameter); break;
       case "saveDiary":    result = saveDiary(studentEmail, e.parameter); break;
       case "getWeeklySummary": result = getWeeklySummary(studentEmail); break;
+      case "askMyPast":    result = askMyPast(studentEmail, e.parameter); break;
       case "getMonthlyReview": result = getMonthlyReview(studentEmail); break;
       case "saveIntent":   result = saveIntent(studentEmail, e.parameter); break;
       case "getIntent":    result = getIntent(studentEmail); break;
@@ -186,6 +187,7 @@ function doPost(e) {
       case "saveSettings": return jsonResponse(saveSettings(studentEmail, body));
       case "saveDiary":    return jsonResponse(saveDiary(studentEmail, body));
       case "saveIntent":   return jsonResponse(saveIntent(studentEmail, body));
+      case "askMyPast":    return jsonResponse(askMyPast(studentEmail, body));
       case "saveContentProfile": return jsonResponse(saveContentProfile(studentEmail, body));
       case "snsSaveAccount": return jsonResponse(snsSaveAccount(studentEmail, body));
       case "snsSaveMetrics": return jsonResponse(snsSaveMetrics(studentEmail, body));
@@ -4469,6 +4471,92 @@ function getMonthlyReview(studentEmail) {
     goalRelatedPct: Number(r.goal_related_pct) || 0,
     avgScore: r.avg_score !== "" ? Number(r.avg_score) : null
   } };
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// 過去の自分に問いかける（セカンドブレイン機能）
+// 蓄積された記録メモ・日記・レポートから、本人の問いにAIが本人の言葉を引用して答える。
+// Obsidian等の受け身な知識庫と違い、JIROKUは能動的に過去を検索して洞察を返せるのが強み
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+function askMyPast(studentEmail, body) {
+  const apiKey = PropertiesService.getScriptProperties().getProperty("CLAUDE_API_KEY");
+  if (!apiKey) return { ok: false, error: "CLAUDE_API_KEY未設定" };
+  const question = String(body.question || "").trim();
+  if (!question) return { ok: false, error: "質問を入力してください" };
+
+  // 全期間のメモ付きログ＋日記を素材にする（記録が膨大な人向けに直近180日を上限）
+  const cutoff = formatDate(new Date(Date.now() - 180 * 86400000));
+  const user = sheetToObjects(getSheet("Users")).find(u => u.student_email === studentEmail);
+  const name = user ? user.name : "あなた";
+
+  const logs = getFilteredRows("DailyLog", "student_email", studentEmail)
+    .filter(l => l.date >= cutoff && l.memo && l.memo.trim())
+    .sort((a, b) => a.date > b.date ? 1 : -1);
+  const journalRows = getSheet("Journal")
+    ? sheetToObjects(getJournalSheet()).filter(r => {
+        const rd = r.date instanceof Date ? formatDate(r.date) : String(r.date);
+        return r.student_email === studentEmail && rd >= cutoff && r.diary && r.diary.trim();
+      }).sort((a, b) => {
+        const ad = a.date instanceof Date ? formatDate(a.date) : String(a.date);
+        const bd = b.date instanceof Date ? formatDate(b.date) : String(b.date);
+        return ad > bd ? 1 : -1;
+      })
+    : [];
+
+  if (logs.length === 0 && journalRows.length === 0) {
+    return { ok: false, error: "まだ振り返りの材料になる記録がありません。メモ付きで記録を続けると、過去の自分に問いかけられるようになります" };
+  }
+
+  const logsText = logs.map(l => l.date + " " + l.time_block + " " + l.task + "：" + l.memo).join("\n");
+  const diaryText = journalRows.map(r => {
+    const rd = r.date instanceof Date ? formatDate(r.date) : String(r.date);
+    return rd + "：" + r.diary;
+  }).join("\n");
+
+  // 素材が長くなりすぎる場合に備え、プロンプト全体をトークン上限内に収める（末尾＝古い方から間引かず、新しい方を優先して残す）
+  let material = "【時間の記録メモ（時系列）】\n" + (logsText || "なし") + "\n\n【日記】\n" + (diaryText || "なし");
+  if (material.length > 24000) material = material.slice(material.length - 24000);
+
+  const prompt = `あなたは${name}さん専用のパーソナルコーチAIです。${name}さんが自分自身の過去の記録に問いかけてきました。以下は${name}さんがこれまでJIROKUに書き溜めてきた実際の記録・日記です（すべて本人の言葉）。
+
+${material}
+
+【質問】
+${question}
+
+【回答の作り方】
+- 上の記録の中から根拠になる箇所を必ず具体的に引用する（日付と本人の言葉をそのまま使う）。記録にないことは推測で断定しない
+- 単なる要約ではなく、パターン・傾向・変化・繰り返している気づきを見つけて示す（例：「〇〇な時にうまくいっている」「△△の前はいつも□□になりがち」）
+- 最後に、その気づきを踏まえた前向きな一言か、試す価値のある小さな提案を添える
+- 親しみのある話し言葉で、3〜6文程度。宛名・挨拶は不要
+
+以下のJSON形式のみで返してください（説明文不要）:
+{
+  "answer": "<本人の記録を引用しながらの回答（話し言葉）>",
+  "evidence": [ { "date": "<YYYY-MM-DD>", "quote": "<引用した本人の言葉（要約可）>" } ],
+  "insight": "<この問いから見えた、本人が意識するとよい一番のポイントを1文で>"
+}
+evidenceは根拠にした記録を1〜4件。`;
+
+  const res = UrlFetchApp.fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
+    // 本人の人生データを扱う中核体験なので、他機能のHaikuより上位のSonnetを使う
+    payload: JSON.stringify({ model: "claude-sonnet-5", max_tokens: 1500, messages: [{ role: "user", content: prompt }] }),
+    muteHttpExceptions: true
+  });
+  const result = JSON.parse(res.getContentText());
+  if (!result.content || !result.content[0]) return { ok: false, error: "APIエラー: " + res.getContentText().substring(0, 200) };
+  try {
+    const text = result.content[0].text.trim();
+    const m = text.match(/\{[\s\S]*\}/);
+    if (!m) return { ok: false, error: "回答の解析に失敗しました" };
+    const parsed = JSON.parse(m[0]);
+    return { ok: true, data: parsed, sourceCount: { logs: logs.length, diary: journalRows.length } };
+  } catch (e) {
+    return { ok: false, error: "回答の解析に失敗しました: " + e.toString() };
+  }
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
