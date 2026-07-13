@@ -3988,6 +3988,38 @@ function buildStudentContext(studentEmail, user, preloaded) {
     if (jRow && jRow.intent) intentText = jRow.intent + (String(jRow.intent_done) === "true" ? "（✅達成済み）" : "（まだ未達成）");
   } catch (e) { /* シート未作成なら無視 */ }
 
+  // セカンドブレインの蓄積（時間の使い道マップ・気づき集）をコーチの文脈に流し込む。
+  // これによりタブを開かない生徒にも、朝夜のメッセージ・レポートを通じて洞察が能動的に届く
+  let themesText = "未生成";
+  try {
+    if (getSheet("TimeThemes")) {
+      if (!globalThis.__timeThemesCache) globalThis.__timeThemesCache = sheetToObjects(getTimeThemesSheet());
+      const tRow = globalThis.__timeThemesCache.find(r => r.student_email === studentEmail);
+      if (tRow && tRow.themes_json) {
+        const pj = JSON.parse(tRow.themes_json);
+        const arr = Array.isArray(pj) ? pj : (pj.themes || []);
+        const sm = Array.isArray(pj) ? "" : (pj.summary || "");
+        if (arr.length) {
+          themesText = arr.map(function(t){ return t.name + " " + t.blocks + "時間帯"; }).join(" / ") + (sm ? "\n傾向: " + sm : "");
+        }
+      }
+    }
+  } catch (e) { /* 無視 */ }
+
+  let insightsText = "未生成";
+  try {
+    if (getSheet("Insights")) {
+      if (!globalThis.__insightsCache) globalThis.__insightsCache = sheetToObjects(getInsightsSheet());
+      const iRow = globalThis.__insightsCache.find(r => r.student_email === studentEmail);
+      if (iRow && iRow.insights_json) {
+        const items = JSON.parse(iRow.insights_json);
+        if (items.length) {
+          insightsText = items.map(function(it){ return (it.type === "caution" ? "【注意】" : "【強み】") + it.title + "：" + it.detail; }).join("\n");
+        }
+      }
+    }
+  } catch (e) { /* 無視 */ }
+
   return `【本日の日付】${today}（${todayDow}曜日）
 【明日の日付】${tomorrow}（${tomorrowDow}曜日）
 ※日付の扱いは厳守：この文脈内のログ・レポート・面談記録・カレンダー予定などの日付には全て「（曜日・今日/昨日/N日前/明日/N日後）」という相対ラベルが付いている。これは確定情報なので、「昨日」「先日」「この前」等の時間表現は必ずこのラベルどおりに書き、自分で日数を計算し直したり推測で書いたりしない。今日の予定を「明日」と書くような取り違えは禁止
@@ -4006,6 +4038,10 @@ ${goalsText}
 ${coachingText}
 【本人とのこれまでのやり取り（生成文では情報源に言及せず、本人の状況として自然に触れること）】
 ${chatworkText}
+【時間の使い道マップ（直近30日をAIが自動分類。この人の時間配分の実態。目標に向けた偏り・かたよりすぎを踏まえて助言する）】
+${themesText}
+【この人の気づき・傾向（過去の記録から蒸留した強みと注意すべき癖。承認や助言の根拠として自然に織り込む。ただし説教くさくならないよう1回のメッセージで触れるのは1点まで）】
+${insightsText}
 【月次サマリー（入会〜先月まで）】
 ${summariesText}
 【直近30日のレポート履歴】
