@@ -64,6 +64,7 @@ function doGet(e) {
       case "getSchedule":  result = getSchedule(studentEmail); break;
       case "getStudents":  result = getStudents(studentEmail); break;
       case "saveLog":      result = saveLog(studentEmail, e.parameter); break;
+      case "quickLog":     result = quickLog(studentEmail, e.parameter); break;
       case "saveLogMulti": result = saveLogMulti(studentEmail, e.parameter); break;
       case "coachGetStudents":      result = coachGetStudents(e.parameter.coachEmail); break;
       case "coachGetStudentDetail": result = coachGetStudentDetail(e.parameter.coachEmail, e.parameter.targetEmail); break;
