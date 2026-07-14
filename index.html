@@ -4155,11 +4155,16 @@ function FeatureAnnounce({onClose,onGo}){
       onClick=${e=>{if(e.target===e.currentTarget)onClose();}}>
       <div style=${{background:"var(--card)",borderRadius:20,width:"100%",maxWidth:380,overflow:"hidden",boxShadow:"0 20px 50px rgba(0,0,0,0.3)"}}>
         <div style=${{background:"linear-gradient(135deg, var(--hero1) 0%, var(--hero2) 100%)",padding:"28px 22px 22px",textAlign:"center"}}>
-          <div style=${{fontSize:40,marginBottom:6}}>✨</div>
+          <div style=${{fontSize:40,marginBottom:6}}>🎙</div>
           <div style=${{fontSize:12,fontWeight:700,color:"rgba(255,255,255,0.85)",letterSpacing:"0.05em",marginBottom:4}}>UPDATE</div>
-          <div style=${{fontSize:20,fontWeight:800,color:"#fff",lineHeight:1.4}}>新しい機能が<br/>増えました</div>
+          <div style=${{fontSize:20,fontWeight:800,color:"#fff",lineHeight:1.4}}>話すだけで記録できる<br/>ようになりました</div>
         </div>
         <div style=${{padding:"20px 22px 22px"}}>
+          <div style=${{display:"flex",gap:10,marginBottom:14}}>
+            <div style=${{fontSize:20,flexShrink:0}}>🎙</div>
+            <div><div style=${{fontSize:13,fontWeight:700,color:"var(--text)"}}>独り言で記録（新！）</div>
+              <div style=${{fontSize:12,color:"var(--sub)",lineHeight:1.6,marginTop:1}}>右下のマイクボタンを押して「今なにしてた？」を話すだけ。AIが自動で記録に整えます。もう入力の手間なし。</div></div>
+          </div>
           <div style=${{display:"flex",gap:10,marginBottom:14}}>
             <div style=${{fontSize:20,flexShrink:0}}>⭐</div>
             <div><div style=${{fontSize:13,fontWeight:700,color:"var(--text)"}}>今日のフォーカス</div>
@@ -4172,10 +4177,10 @@ function FeatureAnnounce({onClose,onGo}){
           </div>
           <div style=${{display:"flex",gap:10,marginBottom:20}}>
             <div style=${{fontSize:20,flexShrink:0}}>🗓</div>
-            <div><div style=${{fontSize:13,fontWeight:700,color:"var(--text)"}}>週次ふりかえり</div>
-              <div style=${{fontSize:12,color:"var(--sub)",lineHeight:1.6,marginTop:1}}>週の初めに今週をふりかえって、来週の一言を書けます。</div></div>
+            <div><div style=${{fontSize:13,fontWeight:700,color:"var(--text)"}}>週末のふりかえり</div>
+              <div style=${{fontSize:12,color:"var(--sub)",lineHeight:1.6,marginTop:1}}>週末に今週をふりかえって、来週の一言を書けます。</div></div>
           </div>
-          <button class="btn" onClick=${onGo}>「気づき」を見てみる</button>
+          <button class="btn" onClick=${onClose}>さっそく使ってみる</button>
           <button onClick=${onClose}
             style=${{display:"block",width:"100%",marginTop:8,background:"none",border:"none",color:"var(--sub)",fontSize:12.5,cursor:"pointer",fontFamily:"inherit",padding:8}}>あとで</button>
         </div>
@@ -4238,12 +4243,12 @@ function App() {
   // 新機能のお知らせ（アプリを開いた時に1回だけ表示）。IDを変えれば次の告知を出せる。
   // チュートリアル中の新規ユーザーには出さない（既存ユーザーへの告知が目的のため）
   // チュートリアル中は下でreturnするので出ない。それ以外の全員に未読なら表示する
-  const ANNOUNCE_ID="update2_2026_07";
+  const ANNOUNCE_ID="update3_2026_07";
   const [showAnnounce,setShowAnnounce]=useState(()=>localStorage.getItem("announce_seen")!==ANNOUNCE_ID);
   const dismissAnnounce=()=>{ localStorage.setItem("announce_seen",ANNOUNCE_ID); setShowAnnounce(false); };
   // チュートリアル終了後は記録タブに着地させる（登録だけして使い始めない人が多いため、
   // 最初の1件を記録するところまで自然に誘導する）。スキップ時も同様に記録タブへ
-  const dismissTutorial=()=>{ localStorage.setItem("tutorial_seen","1"); localStorage.setItem("announce_seen","update2_2026_07"); setShowTutorial(false); setTab("log"); };
+  const dismissTutorial=()=>{ localStorage.setItem("tutorial_seen","1"); localStorage.setItem("announce_seen","update3_2026_07"); setShowTutorial(false); setTab("log"); };
   const [goalData,setGoalData]=useState(()=>{
     const g=localStorage.getItem("jiroku_goals"); if(g) try{return JSON.parse(g);}catch(e){}
     const old=localStorage.getItem("jiroku_goal"); if(old) try{const p=JSON.parse(old); if(p.goal) return [p];}catch(e){}
