@@ -189,6 +189,7 @@ function doPost(e) {
     const studentEmail = body.studentEmail;
     switch (action) {
       case "saveLog":      return jsonResponse(saveLog(studentEmail, body));
+      case "quickLog":     return jsonResponse(quickLog(studentEmail, body));
       case "saveLogMulti": return jsonResponse(saveLogMulti(studentEmail, body));
       case "sendMessage":  return jsonResponse(sendMessage(studentEmail, body));
       case "saveSettings": return jsonResponse(saveSettings(studentEmail, body));
@@ -525,6 +526,78 @@ function getLogs(studentEmail, body) {
   }
   logs.sort((a, b) => a.time_block > b.time_block ? 1 : -1);
   return { ok: true, data: logs };
+}
+
+// 独り言（クイック記録）: 自由に話した/書いた一言をAIが構造化して、その場で記録する。
+// 「通知が来たらすぐ、話すだけで終わる」体験のため、時間帯・タスク・集中度の仕分けを
+// 全部AIに任せる。既存のsaveLogの保存経路（カレンダー書き戻し・XP等）にそのまま乗せる
+function quickLog(studentEmail, body) {
+  const text = String(body.text || "").trim();
+  if (!text) return { ok: false, error: "何をしたか一言だけ教えてください" };
+  const apiKey = PropertiesService.getScriptProperties().getProperty("CLAUDE_API_KEY");
+  if (!apiKey) return { ok: false, error: "CLAUDE_API_KEY未設定" };
+
+  const now = new Date();
+  const hour = now.getHours();
+  const curBlock = String(hour).padStart(2, "0") + ":00";
+
+  const user = sheetToObjects(getSheet("Users")).find(u => u.student_email === studentEmail);
+  const goalsText = user ? [user.goal, user.goal2, user.goal3].filter(Boolean).join(" / ") : "";
+
+  const prompt = `ユーザーが「今どう過ごしたか」を話し言葉でつぶやきました。これを1件の時間記録に構造化してください。
+
+【つぶやき】
+${text}
+
+【現在時刻】${hour}時
+【この人の目標】${goalsText || "未設定"}
+
+【変換ルール】
+- task: 何をしていたかを短く（10字前後の名詞句。例「企画書作成」「筋トレ」「移動」）
+- focus_level: 本人の手応えから1〜5で判定（5=完璧・大満足 / 4=よくできた / 3=まあまあ / 2=もう少し / 1=全然だめ）。手応えが読み取れなければ3
+- memo: つぶやきの内容をほぼそのまま活かした振り返りメモ（本人の言葉・感情を残す。1〜2文）
+- goal_related: その活動が上の目標に関連していそうなら true、そうでなければ false
+- hour_offset: 「さっき」「1時間前」等が読み取れる場合、現在時刻から何時間前かの整数（今のことなら0、1時間前なら1）。不明なら0
+
+以下のJSON形式のみで返してください（説明不要）:
+{ "task": "...", "focus_level": <1-5>, "memo": "...", "goal_related": <true|false>, "hour_offset": <整数> }`;
+
+  const res = UrlFetchApp.fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
+    payload: JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: 400, messages: [{ role: "user", content: prompt }] }),
+    muteHttpExceptions: true
+  });
+  const result = JSON.parse(res.getContentText());
+  if (!result.content || !result.content[0]) return { ok: false, error: "うまく聞き取れませんでした。もう一度お願いします" };
+
+  let parsed;
+  try {
+    const m = result.content[0].text.trim().match(/\{[\s\S]*\}/);
+    parsed = JSON.parse(m[0]);
+  } catch (e) { return { ok: false, error: "うまく聞き取れませんでした。もう一度お願いします" }; }
+
+  const FOCUS_LABELS = { 1: "1 — 全然だめだった", 2: "2 — もう少しだった", 3: "3 — まあまあだった", 4: "4 — よくできた", 5: "5 — 完璧にできた" };
+  const fnum = Math.max(1, Math.min(5, Number(parsed.focus_level) || 3));
+  const offset = Math.max(0, Math.min(12, Number(parsed.hour_offset) || 0));
+  const blockHour = hour - offset;
+  const timeBlock = (blockHour >= 0 ? String(blockHour).padStart(2, "0") : curBlock.substring(0, 2)) + ":00";
+
+  // 既存のsaveLogに乗せる（カレンダー書き戻しはアプリ側で行うためここではDailyLogのみ）
+  const saveRes = saveLog(studentEmail, {
+    time_block: timeBlock,
+    task: String(parsed.task || "記録").slice(0, 60),
+    focus_level: FOCUS_LABELS[fnum],
+    memo: String(parsed.memo || text).slice(0, 3000),
+    goal_related: parsed.goal_related === true ? "true" : "false"
+  });
+
+  return {
+    ok: !!saveRes.ok,
+    saved: { time_block: timeBlock, task: parsed.task, focus_level: fnum, memo: parsed.memo, goal_related: parsed.goal_related === true },
+    xp_gained: saveRes.xp_gained, level_up: saveRes.level_up, level: saveRes.level, updated: saveRes.updated,
+    error: saveRes.ok ? undefined : (saveRes.error || "保存に失敗しました")
+  };
 }
 
 function saveLog(studentEmail, body) {
@@ -2855,7 +2928,7 @@ function hourlyReminder() {
         } else {
           dormantText = daysSinceLastLog + "日間記録がありません。少しずつで大丈夫なので、今日1つ記録してみましょう";
         }
-        notifyUserTimeSlot(user, "📝 記録のお願い", dormantText, dormantText + "\n📝 " + APP_URL);
+        notifyUserTimeSlot(user, "📝 記録のお願い", dormantText, dormantText + "\n📝 " + APP_URL + "#quick");
         return;
       }
     }
@@ -2911,14 +2984,14 @@ ${EMOJI_STYLE}
           if (result.content && result.content[0]) {
             const bodyText = stripSalutation(result.content[0].text).trim();
             logCoachMessage(user.student_email, bodyText);
-            notifyUserTimeSlot(user, "📝 記録リマインダー", bodyText, bodyText + "\n📝 " + APP_URL);
+            notifyUserTimeSlot(user, "📝 記録リマインダー", bodyText, bodyText + "\n📝 " + APP_URL + "#quick");
             return;
           }
         } catch(e) { Logger.log("hourlyCoach error: " + e); }
       }
     }
     notifyUserTimeSlot(user, "⏱ 記録タイム", timeBlock + " の記録タイム！",
-      "⏱ " + timeBlock + " の記録タイム！\n📝 " + APP_URL);
+      "⏱ " + timeBlock + " の記録タイム！\n📝 " + APP_URL + "#quick");
   });
 }
 

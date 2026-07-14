@@ -4184,6 +4184,47 @@ function FeatureAnnounce({onClose,onGo}){
   `;
 }
 
+// 独り言（クイック記録）シート。話す/書くだけで、AIが構造化して即保存する
+function QuickLogSheet({onClose,onToast}){
+  const [text,setText]=useState("");
+  const [saving,setSaving]=useState(false);
+  const inputRef=React.useRef(null);
+  useEffect(()=>{ setTimeout(()=>{ try{inputRef.current&&inputRef.current.focus();}catch(e){} },200); },[]);
+  const save=async()=>{
+    const t=text.trim();
+    if(!t||saving) return;
+    setSaving(true);
+    const r=await gasPostJson("quickLog",{text:t});
+    setSaving(false);
+    if(r.ok){
+      const s=r.saved||{};
+      const focusN=s.focus_level?`（集中${s.focus_level}）`:"";
+      let msg=`記録しました：${s.task||"記録"}${focusN}`;
+      if(r.xp_gained){ msg+=` +${r.xp_gained}XP`; if(r.level_up)msg+=` Lv.${r.level}！`; }
+      onToast(msg);
+      onClose();
+    } else {
+      onToast(r.error||"うまく記録できませんでした");
+    }
+  };
+  return ReactDOM.createPortal(html`
+    <div style=${{position:"fixed",inset:0,height:"100dvh",background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"flex-end",zIndex:550}}
+      onClick=${e=>{if(e.target===e.currentTarget)onClose();}}>
+      <div style=${{background:"var(--card)",borderRadius:"20px 20px 0 0",padding:"22px 20px calc(24px + env(safe-area-inset-bottom))",width:"100%",boxSizing:"border-box"}}>
+        <div style=${{fontSize:18,fontWeight:800,marginBottom:4,color:"var(--text)"}}>🎙 今なにしてた？</div>
+        <div style=${{fontSize:12.5,color:"var(--sub)",marginBottom:14,lineHeight:1.6}}>話すだけ・書くだけでOK。あとはAIが記録に整えます。<br/>（キーボードのマイクを押すと声で入力できます）</div>
+        <textarea ref=${inputRef} class="txa" placeholder="例：さっき1時間カフェで企画書を書いてた。集中できたけど少し疲れた" value=${text}
+          onInput=${e=>setText(e.target.value)} style=${{minHeight:80,marginBottom:14,fontSize:15}}/>
+        <button class="btn" disabled=${!text.trim()||saving} style=${{opacity:text.trim()?1:0.5}} onClick=${save}>
+          ${saving?"記録中…":"これを記録する"}
+        </button>
+        <button onClick=${onClose}
+          style=${{display:"block",width:"100%",marginTop:8,background:"none",border:"none",color:"var(--sub)",fontSize:13,cursor:"pointer",fontFamily:"inherit",padding:8}}>閉じる</button>
+      </div>
+    </div>
+  `, document.body);
+}
+
 function App() {
   // 起動を速くするため、ログイン済みキャッシュがあれば即アプリを表示する。
   // アカウントの存在確認はバックグラウンドで行い、消えていた場合だけログアウトさせる
@@ -4209,6 +4250,14 @@ function App() {
     return [];
   });
   const [profile,setProfile]=useState(()=>({nickname:CURRENT_USER?.nickname||CURRENT_USER?.name||"",avatar:CURRENT_USER?.avatar||"🦊"}));
+  // 独り言（クイック記録）。通知やアプリのURLに #quick が付いていたら自動で開く
+  const [showQuick,setShowQuick]=useState(false);
+  useEffect(()=>{
+    const openIfHash=()=>{ if(location.hash.replace("#","").toLowerCase()==="quick"){ setShowQuick(true); history.replaceState(null,"",location.pathname+location.search); } };
+    openIfHash();
+    window.addEventListener("hashchange",openIfHash);
+    return ()=>window.removeEventListener("hashchange",openIfHash);
+  },[]);
   const logout=()=>{
     localStorage.removeItem("edventure_user");
     localStorage.removeItem("line_prompted");
@@ -4256,6 +4305,12 @@ function App() {
           <div style=${{display:tab==="settings"?"block":"none"}}><${SettingsScreen} onToast=${setToast} onLogout=${logout} onGoalSaved=${setGoalData} profile=${profile} onProfileSaved=${setProfile} onCalLinked=${()=>setCalLinked(true)}/></div>
         </div>
       </div>
+      <!-- 独り言（クイック記録）フローティングボタン。どのタブからでも1タップで話せる -->
+      <button onClick=${()=>setShowQuick(true)} title="独り言で記録"
+        style=${{position:"absolute",right:16,bottom:"calc(var(--nav-h) + var(--safe-bottom) + 16px)",width:56,height:56,borderRadius:"50%",background:"linear-gradient(135deg, var(--hero1) 0%, var(--hero2) 100%)",border:"none",boxShadow:"0 6px 18px rgba(8,145,178,0.4)",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",zIndex:200}}>
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/><path d="M19 10v1a7 7 0 0 1-14 0v-1"/><line x1="12" y1="19" x2="12" y2="22"/></svg>
+      </button>
+      ${showQuick&&html`<${QuickLogSheet} onClose=${()=>setShowQuick(false)} onToast=${setToast}/>`}
       <nav class="nav">
         ${TABS.map(t=>html`
           <button key=${t.id} class=${"nav-btn"+(tab===t.id?" on":"")} onClick=${()=>setTab(t.id)}>
