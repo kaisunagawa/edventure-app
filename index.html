@@ -4488,7 +4488,9 @@ function App() {
           <div style=${{display:tab==="settings"?"block":"none"}}><${SettingsScreen} onToast=${setToast} onLogout=${logout} onGoalSaved=${setGoalData} profile=${profile} onProfileSaved=${setProfile} onCalLinked=${()=>setCalLinked(true)}/></div>
         </div>
       </div>
-      <!-- 独り言（クイック記録）フローティングボタン。どのタブからでも1タップで話せる -->
+      <!-- 独り言（クイック記録）フローティングボタン。
+           タイマー・記録タブには専用の記録UIがあるため、そこでは出さない -->
+      ${tab!=="timer" && tab!=="log" && html`
       <div style=${{position:"absolute",right:16,bottom:"calc(var(--nav-h) + var(--safe-bottom) + 16px)",zIndex:200}}>
         ${hintOn && !showQuick && html`<div class="quick-hint" key=${hintIdx}>${QUICK_HINTS[hintIdx]}</div>`}
         <button onClick=${()=>setShowQuick(true)} title="独り言で記録"
@@ -4496,6 +4498,7 @@ function App() {
           <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/><path d="M19 10v1a7 7 0 0 1-14 0v-1"/><line x1="12" y1="19" x2="12" y2="22"/></svg>
         </button>
       </div>
+      `}
       ${showQuick&&html`<${QuickLogSheet} onClose=${()=>setShowQuick(false)} onToast=${setToast}/>`}
       <nav class="nav">
         ${TABS.map(t=>html`
