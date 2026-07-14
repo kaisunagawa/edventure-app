@@ -871,19 +871,32 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
   const [intentInput, setIntentInput] = useState("");
   const [intentHours, setIntentHours] = useState(()=>getDailyGoalHours()); // 宣言時に使う時間目標（初期値=1日の目標時間）
   const [intentSaving, setIntentSaving] = useState(false);
+  const [intentEditMode, setIntentEditMode] = useState(false); // 既存フォーカスの編集で開いたか
   const saveIntent = async () => {
     const text = intentInput.trim();
     if(!text) return;
     setIntentSaving(true);
-    const next = {date:formatDateStr(new Date()), intent:text, done:false, hours:intentHours};
+    // 編集時は達成状態を引き継ぐ（文言だけ直しても「達成🎉」が消えないように）
+    const keepDone = intentEditMode && intent ? !!intent.done : false;
+    const next = {date:formatDateStr(new Date()), intent:text, done:keepDone, hours:intentHours};
     localStorage.setItem("jiroku_intent", JSON.stringify(next));
-    setIntent(next); setShowIntentModal(false); setIntentSaving(false);
+    setIntent(next); setShowIntentModal(false); setIntentSaving(false); setIntentEditMode(false);
     gasPostJson("saveIntent", {intent:text, hours:String(intentHours)});
+  };
+  // 既存の「今日のフォーカス」を編集するためにモーダルを開く（現在値をプリフィル）
+  const openEditIntent = () => {
+    if(!intent) return;
+    setIntentInput(intent.intent||"");
+    setIntentHours(Number(intent.hours)||getDailyGoalHours());
+    setIntentEditMode(true);
+    setShowIntentModal(true);
   };
   const skipIntent = () => {
     localStorage.setItem("jiroku_intent_skip", formatDateStr(new Date()));
     setShowIntentModal(false);
   };
+  // 編集モーダルを閉じるだけ（スキップ扱いにしない）
+  const closeIntentModal = () => { setShowIntentModal(false); setIntentEditMode(false); };
   // 達成⇄未達成のトグル（間違えて押しても、もう一度タップで戻せる）
   const toggleIntentDone = () => {
     if(!intent) return;
@@ -1015,7 +1028,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
           // まだどの端末でも宣言していない時だけモーダルで聞く。
           // 朝6時〜18時の間だけ自動表示（深夜に出てスキップされ朝に出ない取りこぼし防止）
           const h = new Date().getHours();
-          if(h >= 6 && h < 18) setShowIntentModal(true);
+          if(h >= 6 && h < 18){ setIntentEditMode(false); setShowIntentModal(true); }
         }
       });
     } catch(e){}
@@ -1193,15 +1206,21 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
             <${S} n="timer" s=${11}/>タイマーで測る
           </button>
         </div>
-        <!-- 達成トグル＋本文 -->
-        <button onClick=${toggleIntentDone}
-          style=${{display:"flex",alignItems:"center",gap:12,width:"100%",background:"none",border:"none",padding:0,textAlign:"left",cursor:"pointer",fontFamily:"inherit",marginBottom:12}}>
-          <div style=${{flexShrink:0,width:24,height:24,borderRadius:"50%",border:"2px solid var(--accent)",background:intent.done?"var(--accent)":"transparent",display:"flex",alignItems:"center",justifyContent:"center",transition:"all .15s"}}>
+        <!-- 左の丸＝達成トグル / 本文・右ラベル＝タップで編集、と挙動を分ける -->
+        <div style=${{display:"flex",alignItems:"center",gap:12,marginBottom:12}}>
+          <button onClick=${toggleIntentDone} aria-label="達成の切り替え"
+            style=${{flexShrink:0,width:24,height:24,padding:0,borderRadius:"50%",border:"2px solid var(--accent)",background:intent.done?"var(--accent)":"transparent",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",transition:"all .15s"}}>
             ${intent.done&&html`<span style=${{color:"#fff",fontSize:13,fontWeight:800,lineHeight:1}}>✓</span>`}
-          </div>
-          <div style=${{flex:1,minWidth:0,fontSize:15,fontWeight:700,color:"var(--text)",lineHeight:1.4,textDecoration:intent.done?"line-through":"none",opacity:intent.done?0.6:1}}>${intent.intent}</div>
-          <div style=${{flexShrink:0,fontSize:11,fontWeight:600,color:"var(--sub)",textAlign:"right",lineHeight:1.4}}>${intent.done?html`<span style=${{fontSize:12,fontWeight:800,color:"var(--accent)"}}>達成🎉</span>`:html`タップで<br/>達成`}</div>
-        </button>
+          </button>
+          <button onClick=${openEditIntent} aria-label="今日のフォーカスを編集"
+            style=${{flex:1,minWidth:0,display:"flex",alignItems:"center",gap:8,background:"none",border:"none",padding:0,textAlign:"left",cursor:"pointer",fontFamily:"inherit"}}>
+            <span style=${{flex:1,minWidth:0,fontSize:15,fontWeight:700,color:"var(--text)",lineHeight:1.4,textDecoration:intent.done?"line-through":"none",opacity:intent.done?0.6:1,overflow:"hidden",textOverflow:"ellipsis"}}>${intent.intent}</span>
+            <span style=${{flexShrink:0,display:"inline-flex",alignItems:"center",gap:6}}>
+              ${intent.done&&html`<span style=${{fontSize:12,fontWeight:800,color:"var(--accent)"}}>達成🎉</span>`}
+              <span style=${{fontSize:11,fontWeight:600,color:"var(--sub)",whiteSpace:"nowrap"}}>✎ 編集</span>
+            </span>
+          </button>
+        </div>
         <!-- 時間の進捗（目標関連の記録時間 / 宣言した時間） -->
         ${(()=>{
           const targetH=Number(intent.hours)||dailyGoalHours;
@@ -1229,8 +1248,8 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
     ${showIntentModal&&ReactDOM.createPortal(html`
       <div style=${{position:"fixed",inset:0,height:"100dvh",background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"flex-end",zIndex:500}}>
         <div style=${{background:"var(--card)",borderRadius:"20px 20px 0 0",padding:"24px 20px calc(28px + env(safe-area-inset-bottom))",width:"100%",boxSizing:"border-box"}}>
-          <div style=${{fontSize:18,fontWeight:800,marginBottom:4,color:"var(--text)"}}>⭐ 今日いちばん達成したいことは？</div>
-          <div style=${{fontSize:13,color:"var(--sub)",marginBottom:16,lineHeight:1.6}}>やりたいこと1つと、それに使う時間を決めましょう。今日はこの達成をコーチと一緒に目指します。</div>
+          <div style=${{fontSize:18,fontWeight:800,marginBottom:4,color:"var(--text)"}}>${intentEditMode?"⭐ 今日のフォーカスを編集":"⭐ 今日いちばん達成したいことは？"}</div>
+          <div style=${{fontSize:13,color:"var(--sub)",marginBottom:16,lineHeight:1.6}}>${intentEditMode?"やりたいことと、かける時間を編集できます。":"やりたいこと1つと、それに使う時間を決めましょう。今日はこの達成をコーチと一緒に目指します。"}</div>
           <label class="form-lbl" style=${{fontSize:11}}>達成したいこと</label>
           <input class="inp" placeholder="例：企画書を仕上げる、30分走る" value=${intentInput}
             onInput=${e=>setIntentInput(e.target.value)} style=${{marginBottom:12}}/>
@@ -1253,9 +1272,9 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
               style=${{width:44,height:44,borderRadius:"50%",border:"1.5px solid var(--border)",background:"transparent",color:"var(--text)",fontSize:20,fontWeight:700,cursor:"pointer"}}>＋</button>
           </div>
           <button class="btn" disabled=${!intentInput.trim()||intentSaving} onClick=${saveIntent}
-            style=${{opacity:intentInput.trim()?1:0.5}}>今日のフォーカスにする</button>
-          <button onClick=${skipIntent}
-            style=${{display:"block",width:"100%",marginTop:10,background:"none",border:"none",color:"var(--sub)",fontSize:13,cursor:"pointer",fontFamily:"inherit",padding:8}}>今日はスキップ</button>
+            style=${{opacity:intentInput.trim()?1:0.5}}>${intentEditMode?"更新する":"今日のフォーカスにする"}</button>
+          <button onClick=${intentEditMode?closeIntentModal:skipIntent}
+            style=${{display:"block",width:"100%",marginTop:10,background:"none",border:"none",color:"var(--sub)",fontSize:13,cursor:"pointer",fontFamily:"inherit",padding:8}}>${intentEditMode?"キャンセル":"今日はスキップ"}</button>
         </div>
       </div>
     `, document.body)}
