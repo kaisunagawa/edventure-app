@@ -309,6 +309,31 @@ function StudentMain({ student, onNoteSaved }) {
   const verifyNote = (noteId) => {
     api("coachVerifyNote", { note_id: noteId }).then(r => { if (r.ok) reloadDetail(); });
   };
+  // セッション後に生徒へ送るメッセージの生成・送信
+  const [genMsg, setGenMsg] = useState("");
+  const [genMsgLoading, setGenMsgLoading] = useState(false);
+  const [genMsgSending, setGenMsgSending] = useState(false);
+  const [genMsgResult, setGenMsgResult] = useState("");
+  const [genMsgLineLinked, setGenMsgLineLinked] = useState(true);
+  const generateStudentMessage = async () => {
+    setGenMsgLoading(true); setGenMsgResult("");
+    const r = await apiPost("coachGenerateStudentMessage", { targetEmail: student.email });
+    setGenMsgLoading(false);
+    if (r.ok) { setGenMsg(r.data.message); setGenMsgLineLinked(r.data.lineLinked); }
+    else setGenMsgResult(r.error || "生成に失敗しました");
+  };
+  const sendStudentMessage = async () => {
+    if (!genMsg.trim()) return;
+    if (!confirm(student.name + " さんにこのメッセージを送信しますか？（LINEとアプリに届きます）")) return;
+    setGenMsgSending(true); setGenMsgResult("");
+    const r = await apiPost("coachSendStudentMessage", { targetEmail: student.email, message: genMsg.trim() });
+    setGenMsgSending(false);
+    if (r.ok) { setGenMsgResult(r.lineSent ? "送信しました（LINE＋アプリ）" : "アプリに送信しました（LINE未連携）"); setGenMsg(""); }
+    else setGenMsgResult(r.error || "送信に失敗しました");
+  };
+  const copyStudentMessage = async () => {
+    try { await navigator.clipboard.writeText(genMsg); setGenMsgResult("コピーしました"); setTimeout(()=>setGenMsgResult(""),2000); } catch (e) { setGenMsgResult("コピーに失敗しました"); }
+  };
   // 課金状態の変更（半自動運用: Stripe入金を確認したら「決済済みにする」を押す）
   const [planSaving, setPlanSaving] = useState(false);
   const setPlan = async (status, label) => {
@@ -699,6 +724,24 @@ function StudentMain({ student, onNoteSaved }) {
                 </div>
               `)}
             </div>
+          </div>
+
+          <!-- セッション後: 生徒へ送るフォローアップメッセージを生成 -->
+          <div class="card" style=${{marginTop:20,border:"1.5px solid var(--accent)"}}>
+            <div class="card-label">💬 生徒へ送るメッセージを生成</div>
+            <div style=${{fontSize:11.5,color:"var(--sub)",marginBottom:12}}>今日のセッション記録と${student.name}さんの状況をもとに、セッション後に送るフォローアップメッセージをAIが作ります。内容を確認・編集してから送ってください。</div>
+            <button class="btn" onClick=${generateStudentMessage} disabled=${genMsgLoading}>${genMsgLoading?"生成中…":(genMsg?"作り直す":"メッセージを生成する")}</button>
+            ${genMsg && html`
+              <div style=${{marginTop:12}}>
+                <textarea class="txa" value=${genMsg} onChange=${e=>setGenMsg(e.target.value)} style=${{minHeight:120,fontSize:13.5,lineHeight:1.7}}/>
+                ${!genMsgLineLinked && html`<div style=${{fontSize:11.5,color:"var(--amber, #B45309)",marginBottom:8}}>⚠️ この生徒はLINE未連携です。送信するとアプリの受信箱にのみ届きます。</div>`}
+                <div style=${{display:"flex",gap:8,marginTop:4}}>
+                  <button class="btn" onClick=${sendStudentMessage} disabled=${genMsgSending||!genMsg.trim()}>${genMsgSending?"送信中…":"この内容で送信"}</button>
+                  <button style=${{fontSize:13,background:"none",border:"1px solid var(--border)",borderRadius:8,padding:"0 16px",cursor:"pointer",fontFamily:"inherit"}} onClick=${copyStudentMessage}>コピー</button>
+                </div>
+              </div>
+            `}
+            ${genMsgResult && html`<div style=${{fontSize:12,color:"var(--accent)",marginTop:8}}>${genMsgResult}</div>`}
           </div>
         `}
 

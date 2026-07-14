@@ -216,6 +216,8 @@ function doPost(e) {
       case "coachImportNotes":     return jsonResponse(coachImportNotes(body.coachEmail, body));
       case "coachSessionSuggestions": return jsonResponse(coachSessionSuggestions(body.coachEmail, body));
       case "coachSummarizeTranscript": return jsonResponse(coachSummarizeTranscript(body.coachEmail, body));
+      case "coachGenerateStudentMessage": return jsonResponse(coachGenerateStudentMessage(body.coachEmail, body));
+      case "coachSendStudentMessage": return jsonResponse(coachSendStudentMessage(body.coachEmail, body));
       default: return jsonResponse({ ok: false, error: "Unknown action" });
     }
   } catch (err) {
@@ -2195,6 +2197,71 @@ ${lastNoteText}
   const result = JSON.parse(res.getContentText());
   if (!result.content || !result.content[0]) return { ok: false, error: "ai error" };
   return { ok: true, data: { summary: result.content[0].text.trim(), lastCoachingDate: lastNote ? lastNote.date : null } };
+}
+
+// セッション記録後に、その生徒へ送るフォローアップメッセージをAIが生成する。
+// 直近のコーチングログ（約束事項・次回テーマ）＋生徒の状況を踏まえた、人間のコーチが
+// セッション後に送るような温かい一言を作る。コーチが確認・編集して送る前提
+function coachGenerateStudentMessage(coachEmail, body) {
+  if (!verifyCoach(coachEmail)) return { ok: false, error: "not a coach" };
+  const studentEmail = String(body.targetEmail || "");
+  const user = coachOwnsStudent(coachEmail, studentEmail);
+  if (!user) return { ok: false, error: "not your student" };
+  const apiKey = PropertiesService.getScriptProperties().getProperty("CLAUDE_API_KEY");
+  if (!apiKey) return { ok: false, error: "CLAUDE_API_KEY未設定" };
+
+  const coach = sheetToObjects(getSheet("Coaches")).find(c => c.coach_email === coachEmail);
+  const coachName = (coach && coach.coach_name) ? coach.coach_name : "コーチ";
+
+  const notes = sheetToObjects(getCoachingNotesSheet())
+    .filter(n => n.student_email === studentEmail)
+    .sort((a, b) => b.date > a.date ? 1 : -1);
+  const lastNote = notes[0] || null;
+  const ctx = buildStudentContext(studentEmail, user);
+  const lastNoteText = lastNote
+    ? "【今日のセッション（" + lastNote.date + "）】\n話した内容: " + lastNote.content + "\n約束事項: " + (lastNote.promises || "なし") + "\n次回テーマ: " + (lastNote.next_theme || "なし")
+    : "【今日のセッション】記録がまだありません";
+  const recentMsgs = getRecentCoachMessages(studentEmail, 5);
+  const tone = String(body.tone || "");
+
+  const prompt = "あなたは教育コーチ「" + coachName + "」本人です。今日" + user.name + "さんとコーチングセッションを行いました。セッションの直後に、" + user.name + "さん本人へLINEで送るフォローアップメッセージを書いてください。\n\n" +
+    ctx + "\n\n" + lastNoteText + "\n" + recentMsgs + (tone ? "\n【今回のトーン指定】" + tone : "") + "\n\n" +
+    "【メッセージの作り方】\n" +
+    "- 今日のセッションで話した内容・約束事項に具体的に触れる（本人が「ちゃんと見てくれている」と感じられるように）\n" +
+    "- セッションでの本人の良かった点・前向きな変化を1つ具体的に称える\n" +
+    "- 約束事項があれば、それを一緒に頑張る姿勢で背中を押す（プレッシャーではなく応援）\n" +
+    "- アメとムチを使い分ける。頑張れている時は惜しみなく祝い、停滞している時は愛を持ってはっきり伝える（人格ではなく行動を）\n" +
+    "- 敬語とタメ語を自然に混ぜた、友人でもあるコーチの温度感\n" +
+    "- 「---」「【】」などの見出し・宛名（〇〇さんへ）は書かない。本文からそのまま始める\n" +
+    "- そのままLINEで送れる本文だけを出力する（説明・前置き不要）\n" +
+    "- 3〜5文程度。1文ごとに句点で区切って改行が入りやすくする\n" + EMOJI_STYLE;
+
+  const res = UrlFetchApp.fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
+    payload: JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: 600, messages: [{ role: "user", content: prompt }] }),
+    muteHttpExceptions: true
+  });
+  const result = JSON.parse(res.getContentText());
+  if (!result.content || !result.content[0]) return { ok: false, error: "生成に失敗しました" };
+  return { ok: true, data: { message: stripSalutation(result.content[0].text.trim()), lineLinked: !!user.line_user_id } };
+}
+
+// コーチが確認・編集したメッセージを、その生徒へ実際に送る（LINE＋アプリの受信箱に反映）
+function coachSendStudentMessage(coachEmail, body) {
+  if (!verifyCoach(coachEmail)) return { ok: false, error: "not a coach" };
+  const studentEmail = String(body.targetEmail || "");
+  const message = String(body.message || "").trim();
+  if (!message) return { ok: false, error: "メッセージが空です" };
+  const user = coachOwnsStudent(coachEmail, studentEmail);
+  if (!user) return { ok: false, error: "not your student" };
+
+  logCoachMessage(studentEmail, message); // アプリのメッセージ受信箱に残す
+  let lineSent = false;
+  if (user.line_user_id) {
+    try { lineSent = sendLineMessage(user.line_user_id, formatForLine(message)); } catch (e) { Logger.log("coachSend LINE error: " + e); }
+  }
+  return { ok: true, lineSent: lineSent, lineLinked: !!user.line_user_id };
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
