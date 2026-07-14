@@ -64,6 +64,7 @@ function doGet(e) {
       case "getSchedule":  result = getSchedule(studentEmail); break;
       case "getStudents":  result = getStudents(studentEmail); break;
       case "saveLog":      result = saveLog(studentEmail, e.parameter); break;
+      case "deleteLog":    result = deleteLog(studentEmail, e.parameter); break;
       case "quickLog":     result = quickLog(studentEmail, e.parameter); break;
       case "saveLogMulti": result = saveLogMulti(studentEmail, e.parameter); break;
       case "coachGetStudents":      result = coachGetStudents(e.parameter.coachEmail); break;
@@ -193,6 +194,7 @@ function doPost(e) {
     const studentEmail = body.studentEmail;
     switch (action) {
       case "saveLog":      return jsonResponse(saveLog(studentEmail, body));
+      case "deleteLog":    return jsonResponse(deleteLog(studentEmail, body));
       case "quickLog":     return jsonResponse(quickLog(studentEmail, body));
       case "saveLogMulti": return jsonResponse(saveLogMulti(studentEmail, body));
       case "sendMessage":  return jsonResponse(sendMessage(studentEmail, body));
@@ -492,7 +494,7 @@ function appendReportRow(targetDate, studentEmail, report) {
     if (rIdx === -1) { rIdx = headers2.length; sheet.getRange(1, rIdx + 1).setValue("breakdown_reasons"); }
     sheet.getRange(newRow, rIdx + 1).setValue(JSON.stringify(report.breakdown_reasons));
   }
-  try { CacheService.getScriptCache().remove("ranking_scores_v2"); } catch (e) { /* ignore */ }
+  try { CacheService.getScriptCache().remove("ranking_scores_v3"); } catch (e) { /* ignore */ }
   try { postHighScoreAchievement(studentEmail, report.score); } catch (e) { /* ignore */ }
 }
 
@@ -563,10 +565,16 @@ ${text}
 【この人の目標】${goalsText || "未設定"}
 
 【各記録の作り方】
-- time: その活動の開始時刻を "HH:MM" 形式（24時間）で。つぶやきに言われた時刻をできるだけ忠実に。「8時」→08:00、「8時半」→08:30、「9時15分」→09:15、「9時半から」→09:30。分まで言っていない時だけ:00にする。開始時刻が同じ活動は1件にまとめる。時刻が無く「さっき/今」なら現在時刻(${hour}時00分 = ${String(hour).padStart(2,"0")}:00)
-- task: 何をしていたかを短く（10字前後の名詞句。例「企画書作成」「筋トレ」「移動」）
+- time: その活動の「開始時刻」を "HH:MM"（24時間）で。ユーザーは“記録ボタンを押した今この瞬間”に話している。現在時刻は${hour}時。次のルールを厳密に守る：
+  ・分の言い方はそのまま使う。「8時半」→:30、「9時15分」→:15。
+  ・午前/午後が明示（朝・午前・昼・午後・夕方・夜 など）されていれば必ずそれに従う。「朝11時」→11:00、「夜11時」→23:00、「昼の1時」→13:00、「夕方5時」→17:00。
+  ・午前/午後の明示がない「◯時」（H=1〜12）は、H時 と (H+12)時 のうち“押した今の時刻(${hour}時)に近い方”を選ぶ。例：今が${hour}時なら、これを最優先で当てはめる。「今23時で『11時』」→11と23では23が近いので23:00。「今9時で『11時』」→11:00。「今14時で『2時』」→14:00。
+  ・ただし、明らかに1日を順に振り返っている（朝起きて→昼→夜…と複数の出来事を時系列で話している）場合だけは、その流れに沿った自然な時刻にする。
+  ・時刻を言っていない活動は、勝手に別の時間を作らない。直前に時刻が分かっている活動の"続き"として、その時刻より後ろの妥当な時刻に置く（話した順番を守る）。時刻が一切なく「今・さっき」なら現在時刻(${String(hour).padStart(2,"0")}:00)。
+  ・記録は必ず開始時刻の早い順に並べる。開始時刻が完全に同じ活動だけ1件にまとめる。
+- task: その活動が何だったかを“一文”で要約する（記録一覧の「何をしましたか」に入る見出し）。例「カフェで企画書を書いて集中できた」「友達とランチして部活の話をした」。長すぎず1文で。
 - focus_level: 本人の手応えから1〜5（5=完璧 / 4=よくできた / 3=まあまあ / 2=もう少し / 1=全然だめ）。読み取れなければ3
-- memo: その時間帯の内容を、本人の言葉・感情を残して1〜2文で
+- memo: その活動についてユーザーが話した言葉を、省略・要約・言い換えをせず“そのまま全部”入れる。感情や細かい描写も落とさない。つぶやきに出てきた内容は、必ずどれかの記録のmemoに全て含める（何ひとつ捨てない）。
 - goal_related: 上の目標に関連していそうなら true、そうでなければ false
 
 以下のJSON形式のみで返してください（説明不要）。値の中で引用が必要なら「」を使い半角"は使わない。各値は改行しない:
@@ -619,13 +627,43 @@ ${text}
     return String(h).padStart(2, "0") + ":" + String(min).padStart(2, "0");
   };
 
+  // ★メモ全文保証：AIがmemoを要約/省略してしまった疑いがある（全memoの合計が
+  // 元の発話よりかなり短い）場合は、取りこぼし防止に発話全文をいちばん早い記録へ添える。
+  if (!usedFallback && records.length > 0) {
+    const noSpace = (s) => String(s || "").replace(/[\s　]/g, "");
+    const memoLen = records.reduce((n, r) => n + noSpace(r.memo).length, 0);
+    if (memoLen < noSpace(text).length * 0.6) {
+      // 開始時刻がいちばん早い記録を選び、そこに全文を添える（重複に見えないよう見出しを付ける）
+      let target = records[0], best = normTime(records[0].time);
+      records.forEach((r) => { const t = normTime(r.time); if (t < best) { best = t; target = r; } });
+      target.memo = (target.memo ? String(target.memo) + "\n\n" : "") + "【話した内容（全文）】\n" + text;
+    }
+  }
+
+  // ★時刻の「今に寄せる」確定処理（AIが従いきれないので最終的にコードで補正）。
+  // 短いつぶやきで、朝/昼/夜などの午前午後マーカーが一切ない場合だけ、曖昧な「◯時」を
+  // 「押した今の時刻に近い方（H時 か H+12時）」へスナップする。
+  // 1日を順に振り返る話（3件以上）や、朝/夜など明示がある話は対象外（そのまま尊重）。
+  const hasAmPmMarker = /朝|午前|昼|午後|夕方|夕|夜|晩|深夜|未明|正午/.test(text);
+  const shouldSnap = !hasAmPmMarker && records.length <= 2;
+  const snapHourToNow = (tb) => {
+    if (!shouldSnap) return tb;
+    const h = parseInt(tb.slice(0, 2), 10);
+    const mm = tb.slice(3);
+    if (isNaN(h) || h < 1 || h > 12) return tb; // 13時以降など既に24時間表記なら触らない
+    const c1 = h === 12 ? 12 : h;
+    const c2 = h === 12 ? 0 : h + 12;
+    const near = Math.abs(hour - c1) <= Math.abs(hour - c2) ? c1 : c2;
+    return String(near).padStart(2, "0") + ":" + mm;
+  };
+
   const saved = [];
   let totalXp = 0, lastLevel = null, leveled = false;
   // 1日分をまとめて話す人にも対応するため件数の上限は事実上設けない。
   // 60件は1日24時間を分単位で分けても十分収まる安全弁（暴走・実行時間の保険）
   records.slice(0, 60).forEach(function (r) {
     const fnum = Math.max(1, Math.min(5, Number(r.focus_level) || 3));
-    const tb = normTime(r.time);
+    const tb = snapHourToNow(normTime(r.time));
     const sr = saveLog(studentEmail, {
       time_block: tb,
       task: String(r.task || "記録").slice(0, 60),
@@ -746,6 +784,32 @@ function saveLog(studentEmail, body) {
     memoCount: memoCount + ((body.memo || "").trim() ? 1 : 0)
   });
   return { ok: true, log_id: logId, ...xpResult };
+}
+
+// 記録の削除。間違えて記録した時間帯を消せるようにする（編集画面で内容を空にして
+// 更新＝この時間帯の記録を消す、という操作の受け皿）。該当行を1件だけ削除する。
+function deleteLog(studentEmail, body) {
+  const timeBlock = String(body.time_block || "");
+  if (!timeBlock) return { ok: false, error: "no time_block" };
+  const sheet = getSheet("DailyLog");
+  const today = formatDate(new Date());
+  let targetDate = today;
+  if (body.date && /^\d{4}-\d{2}-\d{2}$/.test(String(body.date)) && String(body.date) <= today) targetDate = String(body.date);
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0];
+  const emailIdx = headers.indexOf("student_email");
+  const dateIdx = headers.indexOf("date");
+  const timeIdx = headers.indexOf("time_block");
+  for (let i = data.length - 1; i >= 1; i--) {
+    const rawDate = data[i][dateIdx];
+    const rowDate = rawDate instanceof Date ? Utilities.formatDate(rawDate, "Asia/Tokyo", "yyyy-MM-dd") : String(rawDate);
+    if (String(data[i][emailIdx]) === studentEmail && rowDate === targetDate && String(data[i][timeIdx]) === timeBlock) {
+      sheet.deleteRow(i + 1);
+      try { invalidateStatusCache(); } catch (e) { /* ignore */ }
+      return { ok: true, deleted: true };
+    }
+  }
+  return { ok: true, deleted: false };
 }
 
 // 複数の時間帯に同じ内容を一括保存する（2時間の会議などを1回の入力で記録）。
@@ -974,8 +1038,39 @@ function getGameStatus(studentEmail) {
 // 「みんなの頑張り」のレポートランキングと基準を完全に一致させる。
 // 生徒ごとにレポート生成日がずれるため、同じ日に最新レポートが出た人だけを対象にし、
 // show_in_communityがFALSEの生徒（ランキング非表示を選んだ人）は分母からも除外する
+// レポートランキングの対象集合を作る共通ロジック。
+// 【なぜウィンドウ方式か】レポートは毎晩生成されるが、GASの6分制限で1回の実行で
+// 全員分そろわず、遅延・翌朝バックフィルで生成日が生徒ごとにずれることがある。
+// 「単一の最新日」だけで絞ると、その日にまだレポートが無い生徒が丸ごとランキングから
+// 抜け落ちる（＝全員分反映されない）。そこで、最新日から windowDays 日以内の
+// 「各生徒の最新レポート」を採用し、少しの生成ずれでは取りこぼさないようにする。
+// （数週間前の古いスコアは除外され、公平性は保たれる）
+function buildReportRankingSet(emailSet, allReports, windowDays) {
+  const has = (emailSet && typeof emailSet.has === "function")
+    ? function (e) { return emailSet.has(e); }
+    : (function () { const s = new Set(emailSet || []); return function (e) { return s.has(e); }; })();
+  const latestByEmail = new Map();
+  allReports.forEach(function (r) {
+    if (!has(r.student_email)) return;
+    const cur = latestByEmail.get(r.student_email);
+    if (!cur || r.date > cur.date) latestByEmail.set(r.student_email, r);
+  });
+  let latestDate = null;
+  latestByEmail.forEach(function (r) { if (!latestDate || r.date > latestDate) latestDate = r.date; });
+  if (!latestDate) return { latestDate: null, cutoff: null, scores: [] };
+  // 最新日を含む windowDays 日ぶんを対象に（例: windowDays=3 なら 最新日・前日・前々日）
+  const cutoff = formatDate(new Date(new Date(latestDate + "T00:00:00").getTime() - (Math.max(1, windowDays) - 1) * 86400000));
+  const scores = [];
+  latestByEmail.forEach(function (r, email) {
+    if (r.date >= cutoff) scores.push({ email: email, score: Number(r.score) || 0, date: r.date });
+  });
+  scores.sort(function (a, b) { return b.score - a.score; });
+  return { latestDate: latestDate, cutoff: cutoff, scores: scores };
+}
+
 function getRanking(studentEmail) {
-  const CACHE_KEY = "ranking_scores_v2";
+  const CACHE_KEY = "ranking_scores_v3";
+  const WINDOW_DAYS = 3;
   let payload;
   const cached = CacheService.getScriptCache().get(CACHE_KEY);
   if (cached) {
@@ -985,26 +1080,14 @@ function getRanking(studentEmail) {
       u.is_active.toUpperCase() === "TRUE" && String(u.show_in_community || "").toUpperCase() !== "FALSE"
     );
     const active = new Set(users.map(u => u.student_email));
-    const reports = sheetToObjects(getSheet("Reports")).filter(r => active.has(r.student_email));
+    const allReports = sheetToObjects(getSheet("Reports")).filter(r => active.has(r.student_email));
 
-    let latestDate = null;
-    reports.forEach(r => { if (!latestDate || r.date > latestDate) latestDate = r.date; });
-    // 前回のランキング開催日（最新日より前で最も新しいレポート日付）。
-    // 「昨日と比べて順位が上がったか」の比較対象として使う
-    let prevDate = null;
-    reports.forEach(r => { if (r.date < latestDate && (!prevDate || r.date > prevDate)) prevDate = r.date; });
+    const cur = buildReportRankingSet(active, allReports, WINDOW_DAYS);
+    // 前期間（現ウィンドウより前）の順位を「昨日と比べて上がったか」の比較対象にする
+    const prevReports = cur.cutoff ? allReports.filter(r => r.date < cur.cutoff) : [];
+    const prev = buildReportRankingSet(active, prevReports, WINDOW_DAYS);
 
-    const buildScores = (d) => reports
-      .filter(r => r.date === d)
-      .map(r => ({ email: r.student_email, score: Number(r.score) || 0 }))
-      .sort((a, b) => b.score - a.score);
-
-    payload = {
-      date: latestDate,
-      scores: latestDate ? buildScores(latestDate) : [],
-      prevDate: prevDate,
-      prevScores: prevDate ? buildScores(prevDate) : []
-    };
+    payload = { date: cur.latestDate, cutoff: cur.cutoff, scores: cur.scores, prevScores: prev.scores };
     try { CacheService.getScriptCache().put(CACHE_KEY, JSON.stringify(payload), 300); } catch (e) { /* サイズ超過時は無視 */ }
   }
 
@@ -1023,23 +1106,15 @@ function getRanking(studentEmail) {
 
   // 「みんなの頑張り」を非表示にしている生徒は共有キャッシュのscoresから除外されるため
   // ここには出てこないが、非表示は「他人から見えない」ためのものであって、自分自身が
-  // 自分の順位を見られなくなるのは意図しない副作用のため、ここで個別に救済する
-  if (payload.date) {
+  // 自分の順位を見られなくなるのは意図しない副作用のため、ここで個別に救済する。
+  // 本人の「直近ウィンドウ内の最新レポート」で順位を出す
+  if (payload.cutoff) {
     const myReports = getFilteredRows("Reports", "student_email", studentEmail).sort((a, b) => b.date > a.date ? 1 : -1);
-    const mine = myReports.find(r => r.date === payload.date);
+    const mine = myReports.find(r => r.date >= payload.cutoff);
     if (mine) {
       const myScore = Number(mine.score) || 0;
       const rank = scores.filter(s => s.score > myScore).length + 1;
-      let prevRank = null;
-      if (payload.prevDate) {
-        const minePrev = myReports.find(r => r.date === payload.prevDate);
-        if (minePrev) {
-          const ps = Number(minePrev.score) || 0;
-          prevRank = prevScores.filter(s => s.score > ps).length + 1;
-        }
-      }
-      const trend = prevRank === null ? null : (rank < prevRank ? "up" : rank > prevRank ? "down" : "same");
-      return { ok: true, data: { rank, total: scores.length + 1, score: myScore, trend } };
+      return { ok: true, data: { rank, total: scores.length + 1, score: myScore, trend: null } };
     }
   }
   return { ok: true, data: null };
@@ -1087,25 +1162,23 @@ function getCommunity(studentEmail) {
   }).sort((a, b) => b.score - a.score);
 
   // レポートランキングは「最新のレポートの点数」で競う場（合計/継続の指標はステータス側が担う）。
-  // 生徒ごとにレポート生成日がずれるため、直近で最も新しい日付のレポートを持つ生徒だけに絞り、
-  // 数日前のレポートしか無い生徒が混ざって不公平にならないようにする
-  let latestDate = null;
-  latestReportByEmail.forEach(r => { if (!latestDate || r.date > latestDate) latestDate = r.date; });
-
-  const reportRanking = users
-    .map(u => {
-      const isMe = u.student_email === studentEmail;
-      const r = latestReportByEmail.get(u.student_email);
-      return {
-        isMe,
-        nickname: maskName(u, isMe),
-        avatar: maskAvatar(u, isMe),
-        reportScore: r ? Number(r.score) : null,
-        reportDate: r ? r.date : null
-      };
-    })
-    .filter(u => u.reportScore !== null && u.reportDate === latestDate)
-    .sort((a, b) => b.reportScore - a.reportScore);
+  // レポート生成は6分制限で全員分が同じ日にそろわないことがあるため、単一の最新日で絞ると
+  // その日にレポートが無い生徒が丸ごと抜け落ちる。最新日から数日以内の各自の最新レポートを
+  // 採用して全員を取りこぼさない（buildReportRankingSet と基準を統一）。
+  const commEmails = new Set(users.map(u => u.student_email));
+  const rankSet = buildReportRankingSet(commEmails, allReports, 3);
+  const userByEmail = new Map(users.map(u => [u.student_email, u]));
+  const reportRanking = rankSet.scores.map(s => {
+    const u = userByEmail.get(s.email);
+    const isMe = u.student_email === studentEmail;
+    return {
+      isMe,
+      nickname: maskName(u, isMe),
+      avatar: maskAvatar(u, isMe),
+      reportScore: s.score,
+      reportDate: s.date
+    };
+  });
 
   // 連続記録ランキング（🔥ストリークの長さで競う。記録を継続する動機づけ）。
   // 0日の人は載せない（まだ記録が続いていない人を晒さないため）
@@ -1134,13 +1207,18 @@ function getAchievementsSheet() {
   let sheet = getSheet("Achievements");
   if (!sheet) {
     sheet = SpreadsheetApp.openById(SPREADSHEET_ID).insertSheet("Achievements");
-    sheet.appendRow(["achievement_id", "date", "student_email", "nickname", "avatar", "message", "created_at"]);
+    sheet.appendRow(["achievement_id", "date", "student_email", "nickname", "avatar", "message", "created_at", "category"]);
   }
   // 既存シートに古い形式（achievement_id列なし）が残っている場合の自己修復
-  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  let headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
   if (headers.indexOf("achievement_id") === -1) {
     sheet.insertColumnBefore(1);
     sheet.getRange(1, 1).setValue("achievement_id");
+    headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  }
+  // カテゴリ列（偏り防止のクールダウン判定に使う）を後付けで自己修復
+  if (headers.indexOf("category") === -1) {
+    sheet.getRange(1, headers.length + 1).setValue("category");
   }
   return sheet;
 }
@@ -1161,21 +1239,65 @@ function shareAchievement(studentEmail, body) {
 // 「みんなの頑張り」をもっとリアルタイムに賑やかにしたいという要望から追加。
 // show_in_communityがFALSEの生徒（ランキング非表示を選んだ人）は対象外にする
 const HIGH_SCORE_ACHIEVEMENT_THRESHOLD = 88;
-const HIGH_SCORE_MESSAGES = ["今日はとても絶好調でした🔥", "充実した一日を過ごせました🌟", "いい流れに乗れています✨", "今日は自分史上ベストな一日でした💪"];
-// 達成シェア欄への投稿を共通化（show_in_communityがFALSEの生徒は投稿しない）
-function postAchievementMessage(studentEmail, message) {
+const HIGH_SCORE_MESSAGES = [
+  "今日はとても絶好調でした🔥", "充実した一日を過ごせました🌟", "いい流れに乗れています✨",
+  "今日は自分史上ベストな一日でした💪", "納得のいく一日を過ごせました😊", "自分の時間をしっかり使えました⏱️",
+  "今日はやりたいことに集中できました🎯", "手応えのある一日でした👏"
+];
+// 新しく使い始めた人・戻ってきた人・小さな節目を積極的に取り上げて、
+// フィードが上位常連だけに偏らないようにレパートリーを増やす
+const NEWCOMER_MESSAGES = [
+  "はじめての記録を残しました🌱 新しい一歩！", "記録デビューしました🎉 これからが楽しみ",
+  "JIROKUで最初の一歩を踏み出しました🌱", "はじめての記録、おめでとうございます✨"
+];
+const COMEBACK_MESSAGES = [
+  "久しぶりに記録を再開しました🌿 おかえりなさい！", "またコツコツ再スタート🌱 いい流れ",
+  "しばらくぶりの記録、戻ってきました👏", "再開の一歩を踏み出しました🌿"
+];
+const pickMsg = (arr) => arr[Math.floor(Math.random() * arr.length)];
+function streakShareMessage(streak) {
+  if (streak >= 100) return streak + "日連続記録を達成しました🏆 圧巻の継続力！";
+  if (streak >= 30) return streak + "日連続を達成しました🔥 習慣になってきました";
+  if (streak >= 14) return streak + "日連続で記録中🔥 いい調子！";
+  if (streak >= 7) return "1週間連続で記録できました🔥 素晴らしい継続";
+  return streak + "日連続で記録できました🌟 その調子！";
+}
+
+// 達成シェア欄への投稿を共通化（show_in_communityがFALSEの生徒は投稿しない）。
+// opts.category: 種類。opts.dailyCap: 1人の同日投稿の上限（既定2）。
+// opts.cooldownDays: 同じ人・同カテゴリを再投稿しない日数（偏り防止）。
+function postAchievementMessage(studentEmail, message, opts) {
   const user = sheetToObjects(getSheet("Users")).find(u => u.student_email === studentEmail);
   if (!user || String(user.show_in_community || "").toUpperCase() === "FALSE") return;
+  opts = opts || {};
   const sheet = getAchievementsSheet();
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  const catIdx = headers.indexOf("category");
+  const today = formatDate(new Date());
+
+  // 偏り防止: 同じ人が1日にシェア欄を独占しないよう上限を設ける
+  const mine = sheetToObjects(sheet).filter(r => r.student_email === studentEmail);
+  const cap = opts.dailyCap || 2;
+  if (mine.filter(r => r.date === today).length >= cap) return;
+  // 偏り防止: 同じ種類（例:高スコア）を短期間に同じ人で連発しない
+  if (opts.category && opts.cooldownDays) {
+    const cutoff = formatDate(new Date(Date.now() - opts.cooldownDays * 86400000));
+    if (mine.some(r => r.category === opts.category && r.date >= cutoff)) return;
+  }
+
   const now = new Date().toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" });
   const id = "ach_" + Date.now() + "_" + Math.random().toString(36).slice(2, 6);
-  sheet.appendRow([id, formatDate(new Date()), studentEmail, user.nickname || "名無しさん", user.avatar || "🦊", message, now]);
+  const row = [id, today, studentEmail, user.nickname || "名無しさん", user.avatar || "🦊", message, now];
+  // categoryは列位置に合わせて入れる（列が末尾でない可能性に備える）
+  if (catIdx >= row.length) { while (row.length < catIdx) row.push(""); row.push(opts.category || ""); }
+  else if (catIdx !== -1) { row[catIdx] = opts.category || ""; }
+  sheet.appendRow(row);
 }
 
 function postHighScoreAchievement(studentEmail, score) {
   if (Number(score) < HIGH_SCORE_ACHIEVEMENT_THRESHOLD) return;
-  const message = HIGH_SCORE_MESSAGES[Math.floor(Math.random() * HIGH_SCORE_MESSAGES.length)];
-  postAchievementMessage(studentEmail, message);
+  // 高スコアの常連が毎日フィードを埋めないよう、同じ人は3日に1回まで
+  postAchievementMessage(studentEmail, pickMsg(HIGH_SCORE_MESSAGES), { category: "high_score", cooldownDays: 3 });
 }
 
 // 目標に関連した記録が節目（10・25・50…時間帯）に到達した時、LINEで祝福メッセージを
@@ -1202,7 +1324,7 @@ function incrementGoalBlocksAndNotify(studentEmail, count) {
       if (lineUserId) {
         sendLineMessage(lineUserId, "🎯 目標に関連した記録が" + crossed + "時間帯に到達しました！\n積み重ねが着実に形になっています。この調子で続けましょう💪");
       }
-      postAchievementMessage(studentEmail, "目標に向けた取り組みが" + crossed + "時間帯を達成しました🎯");
+      postAchievementMessage(studentEmail, "目標に向けた取り組みが" + crossed + "時間帯を達成しました🎯", { category: "goal_milestone" });
     }
     return;
   }
@@ -3293,8 +3415,10 @@ function generateWinbackText(user, days, recentLogs, apiKey) {
     ? "まだ一度も記録していません（使い始めの最初の一歩をそっと後押しする段階）。"
     : days + "日、記録がお休みになっています。";
 
+  const nowHour = new Date().getHours();
   const prompt = "あなたはJIROKU（時間の使い方を記録して自分を好きになっていく習慣アプリ）の、優しくてちょっと可愛い相棒キャラです。"
     + (name ? name + "さん" : "この人") + "に、また記録したくなるLINEメッセージを1通書いてください。\n\n"
+    + "【現在時刻】" + nowHour + "時台。時間帯に合わない挨拶は絶対に使わない（朝でないのに『おはよう』、昼でないのに『こんにちは』、夜でないのに『こんばんは』はNG）。基本は挨拶なしで本題から。\n"
     + "【状況】" + situation + "\n"
     + "【この人の目標】" + (goals || "未設定") + "\n"
     + "【過去の記録（あれば具体的に触れると効く）】\n" + (logLines || "（記録なし）") + "\n\n"
@@ -3402,6 +3526,24 @@ function updateStreak(studentEmail) {
 
     sheet.getRange(i + 1, streakIdx + 1).setValue(newStreak);
     sheet.getRange(i + 1, lastLogDateIdx + 1).setValue(today);
+
+    // ── コミュニティのシェア欄を賑やかに＆偏りなく ──
+    // updateStreakは「その日の最初の記録」で1回だけ動くので、ここでのシェアは1日1回/人。
+    // 新しく始めた人・戻ってきた人・小さな連続の節目を取り上げ、上位常連以外も光を当てる。
+    try {
+      if (lastLogDate === "") {
+        // これまで一度も記録が無かった人の、はじめての記録
+        postAchievementMessage(studentEmail, pickMsg(NEWCOMER_MESSAGES), { category: "newcomer" });
+      } else if (newStreak === 1 && lastLogDate !== yesterday) {
+        // 昨日は記録が無く連続が途切れていた＝しばらくぶりのカムバック
+        const gap = Math.round((new Date(today + "T00:00:00") - new Date(lastLogDate + "T00:00:00")) / 86400000);
+        if (gap >= 4) postAchievementMessage(studentEmail, pickMsg(COMEBACK_MESSAGES), { category: "comeback", cooldownDays: 7 });
+      }
+      // 連続記録の節目（小さな節目=3日も入れて初心者を拾う）
+      if ([3, 7, 14, 30, 50, 100, 200, 365].indexOf(newStreak) !== -1) {
+        postAchievementMessage(studentEmail, streakShareMessage(newStreak), { category: "streak" });
+      }
+    } catch (e) { Logger.log("streak share error: " + e); }
 
     // ストリークフリーズの獲得: 7日連続ごとに1個（最大2個まで保有）。
     // 続けたご褒美として「休んでも消えない保険」が貯まる（Duolingo方式）
@@ -6001,13 +6143,37 @@ function notifyUserTimeSlot(user, pushTitle, pushBody, lineText) {
   return false;
 }
 
+// 送信直前の安全網：実際の送信時刻に合わない冒頭の挨拶（夜なのに「おはよう」等）を必ず除去する。
+// AIが指示に反して時間帯外の挨拶を書いても、送信時刻を正として補正する（時間軸の最終チェック）。
+// 時間帯に合った挨拶（朝の「おはよう」等）はそのまま残す。
+function stripMismatchedGreeting(text, hour) {
+  if (!text) return text;
+  const okMorning = hour >= 5 && hour < 10;   // おはよう
+  const okDay     = hour >= 10 && hour < 17;  // こんにちは
+  const okEvening = hour >= 17 || hour < 5;   // こんばんは（夕〜深夜）
+  // 冒頭（絵文字・記号・空白を挟んでも）にある挨拶語を判定
+  return text.replace(
+    /^([\s　🌅☀️🌞🌙✨、,.。！!]*)((?:おはよう(?:ございます)?|こんにちは|こんばんは)(?:さん)?)([、,.。！!\s　〜～ー♪]*)/,
+    function (m, pre, greet) {
+      let ok = false;
+      if (/^おはよう/.test(greet)) ok = okMorning;
+      else if (greet.indexOf("こんにちは") === 0) ok = okDay;
+      else if (greet.indexOf("こんばんは") === 0) ok = okEvening;
+      // 時間帯に合っていれば元のまま。合っていなければ、先頭の装飾ごと挨拶を丸ごと削除して本文から始める
+      return ok ? m : "";
+    }
+  );
+}
+
 function sendLineMessage(lineUserId, text) {
   if (!lineUserId || !LINE_CHANNEL_TOKEN) return false;
+  // 送信時刻に合わない挨拶は必ず取り除いてから送る
+  text = stripMismatchedGreeting(text, new Date().getHours());
   try {
     const res = UrlFetchApp.fetch("https://api.line.me/v2/bot/message/push", {
       method: "POST",
       headers: { "Content-Type": "application/json", "Authorization": "Bearer " + LINE_CHANNEL_TOKEN },
-      payload: JSON.stringify({ to: lineUserId, messages: [{ type: "text", text }] }),
+      payload: JSON.stringify({ to: lineUserId, messages: [{ type: "text", text: text }] }),
       muteHttpExceptions: true
     });
     const code = res.getResponseCode();
@@ -6102,7 +6268,7 @@ function setupSheets() {
     "CalendarCache": ["student_email","date","events","updated_at"],
     "Journal": ["date","student_email","diary","updated_at","auto_summary"],
     "TimerQueue": ["student_email","end_time","label","notified","created_at"],
-    "Achievements": ["achievement_id","date","student_email","nickname","avatar","message","created_at"],
+    "Achievements": ["achievement_id","date","student_email","nickname","avatar","message","created_at","category"],
     "CoachingNotes": ["note_id","coach_email","student_email","date","content","next_theme","promises","created_at","unverified"],
     "StudentProfile": ["student_email","coach_email","name","birthdate","gender","family","address","phone","occupation","profile_notes","instagram","tiktok","contract_start","contract_end","payment_type","contract_amount","installment_count","updated_at","stripe_email","stripe_total_paid","stripe_currency","stripe_synced_at","chatwork_id","chatwork_room_id"],
     "ContractFiles": ["file_id","student_email","file_name","file_url","note","uploaded_at"],

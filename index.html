@@ -1828,6 +1828,24 @@ function LogScreen({onToast, isActive}) {
     });
   };
 
+  // 間違えて記録した時間帯を削除する（編集画面で「何をしましたか」とメモを空にして
+  // 削除ボタンを押すと、その時間帯の記録が消える）
+  const del = async ()=>{
+    if(saving) return;
+    if(!confirm("この記録を削除しますか？")) return;
+    setSaving(true);
+    saveVersionRef.current++;
+    const res = await gasPostJson("deleteLog", { date, time_block: block });
+    if(!res||!res.ok){ onToast("削除に失敗しました。もう一度お試しください"); setSaving(false); return; }
+    const next = logs.filter(l=>l.time_block!==block);
+    setLogs(next);
+    try{ localStorage.setItem(LOGS_LS+date, JSON.stringify(next)); }catch(e){}
+    try{ localStorage.removeItem(draftKey(date, block)); }catch(e){}
+    setTask(""); setMemo("");
+    onToast("記録を削除しました");
+    setSaving(false);
+  };
+
   // タイマー記録は分単位の時間帯キー(例: 14:05-14:20)で保存されるため、手動記録の
   // 1時間枠チップ(例: 14:00-15:00)と文字列が一致しない。チップの「済み」表示は、
   // その時間帯の開始時が枠の1時間以内に収まっているログがあれば済みとみなす
@@ -1913,7 +1931,15 @@ function LogScreen({onToast, isActive}) {
           </div>
           <textarea class="txa" style=${{marginTop:6}} placeholder="うまくいった点、感じたこと、次はこうしたい、など" value=${memo} onInput=${e=>setMemo(e.target.value)} />
         </div>
-        <button class="btn" onClick=${save} disabled=${!task.trim()||!memo.trim()||saving}>${saving?html`<span class="spin"/>`:recorded.has(block)?"更新する":"保存する"}</button>
+        ${(()=>{
+          const isEditing = recorded.has(block);
+          const cleared = !task.trim() && !memo.trim();
+          // 既存の記録で、内容を空にした状態＝削除の意図。ボタンを「削除」に切り替えて有効化する
+          if(isEditing && cleared){
+            return html`<button class="btn" onClick=${del} disabled=${saving} style=${{background:"var(--red)"}}>${saving?html`<span class="spin"/>`:"この記録を削除する"}</button>`;
+          }
+          return html`<button class="btn" onClick=${save} disabled=${!task.trim()||!memo.trim()||saving}>${saving?html`<span class="spin"/>`:isEditing?"更新する":"保存する"}</button>`;
+        })()}
       </div>
     </div>
 
