@@ -258,37 +258,36 @@
     .spin { width: 16px; height: 16px; border: 2px solid rgba(255,255,255,.3); border-top-color: #fff; border-radius: 50%; animation: rot .6s linear infinite; display: inline-block; }
     @keyframes rot { to { transform: rotate(360deg); } }
 
-    /* ── 独り言FABのふきだしヒント（ふわふわ雲型） ── */
+    /* ── 独り言FABの上に出る、ちいさな雲 ── */
     .quick-hint {
-      position: absolute; right: 2px; bottom: 100%; margin-bottom: 20px;
+      position: absolute; right: -4px; bottom: 100%; margin-bottom: 9px;
       background: var(--card); color: var(--text);
-      font-size: 10px; font-weight: 700; letter-spacing: .02em; white-space: nowrap;
-      padding: 8px 16px; border-radius: 999px;
-      filter: drop-shadow(0 7px 12px rgba(8,145,178,0.18));
+      font-size: 9.5px; font-weight: 700; letter-spacing: .02em; white-space: nowrap;
+      padding: 10px 14px; border-radius: 50% / 60%;
+      filter: drop-shadow(0 4px 7px rgba(8,145,178,0.16));
       animation: quickHintIn .5s cubic-bezier(.34,1.56,.64,1), quickHintFloat 3.4s ease-in-out .5s infinite;
-      transform-origin: bottom right; pointer-events: none; z-index: 1;
+      transform-origin: bottom center; pointer-events: none; z-index: 1;
     }
-    /* 雲のふくらみ（上ふち＆左右にぽこぽこ） */
+    /* 雲の上のふくらみ */
     .quick-hint::before {
       content: ""; position: absolute; z-index: -1;
-      width: 14px; height: 14px; border-radius: 50%; background: var(--card);
-      left: 16px; top: -5px;
+      width: 16px; height: 16px; border-radius: 50%; background: var(--card);
+      left: 10px; top: -6px;
       box-shadow:
-        16px -3px 0 1px var(--card),
-        36px -3px 0 -1px var(--card),
-        55px 0px 0 -1px var(--card),
-        -7px 7px 0 -1px var(--card),
-        69px 9px 0 -2px var(--card);
+        14px -4px 0 1px var(--card),
+        30px -1px 0 -2px var(--card);
     }
-    /* 思考ふきだしのしっぽ（FAB側に小さな玉がふたつ） */
+    /* 雲の下のふくらみ＋思考ふきだしの小さな玉（FAB側へ） */
     .quick-hint::after {
       content: ""; position: absolute; z-index: -1;
-      right: 18px; bottom: -6px;
-      width: 10px; height: 10px; border-radius: 50%; background: var(--card);
-      box-shadow: -8px 6px 0 -3px var(--card);
+      right: 14px; bottom: -5px; width: 9px; height: 9px;
+      border-radius: 50%; background: var(--card);
+      box-shadow:
+        -20px 3px 0 -2px var(--card),
+        -6px 5px 0 -4px var(--card);
     }
-    @keyframes quickHintIn { from { opacity: 0; transform: translateY(8px) scale(.85); } to { opacity: 1; transform: translateY(0) scale(1); } }
-    @keyframes quickHintFloat { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-5px); } }
+    @keyframes quickHintIn { from { opacity: 0; transform: translateY(6px) scale(.8); } to { opacity: 1; transform: translateY(0) scale(1); } }
+    @keyframes quickHintFloat { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-4px); } }
 
     /* ── Empty ── */
     .empty { padding: 48px 24px; text-align: center; }
@@ -4422,7 +4421,7 @@ function App() {
   // 独り言（クイック記録）。通知やアプリのURLに #quick が付いていたら自動で開く
   const [showQuick,setShowQuick]=useState(false);
   // FABの上にふわっと出る、記録したくなる可愛いひとことをランダムに巡回表示
-  const QUICK_HINTS=["いま何してた？","ひとりごと、する？","つぶやいてこ〜","1つだけ教えて♪","サボり？ちがう？👀","記録しちゃお","えらいの見せて","今日のわたし、どう？","ちょいメモしよ","話すだけでOK🎙"];
+  const QUICK_HINTS=["つぶやこ？","何してた？","メモしよ","1つだけ♪","どうだった？","話そ〜","記録しよ","今日どう？","サボり？👀","ひとりごと？"];
   const [hintIdx,setHintIdx]=useState(()=>Math.floor(Math.random()*10));
   const [hintOn,setHintOn]=useState(false);
   useEffect(()=>{
