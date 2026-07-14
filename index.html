@@ -4089,6 +4089,108 @@ const TUTORIAL_STEPS = [
   { mock:TutorialMiniPush, title:"プッシュ通知を有効にしよう", body:"タイマー終了・記録リマインダーなどの通知を、アプリを閉じていても受け取れるようにします。習慣化に欠かせない機能なので、必ず有効にしてください。", pushStep:true },
   { mock:TutorialMiniLog, title:"さっそく1つ記録してみよう", body:"習慣づくりは、まず1回から。次のボタンを押すと記録画面が開くので、直近の1時間で何をしていたかを記録してみましょう。", cta:true },
 ];
+// 初回オンボーディング（自己分析12問・選択式）。回答はAIコーチの文脈と一部の設定に反映される
+const ONBOARDING_QUESTIONS = [
+  { id:"reason", q:"時間管理をしたい、一番の理由は？", opts:["就活・キャリアのため","仕事で成果を出したい","良い習慣を身につけたい","自分を理解したい","やりたいことを実現したい"] },
+  { id:"struggle", q:"今いちばん困っていることは？", opts:["先延ばししてしまう","夜更かし・生活リズム","集中が続かない","優先順位がつけられない","そもそも時間が足りない"] },
+  { id:"chronotype", q:"朝型？夜型？", opts:["朝型","夜型","日による"] },
+  { id:"focus_when", q:"集中できるのはどんな時？", opts:["一人で静かな時","誰かと一緒の時","場所を変えた時","締切が近い時"] },
+  { id:"motivation", q:"やる気の源は？", opts:["達成感","成長を感じること","人に認められること","ゲームのような楽しさ","締切のプレッシャー"] },
+  { id:"quit_reason", q:"続かなくなるのは、たいてい？", opts:["完璧を求めすぎる","飽きてしまう","忙しくて忘れる","気分が乗らない"] },
+  { id:"planning", q:"計画を立てるのは得意？", opts:["計画型（きっちり）","だいたい決める","衝動型（その場で）"] },
+  { id:"tone", q:"どんな声かけが響く？", opts:["優しく応援してほしい","厳しめに喝を入れて","データで淡々と","一緒に伴走してほしい"], setting:"tone" },
+  { id:"notify", q:"通知はどれくらい欲しい？", opts:["こまめに欲しい","ほどほどで","最小限でいい"], setting:"notify" },
+  { id:"hours", q:"1日にどれくらい、目標に時間を使いたい？", opts:["30分","1時間","2時間","3時間以上"], setting:"hours" },
+  { id:"future", q:"3ヶ月後、どうなっていたい？", opts:["良い習慣が身についている","目標に向けて成果が出ている","時間の使い方に迷わない","新しいことに挑戦できている"] },
+  { id:"selftype", q:"自分を一言でいうと？", opts:["コツコツ型","短距離集中型","気分屋","完璧主義"] },
+];
+function OnboardingQuiz({onDone}){
+  const [step,setStep]=useState(0);       // 0..questions-1, 質問。=length で結果画面
+  const [answers,setAnswers]=useState({});
+  const [saving,setSaving]=useState(false);
+  const total=ONBOARDING_QUESTIONS.length;
+  const pick=(qid,opt)=>{
+    const next={...answers,[qid]:opt};
+    setAnswers(next);
+    setTimeout(()=>setStep(s=>s+1),180); // 選んだら少し間を置いて自動で次へ
+  };
+  const back=()=>setStep(s=>Math.max(0,s-1));
+
+  const finish=async()=>{
+    setSaving(true);
+    // 読める要約テキストを作ってサーバーへ（AIコーチの文脈に流れる）
+    const profileText=ONBOARDING_QUESTIONS.filter(q=>answers[q.id]).map(q=>q.q.replace(/？$/,"")+"："+answers[q.id]).join(" / ");
+    const tone=answers.tone||"";
+    const notifyMap={"こまめに欲しい":1,"ほどほどで":2,"最小限でいい":6};
+    const interval=notifyMap[answers.notify]||2;
+    const hoursMap={"30分":0.5,"1時間":1,"2時間":2,"3時間以上":3};
+    const goalHours=hoursMap[answers.hours];
+    // 設定へ反映（目標時間はローカル、通知間隔はサーバー＋ローカル）
+    if(goalHours){ localStorage.setItem("jiroku_daily_goal_hours",String(goalHours)); }
+    const savedNotify=JSON.parse(localStorage.getItem("notifySettings")||'{"start":7,"end":23,"interval":2}');
+    localStorage.setItem("notifySettings",JSON.stringify({...savedNotify,interval}));
+    try{ await gasPostJson("saveOnboarding",{profile_text:profileText,coach_tone:tone,notify_interval:String(interval)}); }catch(e){}
+    localStorage.setItem("onboarding_done","1");
+    setSaving(false);
+    onDone();
+  };
+  const skip=()=>{ localStorage.setItem("onboarding_done","skip"); onDone(); };
+
+  // 結果画面: 回答に応じた「あなたへの活かし方」を出す
+  if(step>=total){
+    const lines=[];
+    if(answers.motivation==="成長を感じること"||answers.motivation==="達成感") lines.push("毎晩のAIレポートで、あなたの「伸び」を点数と言葉で見える化します。");
+    if(answers.struggle==="夜更かし・生活リズム") lines.push("生活リズムの乱れも記録から見えるので、AIコーチが無理なく整える手助けをします。");
+    if(answers.struggle==="先延ばししてしまう") lines.push("朝の「今日のフォーカス」で、まず1つに絞って動き出せるようにします。");
+    if(answers.tone==="厳しめに喝を入れて") lines.push("あなたの希望どおり、コーチは時にはっきりと喝を入れます。");
+    if(answers.tone==="優しく応援してほしい") lines.push("あなたの希望どおり、コーチは優しく応援するトーンで寄り添います。");
+    if(lines.length<2) lines.push("記録が溜まるほど、AIがあなたの強み・クセ・時間の使い道を教えてくれます（気づきタブ）。");
+    return html`<div style=${{position:"fixed",inset:0,height:"100dvh",background:"var(--bg)",zIndex:400,overflowY:"auto",display:"flex",flexDirection:"column"}}>
+      <div style=${{flex:1,display:"flex",flexDirection:"column",justifyContent:"center",padding:"32px 24px",maxWidth:440,margin:"0 auto",width:"100%"}}>
+        <div style=${{fontSize:44,textAlign:"center",marginBottom:8}}>🎉</div>
+        <div style=${{fontSize:22,fontWeight:800,textAlign:"center",marginBottom:6,color:"var(--text)"}}>ありがとう！準備完了です</div>
+        <div style=${{fontSize:13.5,color:"var(--sub)",textAlign:"center",lineHeight:1.7,marginBottom:24}}>あなたのことを踏まえて、JIROKUが今日から伴走します。</div>
+        ${lines.map((l,i)=>html`
+          <div key=${i} style=${{display:"flex",gap:10,marginBottom:12,background:"var(--card)",border:"1px solid var(--border)",borderRadius:12,padding:"13px 14px"}}>
+            <span style=${{color:"var(--accent)",fontWeight:800,flexShrink:0}}>✓</span>
+            <span style=${{fontSize:13,color:"var(--text)",lineHeight:1.7}}>${l}</span>
+          </div>
+        `)}
+        <button class="btn" style=${{marginTop:14}} disabled=${saving} onClick=${finish}>${saving?"保存中…":"はじめる"}</button>
+      </div>
+    </div>`;
+  }
+
+  const cur=ONBOARDING_QUESTIONS[step];
+  return html`<div style=${{position:"fixed",inset:0,height:"100dvh",background:"var(--bg)",zIndex:400,display:"flex",flexDirection:"column"}}>
+    <div style=${{padding:"18px 20px 0",maxWidth:440,margin:"0 auto",width:"100%",boxSizing:"border-box"}}>
+      <div style=${{display:"flex",alignItems:"center",gap:12,marginBottom:20}}>
+        ${step>0?html`<button onClick=${back} style=${{background:"none",border:"none",fontSize:20,color:"var(--sub)",cursor:"pointer",padding:0}}>‹</button>`:html`<div style=${{width:20}}/>`}
+        <div style=${{flex:1,height:6,background:"var(--border)",borderRadius:99,overflow:"hidden"}}>
+          <div style=${{height:"100%",width:((step)/total*100)+"%",background:"var(--accent)",borderRadius:99,transition:"width .3s ease"}}/>
+        </div>
+        <div style=${{fontSize:12,color:"var(--sub)",fontWeight:600,minWidth:38,textAlign:"right"}}>${step+1}/${total}</div>
+      </div>
+    </div>
+    <div style=${{flex:1,overflowY:"auto",padding:"8px 20px 24px",maxWidth:440,margin:"0 auto",width:"100%",boxSizing:"border-box"}}>
+      ${step===0&&html`<div style=${{fontSize:12.5,color:"var(--sub)",lineHeight:1.7,marginBottom:16,background:"var(--accent-l)",borderRadius:12,padding:"12px 14px"}}>最初に、あなたのことを少しだけ教えてください。答えに合わせてコーチングをあなた仕様にします（1〜2分・直感でOK）。</div>`}
+      <div style=${{fontSize:19,fontWeight:800,color:"var(--text)",lineHeight:1.5,marginBottom:20}}>${cur.q}</div>
+      <div style=${{display:"flex",flexDirection:"column",gap:10}}>
+        ${cur.opts.map((o,i)=>{
+          const on=answers[cur.id]===o;
+          return html`<button key=${i} onClick=${()=>pick(cur.id,o)}
+            style=${{textAlign:"left",padding:"15px 16px",borderRadius:14,border:`1.5px solid ${on?"var(--accent)":"var(--border)"}`,background:on?"var(--accent-l)":"var(--card)",color:on?"var(--accent)":"var(--text)",fontSize:15,fontWeight:on?700:500,cursor:"pointer",fontFamily:"inherit",transition:"all .12s"}}>
+            ${o}
+          </button>`;
+        })}
+      </div>
+    </div>
+    <div style=${{padding:"0 20px calc(20px + env(safe-area-inset-bottom))",maxWidth:440,margin:"0 auto",width:"100%",boxSizing:"border-box"}}>
+      <button onClick=${skip} style=${{width:"100%",background:"none",border:"none",color:"var(--sub)",fontSize:12.5,cursor:"pointer",fontFamily:"inherit",padding:10}}>スキップして始める</button>
+    </div>
+  </div>`;
+}
+
 const UNSUPPORTED_PUSH_ERROR = "このブラウザはプッシュ通知に対応していません";
 function TutorialOverlay({onDone}) {
   // ホーム画面から既に開いている場合は「ホーム画面に追加」の案内を飛ばす
@@ -4240,6 +4342,9 @@ function App() {
   const [calLinked,setCalLinked]=useState(!!localStorage.getItem("cal_linked"));
   const [calBannerDismissed,setCalBannerDismissed]=useState(false);
   const [showTutorial,setShowTutorial]=useState(!localStorage.getItem("tutorial_seen"));
+  // 初回オンボーディング（自己分析12問）は、チュートリアル未実施の新規ユーザーにだけ出す。
+  // 既存ユーザー（tutorial_seenあり）には出さず、通常運用を邪魔しない
+  const [showOnboarding,setShowOnboarding]=useState(!localStorage.getItem("tutorial_seen") && !localStorage.getItem("onboarding_done"));
   // 新機能のお知らせ（アプリを開いた時に1回だけ表示）。IDを変えれば次の告知を出せる。
   // チュートリアル中の新規ユーザーには出さない（既存ユーザーへの告知が目的のため）
   // チュートリアル中は下でreturnするので出ない。それ以外の全員に未読なら表示する
@@ -4294,6 +4399,7 @@ function App() {
   },[]);
 
   if(!user) return html`<${LoginScreen} onLogin=${setUser}/>`;
+  if(showOnboarding) return html`<${OnboardingQuiz} onDone=${()=>setShowOnboarding(false)}/>`;
   if(showTutorial) return html`<${TutorialOverlay} onDone=${dismissTutorial}/>`;
   return html`
     <div style=${{height:"100%",position:"relative",display:"flex",flexDirection:"column"}}>

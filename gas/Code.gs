@@ -96,6 +96,7 @@ function doGet(e) {
       case "adminTestPush": result = adminTestPush(e.parameter.coachEmail, e.parameter.targetEmail, e.parameter.title, e.parameter.body); break;
       case "sendMessage":  result = sendMessage(studentEmail, e.parameter); break;
       case "saveSettings": result = saveSettings(studentEmail, e.parameter); break;
+      case "saveOnboarding": result = saveOnboarding(studentEmail, e.parameter); break;
       case "syncCalendar": result = syncCalendar(studentEmail, e.parameter); break;
       case "getCalendar":  result = getCalendar(studentEmail, e.parameter); break;
       case "getDiary":     result = getDiary(studentEmail, e.parameter); break;
@@ -195,6 +196,7 @@ function doPost(e) {
       case "saveLogMulti": return jsonResponse(saveLogMulti(studentEmail, body));
       case "sendMessage":  return jsonResponse(sendMessage(studentEmail, body));
       case "saveSettings": return jsonResponse(saveSettings(studentEmail, body));
+      case "saveOnboarding": return jsonResponse(saveOnboarding(studentEmail, body));
       case "saveDiary":    return jsonResponse(saveDiary(studentEmail, body));
       case "saveIntent":   return jsonResponse(saveIntent(studentEmail, body));
       case "askMyPast":    return jsonResponse(askMyPast(studentEmail, body));
@@ -2807,6 +2809,32 @@ function getStudents(coachEmail) {
   return { ok: true, data };
 }
 
+// 初回オンボーディング（自己分析12問）の保存。回答の読みやすい要約テキストと
+// コーチのトーンをUsersに保存し、AIコーチが初日から性格を踏まえて接する。
+// 通知間隔・目標時間もこの回答から初期設定する（body.notify_interval / body.goal_hours）
+function saveOnboarding(studentEmail, body) {
+  const sheet = getSheet("Users");
+  const data = sheet.getDataRange().getValues();
+  let headers = data[0];
+  const emailIdx = headers.indexOf("student_email");
+  const ensureCol = (name) => {
+    let idx = headers.indexOf(name);
+    if (idx === -1) { idx = headers.length; sheet.getRange(1, idx + 1).setValue(name); headers.push(name); }
+    return idx;
+  };
+  const obIdx = ensureCol("onboarding_profile");   // 読める要約テキスト
+  const toneIdx = ensureCol("coach_tone");         // 優しめ/厳しめ/淡々/伴走 等
+  const intervalIdx = ensureCol("notify_interval");
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][emailIdx]) !== studentEmail) continue;
+    if (body.profile_text !== undefined) sheet.getRange(i + 1, obIdx + 1).setValue(String(body.profile_text).slice(0, 3000));
+    if (body.coach_tone !== undefined) sheet.getRange(i + 1, toneIdx + 1).setValue(String(body.coach_tone).slice(0, 60));
+    if (body.notify_interval !== undefined) sheet.getRange(i + 1, intervalIdx + 1).setValue(Number(body.notify_interval) || 2);
+    return { ok: true };
+  }
+  return { ok: false, error: "user not found" };
+}
+
 function saveSettings(studentEmail, body) {
   const sheet = getSheet("Users");
   const data = sheet.getDataRange().getValues();
@@ -4182,7 +4210,7 @@ function buildStudentContext(studentEmail, user, preloaded) {
 ※日付の扱いは厳守：この文脈内のログ・レポート・面談記録・カレンダー予定などの日付には全て「（曜日・今日/昨日/N日前/明日/N日後）」という相対ラベルが付いている。これは確定情報なので、「昨日」「先日」「この前」等の時間表現は必ずこのラベルどおりに書き、自分で日数を計算し直したり推測で書いたりしない。今日の予定を「明日」と書くような取り違えは禁止
 【生徒名】${user.name}
 【入会日】${user.joined_at || "不明"}
-【連続記録日数】${streak}日
+${user.onboarding_profile ? "【本人の自己分析（初回アンケート。この人の性格・課題・好みの土台。特に" + (user.coach_tone ? "「" + user.coach_tone + "」というコーチングの好みは尊重する" : "声かけのトーンは本人の好みに合わせる") + "）】\n" + user.onboarding_profile + "\n" : ""}【連続記録日数】${streak}日
 【全期間の記録】合計${totalDaysRecorded}日・${totalBlocks}時間帯
 【今日（${today} ${todayDow}）のカレンダー予定】${todayPlan || "未同期（予定情報なし）"}
 【明日（${tomorrow} ${tomorrowDow}）のカレンダー予定】${tomorrowPlan || "未同期（予定情報なし）"}
