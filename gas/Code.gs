@@ -69,6 +69,7 @@ function doGet(e) {
       case "coachGetStudents":      result = coachGetStudents(e.parameter.coachEmail); break;
       case "coachGetStudentDetail": result = coachGetStudentDetail(e.parameter.coachEmail, e.parameter.targetEmail); break;
       case "coachSaveNote":         result = coachSaveNote(e.parameter.coachEmail, e.parameter); break;
+      case "coachGenerateStudentMessage": result = coachGenerateStudentMessage(e.parameter.coachEmail, e.parameter); break;
       case "coachVerifyNote":       result = coachVerifyNote(e.parameter.coachEmail, e.parameter); break;
       case "coachPrepSummary":      result = coachPrepSummary(e.parameter.coachEmail, e.parameter.targetEmail); break;
       case "coachSyncStripeOne":    result = coachSyncStripeOne(e.parameter.coachEmail, e.parameter); break;
