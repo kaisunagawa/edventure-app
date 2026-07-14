@@ -258,6 +258,25 @@
     .spin { width: 16px; height: 16px; border: 2px solid rgba(255,255,255,.3); border-top-color: #fff; border-radius: 50%; animation: rot .6s linear infinite; display: inline-block; }
     @keyframes rot { to { transform: rotate(360deg); } }
 
+    /* ── 独り言FABのふきだしヒント ── */
+    .quick-hint {
+      position: absolute; right: 4px; bottom: 100%; margin-bottom: 12px;
+      background: var(--card); color: var(--text);
+      font-size: 12.5px; font-weight: 700; white-space: nowrap;
+      padding: 8px 13px; border-radius: 14px; border: 1px solid var(--border);
+      box-shadow: 0 6px 18px rgba(8,145,178,0.18);
+      animation: quickHintIn .45s cubic-bezier(.34,1.56,.64,1), quickHintFloat 2.6s ease-in-out .45s infinite;
+      transform-origin: bottom right; pointer-events: none;
+    }
+    .quick-hint::after {
+      content: ""; position: absolute; right: 20px; bottom: -6px;
+      width: 12px; height: 12px; background: var(--card);
+      border-right: 1px solid var(--border); border-bottom: 1px solid var(--border);
+      transform: rotate(45deg);
+    }
+    @keyframes quickHintIn { from { opacity: 0; transform: translateY(6px) scale(.9); } to { opacity: 1; transform: translateY(0) scale(1); } }
+    @keyframes quickHintFloat { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-4px); } }
+
     /* ── Empty ── */
     .empty { padding: 48px 24px; text-align: center; }
     .empty-title { font-size: 15px; font-weight: 600; color: var(--text); margin-bottom: 6px; }
@@ -971,21 +990,22 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
       const localIntent = JSON.parse(localStorage.getItem("jiroku_intent")||"null");
       const hasToday = localIntent && localIntent.date === today;
       const skipped = localStorage.getItem("jiroku_intent_skip") === today;
+      // まずローカルにあれば即表示（体感速度のため）
       if(hasToday){ setIntent(localIntent); }
-      else if(!skipped){
-        gasApi("getIntent").then(r=>{
-          if(r.ok && r.data){
-            const next = {date:today, intent:r.data.intent, done:r.data.done, hours:r.data.hours};
-            localStorage.setItem("jiroku_intent", JSON.stringify(next));
-            setIntent(next);
-          } else {
-            // 朝6時〜18時の間だけ自動表示する。深夜〜早朝に開いた時にモーダルが出て
-            // スキップされ、肝心の朝に出ない…という取りこぼしを防ぐため6時を下限にする
-            const h = new Date().getHours();
-            if(h >= 6 && h < 18) setShowIntentModal(true);
-          }
-        });
-      }
+      // 端末をまたいで必ず同期する。別端末（PC/携帯）で宣言・達成した内容を、
+      // この端末でスキップ済みでも取りこぼさないよう、毎回サーバーを正として取り込む
+      gasApi("getIntent").then(r=>{
+        if(r.ok && r.data && r.data.intent){
+          const next = {date:today, intent:r.data.intent, done:r.data.done, hours:r.data.hours};
+          localStorage.setItem("jiroku_intent", JSON.stringify(next));
+          setIntent(next);
+        } else if(!hasToday && !skipped){
+          // まだどの端末でも宣言していない時だけモーダルで聞く。
+          // 朝6時〜18時の間だけ自動表示（深夜に出てスキップされ朝に出ない取りこぼし防止）
+          const h = new Date().getHours();
+          if(h >= 6 && h < 18) setShowIntentModal(true);
+        }
+      });
     } catch(e){}
   },[isActive]);
 
@@ -4301,17 +4321,35 @@ function QuickLogSheet({onClose,onToast}){
     const t=text.trim();
     if(!t||saving) return;
     setSaving(true);
-    const r=await gasPostJson("quickLog",{text:t});
+    let r;
+    try{
+      r=await gasPostJson("quickLog",{text:t});
+    }catch(e){
+      // 通信エラー等でも「保存中…」で固まらないようにし、入力は消さずに残す
+      setSaving(false);
+      onToast("通信エラーで保存できませんでした。もう一度お試しください");
+      return;
+    }
     setSaving(false);
-    if(r.ok){
+    if(r&&r.ok){
       const s=r.saved||{};
-      const focusN=s.focus_level?`（集中${s.focus_level}）`:"";
-      let msg=`記録しました：${s.task||"記録"}${focusN}`;
+      const cnt=r.count||1;
+      let msg;
+      if(r.fallback){
+        // AIで仕分けできなかった場合も、入力はそのまま1件保存されている
+        msg="記録しました（内容はそのまま保存しました）";
+      } else if(cnt>1){
+        msg=`${cnt}件記録しました`;
+      } else {
+        const focusN=s.focus_level?`（集中${s.focus_level}）`:"";
+        msg=`記録しました：${s.task||"記録"}${focusN}`;
+      }
       if(r.xp_gained){ msg+=` +${r.xp_gained}XP`; if(r.level_up)msg+=` Lv.${r.level}！`; }
       onToast(msg);
       onClose();
     } else {
-      onToast(r.error||"うまく記録できませんでした");
+      // 失敗時はテキストを消さず、モーダルも閉じないので、そのまま再送信できる
+      onToast((r&&r.error)||"うまく記録できませんでした。入力はそのまま残っています");
     }
   };
   return ReactDOM.createPortal(html`
@@ -4319,9 +4357,9 @@ function QuickLogSheet({onClose,onToast}){
       onClick=${e=>{if(e.target===e.currentTarget)onClose();}}>
       <div style=${{background:"var(--card)",borderRadius:"20px 20px 0 0",padding:"22px 20px calc(24px + env(safe-area-inset-bottom))",width:"100%",boxSizing:"border-box"}}>
         <div style=${{fontSize:18,fontWeight:800,marginBottom:4,color:"var(--text)"}}>🎙 今なにしてた？</div>
-        <div style=${{fontSize:12.5,color:"var(--sub)",marginBottom:14,lineHeight:1.6}}>話すだけ・書くだけでOK。あとはAIが記録に整えます。<br/>（キーボードのマイクを押すと声で入力できます）</div>
-        <textarea ref=${inputRef} class="txa" placeholder="例：さっき1時間カフェで企画書を書いてた。集中できたけど少し疲れた" value=${text}
-          onInput=${e=>setText(e.target.value)} style=${{minHeight:80,marginBottom:14,fontSize:15}}/>
+        <div style=${{fontSize:12.5,color:"var(--sub)",marginBottom:14,lineHeight:1.6}}>話すだけ・書くだけでOK。あとはAIが記録に整えます。<br/>1日分をまとめて話しても大丈夫。何時に誰と何をしたか、思い出すままにどうぞ。<br/>（キーボードのマイクを押すと声で入力できます）</div>
+        <textarea ref=${inputRef} class="txa" placeholder="例：8時に起きて朝ごはん、10時から友達とカフェで勉強、昼は移動して13時に打ち合わせ…と1日を丸ごと話してもOK" value=${text}
+          onInput=${e=>setText(e.target.value)} style=${{minHeight:110,marginBottom:14,fontSize:15}}/>
         <button class="btn" disabled=${!text.trim()||saving} style=${{opacity:text.trim()?1:0.5}} onClick=${save}>
           ${saving?"記録中…":"これを記録する"}
         </button>
@@ -4362,6 +4400,20 @@ function App() {
   const [profile,setProfile]=useState(()=>({nickname:CURRENT_USER?.nickname||CURRENT_USER?.name||"",avatar:CURRENT_USER?.avatar||"🦊"}));
   // 独り言（クイック記録）。通知やアプリのURLに #quick が付いていたら自動で開く
   const [showQuick,setShowQuick]=useState(false);
+  // FABの上にふわっと出る、記録したくなる可愛いひとことをランダムに巡回表示
+  const QUICK_HINTS=["いま何してた？","ひとりごと、する？","つぶやいてこ〜","1つだけ教えて♪","サボり？ちがう？👀","記録しちゃお","えらいの見せて","今日のわたし、どう？","ちょいメモしよ","話すだけでOK🎙"];
+  const [hintIdx,setHintIdx]=useState(()=>Math.floor(Math.random()*10));
+  const [hintOn,setHintOn]=useState(false);
+  useEffect(()=>{
+    // 少し待ってからフワッと出し、一定間隔で文言を差し替える（開いている間は隠す）
+    let alive=true;
+    const start=setTimeout(()=>{ if(alive) setHintOn(true); },1800);
+    const iv=setInterval(()=>{
+      setHintOn(false);
+      setTimeout(()=>{ if(alive){ setHintIdx(i=>(i+1+Math.floor(Math.random()*(QUICK_HINTS.length-1)))%QUICK_HINTS.length); setHintOn(true); } },380);
+    },5200);
+    return ()=>{ alive=false; clearTimeout(start); clearInterval(iv); };
+  },[]);
   useEffect(()=>{
     const openIfHash=()=>{ if(location.hash.replace("#","").toLowerCase()==="quick"){ setShowQuick(true); history.replaceState(null,"",location.pathname+location.search); } };
     openIfHash();
@@ -4417,10 +4469,13 @@ function App() {
         </div>
       </div>
       <!-- 独り言（クイック記録）フローティングボタン。どのタブからでも1タップで話せる -->
-      <button onClick=${()=>setShowQuick(true)} title="独り言で記録"
-        style=${{position:"absolute",right:16,bottom:"calc(var(--nav-h) + var(--safe-bottom) + 16px)",width:56,height:56,borderRadius:"50%",background:"linear-gradient(135deg, var(--hero1) 0%, var(--hero2) 100%)",border:"none",boxShadow:"0 6px 18px rgba(8,145,178,0.4)",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",zIndex:200}}>
-        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/><path d="M19 10v1a7 7 0 0 1-14 0v-1"/><line x1="12" y1="19" x2="12" y2="22"/></svg>
-      </button>
+      <div style=${{position:"absolute",right:16,bottom:"calc(var(--nav-h) + var(--safe-bottom) + 16px)",zIndex:200}}>
+        ${hintOn && !showQuick && html`<div class="quick-hint" key=${hintIdx}>${QUICK_HINTS[hintIdx]}</div>`}
+        <button onClick=${()=>setShowQuick(true)} title="独り言で記録"
+          style=${{width:56,height:56,borderRadius:"50%",background:"linear-gradient(135deg, var(--hero1) 0%, var(--hero2) 100%)",border:"none",boxShadow:"0 6px 18px rgba(8,145,178,0.4)",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/><path d="M19 10v1a7 7 0 0 1-14 0v-1"/><line x1="12" y1="19" x2="12" y2="22"/></svg>
+        </button>
+      </div>
       ${showQuick&&html`<${QuickLogSheet} onClose=${()=>setShowQuick(false)} onToast=${setToast}/>`}
       <nav class="nav">
         ${TABS.map(t=>html`

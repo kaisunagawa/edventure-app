@@ -1,4 +1,4 @@
-const CACHE = "jiroku-v6";
+const CACHE = "jiroku-v7";
 
 // タイマー終了などをバックグラウンドでも通知するためのFirebase Cloud Messaging。
 // 別ファイル（firebase-messaging-sw.js）として登録すると、同じスコープ('/')の

@@ -334,6 +334,32 @@ function StudentMain({ student, onNoteSaved }) {
   const copyStudentMessage = async () => {
     try { await navigator.clipboard.writeText(genMsg); setGenMsgResult("コピーしました"); setTimeout(()=>setGenMsgResult(""),2000); } catch (e) { setGenMsgResult("コピーに失敗しました"); }
   };
+  // 記録が滞っている生徒への定期的な声かけメッセージの生成
+  const [nudgeMsg, setNudgeMsg] = useState("");
+  const [nudgeLoading, setNudgeLoading] = useState(false);
+  const [nudgeSending, setNudgeSending] = useState(false);
+  const [nudgeResult, setNudgeResult] = useState("");
+  const [nudgeInfo, setNudgeInfo] = useState(null);
+  const [nudgeLineLinked, setNudgeLineLinked] = useState(true);
+  const generateNudgeMessage = async () => {
+    setNudgeLoading(true); setNudgeResult("");
+    const r = await apiPost("coachGenerateNudgeMessage", { targetEmail: student.email });
+    setNudgeLoading(false);
+    if (r.ok) { setNudgeMsg(r.data.message); setNudgeInfo(r.data); setNudgeLineLinked(r.data.lineLinked); }
+    else setNudgeResult(r.error || "生成に失敗しました");
+  };
+  const sendNudgeMessage = async () => {
+    if (!nudgeMsg.trim()) return;
+    if (!confirm(student.name + " さんにこのメッセージを送信しますか？（LINEとアプリに届きます）")) return;
+    setNudgeSending(true); setNudgeResult("");
+    const r = await apiPost("coachSendStudentMessage", { targetEmail: student.email, message: nudgeMsg.trim() });
+    setNudgeSending(false);
+    if (r.ok) { setNudgeResult(r.lineSent ? "送信しました（LINE＋アプリ）" : "アプリに送信しました（LINE未連携）"); setNudgeMsg(""); }
+    else setNudgeResult(r.error || "送信に失敗しました");
+  };
+  const copyNudgeMessage = async () => {
+    try { await navigator.clipboard.writeText(nudgeMsg); setNudgeResult("コピーしました"); setTimeout(()=>setNudgeResult(""),2000); } catch (e) { setNudgeResult("コピーに失敗しました"); }
+  };
   // 課金状態の変更（半自動運用: Stripe入金を確認したら「決済済みにする」を押す）
   const [planSaving, setPlanSaving] = useState(false);
   const setPlan = async (status, label) => {
@@ -742,6 +768,28 @@ function StudentMain({ student, onNoteSaved }) {
               </div>
             `}
             ${genMsgResult && html`<div style=${{fontSize:12,color:"var(--accent)",marginTop:8}}>${genMsgResult}</div>`}
+          </div>
+
+          <!-- 定期フォロー: 記録が滞っている生徒への声かけを生成 -->
+          <div class="card" style=${{marginTop:20,border:"1.5px solid var(--brass, #A9803F)"}}>
+            <div class="card-label">🌱 定期フォローのメッセージを生成</div>
+            <div style=${{fontSize:11.5,color:"var(--sub)",marginBottom:10}}>セッションとは別に、折を見て送る声かけを作ります。記録が止まっている生徒には、責めずに再開を後押しする文面をAIが状況に合わせて生成します。</div>
+            ${student.lastLogDate
+              ? html`<div style=${{fontSize:11.5,color:"var(--sub)",marginBottom:12}}>最後の記録: ${student.lastLogDate}</div>`
+              : html`<div style=${{fontSize:11.5,color:"var(--brass, #A9803F)",marginBottom:12}}>まだ記録がありません</div>`}
+            <button class="btn" onClick=${generateNudgeMessage} disabled=${nudgeLoading}>${nudgeLoading?"生成中…":(nudgeMsg?"作り直す":"声かけを生成する")}</button>
+            ${nudgeMsg && html`
+              <div style=${{marginTop:12}}>
+                ${nudgeInfo && nudgeInfo.daysSince!=null && nudgeInfo.daysSince>=3 && html`<div style=${{fontSize:11.5,color:"var(--sub)",marginBottom:6}}>最後の記録から約${nudgeInfo.daysSince}日空いています。</div>`}
+                <textarea class="txa" value=${nudgeMsg} onChange=${e=>setNudgeMsg(e.target.value)} style=${{minHeight:120,fontSize:13.5,lineHeight:1.7}}/>
+                ${!nudgeLineLinked && html`<div style=${{fontSize:11.5,color:"var(--amber, #B45309)",marginBottom:8}}>⚠️ この生徒はLINE未連携です。送信するとアプリの受信箱にのみ届きます。</div>`}
+                <div style=${{display:"flex",gap:8,marginTop:4}}>
+                  <button class="btn" onClick=${sendNudgeMessage} disabled=${nudgeSending||!nudgeMsg.trim()}>${nudgeSending?"送信中…":"この内容で送信"}</button>
+                  <button style=${{fontSize:13,background:"none",border:"1px solid var(--border)",borderRadius:8,padding:"0 16px",cursor:"pointer",fontFamily:"inherit"}} onClick=${copyNudgeMessage}>コピー</button>
+                </div>
+              </div>
+            `}
+            ${nudgeResult && html`<div style=${{fontSize:12,color:"var(--accent)",marginTop:8}}>${nudgeResult}</div>`}
           </div>
         `}
 

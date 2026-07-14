@@ -70,6 +70,7 @@ function doGet(e) {
       case "coachGetStudentDetail": result = coachGetStudentDetail(e.parameter.coachEmail, e.parameter.targetEmail); break;
       case "coachSaveNote":         result = coachSaveNote(e.parameter.coachEmail, e.parameter); break;
       case "coachGenerateStudentMessage": result = coachGenerateStudentMessage(e.parameter.coachEmail, e.parameter); break;
+      case "coachGenerateNudgeMessage": result = coachGenerateNudgeMessage(e.parameter.coachEmail, e.parameter); break;
       case "coachVerifyNote":       result = coachVerifyNote(e.parameter.coachEmail, e.parameter); break;
       case "coachPrepSummary":      result = coachPrepSummary(e.parameter.coachEmail, e.parameter.targetEmail); break;
       case "coachSyncStripeOne":    result = coachSyncStripeOne(e.parameter.coachEmail, e.parameter); break;
@@ -220,6 +221,7 @@ function doPost(e) {
       case "coachSessionSuggestions": return jsonResponse(coachSessionSuggestions(body.coachEmail, body));
       case "coachSummarizeTranscript": return jsonResponse(coachSummarizeTranscript(body.coachEmail, body));
       case "coachGenerateStudentMessage": return jsonResponse(coachGenerateStudentMessage(body.coachEmail, body));
+      case "coachGenerateNudgeMessage": return jsonResponse(coachGenerateNudgeMessage(body.coachEmail, body));
       case "coachSendStudentMessage": return jsonResponse(coachSendStudentMessage(body.coachEmail, body));
       default: return jsonResponse({ ok: false, error: "Unknown action" });
     }
@@ -550,7 +552,9 @@ function quickLog(studentEmail, body) {
   const user = sheetToObjects(getSheet("Users")).find(u => u.student_email === studentEmail);
   const goalsText = user ? [user.goal, user.goal2, user.goal3].filter(Boolean).join(" / ") : "";
 
-  const prompt = `ユーザーが「今どう過ごしたか」を話し言葉でつぶやきました。これを1件の時間記録に構造化してください。
+  const prompt = `ユーザーが「今日どう過ごしたか」を話し言葉でつぶやきました。これを時間記録に構造化してください。
+1つの活動だけなら1件でOKですが、1日の出来事をまとめて話している場合は、語られた活動を漏れなく全て別々の記録にしてください（件数の上限を気にせず、話に出てきた分だけ作る）。
+「誰に会ったか」「何時に何をしたか」など具体的な情報が入っていれば、それも記録に活かしてください。話に出てきたことを勝手に省略・要約して捨てないこと。
 
 【つぶやき】
 ${text}
@@ -558,48 +562,93 @@ ${text}
 【現在時刻】${hour}時
 【この人の目標】${goalsText || "未設定"}
 
-【変換ルール】
+【各記録の作り方】
+- time: その活動の開始時刻を "HH:MM" 形式（24時間）で。つぶやきに言われた時刻をできるだけ忠実に。「8時」→08:00、「8時半」→08:30、「9時15分」→09:15、「9時半から」→09:30。分まで言っていない時だけ:00にする。開始時刻が同じ活動は1件にまとめる。時刻が無く「さっき/今」なら現在時刻(${hour}時00分 = ${String(hour).padStart(2,"0")}:00)
 - task: 何をしていたかを短く（10字前後の名詞句。例「企画書作成」「筋トレ」「移動」）
-- focus_level: 本人の手応えから1〜5で判定（5=完璧・大満足 / 4=よくできた / 3=まあまあ / 2=もう少し / 1=全然だめ）。手応えが読み取れなければ3
-- memo: つぶやきの内容をほぼそのまま活かした振り返りメモ（本人の言葉・感情を残す。1〜2文）
-- goal_related: その活動が上の目標に関連していそうなら true、そうでなければ false
-- hour_offset: 「さっき」「1時間前」等が読み取れる場合、現在時刻から何時間前かの整数（今のことなら0、1時間前なら1）。不明なら0
+- focus_level: 本人の手応えから1〜5（5=完璧 / 4=よくできた / 3=まあまあ / 2=もう少し / 1=全然だめ）。読み取れなければ3
+- memo: その時間帯の内容を、本人の言葉・感情を残して1〜2文で
+- goal_related: 上の目標に関連していそうなら true、そうでなければ false
 
-以下のJSON形式のみで返してください（説明不要）:
-{ "task": "...", "focus_level": <1-5>, "memo": "...", "goal_related": <true|false>, "hour_offset": <整数> }`;
+以下のJSON形式のみで返してください（説明不要）。値の中で引用が必要なら「」を使い半角"は使わない。各値は改行しない:
+{ "records": [ { "time": "HH:MM", "task": "...", "focus_level": 3, "memo": "...", "goal_related": false } ] }`;
 
-  const res = UrlFetchApp.fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
-    payload: JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: 400, messages: [{ role: "user", content: prompt }] }),
-    muteHttpExceptions: true
-  });
-  const result = JSON.parse(res.getContentText());
-  if (!result.content || !result.content[0]) return { ok: false, error: "うまく聞き取れませんでした。もう一度お願いします" };
+  // AI呼び出し〜解析は失敗しても入力を落とさない。例外・非JSON・レート制限・
+  // 解析失敗のいずれでも、後段のフォールバックでつぶやき全文を必ず保存する。
+  let records = null;
+  try {
+    const res = UrlFetchApp.fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
+      payload: JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: 8000, messages: [{ role: "user", content: prompt }] }),
+      muteHttpExceptions: true
+    });
+    const result = JSON.parse(res.getContentText());
+    if (result && result.content && result.content[0]) {
+      const parsed = parseAiJson(result.content[0].text);
+      // records配列が基本だが、単一オブジェクトで返ってきた場合も受ける
+      if (parsed && Array.isArray(parsed.records) && parsed.records.length > 0) records = parsed.records;
+      else if (parsed && parsed.task) records = [parsed];
+    } else {
+      Logger.log("quickLog: AI応答にcontentなし body=" + res.getContentText().slice(0, 300));
+    }
+  } catch (e) {
+    Logger.log("quickLog AI例外: " + e);
+  }
 
-  const parsed = parseAiJson(result.content[0].text);
-  if (!parsed) return { ok: false, error: "うまく聞き取れませんでした。もう一度お願いします" };
+  // ★取りこぼし防止フォールバック：AIで構造化できなくても、つぶやき全文を
+  // memoに残した1件を現在時刻で必ず保存する（入力が消えることをなくす）
+  let usedFallback = false;
+  if (!records || records.length === 0) {
+    usedFallback = true;
+    const shortTask = text.length <= 18 ? text : text.slice(0, 18) + "…";
+    records = [{ time: curBlock, task: shortTask, focus_level: 3, memo: text, goal_related: false }];
+  }
 
   const FOCUS_LABELS = { 1: "1 — 全然だめだった", 2: "2 — もう少しだった", 3: "3 — まあまあだった", 4: "4 — よくできた", 5: "5 — 完璧にできた" };
-  const fnum = Math.max(1, Math.min(5, Number(parsed.focus_level) || 3));
-  const offset = Math.max(0, Math.min(12, Number(parsed.hour_offset) || 0));
-  const blockHour = hour - offset;
-  const timeBlock = (blockHour >= 0 ? String(blockHour).padStart(2, "0") : curBlock.substring(0, 2)) + ":00";
+  // "08:30" / "8時30分" / "8時半"(=30) / "8" などから "HH:MM" を作る。
+  // 分まで言っていない場合は :00。範囲外は現在時刻/0分に丸める。
+  const normTime = (t) => {
+    const s = String(t || "");
+    let h, min;
+    const half = /時半/.test(s);
+    const m = s.match(/(\d{1,2})\s*[:：時]\s*(\d{1,2})?/) || s.match(/(\d{1,2})/);
+    h = m ? Number(m[1]) : hour;
+    min = (m && m[2] != null && m[2] !== "") ? Number(m[2]) : (half ? 30 : 0);
+    if (isNaN(h) || h < 0 || h > 23) h = hour;
+    if (isNaN(min) || min < 0 || min > 59) min = 0;
+    return String(h).padStart(2, "0") + ":" + String(min).padStart(2, "0");
+  };
 
-  // 既存のsaveLogに乗せる（カレンダー書き戻しはアプリ側で行うためここではDailyLogのみ）
-  const saveRes = saveLog(studentEmail, {
-    time_block: timeBlock,
-    task: String(parsed.task || "記録").slice(0, 60),
-    focus_level: FOCUS_LABELS[fnum],
-    memo: String(parsed.memo || text).slice(0, 3000),
-    goal_related: parsed.goal_related === true ? "true" : "false"
+  const saved = [];
+  let totalXp = 0, lastLevel = null, leveled = false;
+  // 1日分をまとめて話す人にも対応するため件数の上限は事実上設けない。
+  // 60件は1日24時間を分単位で分けても十分収まる安全弁（暴走・実行時間の保険）
+  records.slice(0, 60).forEach(function (r) {
+    const fnum = Math.max(1, Math.min(5, Number(r.focus_level) || 3));
+    const tb = normTime(r.time);
+    const sr = saveLog(studentEmail, {
+      time_block: tb,
+      task: String(r.task || "記録").slice(0, 60),
+      focus_level: FOCUS_LABELS[fnum],
+      memo: String(r.memo || "").slice(0, 3000),
+      goal_related: r.goal_related === true ? "true" : "false"
+    });
+    if (sr.ok) {
+      saved.push({ time_block: tb, task: r.task, focus_level: fnum, goal_related: r.goal_related === true });
+      if (sr.xp_gained) totalXp += sr.xp_gained;
+      if (sr.level_up) { leveled = true; lastLevel = sr.level; }
+    }
   });
 
+  if (saved.length === 0) return { ok: false, error: "記録の保存に失敗しました。もう一度お試しください" };
+  // 複数件の時は先頭を代表として返しつつ、件数も返す（フロントのトースト用）
   return {
-    ok: !!saveRes.ok,
-    saved: { time_block: timeBlock, task: parsed.task, focus_level: fnum, memo: parsed.memo, goal_related: parsed.goal_related === true },
-    xp_gained: saveRes.xp_gained, level_up: saveRes.level_up, level: saveRes.level, updated: saveRes.updated,
-    error: saveRes.ok ? undefined : (saveRes.error || "保存に失敗しました")
+    ok: true,
+    count: saved.length,
+    saved: saved[0],
+    savedAll: saved,
+    fallback: usedFallback,   // AI解析に失敗し、全文をそのまま1件保存した場合true
+    xp_gained: totalXp, level_up: leveled, level: lastLevel
   };
 }
 
@@ -2222,16 +2271,16 @@ function coachGenerateStudentMessage(coachEmail, body) {
   const recentMsgs = getRecentCoachMessages(studentEmail, 5);
   const tone = String(body.tone || "");
 
-  const prompt = "あなたは教育コーチ「" + coachName + "」本人です。今日" + user.name + "さんとコーチングセッションを行いました。セッションの直後に、" + user.name + "さん本人へLINEで送るフォローアップメッセージを書いてください。\n\n" +
+  const prompt = "あなたは教育コーチ「" + coachName + "」本人です。今日" + user.name + "さんとコーチングセッションを行いました。セッションの直後に、" + user.name + "さん本人へChatwork（チャットワーク）で送るフォローアップメッセージを書いてください。\n\n" +
     ctx + "\n\n" + lastNoteText + "\n" + recentMsgs + (tone ? "\n【今回のトーン指定】" + tone : "") + "\n\n" +
     "【メッセージの作り方】\n" +
     "- 今日のセッションで話した内容・約束事項に具体的に触れる（本人が「ちゃんと見てくれている」と感じられるように）\n" +
     "- セッションでの本人の良かった点・前向きな変化を1つ具体的に称える\n" +
     "- 約束事項があれば、それを一緒に頑張る姿勢で背中を押す（プレッシャーではなく応援）\n" +
-    "- アメとムチを使い分ける。頑張れている時は惜しみなく祝い、停滞している時は愛を持ってはっきり伝える（人格ではなく行動を）\n" +
-    "- 敬語とタメ語を自然に混ぜた、友人でもあるコーチの温度感\n" +
+    "- 頑張れている時は惜しみなく称え、停滞している時も愛を持って、行動（人格ではなく）にはっきり触れる\n" +
+    "- 全体をていねいな敬語で書く（Chatworkでのビジネス的なやり取りにふさわしい、あたたかく丁寧な文体。タメ口・馴れ馴れしい表現は使わない）\n" +
     "- 「---」「【】」などの見出し・宛名（〇〇さんへ）は書かない。本文からそのまま始める\n" +
-    "- そのままLINEで送れる本文だけを出力する（説明・前置き不要）\n" +
+    "- そのままChatworkで送れる本文だけを出力する（説明・前置き不要）\n" +
     "- 3〜5文程度。1文ごとに句点で区切って改行が入りやすくする\n" + EMOJI_STYLE;
 
   const res = UrlFetchApp.fetch("https://api.anthropic.com/v1/messages", {
@@ -2243,6 +2292,69 @@ function coachGenerateStudentMessage(coachEmail, body) {
   const result = JSON.parse(res.getContentText());
   if (!result.content || !result.content[0]) return { ok: false, error: "生成に失敗しました" };
   return { ok: true, data: { message: stripSalutation(result.content[0].text.trim()), lineLinked: !!user.line_user_id } };
+}
+
+// 定期的なフォローアップ（特に記録が滞っている生徒向け）のメッセージを生成する。
+// セッション直後ではなく、コーチが折を見て送る「声かけ」を想定。
+// 記録の停滞状況に応じて、責めずに再開を後押しする文面を作る。
+function coachGenerateNudgeMessage(coachEmail, body) {
+  if (!verifyCoach(coachEmail)) return { ok: false, error: "not a coach" };
+  const studentEmail = String(body.targetEmail || "");
+  const user = coachOwnsStudent(coachEmail, studentEmail);
+  if (!user) return { ok: false, error: "not your student" };
+  const apiKey = PropertiesService.getScriptProperties().getProperty("CLAUDE_API_KEY");
+  if (!apiKey) return { ok: false, error: "CLAUDE_API_KEY未設定" };
+
+  const coach = sheetToObjects(getSheet("Coaches")).find(c => c.coach_email === coachEmail);
+  const coachName = (coach && coach.coach_name) ? coach.coach_name : "コーチ";
+
+  // 記録の停滞状況を算出
+  const logs = sheetToObjects(getSheet("DailyLog")).filter(l => l.student_email === studentEmail);
+  const lastLogDate = logs.length ? logs.map(l => l.date).sort().pop() : null;
+  const today = formatDate(new Date());
+  const daysSince = lastLogDate
+    ? Math.round((new Date(today + "T00:00:00") - new Date(lastLogDate + "T00:00:00")) / 86400000)
+    : null;
+
+  let situation;
+  if (daysSince === null) {
+    situation = "この方はまだ一度も記録をつけていません。まずは記録を始める最初の一歩を、やさしく後押ししてください。";
+  } else if (daysSince <= 1) {
+    situation = "直近（" + (daysSince === 0 ? "今日" : "昨日") + "）まで記録できています。頑張りをしっかり認めつつ、無理なく続けられるよう声をかけてください。";
+  } else if (daysSince <= 3) {
+    situation = "最後の記録から" + daysSince + "日空いています。まだ大きくは離れていないので、責めずに軽く様子をうかがい、そっと再開を促してください。";
+  } else if (daysSince <= 7) {
+    situation = "最後の記録から" + daysSince + "日空いています。少し間が空いているので、体調や忙しさを気づかいつつ、ハードルを下げて（一言だけでもOKと伝えて）再開を後押ししてください。";
+  } else {
+    situation = "最後の記録から" + daysSince + "日以上空いています。だいぶ間が空いているため、決して責めず、まず気にかけていることを伝え、また一緒に少しずつで大丈夫だと安心させる文面にしてください。";
+  }
+
+  const ctx = buildStudentContext(studentEmail, user);
+  const recentMsgs = getRecentCoachMessages(studentEmail, 5);
+  const tone = String(body.tone || "");
+
+  const prompt = "あなたは教育コーチ「" + coachName + "」本人です。担当している" + user.name + "さんへ、折を見て送る定期的な声かけメッセージを、Chatwork（チャットワーク）で送るために書いてください。\n\n" +
+    ctx + "\n\n【記録の状況】" + situation + "\n" + recentMsgs + (tone ? "\n【今回のトーン指定】" + tone : "") + "\n\n" +
+    "【メッセージの作り方】\n" +
+    "- 記録の停滞を『サボっている』と決めつけない。まず気にかけている気持ちを伝える\n" +
+    "- 目標や過去の頑張りに具体的に触れ、『ちゃんと見ている』ことが伝わるようにする\n" +
+    "- 再開のハードルを下げる（『一言だけでも』『できた範囲でOK』など、小さな一歩を提示する）\n" +
+    "- プレッシャーや罪悪感を与えない。あくまで応援・伴走の姿勢\n" +
+    "- 直近で似た内容をすでに送っている場合は、繰り返しにならないよう切り口を変える\n" +
+    "- 全体をていねいな敬語で書く（Chatworkでのあたたかく丁寧な文体。タメ口・馴れ馴れしい表現は使わない）\n" +
+    "- 「---」「【】」などの見出し・宛名（〇〇さんへ）は書かない。本文からそのまま始める\n" +
+    "- そのままChatworkで送れる本文だけを出力する（説明・前置き不要）\n" +
+    "- 3〜4文程度。1文ごとに句点で区切って改行が入りやすくする\n" + EMOJI_STYLE;
+
+  const res = UrlFetchApp.fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
+    payload: JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: 600, messages: [{ role: "user", content: prompt }] }),
+    muteHttpExceptions: true
+  });
+  const result = JSON.parse(res.getContentText());
+  if (!result.content || !result.content[0]) return { ok: false, error: "生成に失敗しました" };
+  return { ok: true, data: { message: stripSalutation(result.content[0].text.trim()), daysSince: daysSince, lastLogDate: lastLogDate, lineLinked: !!user.line_user_id } };
 }
 
 // コーチが確認・編集したメッセージを、その生徒へ実際に送る（LINE＋アプリの受信箱に反映）
@@ -3010,6 +3122,12 @@ function hourlyReminder() {
         : null;
 
       if (daysSinceLastLog === null || daysSinceLastLog >= 2) {
+        // LINE専用の日次継続支援(dailyLineWinback)を今日すでに送っていれば、
+        // 同じ日にプッシュ側のリマインドを重ねない（通知過多を防ぐ）
+        const wbStr = user.last_winback_date
+          ? (user.last_winback_date instanceof Date ? formatDate(user.last_winback_date) : String(user.last_winback_date))
+          : "";
+        if (wbStr === today) return;
         let dormantText;
         if (daysSinceLastLog === null) {
           dormantText = "まだ1件も記録がありません。まずは直近の1時間、何をしていたか記録してみましょう";
@@ -3085,6 +3203,167 @@ ${EMOJI_STYLE}
     notifyUserTimeSlot(user, "⏱ 記録タイム", timeBlock + " の記録タイム！",
       "⏱ " + timeBlock + " の記録タイム！\n📝 " + APP_URL + "#quick");
   });
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// LINE専用の継続支援（ウィンバック）通知
+// 「ログインしていない／記録が止まっている人」を、続けられるように後押しする。
+// プッシュ通知(hourlyReminder)とは別建てで、LINEにだけ・1日1回・停滞の節目
+// （2/3/5/7/10/14日目、以降は週1）に、責めずに再開を促す温かい文面を送る。
+// 未記録（一度も記録がない）人には3日おきに最初の一歩を促す。
+// last_winback_dateで送信日を記録し、同じ日に重ねて送らない。
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+function dailyLineWinback() {
+  if (!LINE_CHANNEL_TOKEN) { Logger.log("dailyLineWinback: LINE未設定のためスキップ"); return; }
+  const sheet = getSheet("Users");
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0];
+  const emailIdx = headers.indexOf("student_email");
+  const lineIdx = headers.indexOf("line_user_id");
+  const activeIdx = headers.indexOf("is_active");
+  const lastLogIdx = headers.indexOf("last_log_date");
+  let winIdx = headers.indexOf("last_winback_date");
+  if (winIdx === -1) { winIdx = headers.length; sheet.getRange(1, winIdx + 1).setValue("last_winback_date"); }
+
+  const today = formatDate(new Date());
+  const todayD = new Date(today + "T00:00:00");
+  const link = "\n\n▼ いま、ひとことだけ🎙\n" + APP_URL + "#quick";
+  const apiKey = PropertiesService.getScriptProperties().getProperty("CLAUDE_API_KEY");
+  // 過去の記録内容を差し込むため、DailyLogをメールでまとめて先読み（ループ内で読み直さない）
+  const logsByEmail = groupBy(sheetToObjects(getSheet("DailyLog")), "student_email");
+  let sent = 0;
+
+  for (let i = 1; i < data.length; i++) {
+    const row = data[i];
+    if (String(row[activeIdx]).toUpperCase() !== "TRUE") continue;
+    const lineId = String(row[lineIdx] || "");
+    if (!lineId) continue; // LINE連携している人だけが対象
+
+    const user = rowToObject(row, headers);
+    if (isRestDay(user, new Date())) continue; // 休みの日は急かさない
+
+    const rawLL = row[lastLogIdx];
+    const lastStr = rawLL instanceof Date ? formatDate(rawLL) : String(rawLL || "");
+    const days = lastStr ? Math.round((todayD - new Date(lastStr + "T00:00:00")) / 86400000) : null;
+
+    const rawWB = row[winIdx];
+    const wbStr = rawWB instanceof Date ? formatDate(rawWB) : String(rawWB || "");
+    if (wbStr === today) continue; // 今日はもう送信済み
+
+    let send = false;
+    if (days === null) {
+      // 一度も記録がない人：3日おきに最初の一歩を促す
+      const gap = wbStr ? Math.round((todayD - new Date(wbStr + "T00:00:00")) / 86400000) : 999;
+      if (gap >= 3) send = true;
+    } else if (days >= 2 && ([2, 3, 5, 7, 10, 14].indexOf(days) !== -1 || (days > 14 && days % 7 === 0))) {
+      send = true;
+    }
+    if (!send) continue;
+
+    // 過去の記録から直近数件を取り出して、AIに具体的に触れさせる材料にする
+    const recentLogs = (logsByEmail.get(user.student_email) || [])
+      .slice().sort((a, b) => (a.date + (a.time_block || "")) > (b.date + (b.time_block || "")) ? -1 : 1)
+      .slice(0, 6);
+
+    // まずAIで一人ひとりに刺さる文面を生成。失敗時はテンプレにフォールバック（取りこぼさない）
+    let body = null;
+    if (apiKey) { try { body = generateWinbackText(user, days, recentLogs, apiKey); } catch (e) { Logger.log("winback AI例外: " + e); } }
+    if (!body) body = buildWinbackText(user, days);
+
+    if (sendLineMessage(lineId, body + link)) {
+      sheet.getRange(i + 1, winIdx + 1).setValue(today);
+      sent++;
+    }
+  }
+  Logger.log("dailyLineWinback: " + sent + "件送信");
+}
+
+// 記録したくなる、心理学を効かせた温かく可愛いウィンバック文面をAIで生成する。
+// 本人の目標・過去の記録内容に具体的に触れつつ、責めずに好奇心と自己肯定をくすぐる。
+// 生成できなければ null を返し、呼び出し側がテンプレにフォールバックする。
+function generateWinbackText(user, days, recentLogs, apiKey) {
+  const name = String(user.name || user.nickname || "").trim();
+  const goals = [user.goal, user.goal2, user.goal3].filter(Boolean).join(" / ");
+  const logLines = (recentLogs || []).map(function (l) {
+    const m = String(l.memo || "").trim();
+    return "・" + l.date + " " + (l.time_block || "") + " " + (l.task || "") + (m ? "（" + m.slice(0, 40) + "）" : "");
+  }).join("\n");
+
+  const situation = days === null
+    ? "まだ一度も記録していません（使い始めの最初の一歩をそっと後押しする段階）。"
+    : days + "日、記録がお休みになっています。";
+
+  const prompt = "あなたはJIROKU（時間の使い方を記録して自分を好きになっていく習慣アプリ）の、優しくてちょっと可愛い相棒キャラです。"
+    + (name ? name + "さん" : "この人") + "に、また記録したくなるLINEメッセージを1通書いてください。\n\n"
+    + "【状況】" + situation + "\n"
+    + "【この人の目標】" + (goals || "未設定") + "\n"
+    + "【過去の記録（あれば具体的に触れると効く）】\n" + (logLines || "（記録なし）") + "\n\n"
+    + "【心理学のエッセンスをさりげなく効かせる（あくまで自然に。露骨にしない）】\n"
+    + "- 好奇心のすき間: 「昨日の自分、何してたっけ？」と思い出したくなる問いかけ\n"
+    + "- 自己肯定・アイデンティティ: 「記録できる人＝ちゃんと前に進んでる人」とそっと認める\n"
+    + "- スモールステップ: 「ひとことだけ」「1つでいい」とハードルを思いっきり下げる\n"
+    + "- 過去の一貫性: 以前がんばっていた記録があれば、その人らしさに触れて思い出させる\n"
+    + "- 目標との接続: 目標があれば、その一歩になると軽くつなげる\n"
+    + "- 損失回避は使ってよいが、罪悪感やプレッシャーは絶対に与えない\n\n"
+    + "【トーン】\n"
+    + "- 優しくて、ちょっと甘えるような・可愛い言い回し（絵文字は1〜2個まで。顔文字も可）\n"
+    + "- 責めない・急かさない。まず「気にかけてるよ」の気持ちが伝わるように\n"
+    + "- 2〜4文・短め。LINEでパッと読めて、思わず開きたくなる長さ\n"
+    + "- 「" + (name || "あなた") + "さん」のように自然に呼びかけて始めてよい\n"
+    + "- 見出し・ラベル・説明・URLは書かない。本文だけを出力する\n"
+    + "- 若者言葉で寒くならないように。あくまで実在の優しい相棒が送る自然な言葉";
+
+  const res = UrlFetchApp.fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
+    payload: JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: 300, messages: [{ role: "user", content: prompt }] }),
+    muteHttpExceptions: true
+  });
+  const result = JSON.parse(res.getContentText());
+  if (!result || !result.content || !result.content[0]) return null;
+  const text = String(result.content[0].text || "").trim();
+  return text || null;
+}
+
+// AIが使えない/失敗した時のフォールバック。停滞状況ごとに、可愛く温かい文面を
+// ランダムに1つ選んで少しだけ変化を出す（毎回同じ文面にならないように）。
+function buildWinbackText(user, days) {
+  const name = String(user.name || user.nickname || "").trim();
+  const goal = String(user.goal || "").trim();
+  const nm = name ? name + "さん、" : "";
+  const pick = function (arr) { return arr[Math.floor(Math.random() * arr.length)]; };
+  const goalLine = goal ? "\n「" + goal + "」、あなたのペースで大丈夫だよ🌱" : "";
+  let body;
+  if (days === null) {
+    body = nm + pick([
+      "はじめまして、これから相棒になるよ☺️ まずは今日の“ひとこと”から、そっと始めてみない？",
+      "まだ記録が真っ白のまま待ってるよ。直近の1時間、何してたか一言だけ教えて〜🎙",
+      "最初の1回がいちばん勇気いるよね。でも“ひとこと”でいいの。いっしょにやろ？"
+    ]) + goalLine;
+  } else if (days >= 14) {
+    body = nm + pick([
+      "ひさしぶり…！ちゃんと待ってたよ🥺 責める気持ちはゼロ。今日ひとことだけ、戻ってきてくれたら嬉しいな。",
+      "" + days + "日ぶりだね。離れる時期があるのも自然なこと。またゆっくり、一言から再会しよ？",
+      "おかえりの準備、いつでもできてるよ☺️ 完璧じゃなくていいの。今日の“ひとこと”から。"
+    ]) + goalLine;
+  } else if (days >= 7) {
+    body = nm + pick([
+      "ちょっとだけ会えてなかったね（" + days + "日ぶり）。今日ひとこと残すと、また流れが戻ってくるよ〜🌿",
+      "" + days + "日ぶりのあなたの“今”、こっそり知りたいな👀 一言でいいから教えて？",
+      "完璧じゃなくて大丈夫。今日の1メモから、そっと再開しよ？"
+    ]) + goalLine;
+  } else if (days >= 5) {
+    body = nm + pick([
+      "ここ数日お休み中だね。ハードルは低くていいよ、今日の出来事を1つだけ残してみよ？☺️",
+      "そういえば最近どうしてた？いま何してたか、ひとことだけ教えて〜🎙"
+    ]);
+  } else {
+    body = nm + pick([
+      "ここ" + days + "日ちょっと空いてるね。昨日の自分、何してたか思い出せる？今の“ひとこと”からいこ？",
+      "ちょっとした一言でOK！今の時間、何してたか教えて〜☺️"
+    ]);
+  }
+  return body;
 }
 
 function updateStreak(studentEmail) {
@@ -5869,7 +6148,8 @@ function setupTriggers() {
   ScriptApp.newTrigger("syncChatworkMessages").timeBased().everyHours(1).create();
   ScriptApp.newTrigger("checkGrowthMilestones").timeBased().everyWeeks(1).onWeekDay(ScriptApp.WeekDay.MONDAY).atHour(9).create();
   ScriptApp.newTrigger("snsAutoFetchAll").timeBased().everyDays(1).atHour(21).create();
-  console.log("トリガーを設定しました（合計14個）");
+  ScriptApp.newTrigger("dailyLineWinback").timeBased().everyDays(1).atHour(19).create();
+  console.log("トリガーを設定しました（合計15個）");
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
