@@ -2876,13 +2876,21 @@ function TimerScreen({onToast, isActive}) {
           <input class="inp" placeholder="例：資料作成、家事、勉強など" value=${task}
             onInput=${e=>setTask(e.target.value)} disabled=${isRunning}/>
           ${!isRunning && todayActionOptions.length>0 && html`
-            <div style=${{display:"flex",flexWrap:"wrap",gap:6,marginTop:8}}>
-              ${todayActionOptions.map((a,i)=>html`
-                <button key=${i} onClick=${()=>setTask(a)}
-                  style=${{padding:"5px 10px",borderRadius:20,border:`1.5px solid ${task===a?"var(--accent)":"var(--border)"}`,background:task===a?"var(--accent-l)":"transparent",color:task===a?"var(--accent)":"var(--sub)",fontSize:11.5,fontWeight:500,cursor:"pointer",fontFamily:"inherit",maxWidth:"100%",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
-                  🎯 ${a}
-                </button>
-              `)}
+            <div style=${{marginTop:12}}>
+              <div style=${{fontSize:10.5,fontWeight:700,letterSpacing:".04em",color:"var(--sub)",marginBottom:7}}>目標・今日のアクションから選ぶ</div>
+              <div style=${{display:"flex",flexDirection:"column",gap:6}}>
+                ${todayActionOptions.map((a,i)=>{
+                  const on=task===a;
+                  return html`
+                    <button key=${i} onClick=${()=>setTask(on?"":a)}
+                      style=${{display:"flex",alignItems:"center",gap:8,width:"100%",textAlign:"left",padding:"10px 12px",borderRadius:10,border:`1.5px solid ${on?"var(--accent)":"var(--border)"}`,background:on?"var(--accent-l)":"var(--bg)",cursor:"pointer",fontFamily:"inherit"}}>
+                      <span style=${{fontSize:13,flexShrink:0,opacity:on?1:.7}}>🎯</span>
+                      <span style=${{flex:1,minWidth:0,fontSize:12.5,fontWeight:on?700:500,color:on?"var(--accent)":"var(--text)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>${a}</span>
+                      ${on&&html`<span style=${{flexShrink:0,fontSize:12,color:"var(--accent)"}}>✓</span>`}
+                    </button>
+                  `;
+                })}
+              </div>
             </div>
           `}
         </div>
