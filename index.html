@@ -258,33 +258,23 @@
     .spin { width: 16px; height: 16px; border: 2px solid rgba(255,255,255,.3); border-top-color: #fff; border-radius: 50%; animation: rot .6s linear infinite; display: inline-block; }
     @keyframes rot { to { transform: rotate(360deg); } }
 
-    /* ── 独り言FABの上に出る、ちいさな雲 ── */
+    /* ── 独り言FABの上に出る、モコモコの雲（インラインSVG） ── */
     .quick-hint {
-      position: absolute; right: -4px; bottom: 100%; margin-bottom: 9px;
-      background: var(--card); color: var(--text);
-      font-size: 9.5px; font-weight: 700; letter-spacing: .02em; white-space: nowrap;
-      padding: 10px 14px; border-radius: 50% / 60%;
-      filter: drop-shadow(0 4px 7px rgba(8,145,178,0.16));
+      position: absolute; right: -14px; bottom: 100%; margin-bottom: 2px;
+      width: 96px; height: 76px; pointer-events: none; z-index: 1;
+      display: flex; align-items: center; justify-content: center;
       animation: quickHintIn .5s cubic-bezier(.34,1.56,.64,1), quickHintFloat 3.4s ease-in-out .5s infinite;
-      transform-origin: bottom center; pointer-events: none; z-index: 1;
+      transform-origin: bottom center;
     }
-    /* 雲の上のふくらみ */
-    .quick-hint::before {
-      content: ""; position: absolute; z-index: -1;
-      width: 16px; height: 16px; border-radius: 50%; background: var(--card);
-      left: 10px; top: -6px;
-      box-shadow:
-        14px -4px 0 1px var(--card),
-        30px -1px 0 -2px var(--card);
+    .quick-hint svg.cloud {
+      position: absolute; inset: 0; width: 100%; height: 100%;
+      filter: drop-shadow(0 5px 9px rgba(8,145,178,0.18));
     }
-    /* 雲の下のふくらみ＋思考ふきだしの小さな玉（FAB側へ） */
-    .quick-hint::after {
-      content: ""; position: absolute; z-index: -1;
-      right: 14px; bottom: -5px; width: 9px; height: 9px;
-      border-radius: 50%; background: var(--card);
-      box-shadow:
-        -20px 3px 0 -2px var(--card),
-        -6px 5px 0 -4px var(--card);
+    .quick-hint svg.cloud circle { fill: var(--card); }
+    .quick-hint .t {
+      position: relative; z-index: 1; color: var(--text);
+      font-size: 10px; font-weight: 700; letter-spacing: .02em; white-space: nowrap;
+      margin-top: -6px; /* しっぽの分、本体中心に文字を寄せる */
     }
     @keyframes quickHintIn { from { opacity: 0; transform: translateY(6px) scale(.8); } to { opacity: 1; transform: translateY(0) scale(1); } }
     @keyframes quickHintFloat { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-4px); } }
@@ -4511,7 +4501,16 @@ function App() {
            タイマー・記録タブには専用の記録UIがあるため、そこでは出さない -->
       ${tab!=="timer" && tab!=="log" && html`
       <div style=${{position:"absolute",right:16,bottom:"calc(var(--nav-h) + var(--safe-bottom) + 16px)",zIndex:200}}>
-        ${hintOn && !showQuick && html`<div class="quick-hint" key=${hintIdx}>${QUICK_HINTS[hintIdx]}</div>`}
+        ${hintOn && !showQuick && html`
+          <div class="quick-hint" key=${hintIdx}>
+            <svg class="cloud" viewBox="0 0 120 96" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+              <circle cx="44" cy="34" r="19"/><circle cx="66" cy="30" r="17"/><circle cx="84" cy="40" r="15"/>
+              <circle cx="30" cy="46" r="17"/><circle cx="90" cy="54" r="13"/><circle cx="40" cy="58" r="16"/>
+              <circle cx="60" cy="52" r="20"/><circle cx="76" cy="60" r="14"/>
+              <circle cx="26" cy="60" r="6"/><circle cx="18" cy="70" r="4"/>
+            </svg>
+            <span class="t">${QUICK_HINTS[hintIdx]}</span>
+          </div>`}
         <button onClick=${()=>setShowQuick(true)} title="独り言で記録"
           style=${{width:56,height:56,borderRadius:"50%",background:"linear-gradient(135deg, var(--hero1) 0%, var(--hero2) 100%)",border:"none",boxShadow:"0 6px 18px rgba(8,145,178,0.4)",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>
           <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/><path d="M19 10v1a7 7 0 0 1-14 0v-1"/><line x1="12" y1="19" x2="12" y2="22"/></svg>
