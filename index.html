@@ -975,10 +975,15 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
       else if(!skipped){
         gasApi("getIntent").then(r=>{
           if(r.ok && r.data){
-            const next = {date:today, intent:r.data.intent, done:r.data.done};
+            const next = {date:today, intent:r.data.intent, done:r.data.done, hours:r.data.hours};
             localStorage.setItem("jiroku_intent", JSON.stringify(next));
             setIntent(next);
-          } else if(new Date().getHours() < 18) setShowIntentModal(true);
+          } else {
+            // 朝6時〜18時の間だけ自動表示する。深夜〜早朝に開いた時にモーダルが出て
+            // スキップされ、肝心の朝に出ない…という取りこぼしを防ぐため6時を下限にする
+            const h = new Date().getHours();
+            if(h >= 6 && h < 18) setShowIntentModal(true);
+          }
         });
       }
     } catch(e){}
