@@ -4377,28 +4377,28 @@ function FeatureAnnounce({onClose,onGo}){
         <div style=${{background:"linear-gradient(135deg, var(--hero1) 0%, var(--hero2) 100%)",padding:"28px 22px 22px",textAlign:"center"}}>
           <div style=${{fontSize:40,marginBottom:6}}>🎙</div>
           <div style=${{fontSize:12,fontWeight:700,color:"rgba(255,255,255,0.85)",letterSpacing:"0.05em",marginBottom:4}}>UPDATE</div>
-          <div style=${{fontSize:20,fontWeight:800,color:"#fff",lineHeight:1.4}}>話すだけで記録できる<br/>ようになりました</div>
+          <div style=${{fontSize:20,fontWeight:800,color:"#fff",lineHeight:1.4}}>アップデートしました✨<br/>もっと記録がラクに</div>
         </div>
         <div style=${{padding:"20px 22px 22px"}}>
           <div style=${{display:"flex",gap:10,marginBottom:14}}>
             <div style=${{fontSize:20,flexShrink:0}}>🎙</div>
-            <div><div style=${{fontSize:13,fontWeight:700,color:"var(--text)"}}>独り言で記録（新！）</div>
-              <div style=${{fontSize:12,color:"var(--sub)",lineHeight:1.6,marginTop:1}}>右下のマイクボタンを押して「今なにしてた？」を話すだけ。AIが自動で記録に整えます。もう入力の手間なし。</div></div>
+            <div><div style=${{fontSize:13,fontWeight:700,color:"var(--text)"}}>独り言がパワーアップ</div>
+              <div style=${{fontSize:12,color:"var(--sub)",lineHeight:1.6,marginTop:1}}>右下のマイクで話すだけ。1日分まとめて話してもOK。「9時から9時半」も「これまでずっと〜してた」も、時間を自動で判断して記録します。</div></div>
           </div>
           <div style=${{display:"flex",gap:10,marginBottom:14}}>
-            <div style=${{fontSize:20,flexShrink:0}}>⭐</div>
-            <div><div style=${{fontSize:13,fontWeight:700,color:"var(--text)"}}>今日のフォーカス</div>
-              <div style=${{fontSize:12,color:"var(--sub)",lineHeight:1.6,marginTop:1}}>朝に「今日これを◯時間やる」と決めると、ホームで進捗を追えます。</div></div>
+            <div style=${{fontSize:20,flexShrink:0}}>⏱️</div>
+            <div><div style=${{fontSize:13,fontWeight:700,color:"var(--text)"}}>今日のタスク × タイマー連携</div>
+              <div style=${{fontSize:12,color:"var(--sub)",lineHeight:1.6,marginTop:1}}>タスクに「想定時間」を決められるように。タイマーでそのタスクを選ぶと、その時間でそのままスタートします。</div></div>
           </div>
           <div style=${{display:"flex",gap:10,marginBottom:14}}>
-            <div style=${{fontSize:20,flexShrink:0}}>🧠</div>
-            <div><div style=${{fontSize:13,fontWeight:700,color:"var(--text)"}}>「気づき」タブ（第二の脳）</div>
-              <div style=${{fontSize:12,color:"var(--sub)",lineHeight:1.6,marginTop:1}}>過去の自分に質問したり、あなたの強み・癖・時間の使い道をAIが教えてくれます。</div></div>
+            <div style=${{fontSize:20,flexShrink:0}}>🗑️</div>
+            <div><div style=${{fontSize:13,fontWeight:700,color:"var(--text)"}}>記録を削除できるように</div>
+              <div style=${{fontSize:12,color:"var(--sub)",lineHeight:1.6,marginTop:1}}>間違えて記録した時は、その記録を開いて「何をしましたか」とメモを空にすると消せます。</div></div>
           </div>
           <div style=${{display:"flex",gap:10,marginBottom:20}}>
-            <div style=${{fontSize:20,flexShrink:0}}>🗓</div>
-            <div><div style=${{fontSize:13,fontWeight:700,color:"var(--text)"}}>週末のふりかえり</div>
-              <div style=${{fontSize:12,color:"var(--sub)",lineHeight:1.6,marginTop:1}}>週末に今週をふりかえって、来週の一言を書けます。</div></div>
+            <div style=${{fontSize:20,flexShrink:0}}>🏆</div>
+            <div><div style=${{fontSize:13,fontWeight:700,color:"var(--text)"}}>みんなの頑張りが賑やかに</div>
+              <div style=${{fontSize:12,color:"var(--sub)",lineHeight:1.6,marginTop:1}}>新しい仲間の一歩や、連続記録の節目なども「シェア」に載るようになりました。</div></div>
           </div>
           <button class="btn" onClick=${onClose}>さっそく使ってみる</button>
           <button onClick=${onClose}
@@ -4484,12 +4484,12 @@ function App() {
   // 新機能のお知らせ（アプリを開いた時に1回だけ表示）。IDを変えれば次の告知を出せる。
   // チュートリアル中の新規ユーザーには出さない（既存ユーザーへの告知が目的のため）
   // チュートリアル中は下でreturnするので出ない。それ以外の全員に未読なら表示する
-  const ANNOUNCE_ID="update3_2026_07";
+  const ANNOUNCE_ID="update4_2026_07";
   const [showAnnounce,setShowAnnounce]=useState(()=>localStorage.getItem("announce_seen")!==ANNOUNCE_ID);
   const dismissAnnounce=()=>{ localStorage.setItem("announce_seen",ANNOUNCE_ID); setShowAnnounce(false); };
   // チュートリアル終了後は記録タブに着地させる（登録だけして使い始めない人が多いため、
   // 最初の1件を記録するところまで自然に誘導する）。スキップ時も同様に記録タブへ
-  const dismissTutorial=()=>{ localStorage.setItem("tutorial_seen","1"); localStorage.setItem("announce_seen","update3_2026_07"); setShowTutorial(false); setTab("log"); };
+  const dismissTutorial=()=>{ localStorage.setItem("tutorial_seen","1"); localStorage.setItem("announce_seen",ANNOUNCE_ID); setShowTutorial(false); setTab("log"); };
   const [goalData,setGoalData]=useState(()=>{
     const g=localStorage.getItem("jiroku_goals"); if(g) try{return JSON.parse(g);}catch(e){}
     const old=localStorage.getItem("jiroku_goal"); if(old) try{const p=JSON.parse(old); if(p.goal) return [p];}catch(e){}
