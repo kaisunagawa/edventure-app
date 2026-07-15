@@ -851,7 +851,12 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
     return s ? JSON.parse(s) : null; // null = use AI actions
   });
   const [editMode, setEditMode] = useState(false);
-  const [editItems, setEditItems] = useState([]);
+  const [editItems, setEditItems] = useState([]); // [{text, min}]（minは想定時間・分、任意）
+  // タスクごとの想定時間（分）。タスク文字列をキーに持つ並行マップ。
+  // タイマーでそのタスクを選ぶと、この想定時間でタイマーが始まる
+  const [taskEstimates, setTaskEstimates] = useState(()=>{
+    try { return JSON.parse(localStorage.getItem("jiroku_task_estimates_"+formatDateStr(new Date()))||"{}"); } catch(e){ return {}; }
+  });
   // 今日いちばんやりたいこと（朝の宣言）。その日の最初の起動でモーダルを出し、
   // 宣言した内容をホームに固定表示して、夜のレポートで達成状況をフォローする
   const [intent, setIntent] = useState(()=>{
@@ -1040,14 +1045,15 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
     : [];
   const actionItems = customActions !== null ? customActions : aiItems;
 
-  // タイマー画面の「何に集中しますか？」からも今日のアクションを選べるよう、
-  // 完了していない項目を端末に共有しておく（未完了のものだけ、選ぶ意味があるため）
+  // タイマー画面の「何に集中しますか？」からも今日のタスクを選べるよう、
+  // 完了していない項目を端末に共有しておく（未完了のものだけ、選ぶ意味があるため）。
+  // 想定時間(min)も一緒に載せて、タイマーで選んだ時にその時間で始められるようにする
   useEffect(()=>{
     try {
-      const remaining = actionItems.filter(item=>!checked[item]);
+      const remaining = actionItems.filter(item=>!checked[item]).map(t=>({text:t, min:(taskEstimates[t]||null)}));
       localStorage.setItem("jiroku_today_actions_shared", JSON.stringify({date:todayKey, items:remaining}));
     } catch(e){}
-  },[actionItems, checked, todayKey]);
+  },[actionItems, checked, todayKey, taskEstimates]);
 
   const toggleCheck = (key) => {
     const next = {...checked, [key]: !checked[key]};
@@ -1056,17 +1062,25 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
     gasPostJson("saveTodayActions", {checked: JSON.stringify(next)}); // 他端末にも同期
   };
 
+  // 現在のタスク(文字列配列)＋想定時間マップから、編集用の {text,min} 配列を作る
+  const toEditRows = (arr) => arr.map(t=>({text:t, min:(taskEstimates[t]!=null?String(taskEstimates[t]):"")}));
   const openEdit = () => {
-    setEditItems([...actionItems, ...(actionItems.length===0?[""]:[])]);
+    setEditItems(actionItems.length===0 ? [{text:"",min:""}] : toEditRows(actionItems));
     setEditMode(true);
   };
   // 「＋ タスクを追加」用。今のタスクに空欄を1つ足した状態で編集モーダルを開き、すぐ入力できる
   const openAddTask = () => {
-    setEditItems([...actionItems, ""]);
+    setEditItems([...toEditRows(actionItems), {text:"",min:""}]);
     setEditMode(true);
   };
   const saveEdit = () => {
-    const filtered = editItems.map(s=>s.trim()).filter(s=>s.length>0);
+    const rows = editItems.map(r=>({text:String(r.text||"").trim(), min:r.min})).filter(r=>r.text.length>0);
+    const filtered = rows.map(r=>r.text);
+    // 想定時間マップを作り直す（数値として妥当な分だけ保持）
+    const est = {};
+    rows.forEach(r=>{ const m=Math.round(Number(r.min)); if(m>0 && m<=600) est[r.text]=m; });
+    setTaskEstimates(est);
+    try { localStorage.setItem("jiroku_task_estimates_"+todayKey, JSON.stringify(est)); }catch(e){}
     // 空で保存したらAIアクションに戻す
     if(filtered.length===0){ setCustomActions(null); localStorage.removeItem("jiroku_custom_actions_"+todayKey); }
     else { setCustomActions(filtered); localStorage.setItem("jiroku_custom_actions_"+todayKey, JSON.stringify(filtered)); }
@@ -1422,7 +1436,8 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
           <div style=${{width:20,height:20,borderRadius:6,border:`2px solid ${checked[item]?"var(--accent)":"var(--border)"}`,background:checked[item]?"var(--accent)":"transparent",flexShrink:0,marginTop:1,display:"flex",alignItems:"center",justifyContent:"center",transition:"all .15s"}}>
             ${checked[item]&&html`<svg width="11" height="11" viewBox="0 0 10 10" fill="none"><path d="M2 5l2.5 2.5L8 3" stroke="white" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`}
           </div>
-          <span style=${{fontSize:14,color:checked[item]?"var(--sub)":"var(--text)",textDecoration:checked[item]?"line-through":"none",lineHeight:1.6,transition:"color .15s"}}>${item}</span>
+          <span style=${{flex:1,minWidth:0,fontSize:14,color:checked[item]?"var(--sub)":"var(--text)",textDecoration:checked[item]?"line-through":"none",lineHeight:1.6,transition:"color .15s"}}>${item}</span>
+          ${taskEstimates[item]>0&&html`<span style=${{flexShrink:0,fontSize:11,fontWeight:600,color:"var(--accent)",background:"var(--accent-l)",borderRadius:20,padding:"2px 8px",marginTop:1}}>⏱${taskEstimates[item]}分</span>`}
         </button>
       `) : html`
         <div style=${{padding:"16px",fontSize:13,color:"var(--sub)",lineHeight:1.7}}>
@@ -1440,17 +1455,23 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
       <div style=${{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"flex-end",zIndex:200}}>
         <div style=${{background:"var(--card)",borderRadius:"20px 20px 0 0",padding:"24px 20px 32px",width:"100%",boxSizing:"border-box",maxHeight:"80vh",overflowY:"auto"}}>
           <div style=${{fontSize:17,fontWeight:800,marginBottom:4}}>今日のタスクを編集</div>
-          <div style=${{fontSize:12,color:"var(--sub)",marginBottom:20}}>やることを自由に追加・編集・削除できます</div>
+          <div style=${{fontSize:12,color:"var(--sub)",marginBottom:16}}>やることと、想定時間（分・任意）を入力できます。タイマーでそのタスクを選ぶと、その時間で始まります。</div>
           ${editItems.map((item,i)=>html`
             <div key=${i} style=${{display:"flex",gap:8,alignItems:"center",marginBottom:10}}>
-              <input class="inp" style=${{flex:1,margin:0}} value=${item}
-                onInput=${e=>{ const a=[...editItems]; a[i]=e.target.value; setEditItems(a); }}
+              <input class="inp" style=${{flex:1,margin:0}} value=${item.text}
+                onInput=${e=>{ const a=[...editItems]; a[i]={...a[i],text:e.target.value}; setEditItems(a); }}
                 placeholder="タスクを入力..."/>
+              <div style=${{display:"flex",alignItems:"center",gap:3,flexShrink:0}}>
+                <input class="inp" type="number" inputmode="numeric" min="1" max="600" value=${item.min}
+                  onInput=${e=>{ const a=[...editItems]; a[i]={...a[i],min:e.target.value}; setEditItems(a); }}
+                  placeholder="分" style=${{width:56,margin:0,textAlign:"center",padding:"10px 6px"}}/>
+                <span style=${{fontSize:12,color:"var(--sub)"}}>分</span>
+              </div>
               <button onClick=${()=>setEditItems(editItems.filter((_,j)=>j!==i))}
                 style=${{background:"none",border:"none",color:"var(--sub)",fontSize:20,cursor:"pointer",flexShrink:0,padding:"0 4px"}}>×</button>
             </div>
           `)}
-          <button onClick=${()=>setEditItems([...editItems,""])}
+          <button onClick=${()=>setEditItems([...editItems,{text:"",min:""}])}
             style=${{width:"100%",padding:"10px",borderRadius:10,border:"1.5px dashed var(--border)",background:"none",color:"var(--accent)",fontSize:14,fontWeight:600,cursor:"pointer",marginBottom:16}}>
             ＋ タスクを追加
           </button>
@@ -2711,21 +2732,18 @@ function TimerScreen({onToast, isActive}) {
   // 途中で終えた場合も分単位で記録できるよう、モーダルを開く時点で確定させる
   const [sessionResult, setSessionResult] = useState(null); // {planned, actual} | null
 
-  // ホーム画面の「今日のアクション」を、タイマーの集中対象としてもワンタップで選べるようにする
-  const [todayActionOptions, setTodayActionOptions] = useState(()=>{
+  // ホーム画面の「今日のタスク」を、タイマーの集中対象としてもワンタップで選べるようにする。
+  // 各項目は {text, min}（minは想定時間・分）。古い形式（ただの文字列）にも後方互換で対応する
+  const normTaskOpts = (items) => (items||[]).map(it => (typeof it==="string" ? {text:it, min:null} : {text:String(it.text||""), min:(it.min||null)})).filter(o=>o.text);
+  const readTodayActions = () => {
     try {
       const s = JSON.parse(localStorage.getItem("jiroku_today_actions_shared")||"null");
-      if (s && s.date === formatDateStr(new Date())) return s.items || [];
+      if (s && s.date === formatDateStr(new Date())) return normTaskOpts(s.items);
     } catch(e){}
     return [];
-  });
-  useEffect(()=>{
-    if (!isActive) return;
-    try {
-      const s = JSON.parse(localStorage.getItem("jiroku_today_actions_shared")||"null");
-      setTodayActionOptions(s && s.date === formatDateStr(new Date()) ? (s.items||[]) : []);
-    } catch(e){}
-  },[isActive]);
+  };
+  const [todayActionOptions, setTodayActionOptions] = useState(readTodayActions);
+  useEffect(()=>{ if(isActive) setTodayActionOptions(readTodayActions()); },[isActive]);
 
   // 状態をlocalStorageに保存
   useEffect(()=>{
@@ -2834,6 +2852,20 @@ function TimerScreen({onToast, isActive}) {
     setIsRunning(true);
     scheduleEndNotify(timeLeft, mode);
   };
+  // 指定した分数でその場からタイマーを開始する（今日のタスクの想定時間で始めるのに使う）
+  const startWithMinutes = (min) => {
+    primeAudio();
+    setSelectedMin(min); setTimeLeft(min*60); setMode("focus");
+    setStartTime(new Date()); setIsRunning(true);
+    scheduleEndNotify(min*60, "focus");
+  };
+  // 今日のタスクを選んだ時の挙動：ラベルをセットし、想定時間があればその時間でタイマー開始
+  const selectTaskOption = (opt) => {
+    if(isRunning) return;
+    if(task===opt.text){ setTask(""); return; } // もう一度タップで選択解除
+    setTask(opt.text);
+    if(opt.min && Number(opt.min)>0) startWithMinutes(Number(opt.min));
+  };
   const pause = () => { primeAudio(); setIsRunning(false); cancelEndNotify(); };
   const reset = () => { setIsRunning(false); setTimeLeft(selectedMin*60); setStartTime(null); setMode("focus"); setTask(""); setSessionResult(null); localStorage.removeItem("jiroku_timer_state"); cancelEndNotify(); };
 
@@ -2923,15 +2955,16 @@ function TimerScreen({onToast, isActive}) {
             onInput=${e=>setTask(e.target.value)} disabled=${isRunning}/>
           ${!isRunning && todayActionOptions.length>0 && html`
             <div style=${{marginTop:12}}>
-              <div style=${{fontSize:10.5,fontWeight:700,letterSpacing:".04em",color:"var(--sub)",marginBottom:7}}>目標・今日のタスクから選ぶ</div>
+              <div style=${{fontSize:10.5,fontWeight:700,letterSpacing:".04em",color:"var(--sub)",marginBottom:7}}>今日のタスクから選ぶ（⏱想定時間つきはその時間で開始）</div>
               <div style=${{display:"flex",flexDirection:"column",gap:6}}>
                 ${todayActionOptions.map((a,i)=>{
-                  const on=task===a;
+                  const on=task===a.text;
                   return html`
-                    <button key=${i} onClick=${()=>setTask(on?"":a)}
+                    <button key=${i} onClick=${()=>selectTaskOption(a)}
                       style=${{display:"flex",alignItems:"center",gap:8,width:"100%",textAlign:"left",padding:"10px 12px",borderRadius:10,border:`1.5px solid ${on?"var(--accent)":"var(--border)"}`,background:on?"var(--accent-l)":"var(--bg)",cursor:"pointer",fontFamily:"inherit"}}>
                       <span style=${{fontSize:13,flexShrink:0,opacity:on?1:.7}}>🎯</span>
-                      <span style=${{flex:1,minWidth:0,fontSize:12.5,fontWeight:on?700:500,color:on?"var(--accent)":"var(--text)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>${a}</span>
+                      <span style=${{flex:1,minWidth:0,fontSize:12.5,fontWeight:on?700:500,color:on?"var(--accent)":"var(--text)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>${a.text}</span>
+                      ${a.min>0&&html`<span style=${{flexShrink:0,fontSize:11,fontWeight:600,color:on?"var(--accent)":"var(--sub)"}}>⏱${a.min}分</span>`}
                       ${on&&html`<span style=${{flexShrink:0,fontSize:12,color:"var(--accent)"}}>✓</span>`}
                     </button>
                   `;
