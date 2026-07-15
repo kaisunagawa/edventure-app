@@ -2950,11 +2950,8 @@ function TimerScreen({onToast, isActive}) {
 
       ${mode==="focus"&&html`
         <div class="form-grp" style=${{marginBottom:16}}>
-          <label class="form-lbl">何に集中しますか？（任意）</label>
-          <input class="inp" placeholder="例：資料作成、家事、勉強など" value=${task}
-            onInput=${e=>setTask(e.target.value)} disabled=${isRunning}/>
           ${!isRunning && todayActionOptions.length>0 && html`
-            <div style=${{marginTop:12}}>
+            <div style=${{marginBottom:14}}>
               <div style=${{fontSize:10.5,fontWeight:700,letterSpacing:".04em",color:"var(--sub)",marginBottom:7}}>今日のタスクから選ぶ（⏱想定時間つきはその時間で開始）</div>
               <div style=${{display:"flex",flexDirection:"column",gap:6}}>
                 ${todayActionOptions.map((a,i)=>{
@@ -2972,6 +2969,9 @@ function TimerScreen({onToast, isActive}) {
               </div>
             </div>
           `}
+          <label class="form-lbl">何に集中しますか？（任意）</label>
+          <input class="inp" placeholder="例：資料作成、家事、勉強など" value=${task}
+            onInput=${e=>setTask(e.target.value)} disabled=${isRunning}/>
         </div>
       `}
 
