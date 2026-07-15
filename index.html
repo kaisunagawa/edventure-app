@@ -1034,8 +1034,9 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
   // GAS側でアクションは「1件=1行」の改行区切りとして保存されるため、
   // 分割は改行のみで行う。「・」や「。」で分割すると「企画・撮影・編集」の
   // ような複合語や説明文の途中で1つのタスクが千切れてしまう
+  // 「明日のタスク」は1つだけにする。過去に複数行で保存されたレポートも、先頭の1件だけ表示する
   const aiItems = report?.action
-    ? report.action.split(/\n+/).map(s=>s.trim().replace(/^[・\-\s]+/,"").replace(/。$/,"")).filter(s=>s.length>2)
+    ? report.action.split(/\n+/).map(s=>s.trim().replace(/^[・\-\s]+/,"").replace(/。$/,"")).filter(s=>s.length>2).slice(0,1)
     : [];
   const actionItems = customActions !== null ? customActions : aiItems;
 
@@ -2581,7 +2582,7 @@ function ReportScreen() {
             ${report.highlights&&html`<div style=${{marginBottom:12}}><span class="tag t-g">良かった点</span><p style=${{fontSize:14,color:"var(--text)",marginTop:7,lineHeight:1.8}}>${report.highlights}</p></div>`}
             ${report.improvement&&html`<div><span class="tag t-a">改善点</span><p style=${{fontSize:14,color:"var(--text)",marginTop:7,lineHeight:1.8}}>${report.improvement}</p></div>`}
           </div>
-          ${report.action&&html`<div class="card" style=${{marginBottom:24}}><div class="card-label">明日のタスク</div><p style=${{fontSize:14,lineHeight:1.8,color:"var(--text)"}}>${report.action}</p></div>`}
+          ${report.action&&html`<div class="card" style=${{marginBottom:24}}><div class="card-label">明日のタスク</div><p style=${{fontSize:14,lineHeight:1.8,color:"var(--text)"}}>${String(report.action).split(/\n+/).map(s=>s.trim()).filter(Boolean)[0]||report.action}</p></div>`}
         </div>`
     }
 
