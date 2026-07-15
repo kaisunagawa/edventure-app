@@ -1373,6 +1373,39 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
       </div>
     `}
 
+    <!-- Today's Actions（ステータスの上に表示） -->
+    <div style=${{margin:"0 16px 10px",background:"var(--card)",borderRadius:16,border:"1px solid var(--border)",overflow:"hidden"}}>
+      <div style=${{padding:"14px 16px",borderBottom:actionItems.length>0?"1px solid var(--border)":"none",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+        <div style=${{display:"flex",alignItems:"center",gap:8}}>
+          <div style=${{fontSize:12,fontWeight:700,color:"var(--text)"}}>今日のタスク</div>
+          ${actionItems.length>0&&html`
+            <div style=${{fontSize:11,background:checkedCount===actionItems.length?"var(--accent)":"var(--bg)",color:checkedCount===actionItems.length?"#fff":"var(--sub)",padding:"2px 8px",borderRadius:20,fontWeight:600}}>
+              ${checkedCount}/${actionItems.length}
+            </div>
+          `}
+        </div>
+        <button onClick=${openEdit} style=${{background:"none",border:"none",cursor:"pointer",color:"var(--accent)",fontSize:12,fontWeight:600,padding:"2px 6px"}}>編集</button>
+      </div>
+      ${actionItems.length>0 ? actionItems.map((item,i)=>html`
+        <button key=${item} onClick=${()=>toggleCheck(item)}
+          style=${{display:"flex",alignItems:"flex-start",gap:12,width:"100%",background:checked[item]?"var(--bg)":"none",border:"none",padding:"13px 16px",cursor:"pointer",borderBottom:i<actionItems.length-1?"1px solid var(--border)":"none",textAlign:"left",fontFamily:"inherit",transition:"background .15s"}}>
+          <div style=${{width:20,height:20,borderRadius:6,border:`2px solid ${checked[item]?"var(--accent)":"var(--border)"}`,background:checked[item]?"var(--accent)":"transparent",flexShrink:0,marginTop:1,display:"flex",alignItems:"center",justifyContent:"center",transition:"all .15s"}}>
+            ${checked[item]&&html`<svg width="11" height="11" viewBox="0 0 10 10" fill="none"><path d="M2 5l2.5 2.5L8 3" stroke="white" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`}
+          </div>
+          <span style=${{flex:1,minWidth:0,fontSize:14,color:checked[item]?"var(--sub)":"var(--text)",textDecoration:checked[item]?"line-through":"none",lineHeight:1.6,transition:"color .15s"}}>${item}</span>
+          ${taskEstimates[item]>0&&html`<span style=${{flexShrink:0,fontSize:11,fontWeight:600,color:"var(--accent)",background:"var(--accent-l)",borderRadius:20,padding:"2px 8px",marginTop:1}}>⏱${taskEstimates[item]}分</span>`}
+        </button>
+      `) : html`
+        <div style=${{padding:"16px",fontSize:13,color:"var(--sub)",lineHeight:1.7}}>
+          ${report?"タスクを取得中...":"記録を入力すると毎晩AIがタスクを提案します"}
+        </div>
+      `}
+      <button onClick=${openAddTask}
+        style=${{display:"flex",alignItems:"center",justifyContent:"center",gap:6,width:"100%",background:"none",border:"none",borderTop:"1px solid var(--border)",padding:"13px 16px",cursor:"pointer",color:"var(--accent)",fontSize:13,fontWeight:600,fontFamily:"inherit"}}>
+        <span style=${{fontSize:16,lineHeight:1}}>＋</span> タスクを追加
+      </button>
+    </div>
+
     <!-- ステータス -->
     ${statusSummary&&html`
       <button onClick=${()=>setShowStatusTip(v=>!v)}
@@ -1416,39 +1449,6 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
         <div style=${{textAlign:"center",fontSize:10,color:"var(--sub)",padding:"6px 0",borderTop:showStatusTip?"none":"1px solid var(--border)"}}>${showStatusTip?"閉じる ▲":"タップでヒントを見る ▼"}</div>
       </button>
     `}
-
-    <!-- Today's Actions -->
-    <div style=${{margin:"0 16px 10px",background:"var(--card)",borderRadius:16,border:"1px solid var(--border)",overflow:"hidden"}}>
-      <div style=${{padding:"14px 16px",borderBottom:actionItems.length>0?"1px solid var(--border)":"none",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-        <div style=${{display:"flex",alignItems:"center",gap:8}}>
-          <div style=${{fontSize:12,fontWeight:700,color:"var(--text)"}}>今日のタスク</div>
-          ${actionItems.length>0&&html`
-            <div style=${{fontSize:11,background:checkedCount===actionItems.length?"var(--accent)":"var(--bg)",color:checkedCount===actionItems.length?"#fff":"var(--sub)",padding:"2px 8px",borderRadius:20,fontWeight:600}}>
-              ${checkedCount}/${actionItems.length}
-            </div>
-          `}
-        </div>
-        <button onClick=${openEdit} style=${{background:"none",border:"none",cursor:"pointer",color:"var(--accent)",fontSize:12,fontWeight:600,padding:"2px 6px"}}>編集</button>
-      </div>
-      ${actionItems.length>0 ? actionItems.map((item,i)=>html`
-        <button key=${item} onClick=${()=>toggleCheck(item)}
-          style=${{display:"flex",alignItems:"flex-start",gap:12,width:"100%",background:checked[item]?"var(--bg)":"none",border:"none",padding:"13px 16px",cursor:"pointer",borderBottom:i<actionItems.length-1?"1px solid var(--border)":"none",textAlign:"left",fontFamily:"inherit",transition:"background .15s"}}>
-          <div style=${{width:20,height:20,borderRadius:6,border:`2px solid ${checked[item]?"var(--accent)":"var(--border)"}`,background:checked[item]?"var(--accent)":"transparent",flexShrink:0,marginTop:1,display:"flex",alignItems:"center",justifyContent:"center",transition:"all .15s"}}>
-            ${checked[item]&&html`<svg width="11" height="11" viewBox="0 0 10 10" fill="none"><path d="M2 5l2.5 2.5L8 3" stroke="white" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`}
-          </div>
-          <span style=${{flex:1,minWidth:0,fontSize:14,color:checked[item]?"var(--sub)":"var(--text)",textDecoration:checked[item]?"line-through":"none",lineHeight:1.6,transition:"color .15s"}}>${item}</span>
-          ${taskEstimates[item]>0&&html`<span style=${{flexShrink:0,fontSize:11,fontWeight:600,color:"var(--accent)",background:"var(--accent-l)",borderRadius:20,padding:"2px 8px",marginTop:1}}>⏱${taskEstimates[item]}分</span>`}
-        </button>
-      `) : html`
-        <div style=${{padding:"16px",fontSize:13,color:"var(--sub)",lineHeight:1.7}}>
-          ${report?"タスクを取得中...":"記録を入力すると毎晩AIがタスクを提案します"}
-        </div>
-      `}
-      <button onClick=${openAddTask}
-        style=${{display:"flex",alignItems:"center",justifyContent:"center",gap:6,width:"100%",background:"none",border:"none",borderTop:"1px solid var(--border)",padding:"13px 16px",cursor:"pointer",color:"var(--accent)",fontSize:13,fontWeight:600,fontFamily:"inherit"}}>
-        <span style=${{fontSize:16,lineHeight:1}}>＋</span> タスクを追加
-      </button>
-    </div>
 
     <!-- Edit Modal -->
     ${editMode&&html`
