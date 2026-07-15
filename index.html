@@ -2910,12 +2910,8 @@ function TimerScreen({onToast, isActive}) {
   const accentColor = mode==="break"?"var(--green)":"var(--accent)";
 
   return html`<div style=${{paddingBottom:32}}>
-    <div class="ph" style=${{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+    <div class="ph">
       <div class="ph-title-accent">ポモドーロタイマー</div>
-      <button onClick=${()=>{primeAudio();setTimeout(playBeep,150);}}
-        style=${{background:"none",border:"1px solid var(--border)",borderRadius:20,padding:"6px 12px",fontSize:12,color:"var(--sub)",cursor:"pointer",fontFamily:"inherit",flexShrink:0}}>
-        🔊 音をテスト
-      </button>
     </div>
     <div style=${{padding:"0 16px"}}>
 
@@ -3122,7 +3118,7 @@ const FAQ_CATEGORIES = [
     { q:"タイマーの使い方は？",
       a:"タイマータブで集中時間を選んでスタート。終了すると記録画面が出て、そのまま記録できます。ホームの目標カードの「タイマーで測る」からもすぐ開けます。\n途中で「タスク完了・途中で記録する」を押せば、その時点までに実際に集中した時間が分単位で記録され、メモに「予定◯分のうち◯分集中」と自動で残ります。\n集中時間のプリセットや休憩の長さ、アラーム音は設定で変更できます。アプリを閉じても終了時にLINEやプッシュ通知で知らせます。" },
     { q:"タイマーの音が鳴らない",
-      a:"iPhoneのマナーモード（消音スイッチ）がオンだと音は鳴りません（振動でお知らせします）。\nまた音量ボタンでメディア音量が下がっていないかも確認してください。\nタイマー画面右上の「🔊 音をテスト」で事前に確認できます。設定の「タイマー」ではアラーム音の種類も変えられます。" },
+      a:"iPhoneのマナーモード（消音スイッチ）がオンだと音は鳴りません（振動でお知らせします）。\nまた音量ボタンでメディア音量が下がっていないかも確認してください。\n設定の「タイマー」でアラーム音の種類を変えたり、音を試したりできます。" },
   ]},
   { cat:"カレンダー連携", icon:"📅", items:[
     { q:"Googleカレンダーと連携したい",
