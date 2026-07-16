@@ -363,6 +363,98 @@ function StudentMain({ student, onNoteSaved }) {
   const copyNudgeMessage = async () => {
     try { await navigator.clipboard.writeText(nudgeMsg); setNudgeResult("コピーしました"); setTimeout(()=>setNudgeResult(""),2000); } catch (e) { setNudgeResult("コピーに失敗しました"); }
   };
+  // 就活支援ツール：行動アセスメント帳票／ガクチカ素材集の生成（30〜90秒かかる）
+  const [talentLoading, setTalentLoading] = useState(false);
+  const [talentData, setTalentData] = useState(null);
+  const [gakuLoading, setGakuLoading] = useState(false);
+  const [gakuData, setGakuData] = useState(null);
+  const [careerErr, setCareerErr] = useState("");
+  const genTalent = async () => {
+    setTalentLoading(true); setCareerErr("");
+    const r = await api("generateTalentReport", { targetEmail: student.email });
+    setTalentLoading(false);
+    if (r.ok) setTalentData(r); else setCareerErr(r.error || "生成に失敗しました");
+  };
+  const genGaku = async () => {
+    setGakuLoading(true); setCareerErr("");
+    const r = await api("generateGakuchika", { targetEmail: student.email });
+    setGakuLoading(false);
+    if (r.ok) setGakuData(r); else setCareerErr(r.error || "生成に失敗しました");
+  };
+  const esc = (s) => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  // 印刷用ページを別タブで開く（ブラウザの印刷→PDF保存でそのまま企業に渡せる体裁）
+  const openPrint = (title, bodyHtml) => {
+    const w = window.open("", "_blank");
+    if (!w) { alert("ポップアップがブロックされました"); return; }
+    w.document.write(`<!doctype html><html lang="ja"><head><meta charset="utf-8"><title>${esc(title)}</title>
+      <style>
+        body{font-family:"Hiragino Kaku Gothic ProN","Hiragino Sans",Meiryo,sans-serif;color:#1B2A2E;line-height:1.8;font-size:13px;max-width:760px;margin:0 auto;padding:24px 20px}
+        h1{font-family:"Hiragino Mincho ProN","Yu Mincho",serif;font-size:23px;border-bottom:3px solid #0E7A6E;padding-bottom:8px;margin:0 0 4px}
+        .brand{font-size:11px;font-weight:800;letter-spacing:.15em;color:#0A5A50}
+        .sub{color:#586268;font-size:12px;margin-bottom:18px}
+        h2{font-size:15px;border-left:4px solid #0E7A6E;padding-left:9px;margin:22px 0 8px}
+        .ep{border:1px solid #DEE5E2;border-radius:11px;padding:13px 16px;margin-bottom:12px;break-inside:avoid}
+        .ep .t{font-weight:800;font-size:14px;margin-bottom:6px}
+        .ep .kw{font-size:10px;color:#0A5A50;background:#E3F0EC;border-radius:99px;padding:2px 9px;margin-left:6px;font-weight:700}
+        .row{margin-bottom:4px;font-size:12.5px}
+        .row b{color:#0A5A50;font-size:11px;margin-right:6px}
+        .q{background:#F4F7F5;border-left:2.5px solid #0E7A6E;border-radius:0 6px 6px 0;padding:5px 10px;font-size:11px;margin-top:5px}
+        .q .d{font-weight:700;color:#0A5A50;margin-right:7px;font-size:10px}
+        .seed{background:#E3F0EC;border-radius:9px;padding:9px 13px;font-size:12.5px;margin-bottom:8px}
+        footer{margin-top:22px;padding-top:9px;border-top:1px solid #DEE5E2;font-size:9.5px;color:#8A939A;line-height:1.7}
+        @page{size:A4;margin:14mm 13mm}
+      </style></head><body>${bodyHtml}
+      <footer>※ 本資料は本人がJIROKUに日々記録した実際の行動に基づいて生成されています（事実ベース・日付つき根拠）。<br>JIROKU for Students</footer>
+      <script>window.onload=()=>setTimeout(()=>window.print(),400)<\/script></body></html>`);
+    w.document.close();
+  };
+  const printGaku = () => {
+    if (!gakuData) return;
+    const r = gakuData.data;
+    const eps = (r.materials || []).map((m, i) => `
+      <div class="ep">
+        <div class="t">${i + 1}. ${esc(m.title)}${(m.keywords || []).map(k => `<span class="kw">${esc(k)}</span>`).join("")}</div>
+        <div class="row"><b>状況</b>${esc(m.situation)}</div>
+        <div class="row"><b>行動</b>${esc(m.action)}</div>
+        <div class="row"><b>結果</b>${esc(m.result)}</div>
+        <div class="row"><b>学び</b>${esc(m.learning)}</div>
+        ${(m.evidence || []).map(e => `<div class="q"><span class="d">${esc(e.date)}</span>${esc(e.quote)}</div>`).join("")}
+      </div>`).join("");
+    const seeds = (r.self_pr_seeds || []).map(s => `<div class="seed">${esc(s)}</div>`).join("");
+    openPrint(`ガクチカ素材集_${student.name}`,
+      `<div class="brand">JIROKU ── ガクチカ素材集</div><h1>${esc(gakuData.name)}</h1>
+       <div class="sub">記録${gakuData.recordDays}日分の実際の行動から生成 ・ 状況→行動→結果→学び の面接対応フォーマット</div>
+       <h2>エピソード素材（${(r.materials || []).length}本）</h2>${eps}
+       <h2>自己PRの種</h2>${seeds}`);
+  };
+  const printTalent = () => {
+    if (!talentData) return;
+    const r = talentData.data; const sc = r.scales || {}; const b = talentData.behavior || {};
+    const scaleTable = (items, useDef) => `<table style="width:100%;border-collapse:collapse;margin-bottom:6px">${(items || []).map(x => `
+      <tr style="border-bottom:1px solid #EDF1EF">
+        <td style="padding:5px 6px;font-weight:700;white-space:nowrap;width:16%">${esc(x.name)}</td>
+        <td style="padding:5px 6px;font-weight:800;color:#0A5A50;width:8%;text-align:right;font-size:14px">${x.score}</td>
+        <td style="padding:5px 6px;font-size:10.5px;color:#586268">${esc(x.basis)}${x.confidence ? `（確度${{ high: "高", mid: "中", low: "低" }[x.confidence] || "中"}）` : ""}</td>
+      </tr>`).join("")}</table>`;
+    const strengths = (r.strengths || []).map((m, i) => `
+      <div class="ep"><div class="t">${i + 1}. ${esc(m.title)}</div>
+        <div class="row">${esc(m.detail)}</div>
+        ${(m.evidence || []).map(e => `<div class="q"><span class="d">${esc(e.date)}</span>${esc(e.quote)}</div>`).join("")}
+      </div>`).join("");
+    openPrint(`行動アセスメント帳票_${student.name}`,
+      `<div class="brand">JIROKU ── 行動アセスメント帳票（事実ベース）</div><h1>${esc(talentData.name)}</h1>
+       <div class="sub">${esc(r.headline)}<br>測定方法：本人が日々記録した行動データ ・ 記録${talentData.recordDays}日 / ${talentData.recordBlocks}件 / 振り返り${(talentData.memoChars || 0).toLocaleString()}字 / 日次評価${talentData.reportCount}回${b.intentRate != null ? ` ・ 有言実行率${b.intentRate}%` : ""}</div>
+       <h2>総評</h2><div class="row">${esc(r.summary)}</div>
+       <h2>性格・行動特性（50=一般的平均）</h2>${scaleTable(sc.personality)}
+       <h2>活動意欲</h2>${scaleTable(sc.motivation)}
+       <h2>実務能力</h2>${scaleTable(sc.ability)}
+       <h2>働く価値観</h2>${scaleTable(sc.values)}
+       <h2>職務適性（得点順）</h2>${scaleTable((sc.aptitude || []).map(a => ({ name: a.type, score: a.score, basis: a.reason })))}
+       <h2>成長の軌跡</h2><div class="row">${esc(r.growth)}</div>
+       <h2>強みの根拠（日付つき）</h2>${strengths}
+       <h2>伸びしろ・行動上の留意点</h2>${(r.growth_edges || []).map(e => `<div class="row">→ ${esc(e)}</div>`).join("")}
+       <h2>活躍しやすい環境</h2><div class="seed">${esc(r.fit_hint)}</div>`);
+  };
   // 区分(cohort)の設定・解除。学生など、生徒を仕分けて差別化するためのタグ
   const [cohortSaving, setCohortSaving] = useState(false);
   const setCohort = async (label) => {
@@ -623,6 +715,31 @@ function StudentMain({ student, onNoteSaved }) {
                   </div>
                 </div>
               `}
+
+              <!-- 就活支援ツール: 記録から帳票・ガクチカ素材集をワンクリック生成 -->
+              <div class="card" style=${{border:"1.5px solid var(--brass, #A9803F)"}}>
+                <div class="card-label">🎓 就活支援ツール（事実ベース）</div>
+                <div style=${{fontSize:11.5,color:"var(--sub)",marginBottom:12,lineHeight:1.7}}>${student.name}さんの日々の記録から、企業向けの「行動アセスメント帳票」と本人向けの「ガクチカ素材集」を生成します。生成後、印刷ビューからPDF保存できます。（生成に30〜90秒）</div>
+                <div style=${{display:"flex",gap:8,flexWrap:"wrap"}}>
+                  <button class="btn" style=${{flex:1,minWidth:170}} onClick=${genTalent} disabled=${talentLoading}>${talentLoading?"帳票を生成中…":(talentData?"帳票を作り直す":"📋 行動アセスメント帳票")}</button>
+                  <button class="btn" style=${{flex:1,minWidth:170}} onClick=${genGaku} disabled=${gakuLoading}>${gakuLoading?"素材集を生成中…":(gakuData?"素材集を作り直す":"📝 ガクチカ素材集")}</button>
+                </div>
+                ${careerErr && html`<div style=${{fontSize:12,color:"var(--red, #DC2626)",marginTop:10}}>${careerErr}</div>`}
+                ${talentData && html`
+                  <div style=${{marginTop:12,background:"var(--bg)",borderRadius:10,padding:"10px 13px"}}>
+                    <div style=${{fontSize:12.5,fontWeight:700,marginBottom:3}}>📋 ${talentData.name}｜${talentData.data.headline}</div>
+                    <div style=${{fontSize:11,color:"var(--sub)",marginBottom:8}}>記録${talentData.recordDays}日・${talentData.recordBlocks}件から生成${talentData.behavior?.intentRate!=null?html`・有言実行率${talentData.behavior.intentRate}%`:""}</div>
+                    <button class="btn" onClick=${printTalent} style=${{fontSize:12.5,padding:"8px 14px"}}>🖨 印刷ビューを開く（PDF保存）</button>
+                  </div>
+                `}
+                ${gakuData && html`
+                  <div style=${{marginTop:10,background:"var(--bg)",borderRadius:10,padding:"10px 13px"}}>
+                    <div style=${{fontSize:12.5,fontWeight:700,marginBottom:3}}>📝 エピソード${(gakuData.data.materials||[]).length}本＋自己PRの種${(gakuData.data.self_pr_seeds||[]).length}本</div>
+                    <div style=${{fontSize:11,color:"var(--sub)",marginBottom:8}}>${(gakuData.data.materials||[]).map(m=>m.title).join(" ／ ")}</div>
+                    <button class="btn" onClick=${printGaku} style=${{fontSize:12.5,padding:"8px 14px"}}>🖨 印刷ビューを開く（PDF保存）</button>
+                  </div>
+                `}
+              </div>
             </div>
           </div>
         `}
