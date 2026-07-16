@@ -1594,20 +1594,10 @@ function CommunityOverlay({onClose}) {
         <div style=${{background:"var(--card)",borderRadius:16,border:"1px solid var(--border)",overflow:"hidden",marginBottom:16}}>
           <div style=${{padding:"14px 16px",borderBottom:"1px solid var(--border)",fontSize:12,fontWeight:700,color:"var(--text)"}}>ステータスランキング</div>
           ${list===null&&html`<div style=${{padding:20,textAlign:"center",color:"var(--sub)",fontSize:13}}>読み込み中...</div>`}
-          ${list&&(()=>{
-            const {top,me,meRank}=trimRanking(list);
-            return html`
-              ${top.map((u,i)=>html`
-                <${RankingRow} key=${i} rank=${i+1} avatar=${u.avatar} nickname=${u.nickname} isMe=${u.isMe}
-                  scoreValue=${u.score} scoreUnit="点" sub=${u.streak>0?`🔥${u.streak}日連続`:null} isLast=${!me&&i===top.length-1}/>
-              `)}
-              ${me&&html`
-                <div style=${{textAlign:"center",fontSize:12,color:"var(--sub)",padding:"6px 0",borderBottom:"1px solid var(--border)"}}>⋮</div>
-                <${RankingRow} rank=${meRank} avatar=${me.avatar} nickname=${me.nickname} isMe=${true}
-                  scoreValue=${me.score} scoreUnit="点" sub=${me.streak>0?`🔥${me.streak}日連続`:null} isLast=${true}/>
-              `}
-            `;
-          })()}
+          ${list&&list.map((u,i)=>html`
+            <${RankingRow} key=${i} rank=${i+1} avatar=${u.avatar} nickname=${u.nickname} isMe=${u.isMe}
+              scoreValue=${u.score} scoreUnit="点" sub=${u.streak>0?`🔥${u.streak}日連続`:null} isLast=${i===list.length-1}/>
+          `)}
           ${list&&list.length===0&&html`<div style=${{padding:20,textAlign:"center",color:"var(--sub)",fontSize:13}}>まだデータがありません</div>`}
         </div>
 
