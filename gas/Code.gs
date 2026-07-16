@@ -70,6 +70,7 @@ function doGet(e) {
       case "coachGetStudents":      result = coachGetStudents(e.parameter.coachEmail); break;
       case "adminTagCohortByJoinDate": result = adminTagCohortByJoinDate(e.parameter.coachEmail, e.parameter.date, e.parameter.cohort); break;
       case "adminListRecentRegistrations": result = adminListRecentRegistrations(e.parameter.coachEmail, e.parameter.days); break;
+      case "generateTalentReport": result = generateTalentReport(e.parameter.coachEmail, e.parameter.targetEmail); break;
       case "adminTagCohortByEmails": result = adminTagCohortByEmails(e.parameter.coachEmail, e.parameter.emails, e.parameter.cohort); break;
       case "coachSetCohort":       result = coachSetCohort(e.parameter.coachEmail, e.parameter); break;
       case "coachGetStudentDetail": result = coachGetStudentDetail(e.parameter.coachEmail, e.parameter.targetEmail); break;
@@ -5676,6 +5677,168 @@ function parseAiJson(rawText) {
   return null;
 }
 
+// 「事実ベースのスカウター」= JIROKU人物レポート。日々の行動記録・メモ・レポートから、
+// 強み・働き方・価値観・成長曲線を“日付つきの根拠”で示す。人材紹介/HR向けの成果物。
+// メンタル・離職リスク等のセンシティブなスコアは出さない（強み側に限定）。
+function generateTalentReport(email, targetEmail) {
+  if (!verifyAdmin(email) && !verifyCoach(email)) return { ok: false, error: "not authorized" };
+  const apiKey = PropertiesService.getScriptProperties().getProperty("CLAUDE_API_KEY");
+  if (!apiKey) return { ok: false, error: "CLAUDE_API_KEY未設定" };
+  const who = String(targetEmail || "").trim();
+  if (!who) return { ok: false, error: "targetEmail required" };
+  const user = sheetToObjects(getSheet("Users")).find(u => u.student_email === who);
+  if (!user) return { ok: false, error: "user not found" };
+  const name = user.name || "本人";
+  const goals = [user.goal, user.goal2, user.goal3].filter(Boolean).join(" / ");
+
+  const cutoff = formatDate(new Date(Date.now() - 180 * 86400000));
+  const logs = getFilteredRows("DailyLog", "student_email", who)
+    .filter(l => l.date >= cutoff && l.memo && l.memo.trim())
+    .sort((a, b) => a.date > b.date ? 1 : -1);
+  const reports = getFilteredRows("Reports", "student_email", who)
+    .filter(r => r.date >= cutoff)
+    .sort((a, b) => a.date > b.date ? 1 : -1);
+  if (logs.length === 0 && reports.length === 0) return { ok: false, error: "記録がまだ少なく、人物レポートを作れません" };
+
+  let logsText = logs.map(l => l.date + " " + (l.time_block || "") + " " + l.task + "：" + l.memo).join("\n");
+  const reportsText = reports.map(r => r.date + " スコア" + r.score + "／良かった点:" + (r.highlights || "") + "／改善:" + (r.improvement || "") + (r.trend ? "／傾向:" + r.trend : "")).join("\n");
+  // トークン上限に収める（新しい記録を優先して残す）
+  if (logsText.length > 22000) logsText = logsText.slice(logsText.length - 22000);
+
+  const prompt = "あなたは人材アセスメントの専門家です。以下は" + name + "さんがJIROKU（時間の使い方を毎日記録する習慣アプリ）に書き溜めた“実際の行動記録”です。アンケートの自己申告ではなく、日々の事実の積み重ねです。これを根拠に、企業の人事が読む『行動アセスメント帳票』を作ってください。\n\n"
+    + "【目標】" + (goals || "未設定") + "\n\n"
+    + "【日々の記録メモ（時系列・本人の言葉）】\n" + (logsText || "なし") + "\n\n"
+    + "【AIレポートの推移（成長の軌跡）】\n" + (reportsText || "なし") + "\n\n"
+    + "【厳守事項】\n"
+    + "- 必ず記録の中の“事実（日付・本人の言葉・行動）”を根拠にする。記録にないことは推測で断定しない。\n"
+    + "- メンタルヘルス・離職リスク・病気などセンシティブな判定は一切書かない。強み・働き方・価値観・成長・適性に絞る。\n"
+    + "- 盛らない。実際の行動が示す範囲で正直に採点する（全部高得点にしない。行動の証拠が弱い尺度は50前後に寄せる）。\n\n"
+    + "【採点ルール】各尺度は0〜100の整数。50=一般的な社会人の平均。60超=平均より明確に高い、70超=顕著、80超=傑出（記録に強い証拠がある時のみ）。40未満=平均より低い傾向。"
+    + "各尺度に必ずbasis（採点根拠となった行動を1文・可能なら日付に触れる）を付ける。証拠が薄い尺度はconfidenceを low にし、басисにその旨を書く。\n\n"
+    + "以下のJSON形式のみで返す（説明不要）。値の引用は「」を使い半角\"は使わない。各値は改行しない：\n"
+    + "{\n"
+    + '  "headline": "<この人を一言で表す人物像（事実に基づく）>",\n'
+    + '  "summary": "<人事向けの総評を3〜4文。行動事実に基づき、この人がどう働きどう成長しているか>",\n'
+    + '  "scales": {\n'
+    + '    "personality": [\n'
+    + '      { "name": "行動性", "low": "落ち着きがある、腰が重い", "high": "行動的、すぐ動く", "score": 50, "confidence": "high|mid|low", "basis": "<採点根拠の行動>" },\n'
+    + '      { "name": "社交性", "low": "控えめ、一人を好む", "high": "人と関わることを好む", "score": 50, "confidence": "", "basis": "" },\n'
+    + '      { "name": "慎重性", "low": "気さく、大胆", "high": "慎重、丁寧", "score": 50, "confidence": "", "basis": "" },\n'
+    + '      { "name": "挑戦性", "low": "堅実、現状維持", "high": "新しいことに挑む", "score": 50, "confidence": "", "basis": "" },\n'
+    + '      { "name": "粘り強さ", "low": "切り替えが早い", "high": "こだわり粘り強い", "score": 50, "confidence": "", "basis": "" },\n'
+    + '      { "name": "主体性", "low": "周囲と調和、協調的", "high": "自分で決めて動く", "score": 50, "confidence": "", "basis": "" },\n'
+    + '      { "name": "決断性", "low": "熟考型、情緒的", "high": "素早く合理的に決める", "score": 50, "confidence": "", "basis": "" }\n'
+    + "    ],\n"
+    + '    "motivation": [\n'
+    + '      { "name": "向上欲求", "def": "自己成長・向上したいという意欲", "score": 50, "confidence": "", "basis": "" },\n'
+    + '      { "name": "挑戦欲求", "def": "困難や目標にチャレンジしたいという意欲", "score": 50, "confidence": "", "basis": "" },\n'
+    + '      { "name": "自律欲求", "def": "自分の意思で物事に取り組みたいという意欲", "score": 50, "confidence": "", "basis": "" },\n'
+    + '      { "name": "探求欲求", "def": "本質や理由を知りたいという意欲", "score": 50, "confidence": "", "basis": "" },\n'
+    + '      { "name": "啓発欲求", "def": "他者に良い影響を与えたいという意欲", "score": 50, "confidence": "", "basis": "" },\n'
+    + '      { "name": "承認欲求", "def": "役割を果たし認められたいという意欲", "score": 50, "confidence": "", "basis": "" },\n'
+    + '      { "name": "エネルギー", "def": "総合的な活動意欲の強さ", "score": 50, "confidence": "", "basis": "" }\n'
+    + "    ],\n"
+    + '    "ability": [\n'
+    + '      { "name": "直観力", "def": "本質を感覚的に捉える力", "score": 50, "confidence": "", "basis": "" },\n'
+    + '      { "name": "論理力", "def": "筋道立てて思考し捉える力", "score": 50, "confidence": "", "basis": "" },\n'
+    + '      { "name": "実行力", "def": "計画を立てて行動し遂行する力", "score": 50, "confidence": "", "basis": "" },\n'
+    + '      { "name": "共感力", "def": "他者の心理や感情を汲み取る力", "score": 50, "confidence": "", "basis": "" }\n'
+    + "    ],\n"
+    + '    "values": [\n'
+    + '      { "name": "公益志向", "def": "人の役に立つことへの価値", "score": 50, "confidence": "", "basis": "" },\n'
+    + '      { "name": "成長志向", "def": "能力向上への価値", "score": 50, "confidence": "", "basis": "" },\n'
+    + '      { "name": "達成志向", "def": "目標達成・成果への価値", "score": 50, "confidence": "", "basis": "" },\n'
+    + '      { "name": "協働志向", "def": "仲間と協力することへの価値", "score": 50, "confidence": "", "basis": "" },\n'
+    + '      { "name": "安定志向", "def": "生活・収入の安定への価値", "score": 50, "confidence": "", "basis": "" }\n'
+    + "    ],\n"
+    + '    "aptitude": [ { "type": "<職務タイプ（例：企画・推進型）>", "score": 50, "reason": "<行動根拠1文>" } ]\n'
+    + "  },\n"
+    + '  "strengths": [ { "title": "<強みの見出し>", "detail": "<行動パターンでの説明>", "evidence": [ { "date": "<YYYY-MM-DD>", "quote": "<本人の記録の言葉（要約可）>" } ] } ],\n'
+    + '  "growth": "<レポート推移や記録から見える成長・変化を2〜3文で>",\n'
+    + '  "growth_edges": [ "<伸びしろ/気をつけたい行動の癖を建設的に1文で>" ],\n'
+    + '  "fit_hint": "<どんな仕事・環境で力を発揮しやすそうか、事実からの示唆を1〜2文で>"\n'
+    + "}\n"
+    + "aptitudeは4〜5タイプ（得点順）。strengthsは3〜4個、各evidenceは1〜3件。";
+
+  const res = UrlFetchApp.fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
+    payload: JSON.stringify({ model: "claude-opus-4-8", max_tokens: 8000, messages: [{ role: "user", content: prompt }] }),
+    muteHttpExceptions: true
+  });
+  const result = JSON.parse(res.getContentText());
+  const textBlock = result.content && Array.isArray(result.content) ? result.content.find(b => b.type === "text") : null;
+  if (!textBlock) return { ok: false, error: friendlyClaudeError(res.getContentText()) };
+  const parsed = parseAiJson(textBlock.text);
+  if (!parsed) return { ok: false, error: "レポートの解析に失敗しました" };
+
+  // 成長トレンド（レポートスコアの推移）はコード側で確定値を渡す（スカウターに無い時系列の武器）
+  const trend = reports.map(r => ({ date: r.date, score: Number(r.score) || 0 }));
+  // データ信頼性の材料（虚偽回答傾向の代替：行動データの厚み）
+  const memoChars = logs.reduce((n, l) => n + String(l.memo || "").length, 0);
+
+  // ★実測の行動統計（AIを介さない生の事実。検査型アセスメントが構造的に持てないデータ）
+  const allLogs180 = getFilteredRows("DailyLog", "student_email", who).filter(l => l.date >= cutoff);
+  const focusNums = allLogs180.map(l => parseInt(l.focus_level) || 0).filter(n => n > 0);
+  const goalCount = allLogs180.filter(l => l.goal_related === "true" || l.goal_related === true).length;
+  // 活動の上位（何にいちばん時間を使っているか）
+  const taskHours = {};
+  allLogs180.forEach(l => { const t = String(l.task || "").trim(); if (t) taskHours[t] = (taskHours[t] || 0) + 1; });
+  const topTasks = Object.keys(taskHours).map(k => ({ task: k, blocks: taskHours[k] }))
+    .sort((a, b) => b.blocks - a.blocks).slice(0, 6);
+  // 時間帯分布（朝型/夜型が事実で見える）
+  const buckets = { morning: 0, day: 0, evening: 0, night: 0 }; // 5-9 / 9-18 / 18-24 / 0-5
+  allLogs180.forEach(l => {
+    const h = parseInt(String(l.time_block || "").slice(0, 2));
+    if (isNaN(h)) return;
+    if (h >= 5 && h < 9) buckets.morning++;
+    else if (h >= 9 && h < 18) buckets.day++;
+    else if (h >= 18) buckets.evening++;
+    else buckets.night++;
+  });
+  // 記録の継続性（直近28日のうち何日記録したか＝自己管理の実測）
+  const d28 = formatDate(new Date(Date.now() - 27 * 86400000));
+  const activeDays28 = new Set(allLogs180.filter(l => l.date >= d28).map(l => l.date)).size;
+
+  // ★有言実行率（企業が最も知りたい「宣言→実行」の実測）。
+  // 「今日のフォーカス」で朝宣言した日のうち、達成チェックまで至った日の割合
+  let intentDeclared = 0, intentDone = 0;
+  if (getSheet("Journal")) {
+    sheetToObjects(getJournalSheet()).forEach(row => {
+      if (row.student_email !== who) return;
+      const rd = row.date instanceof Date ? formatDate(row.date) : String(row.date || "");
+      if (rd < cutoff) return;
+      if (String(row.intent || "").trim()) {
+        intentDeclared++;
+        if (String(row.intent_done) === "true") intentDone++;
+      }
+    });
+  }
+
+  const behavior = {
+    totalBlocks180: allLogs180.length,
+    goalPct: allLogs180.length ? Math.round(goalCount / allLogs180.length * 100) : 0,
+    avgFocus: focusNums.length ? Math.round(focusNums.reduce((a, b) => a + b, 0) / focusNums.length * 10) / 10 : null,
+    topTasks: topTasks,
+    hourBuckets: buckets,
+    activeDays28: activeDays28,
+    streak: Number(user.streak || 0),
+    intentDeclared: intentDeclared,
+    intentDone: intentDone,
+    intentRate: intentDeclared > 0 ? Math.round(intentDone / intentDeclared * 100) : null
+  };
+
+  return {
+    ok: true, name: name, goals: goals,
+    recordDays: new Set(logs.map(l => l.date)).size,
+    recordBlocks: logs.length, memoChars: memoChars,
+    reportCount: reports.length, sinceDate: cutoff,
+    reportTrend: trend,
+    behavior: behavior,
+    data: parsed
+  };
+}
+
 function askMyPast(studentEmail, body) {
   const apiKey = PropertiesService.getScriptProperties().getProperty("CLAUDE_API_KEY");
   if (!apiKey) return { ok: false, error: "CLAUDE_API_KEY未設定" };
@@ -5737,11 +5900,14 @@ ${question}
 evidenceは根拠にした記録を1〜4件。
 【重要・JSONを壊さないための厳守事項】値の中で引用する時は必ずカギ括弧「」を使い、半角のダブルクォート(")は絶対に使わないこと。各値は改行を入れず1行で書くこと。`;
 
+  // 本人の人生データを扱う中核体験なので、他機能のHaikuより上位のモデルを使う。
+  // ただしコスト最適化のため、学生（cohortタグ付き）はSonnetにする（十分な品質で単価は約半分）。
+  // 有料クライアント等（cohortなし）は最上位のOpusのままにする。
+  const askModel = (user && String(user.cohort || "").trim()) ? "claude-sonnet-5" : "claude-opus-4-8";
   const res = UrlFetchApp.fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
-    // 本人の人生データを扱う中核体験なので、他機能のHaikuより上位のモデルを使う
-    payload: JSON.stringify({ model: "claude-opus-4-8", max_tokens: 1500, messages: [{ role: "user", content: prompt }] }),
+    payload: JSON.stringify({ model: askModel, max_tokens: 1500, messages: [{ role: "user", content: prompt }] }),
     muteHttpExceptions: true
   });
   const result = JSON.parse(res.getContentText());

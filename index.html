@@ -4495,8 +4495,10 @@ function App() {
   // 独り言（クイック記録）。通知やアプリのURLに #quick が付いていたら自動で開く
   const [showQuick,setShowQuick]=useState(false);
   // FABの上にふわっと出る、記録したくなる可愛いひとことをランダムに巡回表示
-  const QUICK_HINTS=["つぶやこ？","何してた？","メモしよ","1つだけ♪","どうだった？","話そ〜","記録しよ","今日どう？","サボり？👀","ひとりごと？"];
-  const [hintIdx,setHintIdx]=useState(()=>Math.floor(Math.random()*10));
+  // 協調性・挑戦性を引き出す問いかけ（誰かと？初挑戦？）も混ぜて、
+  // 日々の記録に「対人」「挑戦」のエピソードが自然と残るようにする
+  const QUICK_HINTS=["つぶやこ？","何してた？","メモしよ","1つだけ♪","どうだった？","話そ〜","記録しよ","今日どう？","サボり？👀","ひとりごと？","誰かと何した？","初挑戦あった？","挑戦した？","誰と話した？"];
+  const [hintIdx,setHintIdx]=useState(()=>Math.floor(Math.random()*QUICK_HINTS.length));
   const [hintOn,setHintOn]=useState(false);
   useEffect(()=>{
     // 少し待ってからフワッと出し、一定間隔で文言を差し替える（開いている間は隠す）
