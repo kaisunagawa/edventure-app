@@ -4236,6 +4236,75 @@ const isStandaloneDisplay = () =>
   (window.navigator && window.navigator.standalone === true) ||
   (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches);
 
+// 端末・ブラウザの簡易判定（ホーム画面追加の手順を出し分けるため）
+function detectDevice(){
+  const ua = navigator.userAgent || "";
+  const isIOS = /iPhone|iPad|iPod/.test(ua);
+  const isAndroid = /Android/.test(ua);
+  // iOSのChrome等は「CriOS/FxiOS」、Androidの内蔵ブラウザ差はここでは吸収せずChrome前提
+  const iosSafari = isIOS && !/CriOS|FxiOS|EdgiOS/.test(ua);
+  const iosOther = isIOS && !iosSafari;
+  return { isIOS, isAndroid, iosSafari, iosOther };
+}
+
+// 学生向け・必須セットアップ画面（①ホーム画面に追加 ②LINE連携 の両方が済むまで先へ進めない）
+function StudentSetupGate({email, lineLinked, onRecheck, onSkip}){
+  const installed = isStandaloneDisplay();
+  const dev = detectDevice();
+  const [copied,setCopied]=useState(false);
+  const [checking,setChecking]=useState(false);
+  const [checkMsg,setCheckMsg]=useState("");
+  const copyEmail=()=>{ try{ navigator.clipboard.writeText(email||""); setCopied(true); setTimeout(()=>setCopied(false),2000);}catch(e){} };
+  const recheck=async()=>{ setChecking(true); setCheckMsg(""); const ok=await onRecheck(); setChecking(false); if(ok===false) setCheckMsg("まだ連携が確認できません。メールをbotに送ってから、もう一度確認してください。"); };
+  const bothDone = installed && lineLinked;
+
+  const Step = ({no, icon, title, done, children}) => html`
+    <div style=${{background:"var(--card)",border:`1.5px solid ${done?"var(--accent)":"var(--border)"}`,borderRadius:14,padding:"16px 16px 18px",marginBottom:14}}>
+      <div style=${{display:"flex",alignItems:"center",gap:10,marginBottom:done?0:10}}>
+        <div style=${{width:26,height:26,borderRadius:"50%",background:done?"var(--accent)":"var(--bg)",border:done?"none":"1.5px solid var(--border)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:13,fontWeight:800,color:done?"#fff":"var(--sub)",flexShrink:0}}>${done?"✓":no}</div>
+        <div style=${{flex:1,fontSize:14.5,fontWeight:800,color:"var(--text)"}}>${icon} ${title}</div>
+        ${done&&html`<div style=${{fontSize:11,fontWeight:700,color:"var(--accent)"}}>完了！</div>`}
+      </div>
+      ${!done&&html`<div style=${{paddingLeft:36}}>${children}</div>`}
+    </div>`;
+
+  return ReactDOM.createPortal(html`
+    <div style=${{position:"fixed",inset:0,height:"100dvh",background:"var(--bg)",zIndex:700,display:"flex",flexDirection:"column"}}>
+      <div style=${{flex:1,overflowY:"auto",padding:"32px 20px 20px",maxWidth:460,margin:"0 auto",width:"100%",boxSizing:"border-box"}}>
+        <div style=${{fontSize:22,fontWeight:800,color:"var(--text)",marginBottom:6,lineHeight:1.4}}>はじめる前に、<br/>2つだけ設定しよう📲</div>
+        <div style=${{fontSize:13,color:"var(--sub)",lineHeight:1.7,marginBottom:22}}>この2つを済ませると、毎日の記録を忘れずに続けられます。就活の武器（あなたの帳票）を育てるための大事な準備です。</div>
+
+        ${Step({no:"1",icon:"📲",title:"ホーム画面に追加",done:installed,children:html`
+          <div style=${{fontSize:12.5,color:"var(--sub)",lineHeight:1.85}}>
+            ${dev.iosSafari?html`Safari下の <b>共有ボタン（□に↑）</b> をタップ → <b>「ホーム画面に追加」</b> を選ぶ`
+              :dev.iosOther?html`右上または下の <b>共有／メニュー</b> から <b>「ホーム画面に追加」</b>（※Safariで開くと確実です）`
+              :dev.isAndroid?html`右上の <b>メニュー（⋮）</b> → <b>「ホーム画面に追加」/「アプリをインストール」</b>`
+              :html`ブラウザのメニューから <b>「ホーム画面に追加」/「インストール」</b>`}
+            <div style=${{marginTop:8,background:"var(--accent-l)",borderRadius:9,padding:"9px 12px",color:"var(--accent)",fontWeight:600}}>👉 追加できたら、ホーム画面に増えた <b>JIROKUのアイコン</b> からこのアプリを開き直してください。</div>
+          </div>
+        `})}
+
+        ${Step({no:"2",icon:"💬",title:"LINEを連携",done:lineLinked,children:html`
+          <div style=${{fontSize:12.5,color:"var(--sub)",lineHeight:1.85}}>
+            リマインダー・毎晩のAIレポート・先生からのメッセージがLINEに届きます。
+            <div style=${{display:"flex",flexDirection:"column",gap:8,marginTop:10}}>
+              <button onClick=${()=>window.open("https://lin.ee/5pElLYY","_blank")} style=${{padding:"11px",borderRadius:9,border:"none",background:"#06C755",color:"#fff",fontSize:13.5,fontWeight:700,cursor:"pointer"}}>① 公式LINEを友だち追加</button>
+              <button onClick=${copyEmail} style=${{padding:"11px",borderRadius:9,border:"1.5px solid var(--border)",background:"var(--card)",color:"var(--text)",fontSize:13,fontWeight:600,cursor:"pointer"}}>${copied?"✓ コピーしました":"② 登録メールをコピー"}</button>
+              <div style=${{fontSize:11.5,color:"var(--faint)",lineHeight:1.6}}>コピーした <b>${email}</b> を、追加したLINEのトークにそのまま送ると連携完了です。</div>
+              <button onClick=${recheck} disabled=${checking} style=${{padding:"10px",borderRadius:9,border:"1.5px solid var(--accent)",background:"none",color:"var(--accent)",fontSize:12.5,fontWeight:700,cursor:"pointer"}}>${checking?"確認中…":"③ 連携できたか確認する"}</button>
+              ${checkMsg&&html`<div style=${{fontSize:11.5,color:"var(--amber,#B45309)"}}>${checkMsg}</div>`}
+            </div>
+          </div>
+        `})}
+      </div>
+      <div style=${{padding:"12px 20px calc(16px + env(safe-area-inset-bottom))",maxWidth:460,margin:"0 auto",width:"100%",boxSizing:"border-box",borderTop:"1px solid var(--border)",background:"var(--bg)"}}>
+        <button class="btn" disabled=${!bothDone} style=${{opacity:bothDone?1:0.45}} onClick=${()=>bothDone&&onSkip()}>${bothDone?"設定できた！はじめる🎉":"上の2つを完了すると進めます"}</button>
+        <button onClick=${onSkip} style=${{display:"block",width:"100%",marginTop:8,background:"none",border:"none",color:"var(--faint)",fontSize:11.5,cursor:"pointer",fontFamily:"inherit",padding:6}}>パソコンで見ている / うまくできない → あとで設定する</button>
+      </div>
+    </div>
+  `, document.body);
+}
+
 const TUTORIAL_STEPS = [
   { mock:TutorialMiniWelcome, title:"JIROKUへようこそ", body:"時間の使い方を記録して、AIコーチと一緒に振り返る習慣化アプリです。まずは基本の使い方を簡単にご案内します。" },
   { mock:TutorialMiniLog, title:"記録タブで時間帯を記録", body:"時間帯を選んで「何をしましたか？」と自己評価、そしてメモを入れて保存します。メモには、うまくできたか・感じたこと・改善点を書きましょう。振り返って気づくことが習慣化の一番のポイントです。" },
@@ -4516,6 +4585,24 @@ function App() {
   const [tab,setTab]=useState("home");
   const [toast,setToast]=useState(null);
   const [bannerDismissed,setBannerDismissed]=useState(false);
+  // 学生向け必須セットアップ（ホーム画面追加＋LINE連携）。PC等でどうしてもできない人用に
+  // 目立たないスキップだけ用意（セッション内のみ・次回開くとまた出る）
+  const [setupSkipped,setSetupSkipped]=useState(false);
+  // LINE連携できたかをその場で再確認して、ゲートを進めるための再取得
+  const recheckUser = async () => {
+    try {
+      const url=new URL(GAS_URL);
+      url.searchParams.set("action","getUser");
+      url.searchParams.set("studentEmail",CURRENT_USER.email);
+      const r=await (await fetch(url)).json();
+      if(r.ok&&r.data){
+        const u={...CURRENT_USER, lineLinked:r.data.lineLinked===undefined?true:!!r.data.lineLinked, cohort:r.data.cohort||"", recordDays:(r.data.recordDays===undefined?null:r.data.recordDays)};
+        CURRENT_USER=u; localStorage.setItem("edventure_user",JSON.stringify(u)); setUser(u);
+        return u.lineLinked;
+      }
+    } catch(e){}
+    return null;
+  };
   const [calLinked,setCalLinked]=useState(!!localStorage.getItem("cal_linked"));
   const [calBannerDismissed,setCalBannerDismissed]=useState(false);
   const [showTutorial,setShowTutorial]=useState(!localStorage.getItem("tutorial_seen"));
@@ -4594,6 +4681,10 @@ function App() {
   if(!user) return html`<${LoginScreen} onLogin=${setUser}/>`;
   if(showOnboarding) return html`<${OnboardingQuiz} onDone=${()=>setShowOnboarding(false)}/>`;
   if(showTutorial) return html`<${TutorialOverlay} onDone=${dismissTutorial}/>`;
+  // 学生（cohort付き）は、ホーム画面追加＋LINE連携が両方済むまで必須セットアップ画面を出す
+  if(!!user.cohort && !setupSkipped && (!isStandaloneDisplay() || user.lineLinked===false)){
+    return html`<${StudentSetupGate} email=${user.email} lineLinked=${user.lineLinked!==false} onRecheck=${recheckUser} onSkip=${()=>setSetupSkipped(true)}/>`;
+  }
   return html`
     <div style=${{height:"100%",position:"relative",display:"flex",flexDirection:"column"}}>
       ${showAnnounce && html`<${FeatureAnnounce} onClose=${dismissAnnounce} onGo=${()=>{dismissAnnounce();setTab("brain");}}/>`}
