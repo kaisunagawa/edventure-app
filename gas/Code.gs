@@ -335,6 +335,15 @@ function getUser(studentEmail) {
   if (!user) return { ok: false, error: "User not found" };
   const coach = sheetToObjects(getSheet("Coaches")).find(c => c.coach_email === user.coach_email);
   const accessState = computeAccessState(user);
+  const cohort = String(user.cohort || "").trim();
+  // 学生（cohort付き）には「30日で帳票＋ガクチカ素材集」の進捗を出すため、
+  // 記録した日数（ユニーク日付）を返す。学生以外はシート走査を省く
+  let recordDays = null;
+  if (cohort) {
+    try {
+      recordDays = new Set(getFilteredRows("DailyLog", "student_email", studentEmail).map(l => l.date)).size;
+    } catch (e) { recordDays = null; }
+  }
   return { ok: true, data: {
     name: user.name,
     nickname: user.nickname || user.name,
@@ -343,6 +352,8 @@ function getUser(studentEmail) {
     coachName: (coach && coach.coach_name) ? coach.coach_name : "コーチ",
     lineLinked: !!user.line_user_id,
     showInCommunity: String(user.show_in_community || "").toUpperCase() !== "FALSE",
+    cohort: cohort,
+    recordDays: recordDays,
     access: accessState.access,          // "full" | "limited"
     plan: accessState.plan,              // grandfathered | trial | paid | free | expired
     trialDaysLeft: accessState.trialDaysLeft

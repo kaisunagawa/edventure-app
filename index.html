@@ -835,7 +835,7 @@ const getTimeBlocks = () => { const {start,end}=getLogHours(); return ALL_TIME_B
 const TIME_BLOCKS = getTimeBlocks();
 
 // ── Home ──
-function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, onGoTimer}) {
+function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, studentCohort, recordDays, onGoTimer}) {
   const [report, setReport] = useState(null);
   const [schedule, setSchedule] = useState([]);
   const [game, setGame] = useState(null);
@@ -1372,6 +1372,33 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
         })}
       </div>
     `}
+
+    <!-- 学生向け: 記録が就活の武器になる進捗カード（30日で帳票＋ガクチカ素材集） -->
+    ${!!studentCohort && recordDays !== null && recordDays !== undefined && (()=>{
+      const days = Number(recordDays)||0;
+      const goalDays = 30;
+      const pct = Math.min(100, Math.round(days/goalDays*100));
+      const ready = days >= goalDays;
+      return html`
+        <div style=${{margin:"0 16px 10px",background:"var(--card)",borderRadius:16,border:"1px solid var(--border)",padding:"14px 16px"}}>
+          <div style=${{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
+            <div style=${{fontSize:12,fontWeight:700,color:"var(--text)"}}>🎓 就活の武器を育て中</div>
+            ${ready&&html`<span style=${{fontSize:10.5,fontWeight:700,color:"#fff",background:"var(--accent)",borderRadius:20,padding:"2px 8px"}}>条件クリア🎉</span>`}
+          </div>
+          ${ready?html`
+            <div style=${{fontSize:12.5,color:"var(--sub)",lineHeight:1.7}}>記録が<b style=${{color:"var(--accent)"}}>${days}日分</b>たまりました！あなたの毎日の記録から<b>「行動アセスメント帳票」</b>と<b>「ガクチカ素材集」</b>が作れます。先生に声をかけてください。</div>
+          `:html`
+            <div style=${{fontSize:12.5,color:"var(--sub)",lineHeight:1.7,marginBottom:8}}>記録が<b style=${{color:"var(--accent)"}}>30日</b>たまると、あなたの<b>「行動アセスメント帳票」</b>と<b>「ガクチカ素材集」</b>ができます。毎日の記録が、そのまま就活の武器に。</div>
+            <div style=${{display:"flex",alignItems:"center",gap:10}}>
+              <div style=${{flex:1,height:8,background:"var(--bg)",borderRadius:99,overflow:"hidden"}}>
+                <div style=${{height:"100%",width:pct+"%",background:"var(--accent)",borderRadius:99,transition:"width .5s ease"}}/>
+              </div>
+              <div style=${{fontSize:12,fontWeight:800,color:"var(--accent)",minWidth:64,textAlign:"right"}}>${days} / ${goalDays}日</div>
+            </div>
+          `}
+        </div>
+      `;
+    })()}
 
     <!-- Today's Actions（ステータスの上に表示） -->
     <div style=${{margin:"0 16px 10px",background:"var(--card)",borderRadius:16,border:"1px solid var(--border)",overflow:"hidden"}}>
@@ -4533,7 +4560,7 @@ function App() {
       if(r.ok&&r.data){
         // lineLinkedがレスポンスに無い場合（GAS未再デプロイ等）は「未連携」と誤判定してバナーを
         // 誤表示しないよう、不明な場合は連携済み扱いにする（安全側に倒す）
-        const u={...CURRENT_USER, name:r.data.name||CURRENT_USER.name, nickname:r.data.nickname||CURRENT_USER.name, avatar:r.data.avatar||"🦊", coachName:r.data.coachName||"コーチ", coachEmail:r.data.coach_email||"", lineLinked:r.data.lineLinked===undefined?true:!!r.data.lineLinked, showInCommunity:r.data.showInCommunity===undefined?true:!!r.data.showInCommunity};
+        const u={...CURRENT_USER, name:r.data.name||CURRENT_USER.name, nickname:r.data.nickname||CURRENT_USER.name, avatar:r.data.avatar||"🦊", coachName:r.data.coachName||"コーチ", coachEmail:r.data.coach_email||"", lineLinked:r.data.lineLinked===undefined?true:!!r.data.lineLinked, showInCommunity:r.data.showInCommunity===undefined?true:!!r.data.showInCommunity, cohort:r.data.cohort||"", recordDays:(r.data.recordDays===undefined?null:r.data.recordDays)};
         CURRENT_USER=u; localStorage.setItem("edventure_user",JSON.stringify(u)); setUser(u);
         setProfile({nickname:u.nickname,avatar:u.avatar});
       } else if(r.error==="User not found"){
@@ -4556,7 +4583,7 @@ function App() {
       ${!calLinked && !calBannerDismissed && html`<${CalendarLinkBanner} onGoToSettings=${()=>setTab("settings")} onDismiss=${()=>setCalBannerDismissed(true)}/>`}
       <div style=${{position:"relative",flex:1,minHeight:0}}>
         <div class="screen">
-          <div style=${{display:tab==="home"?"block":"none"}}><${HomeScreen} goalData=${goalData} onGoalSaved=${setGoalData} profile=${profile} isActive=${tab==="home"} showInCommunity=${user.showInCommunity!==false} onGoTimer=${()=>setTab("timer")}/></div>
+          <div style=${{display:tab==="home"?"block":"none"}}><${HomeScreen} goalData=${goalData} onGoalSaved=${setGoalData} profile=${profile} isActive=${tab==="home"} showInCommunity=${user.showInCommunity!==false} studentCohort=${user.cohort||""} recordDays=${user.recordDays} onGoTimer=${()=>setTab("timer")}/></div>
           <div style=${{display:tab==="log"?"block":"none"}}><${LogScreen} onToast=${setToast} isActive=${tab==="log"}/></div>
           <div style=${{display:tab==="report"?"block":"none"}}><${ReportScreen}/></div>
           <div style=${{display:tab==="brain"?"block":"none"}}><${SecondBrainScreen} isActive=${tab==="brain"}/></div>
