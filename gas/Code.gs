@@ -68,6 +68,10 @@ function doGet(e) {
       case "quickLog":     result = quickLog(studentEmail, e.parameter); break;
       case "saveLogMulti": result = saveLogMulti(studentEmail, e.parameter); break;
       case "coachGetStudents":      result = coachGetStudents(e.parameter.coachEmail); break;
+      case "adminTagCohortByJoinDate": result = adminTagCohortByJoinDate(e.parameter.coachEmail, e.parameter.date, e.parameter.cohort); break;
+      case "adminListRecentRegistrations": result = adminListRecentRegistrations(e.parameter.coachEmail, e.parameter.days); break;
+      case "adminTagCohortByEmails": result = adminTagCohortByEmails(e.parameter.coachEmail, e.parameter.emails, e.parameter.cohort); break;
+      case "coachSetCohort":       result = coachSetCohort(e.parameter.coachEmail, e.parameter); break;
       case "coachGetStudentDetail": result = coachGetStudentDetail(e.parameter.coachEmail, e.parameter.targetEmail); break;
       case "coachSaveNote":         result = coachSaveNote(e.parameter.coachEmail, e.parameter); break;
       case "coachGenerateStudentMessage": result = coachGenerateStudentMessage(e.parameter.coachEmail, e.parameter); break;
@@ -214,6 +218,7 @@ function doPost(e) {
       case "coachSaveLead":        return jsonResponse(coachSaveLead(body.coachEmail, body));
       case "coachGenerateSalesTalk": return jsonResponse(coachGenerateSalesTalk(body.coachEmail, body));
       case "coachSetPlanStatus":   return jsonResponse(coachSetPlanStatus(body.coachEmail, body));
+      case "coachSetCohort":       return jsonResponse(coachSetCohort(body.coachEmail, body));
       case "coachUploadFile":      return jsonResponse(coachUploadFile(body.coachEmail, body));
       case "coachDeleteFile":      return jsonResponse(coachDeleteFile(body.coachEmail, body));
       case "coachDeleteNote":      return jsonResponse(coachDeleteNote(body.coachEmail, body));
@@ -549,10 +554,33 @@ function quickLog(studentEmail, body) {
 
   const now = new Date();
   const hour = now.getHours();
-  const curBlock = String(hour).padStart(2, "0") + ":00";
+  const pad2 = (n) => String(n).padStart(2, "0");
+  const curBlock = pad2(hour) + ":00";
+  const nowStr = pad2(hour) + ":" + pad2(now.getMinutes());
+  const today = formatDate(now);
 
   const user = sheetToObjects(getSheet("Users")).find(u => u.student_email === studentEmail);
   const goalsText = user ? [user.goal, user.goal2, user.goal3].filter(Boolean).join(" / ") : "";
+
+  // 今日すでに記録済みの「最後の終了時刻」を出す。「これまで/さっきから」と話した時に、
+  // 直近の記録の終わり〜今 の空白を、その内容で自動で埋めるための起点にする。
+  // 範囲キー("HH:MM-HH:MM")は終了側、開始のみ("HH:MM")は1時間枠として+1時間を終わりとみなす。
+  const blockEnd = (tb) => {
+    const s = String(tb || "");
+    const mr = s.match(/-(\d{1,2}):(\d{2})$/);
+    if (mr) return pad2(Number(mr[1])) + ":" + mr[2];
+    const ms = s.match(/^(\d{1,2}):(\d{2})/);
+    if (ms) return pad2((Number(ms[1]) + 1) % 24) + ":" + ms[2];
+    return null;
+  };
+  let lastEnd = null;
+  sheetToObjects(getSheet("DailyLog"))
+    .filter(l => l.student_email === studentEmail && l.date === today)
+    .forEach(l => {
+      const e = blockEnd(l.time_block);
+      // 「今以前で最も遅い終了」を起点にする（後ろ/未来の記録には引きずられない）
+      if (e && e <= nowStr && (!lastEnd || e > lastEnd)) lastEnd = e;
+    });
 
   const prompt = `ユーザーが「今日どう過ごしたか」を話し言葉でつぶやきました。これを時間記録に構造化してください。
 1つの活動だけなら1件でOKですが、1日の出来事をまとめて話している場合は、語られた活動を漏れなく全て別々の記録にしてください（件数の上限を気にせず、話に出てきた分だけ作る）。
@@ -565,20 +593,22 @@ ${text}
 【この人の目標】${goalsText || "未設定"}
 
 【各記録の作り方】
-- time: その活動の「開始時刻」を "HH:MM"（24時間）で。ユーザーは“記録ボタンを押した今この瞬間”に話している。現在時刻は${hour}時。次のルールを厳密に守る：
+- time: その活動の「開始時刻」を "HH:MM"（24時間）で。ユーザーは“記録ボタンを押した今この瞬間(${nowStr})”に話している。${lastEnd ? "今日はすでに " + lastEnd + " まで記録済み。" : "今日はまだ記録がない。"}次のルールを厳密に守る：
+  ${lastEnd ? "・「これまで」「さっきから」「ずっと」など、開始時刻を言わずに“前回の記録のあとから今まで”を通しで話している場合は、time=" + lastEnd + "（直近の記録の終わり）、end=" + nowStr + "（今）の1件にして、その間ずっとその活動をしていたとみなす。ただしその間の個別の時刻を言っていれば、それぞれの時刻を優先する。" : "・時刻を言わず「これまで/さっきから」と話した場合は、time・endを現在時刻(" + nowStr + ")付近にする。"}
   ・分の言い方はそのまま使う。「8時半」→:30、「9時15分」→:15。
   ・午前/午後が明示（朝・午前・昼・午後・夕方・夜 など）されていれば必ずそれに従う。「朝11時」→11:00、「夜11時」→23:00、「昼の1時」→13:00、「夕方5時」→17:00。
   ・午前/午後の明示がない「◯時」（H=1〜12）は、H時 と (H+12)時 のうち“押した今の時刻(${hour}時)に近い方”を選ぶ。例：今が${hour}時なら、これを最優先で当てはめる。「今23時で『11時』」→11と23では23が近いので23:00。「今9時で『11時』」→11:00。「今14時で『2時』」→14:00。
   ・ただし、明らかに1日を順に振り返っている（朝起きて→昼→夜…と複数の出来事を時系列で話している）場合だけは、その流れに沿った自然な時刻にする。
   ・時刻を言っていない活動は、勝手に別の時間を作らない。直前に時刻が分かっている活動の"続き"として、その時刻より後ろの妥当な時刻に置く（話した順番を守る）。時刻が一切なく「今・さっき」なら現在時刻(${String(hour).padStart(2,"0")}:00)。
   ・記録は必ず開始時刻の早い順に並べる。開始時刻が完全に同じ活動だけ1件にまとめる。
+- end: 終了時刻を "HH:MM"（24時間）で。ユーザーが「◯時から◯時（まで）」「◯時半まで」のように終了時刻もはっきり言った場合だけ入れる（例「9時から9時半」→ time=09:00, end=09:30）。終了を言っていなければ空文字 "" にする。timeと同じ午前/午後・「今に近い方」の判断をendにも同じように適用し、end は必ず time より後にする。
 - task: その活動が何だったかを“一文”で要約する（記録一覧の「何をしましたか」に入る見出し）。例「カフェで企画書を書いて集中できた」「友達とランチして部活の話をした」。長すぎず1文で。
 - focus_level: 本人の手応えから1〜5（5=完璧 / 4=よくできた / 3=まあまあ / 2=もう少し / 1=全然だめ）。読み取れなければ3
 - memo: その活動についてユーザーが話した言葉を、省略・要約・言い換えをせず“そのまま全部”入れる。感情や細かい描写も落とさない。つぶやきに出てきた内容は、必ずどれかの記録のmemoに全て含める（何ひとつ捨てない）。
 - goal_related: 上の目標に関連していそうなら true、そうでなければ false
 
 以下のJSON形式のみで返してください（説明不要）。値の中で引用が必要なら「」を使い半角"は使わない。各値は改行しない:
-{ "records": [ { "time": "HH:MM", "task": "...", "focus_level": 3, "memo": "...", "goal_related": false } ] }`;
+{ "records": [ { "time": "HH:MM", "end": "HH:MM または空", "task": "...", "focus_level": 3, "memo": "...", "goal_related": false } ] }`;
 
   // AI呼び出し〜解析は失敗しても入力を落とさない。例外・非JSON・レート制限・
   // 解析失敗のいずれでも、後段のフォールバックでつぶやき全文を必ず保存する。
@@ -663,7 +693,18 @@ ${text}
   // 60件は1日24時間を分単位で分けても十分収まる安全弁（暴走・実行時間の保険）
   records.slice(0, 60).forEach(function (r) {
     const fnum = Math.max(1, Math.min(5, Number(r.focus_level) || 3));
-    const tb = snapHourToNow(normTime(r.time));
+    // 終了時刻がある＝「◯時から◯時」や「これまで通し」の範囲。言われた時刻をそのまま尊重し、
+    // タイマー記録と同じ "HH:MM-HH:MM" キーで保存（スナップは掛けない）。
+    // 終了が無い＝単発。曖昧な「◯時」だけは「今に近い方」へスナップする。
+    const endRaw = String(r.end || "").trim();
+    let tb;
+    if (endRaw) {
+      const startTb = normTime(r.time);
+      const endTb = normTime(endRaw);
+      tb = (endTb > startTb) ? startTb + "-" + endTb : startTb;
+    } else {
+      tb = snapHourToNow(normTime(r.time));
+    }
     const sr = saveLog(studentEmail, {
       time_block: tb,
       task: String(r.task || "記録").slice(0, 60),
@@ -1465,6 +1506,7 @@ function coachGetStudents(coachEmail) {
       contractEnd: contractEnd || "",
       contractDaysLeft: daysToEnd,
       joinedJiroku: true,
+      cohort: u.cohort || "",
       showInCommunity: String(u.show_in_community || "").toUpperCase() !== "FALSE"
     };
   });
@@ -1496,6 +1538,98 @@ function coachGetStudents(coachEmail) {
   // 記録が止まっている生徒を上に（要フォロー順）
   data.sort((a, b) => String(a.lastLogDate||"") > String(b.lastLogDate||"") ? 1 : -1);
   return { ok: true, data: data, isAdmin: verifyAdmin(coachEmail) };
+}
+
+// Usersシートの cohort 列（区分ラベル。例「九産大生」）を確保して列indexを返す
+function ensureUsersCohortCol(sheet) {
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  let idx = headers.indexOf("cohort");
+  if (idx === -1) { idx = headers.length; sheet.getRange(1, idx + 1).setValue("cohort"); }
+  return idx;
+}
+
+// 指定した「登録日(joined_at)」の生徒をまとめて区分(cohort)タグ付けする管理機能。
+// 例：本日一括登録した九産大の学生を全員「九産大生」にする。
+function adminTagCohortByJoinDate(email, date, cohort) {
+  if (!verifyAdmin(email)) return { ok: false, error: "not admin" };
+  if (!date) return { ok: false, error: "missing date" };
+  const label = String(cohort || "").slice(0, 40);
+  const sheet = getSheet("Users");
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0];
+  const emailIdx = headers.indexOf("student_email");
+  const nameIdx = headers.indexOf("name");
+  const joinedIdx = headers.indexOf("joined_at");
+  const cohortIdx = ensureUsersCohortCol(sheet);
+  const tagged = [];
+  for (let i = 1; i < data.length; i++) {
+    const rawJ = data[i][joinedIdx];
+    const j = rawJ instanceof Date ? Utilities.formatDate(rawJ, "Asia/Tokyo", "yyyy-MM-dd") : String(rawJ || "");
+    if (j === date) {
+      sheet.getRange(i + 1, cohortIdx + 1).setValue(label);
+      tagged.push({ email: data[i][emailIdx], name: data[i][nameIdx] });
+    }
+  }
+  return { ok: true, date: date, cohort: label, count: tagged.length, tagged: tagged };
+}
+
+// 直近N日の登録者を一覧で返す（誰が学生かを見分けてタグ付け対象を決めるため）。
+function adminListRecentRegistrations(email, days) {
+  if (!verifyAdmin(email)) return { ok: false, error: "not admin" };
+  const n = Math.max(1, Math.min(60, Number(days) || 7));
+  const cutoff = formatDate(new Date(Date.now() - (n - 1) * 86400000));
+  const users = sheetToObjects(getSheet("Users"));
+  const list = users
+    .map(u => {
+      const j = u.joined_at instanceof Date ? Utilities.formatDate(u.joined_at, "Asia/Tokyo", "yyyy-MM-dd") : String(u.joined_at || "");
+      return { email: u.student_email, name: u.name, joined_at: j, cohort: u.cohort || "" };
+    })
+    .filter(u => u.joined_at && u.joined_at >= cutoff)
+    .sort((a, b) => a.joined_at < b.joined_at ? 1 : -1);
+  return { ok: true, sinceDate: cutoff, count: list.length, users: list };
+}
+
+// メールアドレスのリスト（カンマ区切り）で、まとめて区分(cohort)タグ付けする。
+function adminTagCohortByEmails(email, emailsCsv, cohort) {
+  if (!verifyAdmin(email)) return { ok: false, error: "not admin" };
+  const label = String(cohort || "").slice(0, 40);
+  const targets = String(emailsCsv || "").split(",").map(s => s.trim().toLowerCase()).filter(Boolean);
+  if (targets.length === 0) return { ok: false, error: "no emails" };
+  const sheet = getSheet("Users");
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0];
+  const emailIdx = headers.indexOf("student_email");
+  const nameIdx = headers.indexOf("name");
+  const cohortIdx = ensureUsersCohortCol(sheet);
+  const set = new Set(targets);
+  const tagged = [];
+  for (let i = 1; i < data.length; i++) {
+    if (set.has(String(data[i][emailIdx]).trim().toLowerCase())) {
+      sheet.getRange(i + 1, cohortIdx + 1).setValue(label);
+      tagged.push({ email: data[i][emailIdx], name: data[i][nameIdx] });
+    }
+  }
+  return { ok: true, cohort: label, count: tagged.length, tagged: tagged };
+}
+
+// コーチが個別に生徒の区分(cohort)を設定・変更する（空文字で解除）。
+function coachSetCohort(coachEmail, body) {
+  if (!verifyCoach(coachEmail)) return { ok: false, error: "not a coach" };
+  const studentEmail = String(body.targetEmail || "");
+  if (!coachOwnsStudent(coachEmail, studentEmail)) return { ok: false, error: "not your student" };
+  const label = String(body.cohort || "").slice(0, 40);
+  const sheet = getSheet("Users");
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0];
+  const emailIdx = headers.indexOf("student_email");
+  const cohortIdx = ensureUsersCohortCol(sheet);
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][emailIdx]) === studentEmail) {
+      sheet.getRange(i + 1, cohortIdx + 1).setValue(label);
+      return { ok: true, cohort: label };
+    }
+  }
+  return { ok: false, error: "student not found" };
 }
 
 // JIROKU未登録のクライアントを手動でCRMに追加する（契約書・Stripe情報だけ先に管理したい場合）
@@ -1649,7 +1783,7 @@ objectionsは、ヒアリング内容から予想されるものを2〜3個。`;
     muteHttpExceptions: true
   });
   const result = JSON.parse(res.getContentText());
-  if (!result.content || !result.content[0]) return { ok: false, error: "APIエラー: " + res.getContentText().substring(0, 200) };
+  if (!result.content || !result.content[0]) return { ok: false, error: friendlyClaudeError(res.getContentText()) };
 
   try {
     const parsed = parseAiJson(result.content[0].text);
@@ -3581,17 +3715,40 @@ function nightlyReport() {
   const startedAt = Date.now();
 
   const props = PropertiesService.getScriptProperties();
+
+  // ★重要: 今回この関数を発火させた「再開トリガー」を必ず削除する。
+  // GASの .after() トリガーは発火後に自動削除されないため、放置するとトリガーが
+  // 溜まり続け、上限（20個）に達して新しい再開トリガーの作成が失敗し、
+  // 後半の生徒のレポートが無言で欠落する。IDで確実に消してから続きを処理する。
+  const prevTid = props.getProperty("NIGHTLY_REPORT_RESUME_TRIGGER_ID");
+  if (prevTid) {
+    try { ScriptApp.getProjectTriggers().forEach(t => { if (t.getUniqueId() === prevTid) ScriptApp.deleteTrigger(t); }); } catch (e) { Logger.log("resume trigger削除失敗: " + e); }
+    props.deleteProperty("NIGHTLY_REPORT_RESUME_TRIGGER_ID");
+  }
+
   const resumeDate = props.getProperty("NIGHTLY_REPORT_RESUME_DATE");
   const startIndex = (resumeDate === today) ? Number(props.getProperty("NIGHTLY_REPORT_RESUME_INDEX") || 0) : 0;
 
   const users = sheetToObjects(getSheet("Users")).filter(u => u.is_active.toUpperCase() === "TRUE");
+  // 既存レポート(今日分)のキーを一度だけ先読み（生徒ごとにReports全読みするとO(N^2)で遅く、
+  // 分割回数が増える＝再開トリガーも増えるため）
+  const doneToday = new Set(
+    sheetToObjects(getSheet("Reports")).filter(r => r.date === today).map(r => r.student_email)
+  );
 
   for (let i = startIndex; i < users.length; i++) {
     if (Date.now() - startedAt > NIGHTLY_REPORT_TIME_BUDGET_MS) {
-      // 時間切れ: 続きから再開できるよう位置を保存し、1分後に自分自身を再実行するトリガーを張る
+      // 時間切れ: 続きから再開できるよう位置を保存し、1分後に自分自身を再実行するトリガーを張る。
+      // 作ったトリガーのIDを控えておき、次回起動の冒頭で必ず削除する（溜まり防止）
       props.setProperty("NIGHTLY_REPORT_RESUME_DATE", today);
       props.setProperty("NIGHTLY_REPORT_RESUME_INDEX", String(i));
-      ScriptApp.newTrigger("nightlyReport").timeBased().after(60 * 1000).create();
+      try {
+        const t = ScriptApp.newTrigger("nightlyReport").timeBased().after(60 * 1000).create();
+        props.setProperty("NIGHTLY_REPORT_RESUME_TRIGGER_ID", t.getUniqueId());
+      } catch (e) {
+        // トリガー作成に失敗（上限等）した場合でも黙って落とさず記録に残す
+        Logger.log("nightlyReport: 再開トリガー作成に失敗: " + e);
+      }
       Logger.log("nightlyReport: 時間切れのため" + i + "人目から中断・1分後に再開します（全" + users.length + "人）");
       return;
     }
@@ -3605,9 +3762,8 @@ function nightlyReport() {
         continue;
       }
 
-      // 既存レポートがあればスキップ（重複防止）
-      const existing = sheetToObjects(getSheet("Reports")).find(r => r.student_email === user.student_email && r.date === today);
-      if (existing) { Logger.log(user.student_email + ": 本日のレポートは既に存在します"); continue; }
+      // 既存レポートがあればスキップ（重複防止・先読みしたSetで判定）
+      if (doneToday.has(user.student_email)) { continue; }
 
       // 日付を跨いだ後の実行では、updateStreakが「翌日」を記録日として
       // 誤登録してしまうためスキップする（記録保存時にも更新されているので実害はない）
@@ -3615,6 +3771,7 @@ function nightlyReport() {
       const report = generateReportWithClaude(user.student_email, user.name, logs);
       if (!report) continue;
       appendReportRow(today, user.student_email, report);
+      doneToday.add(user.student_email);
       sendReportLineMessage(user, report);
       notifyCoachOnReport(user, report);
     } catch (err) { Logger.log(err); }
@@ -3623,6 +3780,7 @@ function nightlyReport() {
   // 全員処理完了。再開用の状態が残っていればクリアする
   props.deleteProperty("NIGHTLY_REPORT_RESUME_DATE");
   props.deleteProperty("NIGHTLY_REPORT_RESUME_INDEX");
+  props.deleteProperty("NIGHTLY_REPORT_RESUME_TRIGGER_ID");
 }
 
 function sendReportLineMessage(user, report) {
@@ -5260,7 +5418,7 @@ ${material}
   const result = JSON.parse(res.getContentText());
   const textBlock = result.content && Array.isArray(result.content)
     ? result.content.find(function(b){ return b && typeof b.text === "string"; }) : null;
-  if (!textBlock) return { ok: false, error: "APIエラー: " + res.getContentText().substring(0, 200) };
+  if (!textBlock) return { ok: false, error: friendlyClaudeError(res.getContentText()) };
   try {
     const parsed = parseAiJson(textBlock.text);
     if (!parsed) return { ok: false, error: "気づきの解析に失敗しました。もう一度お試しください" };
@@ -5384,7 +5542,7 @@ ${taskList}
   const result = JSON.parse(res.getContentText());
   const textBlock = result.content && Array.isArray(result.content)
     ? result.content.find(function(b){ return b && typeof b.text === "string"; }) : null;
-  if (!textBlock) return { ok: false, error: "APIエラー: " + res.getContentText().substring(0, 200) };
+  if (!textBlock) return { ok: false, error: friendlyClaudeError(res.getContentText()) };
   try {
     const parsed = parseAiJson(textBlock.text);
     if (!parsed) return { ok: false, error: "分類の解析に失敗しました。もう一度お試しください" };
@@ -5479,6 +5637,21 @@ function exportMyData(studentEmail, body) {
 
 // AIが返すJSONを頑丈にパースする。AIは文字列値の中に半角ダブルクォート(")や
 // 生の改行を混ぜてしまうことがあり、素のJSON.parseだと壊れる。段階的に修復して試す
+// AnthropicのAPIエラー本文を、ユーザーに見せる短い日本語メッセージに変換する。
+// 生JSON（利用上限・レート制限等）をそのまま画面に出さないための共通処理。
+// 生の内容はLogger.logに残して原因調査できるようにする。
+function friendlyClaudeError(rawText) {
+  const s = String(rawText || "");
+  Logger.log("Claude API error raw: " + s.substring(0, 400));
+  if (/usage limit|credit balance|billing|regain access|insufficient/i.test(s)) {
+    return "ただいまAIの利用が混み合っており、一時的にご利用いただけません。少し時間をおいて再度お試しください🙏";
+  }
+  if (/rate_limit|overloaded|too many requests|"status":\s*429|"status":\s*529/i.test(s)) {
+    return "AIへのアクセスが集中しています。少し待ってから、もう一度お試しください🙏";
+  }
+  return "AIの処理で一時的な問題が発生しました。もう一度お試しください。";
+}
+
 function parseAiJson(rawText) {
   if (!rawText) return null;
   const m = String(rawText).trim().match(/\{[\s\S]*\}/);
@@ -5575,7 +5748,7 @@ evidenceは根拠にした記録を1〜4件。
   // content配列から確実にテキストブロックを拾う（thinkingブロック等が先頭に来ても壊れないように）
   const textBlock = result.content && Array.isArray(result.content)
     ? result.content.find(function(b){ return b && typeof b.text === "string"; }) : null;
-  if (!textBlock) return { ok: false, error: "APIエラー: " + res.getContentText().substring(0, 200) };
+  if (!textBlock) return { ok: false, error: friendlyClaudeError(res.getContentText()) };
   const parsed = parseAiJson(textBlock.text);
   if (!parsed) return { ok: false, error: "回答の解析に失敗しました。もう一度お試しください" };
   return { ok: true, data: parsed, sourceCount: { logs: logs.length, diary: journalRows.length } };
@@ -6265,7 +6438,7 @@ function formatDate(date) {
 function setupSheets() {
   const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
   const sheets = {
-    "Users": ["student_email","name","line_user_id","coach_email","coach_line_id","google_calendar_id","chatwork_room","is_active","joined_at","notify_start","notify_end","nickname","avatar","show_in_community","fcm_token"],
+    "Users": ["student_email","name","line_user_id","coach_email","coach_line_id","google_calendar_id","chatwork_room","is_active","joined_at","notify_start","notify_end","nickname","avatar","show_in_community","fcm_token","cohort"],
     "DailyLog": ["log_id","student_email","date","time_block","task","focus_level","memo","timestamp","goal_related","xp_awarded"],
     "Reports": ["date","student_email","score","feedback","action","highlights","improvement","created_at","breakdown"],
     "Messages": ["message_id","student_email","content","sender_name","sender_photo","sender_role","timestamp","is_read"],

@@ -259,7 +259,10 @@ function Sidebar({ students, selectedEmail, onSelect, onLogout, coach, onAddClie
               <div style=${{display:"flex",alignItems:"center",gap:10}}>
                 <div style=${{width:32,height:32,borderRadius:"50%",background:"var(--bg)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:17,flexShrink:0}}>${s.avatar}</div>
                 <div style=${{flex:1,minWidth:0}}>
-                  <div style=${{fontSize:13.5,fontWeight:600,color:"var(--text)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>${s.nickname||s.name}</div>
+                  <div style=${{display:"flex",alignItems:"center",gap:6,minWidth:0}}>
+                    <span style=${{fontSize:13.5,fontWeight:600,color:"var(--text)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>${s.nickname||s.name}</span>
+                    ${s.cohort&&html`<span title=${s.cohort} style=${{flexShrink:0,fontSize:9.5,fontWeight:700,color:"var(--accent)",background:"var(--accent-l)",borderRadius:20,padding:"1px 6px"}}>🎓${s.cohort}</span>`}
+                  </div>
                   <div style=${{fontSize:11,fontWeight:600,color:agoColor}}>${agoText}</div>
                 </div>
                 ${s.contractDaysLeft !== null && s.contractDaysLeft <= 30 && html`
@@ -359,6 +362,15 @@ function StudentMain({ student, onNoteSaved }) {
   };
   const copyNudgeMessage = async () => {
     try { await navigator.clipboard.writeText(nudgeMsg); setNudgeResult("コピーしました"); setTimeout(()=>setNudgeResult(""),2000); } catch (e) { setNudgeResult("コピーに失敗しました"); }
+  };
+  // 区分(cohort)の設定・解除。学生など、生徒を仕分けて差別化するためのタグ
+  const [cohortSaving, setCohortSaving] = useState(false);
+  const setCohort = async (label) => {
+    setCohortSaving(true);
+    const r = await apiPost("coachSetCohort", { targetEmail: student.email, cohort: label });
+    setCohortSaving(false);
+    if (r.ok) reloadDetail();
+    else alert(r.error || "変更に失敗しました");
   };
   // 課金状態の変更（半自動運用: Stripe入金を確認したら「決済済みにする」を押す）
   const [planSaving, setPlanSaving] = useState(false);
@@ -490,7 +502,13 @@ function StudentMain({ student, onNoteSaved }) {
         <div style=${{display:"flex",alignItems:"center",gap:12}}>
           <div style=${{width:40,height:40,borderRadius:"50%",background:"var(--bg)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:21}}>${student.avatar}</div>
           <div>
-            <div style=${{fontSize:17,fontWeight:700}}>${student.name}</div>
+            <div style=${{display:"flex",alignItems:"center",gap:8}}>
+              <div style=${{fontSize:17,fontWeight:700}}>${student.name}</div>
+              ${student.cohort&&html`<span style=${{fontSize:10.5,fontWeight:700,color:"var(--accent)",background:"var(--accent-l)",borderRadius:20,padding:"2px 8px"}}>🎓${student.cohort}</span>`}
+              <button onClick=${()=>setCohort(student.cohort?"":"九産大生")} disabled=${cohortSaving}
+                style=${{fontSize:10.5,color:"var(--sub)",background:"none",border:"1px solid var(--border)",borderRadius:20,padding:"2px 8px",cursor:"pointer",fontFamily:"inherit"}}>
+                ${cohortSaving?"…":(student.cohort?"区分を外す":"🎓 九産大生にする")}</button>
+            </div>
             <div style=${{fontSize:11.5,color:"var(--sub)"}}>${student.email}</div>
           </div>
         </div>
