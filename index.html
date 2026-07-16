@@ -1563,12 +1563,13 @@ function CommunityOverlay({onClose}) {
   const [list,setList]=useState(null);
   const [reportRanking,setReportRanking]=useState(null);
   const [streakRanking,setStreakRanking]=useState(null);
+  const [newcomers,setNewcomers]=useState(null);
   const [achievements,setAchievements]=useState(null);
   const [message,setMessage]=useState("");
   const [sending,setSending]=useState(false);
 
   const load=()=>{
-    gasApi("getCommunity").then(r=>{ if(r.ok) { setList(r.data); setReportRanking(r.reportRanking||[]); setStreakRanking(r.streakRanking||[]); } });
+    gasApi("getCommunity").then(r=>{ if(r.ok) { setList(r.data); setReportRanking(r.reportRanking||[]); setStreakRanking(r.streakRanking||[]); setNewcomers(r.newcomers||[]); } });
     gasApi("getAchievements").then(r=>{ if(r.ok) setAchievements(r.data); });
   };
   useEffect(()=>{ load(); },[]);
@@ -1591,13 +1592,40 @@ function CommunityOverlay({onClose}) {
       </div>
 
       <div style=${{padding:16}}>
+        ${newcomers&&newcomers.length>0&&html`
+          <div style=${{background:"var(--card)",borderRadius:16,border:"1px solid var(--border)",overflow:"hidden",marginBottom:16}}>
+            <div style=${{padding:"14px 16px",borderBottom:"1px solid var(--border)"}}>
+              <div style=${{fontSize:12,fontWeight:700,color:"var(--text)"}}>🌱 新しい仲間</div>
+              <div style=${{fontSize:10.5,color:"var(--sub)",marginTop:2}}>最近この場に加わったメンバーです。見かけたら応援しよう！</div>
+            </div>
+            <div style=${{display:"flex",gap:14,overflowX:"auto",padding:"14px 16px",scrollbarWidth:"none"}}>
+              ${newcomers.map((u,i)=>html`
+                <div key=${i} style=${{display:"flex",flexDirection:"column",alignItems:"center",gap:5,flexShrink:0,width:56}}>
+                  <div style=${{width:46,height:46,borderRadius:"50%",background:"var(--bg)",border:`2px solid ${u.isMe?"var(--accent)":"var(--border)"}`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:22}}>${u.avatar}</div>
+                  <div style=${{fontSize:10.5,fontWeight:600,color:u.isMe?"var(--accent)":"var(--text)",maxWidth:56,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",textAlign:"center"}}>${u.nickname}${u.isMe?"(あなた)":""}</div>
+                </div>
+              `)}
+            </div>
+          </div>
+        `}
+
         <div style=${{background:"var(--card)",borderRadius:16,border:"1px solid var(--border)",overflow:"hidden",marginBottom:16}}>
           <div style=${{padding:"14px 16px",borderBottom:"1px solid var(--border)",fontSize:12,fontWeight:700,color:"var(--text)"}}>ステータスランキング</div>
           ${list===null&&html`<div style=${{padding:20,textAlign:"center",color:"var(--sub)",fontSize:13}}>読み込み中...</div>`}
-          ${list&&list.map((u,i)=>html`
-            <${RankingRow} key=${i} rank=${i+1} avatar=${u.avatar} nickname=${u.nickname} isMe=${u.isMe}
-              scoreValue=${u.score} scoreUnit="点" sub=${u.streak>0?`🔥${u.streak}日連続`:null} isLast=${i===list.length-1}/>
-          `)}
+          ${list&&(()=>{
+            const {top,me,meRank}=trimRanking(list);
+            return html`
+              ${top.map((u,i)=>html`
+                <${RankingRow} key=${i} rank=${i+1} avatar=${u.avatar} nickname=${u.nickname} isMe=${u.isMe}
+                  scoreValue=${u.score} scoreUnit="点" sub=${u.streak>0?`🔥${u.streak}日連続`:null} isLast=${!me&&i===top.length-1}/>
+              `)}
+              ${me&&html`
+                <div style=${{textAlign:"center",fontSize:12,color:"var(--sub)",padding:"6px 0",borderBottom:"1px solid var(--border)"}}>⋮</div>
+                <${RankingRow} rank=${meRank} avatar=${me.avatar} nickname=${me.nickname} isMe=${true}
+                  scoreValue=${me.score} scoreUnit="点" sub=${me.streak>0?`🔥${me.streak}日連続`:null} isLast=${true}/>
+              `}
+            `;
+          })()}
           ${list&&list.length===0&&html`<div style=${{padding:20,textAlign:"center",color:"var(--sub)",fontSize:13}}>まだデータがありません</div>`}
         </div>
 

@@ -71,6 +71,7 @@ function doGet(e) {
       case "adminTagCohortByJoinDate": result = adminTagCohortByJoinDate(e.parameter.coachEmail, e.parameter.date, e.parameter.cohort); break;
       case "adminListRecentRegistrations": result = adminListRecentRegistrations(e.parameter.coachEmail, e.parameter.days); break;
       case "generateTalentReport": result = generateTalentReport(e.parameter.coachEmail, e.parameter.targetEmail); break;
+      case "generateGakuchika": result = generateGakuchika(e.parameter.coachEmail, e.parameter.targetEmail); break;
       case "adminTagCohortByEmails": result = adminTagCohortByEmails(e.parameter.coachEmail, e.parameter.emails, e.parameter.cohort); break;
       case "coachSetCohort":       result = coachSetCohort(e.parameter.coachEmail, e.parameter); break;
       case "coachGetStudentDetail": result = coachGetStudentDetail(e.parameter.coachEmail, e.parameter.targetEmail); break;
@@ -511,7 +512,12 @@ function appendReportRow(targetDate, studentEmail, report) {
     if (rIdx === -1) { rIdx = headers2.length; sheet.getRange(1, rIdx + 1).setValue("breakdown_reasons"); }
     sheet.getRange(newRow, rIdx + 1).setValue(JSON.stringify(report.breakdown_reasons));
   }
-  try { CacheService.getScriptCache().remove("ranking_scores_v3"); } catch (e) { /* ignore */ }
+  try {
+    // ランキングキャッシュはcohortごとに分かれているため、書き込んだ本人のcohortのキーを消す
+    const au = sheetToObjects(getSheet("Users")).find(u => u.student_email === studentEmail);
+    const ck = "ranking_scores_v4_" + (String((au && au.cohort) || "").trim() || "main");
+    CacheService.getScriptCache().remove(ck);
+  } catch (e) { /* ignore */ }
   try { postHighScoreAchievement(studentEmail, report.score); } catch (e) { /* ignore */ }
 }
 
@@ -1122,15 +1128,21 @@ function buildReportRankingSet(emailSet, allReports, windowDays) {
 }
 
 function getRanking(studentEmail) {
-  const CACHE_KEY = "ranking_scores_v3";
+  // ラインの分離：学生（cohort付き）は学生同士、クライアント（cohortなし）はクライアント同士でだけ競う。
+  // 有料顧客のランキングに学生が混ざる／学生に顧客が見える、という体験の混在を防ぐ
+  const allUsersForCohort = sheetToObjects(getSheet("Users"));
+  const meU = allUsersForCohort.find(u => u.student_email === studentEmail);
+  const myCohort = String((meU && meU.cohort) || "").trim();
+  const CACHE_KEY = "ranking_scores_v4_" + (myCohort || "main");
   const WINDOW_DAYS = 3;
   let payload;
   const cached = CacheService.getScriptCache().get(CACHE_KEY);
   if (cached) {
     payload = JSON.parse(cached);
   } else {
-    const users = sheetToObjects(getSheet("Users")).filter(u =>
-      u.is_active.toUpperCase() === "TRUE" && String(u.show_in_community || "").toUpperCase() !== "FALSE"
+    const users = allUsersForCohort.filter(u =>
+      u.is_active.toUpperCase() === "TRUE" && String(u.show_in_community || "").toUpperCase() !== "FALSE" &&
+      String(u.cohort || "").trim() === myCohort
     );
     const active = new Set(users.map(u => u.student_email));
     const allReports = sheetToObjects(getSheet("Reports")).filter(r => active.has(r.student_email));
@@ -1179,15 +1191,20 @@ function getRanking(studentEmail) {
 // 見ている場所によって基準がバラバラだと分かりにくいため一本化している。
 // レポートスコア（直近レポートの点数）のランキングも別途あわせて返す。
 function getCommunity(studentEmail) {
+  // ラインの分離：学生（cohort付き）は学生同士、クライアントはクライアント同士だけが見える
+  const allUsersC = sheetToObjects(getSheet("Users"));
+  const meC = allUsersC.find(u => u.student_email === studentEmail);
+  const myCohortC = String((meC && meC.cohort) || "").trim();
   // show_in_communityが明示的に"FALSE"の生徒は、本人以外の目からは完全に見えなくする
   // （自分自身は自分の結果を見られるよう例外にする）
-  const users = sheetToObjects(getSheet("Users")).filter(u =>
+  const users = allUsersC.filter(u =>
     u.is_active.toUpperCase() === "TRUE" &&
+    String(u.cohort || "").trim() === myCohortC &&
     (u.student_email === studentEmail || String(u.show_in_community || "").toUpperCase() !== "FALSE")
   );
   // 「みんなの頑張り」を非表示にしている本人は、順位（数字）は見られてよいが、
   // 他の生徒の名前までは見せない（非表示は一方通行ではなく、お互いに匿名化する）
-  const me = sheetToObjects(getSheet("Users")).find(u => u.student_email === studentEmail);
+  const me = meC;
   const callerHidden = !!me && String(me.show_in_community || "").toUpperCase() === "FALSE";
   const maskName = (u, isMe) => (callerHidden && !isMe) ? "匿名さん" : (u.nickname || "名無しさん");
   const maskAvatar = (u, isMe) => (callerHidden && !isMe) ? "🙈" : (u.avatar || "🦊");
@@ -1249,7 +1266,22 @@ function getCommunity(studentEmail) {
     .filter(u => u.streak > 0)
     .sort((a, b) => b.streak - a.streak);
 
-  return { ok: true, data: list, reportRanking: reportRanking, streakRanking: streakRanking };
+  // 新しく入った仲間（直近14日に登録）。記録がまだ無くてもここに載せて歓迎し、
+  // 顔（ニックネーム・アバター）が見えることでコミュニティに迎え入れる
+  const nc14 = formatDate(new Date(Date.now() - 14 * 86400000));
+  const newcomers = users
+    .filter(u => {
+      const j = u.joined_at instanceof Date ? formatDate(u.joined_at) : String(u.joined_at || "");
+      return j && j >= nc14;
+    })
+    .sort((a, b) => (String(b.joined_at) > String(a.joined_at) ? 1 : -1))
+    .slice(0, 20)
+    .map(u => {
+      const isMe = u.student_email === studentEmail;
+      return { isMe, nickname: maskName(u, isMe), avatar: maskAvatar(u, isMe), joined_at: (u.joined_at instanceof Date ? formatDate(u.joined_at) : String(u.joined_at || "")) };
+    });
+
+  return { ok: true, data: list, reportRanking: reportRanking, streakRanking: streakRanking, newcomers: newcomers };
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1389,10 +1421,13 @@ function getAchievements(studentEmail) {
   const hiddenEmails = new Set(
     allUsers.filter(u => String(u.show_in_community || "").toUpperCase() === "FALSE").map(u => u.student_email)
   );
+  // ラインの分離：シェア欄も学生は学生同士、クライアントはクライアント同士だけ見える
+  const cohortByEmail = new Map(allUsers.map(u => [u.student_email, String(u.cohort || "").trim()]));
+  const myCohortA = cohortByEmail.get(studentEmail) || "";
   // 「みんなの頑張り」を非表示にしている本人には、他の生徒の名前を見せない（お互いに匿名化する）
   const callerHidden = hiddenEmails.has(studentEmail);
   const rows = sheetToObjects(getAchievementsSheet())
-    .filter(r => !hiddenEmails.has(r.student_email))
+    .filter(r => !hiddenEmails.has(r.student_email) && (cohortByEmail.get(r.student_email) || "") === myCohortA)
     .sort((a, b) => b.created_at > a.created_at ? 1 : -1)
     .slice(0, 30)
     .map(r => {
@@ -5848,6 +5883,57 @@ function generateTalentReport(email, targetEmail) {
     behavior: behavior,
     data: parsed
   };
+}
+
+// ガクチカ素材集：日々の記録から、就活で語れるエピソードを
+// 「状況→行動→結果→学び」の型で抽出する（日付つき根拠・本人の言葉ベース）。
+// 面接でそのまま話せる素材と、自己PRの種を返す。
+function generateGakuchika(email, targetEmail) {
+  if (!verifyAdmin(email) && !verifyCoach(email)) return { ok: false, error: "not authorized" };
+  const apiKey = PropertiesService.getScriptProperties().getProperty("CLAUDE_API_KEY");
+  if (!apiKey) return { ok: false, error: "CLAUDE_API_KEY未設定" };
+  const who = String(targetEmail || "").trim();
+  const user = sheetToObjects(getSheet("Users")).find(u => u.student_email === who);
+  if (!user) return { ok: false, error: "user not found" };
+  const name = user.name || "本人";
+
+  const cutoff = formatDate(new Date(Date.now() - 180 * 86400000));
+  const logs = getFilteredRows("DailyLog", "student_email", who)
+    .filter(l => l.date >= cutoff && l.memo && l.memo.trim())
+    .sort((a, b) => a.date > b.date ? 1 : -1);
+  if (logs.length === 0) return { ok: false, error: "記録がまだ少なく、素材集を作れません" };
+  let logsText = logs.map(l => l.date + " " + (l.time_block || "") + " " + l.task + "：" + l.memo).join("\n");
+  if (logsText.length > 22000) logsText = logsText.slice(logsText.length - 22000);
+
+  const prompt = "あなたは就活支援のプロのキャリアコーチです。以下は" + name + "さんが習慣アプリJIROKUに日々書き溜めた実際の記録です（すべて本人の言葉・事実）。ここから就活の面接・ESで使える『ガクチカ／自己PRの素材集』を作ってください。\n\n"
+    + "【日々の記録（時系列）】\n" + logsText + "\n\n"
+    + "【作り方】\n"
+    + "- 記録の中から“エピソードとして語れる出来事”を3〜5本選ぶ（挑戦・工夫・継続・協働・失敗からの立て直し等）。\n"
+    + "- 各エピソードは面接の王道の型で構造化：状況(Situation)→行動(Action)→結果(Result)→学び(Learning)。\n"
+    + "- 必ず記録の事実だけで書く。誇張・創作はしない（事実ベースが最大の武器。面接で深掘りされても本人が話せる内容にする）。\n"
+    + "- evidenceに根拠の記録（日付＋本人の言葉）を入れる。\n"
+    + "- keywordsは面接官に伝わる強みワード（例：継続力、巻き込み力）を2〜3個。\n"
+    + "- self_pr_seedsは、複数エピソードを貫く本人の強みを「私は◯◯な人間です。実際に〜」の書き出しで使える1〜2文の種を2〜3本。\n\n"
+    + "以下のJSON形式のみで返す（説明不要）。値の引用は「」を使い半角\"は使わない。各値は改行しない：\n"
+    + "{\n"
+    + '  "materials": [ { "title": "<エピソードの見出し（15字以内）>", "situation": "<状況1-2文>", "action": "<取った行動1-2文>", "result": "<結果1-2文>", "learning": "<学び1文>", "evidence": [ { "date": "<YYYY-MM-DD>", "quote": "<本人の記録の言葉>" } ], "keywords": ["<強みワード>"] } ],\n'
+    + '  "self_pr_seeds": [ "<自己PRの種1-2文>" ]\n'
+    + "}";
+
+  // 学生（cohort付き）はSonnet、それ以外はOpus（コスト方針をaskMyPastと統一）
+  const model = String(user.cohort || "").trim() ? "claude-sonnet-5" : "claude-opus-4-8";
+  const res = UrlFetchApp.fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
+    payload: JSON.stringify({ model: model, max_tokens: 4000, messages: [{ role: "user", content: prompt }] }),
+    muteHttpExceptions: true
+  });
+  const result = JSON.parse(res.getContentText());
+  const textBlock = result.content && Array.isArray(result.content) ? result.content.find(b => b.type === "text") : null;
+  if (!textBlock) return { ok: false, error: friendlyClaudeError(res.getContentText()) };
+  const parsed = parseAiJson(textBlock.text);
+  if (!parsed || !Array.isArray(parsed.materials)) return { ok: false, error: "素材集の解析に失敗しました" };
+  return { ok: true, name: name, recordDays: new Set(logs.map(l => l.date)).size, sinceDate: cutoff, data: parsed };
 }
 
 function askMyPast(studentEmail, body) {
