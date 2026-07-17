@@ -1266,6 +1266,26 @@ function getCommunity(studentEmail) {
     .filter(u => u.streak > 0)
     .sort((a, b) => b.streak - a.streak);
 
+  // 最近記録した仲間（直近48時間に記録した人を全員）。ランキング（上位5人）とは別に、
+  // 「記録した人は必ず載る」場を作ることで、頑張りを取りこぼさず称える
+  const recentCut = formatDate(new Date(Date.now() - 1 * 86400000)); // 昨日・今日
+  const recentLoggers = (function () {
+    const emails = new Set(users.map(u => u.student_email));
+    const byEmail = {};
+    sheetToObjects(getSheet("DailyLog")).forEach(function (l) {
+      if (emails.has(l.student_email) && String(l.date) >= recentCut) {
+        byEmail[l.student_email] = (byEmail[l.student_email] || 0) + 1;
+      }
+    });
+    return users
+      .filter(u => byEmail[u.student_email])
+      .map(u => {
+        const isMe = u.student_email === studentEmail;
+        return { isMe, nickname: maskName(u, isMe), avatar: maskAvatar(u, isMe), blocks: byEmail[u.student_email], streak: Number(u.streak || 0) };
+      })
+      .sort((a, b) => b.blocks - a.blocks);
+  })();
+
   // 新しく入った仲間（直近14日に登録）。記録がまだ無くてもここに載せて歓迎し、
   // 顔（ニックネーム・アバター）が見えることでコミュニティに迎え入れる
   const nc14 = formatDate(new Date(Date.now() - 14 * 86400000));
@@ -1281,7 +1301,7 @@ function getCommunity(studentEmail) {
       return { isMe, nickname: maskName(u, isMe), avatar: maskAvatar(u, isMe), joined_at: (u.joined_at instanceof Date ? formatDate(u.joined_at) : String(u.joined_at || "")) };
     });
 
-  return { ok: true, data: list, reportRanking: reportRanking, streakRanking: streakRanking, newcomers: newcomers };
+  return { ok: true, data: list, reportRanking: reportRanking, streakRanking: streakRanking, newcomers: newcomers, recentLoggers: recentLoggers };
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

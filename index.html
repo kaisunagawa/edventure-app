@@ -1564,12 +1564,13 @@ function CommunityOverlay({onClose}) {
   const [reportRanking,setReportRanking]=useState(null);
   const [streakRanking,setStreakRanking]=useState(null);
   const [newcomers,setNewcomers]=useState(null);
+  const [recentLoggers,setRecentLoggers]=useState(null);
   const [achievements,setAchievements]=useState(null);
   const [message,setMessage]=useState("");
   const [sending,setSending]=useState(false);
 
   const load=()=>{
-    gasApi("getCommunity").then(r=>{ if(r.ok) { setList(r.data); setReportRanking(r.reportRanking||[]); setStreakRanking(r.streakRanking||[]); setNewcomers(r.newcomers||[]); } });
+    gasApi("getCommunity").then(r=>{ if(r.ok) { setList(r.data); setReportRanking(r.reportRanking||[]); setStreakRanking(r.streakRanking||[]); setNewcomers(r.newcomers||[]); setRecentLoggers(r.recentLoggers||[]); } });
     gasApi("getAchievements").then(r=>{ if(r.ok) setAchievements(r.data); });
   };
   useEffect(()=>{ load(); },[]);
@@ -1603,6 +1604,24 @@ function CommunityOverlay({onClose}) {
                 <div key=${i} style=${{display:"flex",flexDirection:"column",alignItems:"center",gap:5,flexShrink:0,width:56}}>
                   <div style=${{width:46,height:46,borderRadius:"50%",background:"var(--bg)",border:`2px solid ${u.isMe?"var(--accent)":"var(--border)"}`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:22}}>${u.avatar}</div>
                   <div style=${{fontSize:10.5,fontWeight:600,color:u.isMe?"var(--accent)":"var(--text)",maxWidth:56,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",textAlign:"center"}}>${u.nickname}${u.isMe?"(あなた)":""}</div>
+                </div>
+              `)}
+            </div>
+          </div>
+        `}
+
+        ${recentLoggers&&recentLoggers.length>0&&html`
+          <div style=${{background:"var(--card)",borderRadius:16,border:"1px solid var(--border)",overflow:"hidden",marginBottom:16}}>
+            <div style=${{padding:"14px 16px",borderBottom:"1px solid var(--border)"}}>
+              <div style=${{fontSize:12,fontWeight:700,color:"var(--text)"}}>✏️ 最近記録した仲間</div>
+              <div style=${{fontSize:10.5,color:"var(--sub)",marginTop:2}}>この2日で記録した${recentLoggers.length}人。順位じゃなく、記録したことがえらい！</div>
+            </div>
+            <div style=${{display:"flex",flexWrap:"wrap",gap:10,padding:"14px 16px"}}>
+              ${recentLoggers.map((u,i)=>html`
+                <div key=${i} style=${{display:"flex",alignItems:"center",gap:7,background:u.isMe?"var(--accent-l)":"var(--bg)",border:`1px solid ${u.isMe?"var(--accent)":"var(--border)"}`,borderRadius:99,padding:"5px 11px 5px 6px"}}>
+                  <div style=${{width:26,height:26,borderRadius:"50%",background:"var(--card)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:15,flexShrink:0}}>${u.avatar}</div>
+                  <span style=${{fontSize:12,fontWeight:600,color:u.isMe?"var(--accent)":"var(--text)",maxWidth:110,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>${u.nickname}</span>
+                  ${u.streak>0&&html`<span style=${{fontSize:10.5,color:"var(--sub)"}}>🔥${u.streak}</span>`}
                 </div>
               `)}
             </div>
