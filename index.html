@@ -2604,10 +2604,14 @@ function ReportScreen() {
   return html`<div>
     <div class="ph">
       <button onClick=${()=>setDate(null)} style=${{background:"none",border:"none",color:"var(--accent)",fontSize:14,cursor:"pointer",padding:0,fontFamily:"inherit",marginBottom:4}}>← 一覧に戻る</button>
-      <div class="ph-title">${fmtDate(date)}</div>
+      <div style=${{display:"flex",alignItems:"center",gap:10}}>
+        <button onClick=${()=>setDate(addDays(date,-1))} style=${{background:"none",border:"none",fontSize:22,cursor:"pointer",color:"var(--sub)",padding:"0 6px",lineHeight:1}}>‹</button>
+        <div class="ph-title" style=${{marginBottom:0}}>${fmtDate(date)}</div>
+        <button onClick=${()=>setDate(addDays(date,1))} disabled=${isToday(date)} style=${{background:"none",border:"none",fontSize:22,cursor:isToday(date)?"default":"pointer",color:isToday(date)?"var(--border)":"var(--sub)",padding:"0 6px",lineHeight:1}}>›</button>
+      </div>
     </div>
 
-    ${!report&&logs.length===0&&html`<div class="empty"><div class="empty-title">この日の記録はありません</div></div>`}
+    ${!report&&logs.length===0&&html`<div class="empty" style=${{padding:"20px 24px"}}><div class="empty-title">この日の記録はありません</div><div class="empty-body">下の日記には自由に書けます</div></div>`}
 
     ${(report||logs.length>0)&&html`
       <div style=${{display:"flex",gap:6,margin:"0 16px 4px",background:"var(--bg)",borderRadius:10,padding:3}}>
