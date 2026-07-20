@@ -1046,15 +1046,10 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
     ? Math.ceil((new Date(mainGoal.deadline) - new Date()) / 86400000)
     : null;
 
-  // actionテキストを行に分割（カスタムがあればそちらを優先）。
-  // GAS側でアクションは「1件=1行」の改行区切りとして保存されるため、
-  // 分割は改行のみで行う。「・」や「。」で分割すると「企画・撮影・編集」の
-  // ような複合語や説明文の途中で1つのタスクが千切れてしまう
-  // 「明日のタスク」は1つだけにする。過去に複数行で保存されたレポートも、先頭の1件だけ表示する
-  const aiItems = report?.action
-    ? report.action.split(/\n+/).map(s=>s.trim().replace(/^[・\-\s]+/,"").replace(/。$/,"")).filter(s=>s.length>2).slice(0,1)
-    : [];
-  const actionItems = customActions !== null ? customActions : aiItems;
+  // 「今日のタスク」は、ユーザーが自分で追加したものだけを表示する。
+  // AIコーチレポートの「明日のアクション」は自動でタスクには入れない（提案は
+  // レポート画面で見られる）。要望により、勝手にタスクが増えないようにした。
+  const actionItems = customActions !== null ? customActions : [];
 
   // タイマー画面の「何に集中しますか？」からも今日のタスクを選べるよう、
   // 完了していない項目を端末に共有しておく（未完了のものだけ、選ぶ意味があるため）。
@@ -1157,11 +1152,14 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
             <span style=${{minWidth:0}}>
               <span style=${{display:"block",fontSize:10,color:"rgba(255,255,255,0.75)",fontWeight:600,whiteSpace:"nowrap"}}>最新レポートランキング</span>
               <span style=${{display:"flex",alignItems:"baseline",gap:3,fontSize:13,color:"#fff",fontWeight:700,whiteSpace:"nowrap"}}>
-                ${ranking.total}人中<b style=${{fontSize:15}}>${ranking.rank}位</b>
-                ${ranking.trend==="up"&&html`<span style=${{fontSize:12,color:"#4ADE80",fontWeight:800}}>▲</span>`}
-                ${ranking.trend==="down"&&html`<span style=${{fontSize:12,color:"#F87171",fontWeight:800}}>▼</span>`}
-                ${ranking.trend==="same"&&html`<span style=${{fontSize:11,color:"rgba(255,255,255,0.6)",fontWeight:800}}>―</span>`}
+                ${ranking.rank!=null
+                  ? html`${ranking.total}人中<b style=${{fontSize:15}}>${ranking.rank}位</b>
+                    ${ranking.trend==="up"&&html`<span style=${{fontSize:12,color:"#4ADE80",fontWeight:800}}>▲</span>`}
+                    ${ranking.trend==="down"&&html`<span style=${{fontSize:12,color:"#F87171",fontWeight:800}}>▼</span>`}
+                    ${ranking.trend==="same"&&html`<span style=${{fontSize:11,color:"rgba(255,255,255,0.6)",fontWeight:800}}>―</span>`}`
+                  : html`<b style=${{fontSize:15}}>${ranking.total}人</b>が参加中`}
               </span>
+              ${ranking.rank==null&&html`<span style=${{display:"block",fontSize:9.5,color:"rgba(255,255,255,0.7)",whiteSpace:"nowrap"}}>記録すると参加できます</span>`}
             </span>
           </div>
         `}

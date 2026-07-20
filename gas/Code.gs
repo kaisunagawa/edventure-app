@@ -515,7 +515,7 @@ function appendReportRow(targetDate, studentEmail, report) {
   try {
     // ランキングキャッシュはcohortごとに分かれているため、書き込んだ本人のcohortのキーを消す
     const au = sheetToObjects(getSheet("Users")).find(u => u.student_email === studentEmail);
-    const ck = "ranking_scores_v4_" + (String((au && au.cohort) || "").trim() || "main");
+    const ck = "ranking_scores_v5_" + (String((au && au.cohort) || "").trim() || "main");
     CacheService.getScriptCache().remove(ck);
   } catch (e) { /* ignore */ }
   try { postHighScoreAchievement(studentEmail, report.score); } catch (e) { /* ignore */ }
@@ -1117,11 +1117,13 @@ function buildReportRankingSet(emailSet, allReports, windowDays) {
   let latestDate = null;
   latestByEmail.forEach(function (r) { if (!latestDate || r.date > latestDate) latestDate = r.date; });
   if (!latestDate) return { latestDate: null, cutoff: null, scores: [] };
-  // 最新日を含む windowDays 日ぶんを対象に（例: windowDays=3 なら 最新日・前日・前々日）
-  const cutoff = formatDate(new Date(new Date(latestDate + "T00:00:00").getTime() - (Math.max(1, windowDays) - 1) * 86400000));
+  // windowDays<=0 のときは期間しばり無し＝レポートを書いて点数が出ている人を全員対象にする。
+  // それ以外は「最新日を含む windowDays 日ぶん」だけを対象に（例: 3 なら 最新日・前日・前々日）。
+  const noWindow = !(windowDays > 0);
+  const cutoff = noWindow ? null : formatDate(new Date(new Date(latestDate + "T00:00:00").getTime() - (windowDays - 1) * 86400000));
   const scores = [];
   latestByEmail.forEach(function (r, email) {
-    if (r.date >= cutoff) scores.push({ email: email, score: Number(r.score) || 0, date: r.date });
+    if (noWindow || r.date >= cutoff) scores.push({ email: email, score: Number(r.score) || 0, date: r.date });
   });
   scores.sort(function (a, b) { return b.score - a.score; });
   return { latestDate: latestDate, cutoff: cutoff, scores: scores };
@@ -1133,8 +1135,7 @@ function getRanking(studentEmail) {
   const allUsersForCohort = sheetToObjects(getSheet("Users"));
   const meU = allUsersForCohort.find(u => u.student_email === studentEmail);
   const myCohort = String((meU && meU.cohort) || "").trim();
-  const CACHE_KEY = "ranking_scores_v4_" + (myCohort || "main");
-  const WINDOW_DAYS = 3;
+  const CACHE_KEY = "ranking_scores_v5_" + (myCohort || "main");
   let payload;
   const cached = CacheService.getScriptCache().get(CACHE_KEY);
   if (cached) {
@@ -1147,42 +1148,38 @@ function getRanking(studentEmail) {
     const active = new Set(users.map(u => u.student_email));
     const allReports = sheetToObjects(getSheet("Reports")).filter(r => active.has(r.student_email));
 
-    const cur = buildReportRankingSet(active, allReports, WINDOW_DAYS);
-    // 前期間（現ウィンドウより前）の順位を「昨日と比べて上がったか」の比較対象にする
-    const prevReports = cur.cutoff ? allReports.filter(r => r.date < cur.cutoff) : [];
-    const prev = buildReportRankingSet(active, prevReports, WINDOW_DAYS);
-
-    payload = { date: cur.latestDate, cutoff: cur.cutoff, scores: cur.scores, prevScores: prev.scores };
+    // 期間しばり無し（windowDays=0）＝レポートを書いて点数が出ている人を“全員”対象にする
+    const cur = buildReportRankingSet(active, allReports, 0);
+    payload = { date: cur.latestDate, scores: cur.scores };
     try { CacheService.getScriptCache().put(CACHE_KEY, JSON.stringify(payload), 300); } catch (e) { /* サイズ超過時は無視 */ }
   }
 
   const scores = payload.scores || [];
-  const prevScores = payload.prevScores || [];
   if (scores.length < 2) return { ok: true, data: null };
 
-  const rankOf = (arr, email) => { const i = arr.findIndex(s => s.email === email); return i === -1 ? null : i + 1; };
+  // トレンド（↑↓）は本人の直近2回のレポートのスコア推移で判定する
+  const myReports = getFilteredRows("Reports", "student_email", studentEmail).sort((a, b) => b.date > a.date ? 1 : -1);
+  const myTrend = () => {
+    if (myReports.length < 2) return null;
+    const cs = Number(myReports[0].score) || 0, ps = Number(myReports[1].score) || 0;
+    return cs > ps ? "up" : cs < ps ? "down" : "same";
+  };
+
   const idx = scores.findIndex(s => s.email === studentEmail);
   if (idx !== -1) {
-    const rank = idx + 1;
-    const prevRank = rankOf(prevScores, studentEmail);
-    const trend = prevRank === null ? null : (rank < prevRank ? "up" : rank > prevRank ? "down" : "same");
-    return { ok: true, data: { rank, total: scores.length, score: scores[idx].score, trend } };
+    return { ok: true, data: { rank: idx + 1, total: scores.length, score: scores[idx].score, trend: myTrend() } };
   }
 
-  // 「みんなの頑張り」を非表示にしている生徒は共有キャッシュのscoresから除外されるため
-  // ここには出てこないが、非表示は「他人から見えない」ためのものであって、自分自身が
-  // 自分の順位を見られなくなるのは意図しない副作用のため、ここで個別に救済する。
-  // 本人の「直近ウィンドウ内の最新レポート」で順位を出す
-  if (payload.cutoff) {
-    const myReports = getFilteredRows("Reports", "student_email", studentEmail).sort((a, b) => b.date > a.date ? 1 : -1);
-    const mine = myReports.find(r => r.date >= payload.cutoff);
-    if (mine) {
-      const myScore = Number(mine.score) || 0;
-      const rank = scores.filter(s => s.score > myScore).length + 1;
-      return { ok: true, data: { rank, total: scores.length + 1, score: myScore, trend: null } };
-    }
+  // 「みんなの頑張り」を非表示にしている本人は共有scoresから除外されるため、ここで個別救済。
+  // レポートが1件でもあれば、その最新スコアで順位を算出（総数は本人を足した数）
+  if (myReports.length) {
+    const myScore = Number(myReports[0].score) || 0;
+    const rank = scores.filter(s => s.score > myScore).length + 1;
+    return { ok: true, data: { rank, total: scores.length + 1, score: myScore, trend: myTrend() } };
   }
-  return { ok: true, data: null };
+  // まだレポートが無い人（＝未記録）にも「今の参加人数」は見せる。rank=nullで
+  // 「◯人が参加中・記録するとランキングに載る」と案内できるようにする
+  return { ok: true, data: { rank: null, total: scores.length, score: null, trend: null } };
 }
 
 // 「みんなの頑張り」画面用。ニックネーム＋アバターは本名と違い公開前提の情報なので
@@ -1231,12 +1228,11 @@ function getCommunity(studentEmail) {
     };
   }).sort((a, b) => b.score - a.score);
 
-  // レポートランキングは「最新のレポートの点数」で競う場（合計/継続の指標はステータス側が担う）。
-  // レポート生成は6分制限で全員分が同じ日にそろわないことがあるため、単一の最新日で絞ると
-  // その日にレポートが無い生徒が丸ごと抜け落ちる。最新日から数日以内の各自の最新レポートを
-  // 採用して全員を取りこぼさない（buildReportRankingSet と基準を統一）。
+  // レポートランキングは「その人の最新レポートの点数」で競う場（合計/継続はステータス側が担う）。
+  // 期間しばり無し（windowDays=0）＝レポートを書いて点数が出ている人を全員、最新スコアで反映する。
+  // 数日前にレポートを書いた人が消えないよう、ホームの getRanking と基準を統一している。
   const commEmails = new Set(users.map(u => u.student_email));
-  const rankSet = buildReportRankingSet(commEmails, allReports, 3);
+  const rankSet = buildReportRankingSet(commEmails, allReports, 0);
   const userByEmail = new Map(users.map(u => [u.student_email, u]));
   const reportRanking = rankSet.scores.map(s => {
     const u = userByEmail.get(s.email);
