@@ -867,7 +867,8 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
   const [intentHours, setIntentHours] = useState(()=>getDailyGoalHours()); // 宣言時に使う時間目標（初期値=1日の目標時間）
   const [intentSaving, setIntentSaving] = useState(false);
   // 宣言モーダルで“ついでに”入力できる今日のタスク（任意・保存時に今日のタスクへ追加）
-  const [intentTasks, setIntentTasks] = useState([""]);
+  // {text, min}（minは想定時間・分、任意。タスクの横に時間として表示・タイマー連携）
+  const [intentTasks, setIntentTasks] = useState([{text:"",min:""}]);
   const [intentEditMode, setIntentEditMode] = useState(false); // 既存フォーカスの編集で開いたか
   const saveIntent = async () => {
     const text = intentInput.trim();
@@ -880,14 +881,20 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
     setIntent(next); setShowIntentModal(false); setIntentSaving(false); setIntentEditMode(false);
     gasPostJson("saveIntent", {intent:text, hours:String(intentHours)});
     // 任意入力のタスクがあれば「今日のタスク」に追加（既存のタスク＋チェック状態は保持）
-    const newTasks = intentTasks.map(s=>String(s||"").trim()).filter(s=>s.length>0 && !actionItems.includes(s));
-    if(newTasks.length>0){
-      const merged = [...actionItems, ...newTasks];
+    const rows = intentTasks.map(r=>({text:String(r&&r.text||"").trim(), min:parseInt(r&&r.min,10)}))
+      .filter(r=>r.text.length>0 && !actionItems.includes(r.text));
+    if(rows.length>0){
+      const merged = [...actionItems, ...rows.map(r=>r.text)];
       setCustomActions(merged);
       localStorage.setItem("jiroku_custom_actions_"+todayKey, JSON.stringify(merged));
       gasPostJson("saveTodayActions", {actions: JSON.stringify(merged)});
+      // 想定時間（分）があれば、タスクの横に表示できるよう見積もりマップへ保存
+      const est = {...taskEstimates};
+      rows.forEach(r=>{ if(r.min>0) est[r.text]=r.min; });
+      setTaskEstimates(est);
+      try{ localStorage.setItem("jiroku_task_estimates_"+todayKey, JSON.stringify(est)); }catch(e){}
     }
-    setIntentTasks([""]);
+    setIntentTasks([{text:"",min:""}]);
   };
   // 既存の「今日のフォーカス」を編集するためにモーダルを開く（現在値をプリフィル）
   const openEditIntent = () => {
@@ -1294,14 +1301,18 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
           <div style=${{display:"flex",flexDirection:"column",gap:8,marginBottom:6}}>
             ${intentTasks.map((t,i)=>html`
               <div key=${i} style=${{display:"flex",gap:8,alignItems:"center"}}>
-                <input class="inp" style=${{flex:1,margin:0}} value=${t} placeholder="例：数学の課題を出す"
-                  onInput=${e=>{ const a=[...intentTasks]; a[i]=e.target.value; setIntentTasks(a); }}/>
+                <input class="inp" style=${{flex:1,margin:0}} value=${t.text} placeholder="例：数学の課題を出す"
+                  onInput=${e=>{ const a=[...intentTasks]; a[i]={...a[i],text:e.target.value}; setIntentTasks(a); }}/>
+                <input class="inp" type="number" inputmode="numeric" value=${t.min} placeholder="分"
+                  style=${{width:56,margin:0,textAlign:"center",padding:"10px 6px",flexShrink:0}}
+                  onInput=${e=>{ const a=[...intentTasks]; a[i]={...a[i],min:e.target.value}; setIntentTasks(a); }}/>
+                <span style=${{fontSize:12,color:"var(--sub)",flexShrink:0}}>分</span>
                 ${intentTasks.length>1&&html`<button onClick=${()=>setIntentTasks(intentTasks.filter((_,j)=>j!==i))}
                   style=${{background:"none",border:"none",color:"var(--sub)",fontSize:20,cursor:"pointer",flexShrink:0,padding:"0 4px"}}>×</button>`}
               </div>
             `)}
           </div>
-          <button onClick=${()=>setIntentTasks([...intentTasks,""])}
+          <button onClick=${()=>setIntentTasks([...intentTasks,{text:"",min:""}])}
             style=${{width:"100%",padding:"8px",borderRadius:10,border:"1.5px dashed var(--border)",background:"none",color:"var(--accent)",fontSize:12.5,fontWeight:600,cursor:"pointer",marginBottom:16,fontFamily:"inherit"}}>
             ＋ タスクを追加
           </button>
