@@ -26,8 +26,21 @@ function getXpLevel(xp) {
   return level;
 }
 
+// スプレッドシートのハンドルは openById() のたびに実測で数百ms〜1秒かかる。
+// GASでは1リクエスト＝1実行で、このモジュール変数は実行ごとに初期化されるため、
+// 実行の中では開いたハンドルを使い回して安全に高速化できる（読み取りは常に最新値を返す）。
+var _ssHandle = null;
+function getSpreadsheet() {
+  if (!_ssHandle) _ssHandle = SpreadsheetApp.openById(SPREADSHEET_ID);
+  return _ssHandle;
+}
+// シート名→Sheetオブジェクトも同じ理由で実行内キャッシュする（getSheetByNameの往復を省く）。
+var _sheetHandles = {};
 function getSheet(name) {
-  return SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName(name);
+  if (_sheetHandles[name]) return _sheetHandles[name];
+  var s = getSpreadsheet().getSheetByName(name);
+  if (s) _sheetHandles[name] = s;
+  return s;
 }
 
 function jsonResponse(data, callback) {
@@ -6662,23 +6675,31 @@ function notifyCoachOnReport(user, report) {
 // ユーティリティ
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+function _pad2(n){ return n < 10 ? "0" + n : "" + n; }
 function rowToObject(row, headers) {
   const obj = {};
-  headers.forEach((h, i) => {
+  for (let i = 0; i < headers.length; i++) {
+    const h = headers[i];
     const v = row[i];
     if (v instanceof Date) {
       if (v.getFullYear() === 1899) {
-        obj[h] = String(v.getHours()).padStart(2,"0") + ":" + String(v.getMinutes()).padStart(2,"0");
+        // 時刻のみのセル（1899-12-30基準）。従来どおりローカル時刻をそのまま使う
+        obj[h] = _pad2(v.getHours()) + ":" + _pad2(v.getMinutes());
       } else {
-        const inTokyo = new Date(v.toLocaleString("en-US", {timeZone:"Asia/Tokyo"}));
-        const hasTime = inTokyo.getHours() !== 0 || inTokyo.getMinutes() !== 0;
-        obj[h] = hasTime
-          ? Utilities.formatDate(v, "Asia/Tokyo", "yyyy-MM-dd HH:mm")
-          : Utilities.formatDate(v, "Asia/Tokyo", "yyyy-MM-dd");
+        // 以前は Date セルごとに toLocaleString + Utilities.formatDate の2つの重い
+        // GAS呼び出しをしており、DailyLog全読み(約4600セル)で3秒近くかかっていた。
+        // 日本標準時は通年 UTC+9 固定なので、UTCへ+9時間ずらして各フィールドを読むだけで
+        // Asia/Tokyo の壁時計と完全に一致する（結果は従来と同一・スクリプトのTZにも依存しない）。
+        const t = new Date(v.getTime() + 32400000); // +9h
+        const y = t.getUTCFullYear(), mo = _pad2(t.getUTCMonth() + 1), d = _pad2(t.getUTCDate());
+        const hh = t.getUTCHours(), mm = t.getUTCMinutes();
+        obj[h] = (hh || mm)
+          ? (y + "-" + mo + "-" + d + " " + _pad2(hh) + ":" + _pad2(mm))
+          : (y + "-" + mo + "-" + d);
       }
     }
     else { obj[h] = v !== undefined && v !== null ? String(v) : ""; }
-  });
+  }
   return obj;
 }
 
