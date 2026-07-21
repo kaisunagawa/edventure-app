@@ -2605,21 +2605,44 @@ function ReportScreen() {
                 `}
               </div>
             `}
-            <div class="card" style=${{marginBottom:24}}>
-            ${reportList.map((r,i)=>html`
-              <button key=${r.date} onClick=${()=>setDate(r.date)}
-                style=${{display:"flex",alignItems:"center",justifyContent:"space-between",width:"100%",background:"none",border:"none",padding:"13px 0",borderBottom:i<reportList.length-1?"1px solid var(--border)":"none",cursor:"pointer",fontFamily:"inherit",textAlign:"left"}}>
-                <div>
-                  <div style=${{fontSize:14,fontWeight:500,color:"var(--text)"}}>${fmtDate(r.date)}</div>
-                  <div style=${{fontSize:11,color:"var(--sub)",marginTop:2}}>${isToday(r.date)?"今日":r.date.substring(0,10)}</div>
-                </div>
-                <div style=${{display:"flex",alignItems:"center",gap:10}}>
-                  <div style=${{fontSize:22,fontWeight:700,color:SCORE_COLOR(r.score)}}>${r.score}</div>
-                  <div style=${{color:"var(--sub)",fontSize:16}}>›</div>
-                </div>
-              </button>
-            `)}
-            </div>
+            ${(()=>{
+              // 月ごとにグループ化して表示（例: 2026-07 → 「2026年7月」）。
+              // reportListは新しい順で届くので、月グループも自然に新しい月が上になる
+              const groups=[];
+              reportList.forEach(r=>{
+                const key=r.date.substring(0,7);
+                const g=groups[groups.length-1];
+                if(g&&g.key===key) g.items.push(r); else groups.push({key,items:[r]});
+              });
+              return groups.map(g=>{
+                const [y,m]=g.key.split("-");
+                const avg=Math.round(g.items.reduce((s,r)=>s+r.score,0)/g.items.length);
+                return html`
+                  <div key=${g.key} style=${{marginBottom:16}}>
+                    <div style=${{display:"flex",alignItems:"baseline",justifyContent:"space-between",padding:"0 4px",marginBottom:8}}>
+                      <div style=${{fontSize:13,fontWeight:700,color:"var(--text)"}}>${Number(y)===new Date().getFullYear()?"":y+"年"}${Number(m)}月</div>
+                      <div style=${{fontSize:11,color:"var(--sub)"}}>${g.items.length}件 ・ 平均<b style=${{color:SCORE_COLOR(avg)}}> ${avg}</b>点</div>
+                    </div>
+                    <div class="card">
+                    ${g.items.map((r,i)=>html`
+                      <button key=${r.date} onClick=${()=>setDate(r.date)}
+                        style=${{display:"flex",alignItems:"center",justifyContent:"space-between",width:"100%",background:"none",border:"none",padding:"13px 0",borderBottom:i<g.items.length-1?"1px solid var(--border)":"none",cursor:"pointer",fontFamily:"inherit",textAlign:"left"}}>
+                        <div>
+                          <div style=${{fontSize:14,fontWeight:500,color:"var(--text)"}}>${fmtDate(r.date)}</div>
+                          <div style=${{fontSize:11,color:"var(--sub)",marginTop:2}}>${isToday(r.date)?"今日":r.date.substring(0,10)}</div>
+                        </div>
+                        <div style=${{display:"flex",alignItems:"center",gap:10}}>
+                          <div style=${{fontSize:22,fontWeight:700,color:SCORE_COLOR(r.score)}}>${r.score}</div>
+                          <div style=${{color:"var(--sub)",fontSize:16}}>›</div>
+                        </div>
+                      </button>
+                    `)}
+                    </div>
+                  </div>
+                `;
+              });
+            })()}
+            <div style=${{marginBottom:8}}></div>
           </div>`
     }
   </div>`;
