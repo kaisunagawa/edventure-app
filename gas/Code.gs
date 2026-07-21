@@ -83,6 +83,7 @@ function doGet(e) {
       case "coachGetStudents":      result = coachGetStudents(e.parameter.coachEmail); break;
       case "adminTagCohortByJoinDate": result = adminTagCohortByJoinDate(e.parameter.coachEmail, e.parameter.date, e.parameter.cohort); break;
       case "adminListRecentRegistrations": result = adminListRecentRegistrations(e.parameter.coachEmail, e.parameter.days); break;
+      case "adminBackfillReports": result = adminBackfillReports(e.parameter.coachEmail, e.parameter.days, e.parameter.limit, e.parameter.dryRun); break;
       case "generateTalentReport": result = generateTalentReport(e.parameter.coachEmail, e.parameter.targetEmail); break;
       case "generateGakuchika": result = generateGakuchika(e.parameter.coachEmail, e.parameter.targetEmail); break;
       case "adminTagCohortByEmails": result = adminTagCohortByEmails(e.parameter.coachEmail, e.parameter.emails, e.parameter.cohort); break;
@@ -3806,13 +3807,59 @@ function nightlyReport() {
   const startIndex = (resumeDate === today) ? Number(props.getProperty("NIGHTLY_REPORT_RESUME_INDEX") || 0) : 0;
 
   const users = sheetToObjects(getSheet("Users")).filter(u => u.is_active.toUpperCase() === "TRUE");
-  // 既存レポート(今日分)のキーを一度だけ先読み（生徒ごとにReports全読みするとO(N^2)で遅く、
+  // 各シートは一度だけ読む（生徒ごとにReports全読みするとO(N^2)で遅く、
   // 分割回数が増える＝再開トリガーも増えるため）
-  const doneToday = new Set(
-    sheetToObjects(getSheet("Reports")).filter(r => r.date === today).map(r => r.student_email)
+  const allLogs = sheetToObjects(getSheet("DailyLog"));
+  const haveReport = new Set(
+    sheetToObjects(getSheet("Reports")).map(r => r.student_email + "|" + r.date)
   );
+  // メール別に「記録がある日付」の集合を作る（当日判定と穴埋め判定の両方に使う）
+  const logDatesByEmail = new Map();
+  allLogs.forEach(l => {
+    const em = String(l.student_email || "");
+    if (!em) return;
+    (logDatesByEmail.get(em) || logDatesByEmail.set(em, new Set()).get(em)).add(l.date);
+  });
+  const logsFor = (email, date) => allLogs
+    .filter(r => r.student_email === email && r.date === date)
+    .sort((a, b) => a.time_block > b.time_block ? 1 : -1)
+    .map(r => ({ time_block: r.time_block, task: r.task, focus_level: r.focus_level, memo: r.memo }));
 
-  for (let i = startIndex; i < users.length; i++) {
+  // 処理リスト（jobs）を組み立てる：
+  // ①当日分（記録あり・レポート未生成）②過去2日の穴埋め（生成失敗などで欠けた分）。
+  // 以前は当日に生成失敗すると catch → Logger.log で黙って飛ばされ、そのユーザーの
+  // その日のレポートが永久に欠落していた（「レポートが表示されない」の原因）。
+  // 毎晩、直近2日ぶんの欠落を自動リカバリすることで穴が残らないようにする。
+  const jobs = [];
+  users.forEach(u => {
+    const dset = logDatesByEmail.get(u.student_email);
+    if (dset && dset.has(today) && !haveReport.has(u.student_email + "|" + today)) {
+      jobs.push({ user: u, date: today, backfill: false });
+    }
+  });
+  for (let back = 1; back <= 2; back++) {
+    const d = new Date(today + "T00:00:00+09:00"); d.setDate(d.getDate() - back);
+    const bd = formatDate(d);
+    users.forEach(u => {
+      const dset = logDatesByEmail.get(u.student_email);
+      if (dset && dset.has(bd) && !haveReport.has(u.student_email + "|" + bd)) {
+        jobs.push({ user: u, date: bd, backfill: true });
+      }
+    });
+  }
+
+  // XP減少・ストリークリセット（当日記録なしのユーザー）は軽い処理なので
+  // 初回起動時にまとめて実行する（再開時に二重適用しない）
+  if (startIndex === 0) {
+    users.forEach(u => {
+      const dset = logDatesByEmail.get(u.student_email);
+      if (!dset || !dset.has(today)) {
+        try { applyXPDecay(u.student_email, today); } catch (e) { Logger.log(e); }
+      }
+    });
+  }
+
+  for (let i = startIndex; i < jobs.length; i++) {
     if (Date.now() - startedAt > NIGHTLY_REPORT_TIME_BUDGET_MS) {
       // 時間切れ: 続きから再開できるよう位置を保存し、1分後に自分自身を再実行するトリガーを張る。
       // 作ったトリガーのIDを控えておき、次回起動の冒頭で必ず削除する（溜まり防止）
@@ -3825,31 +3872,27 @@ function nightlyReport() {
         // トリガー作成に失敗（上限等）した場合でも黙って落とさず記録に残す
         Logger.log("nightlyReport: 再開トリガー作成に失敗: " + e);
       }
-      Logger.log("nightlyReport: 時間切れのため" + i + "人目から中断・1分後に再開します（全" + users.length + "人）");
+      Logger.log("nightlyReport: 時間切れのため" + i + "件目から中断・1分後に再開します（全" + jobs.length + "件）");
       return;
     }
-    const user = users[i];
+    const job = jobs[i];
+    const user = job.user;
     try {
-      const logs = getLogs(user.student_email, { date: today }).data;
-
-      // ログなし → XP減少・ストリークリセット
-      if (logs.length === 0) {
-        applyXPDecay(user.student_email, today);
-        continue;
-      }
-
-      // 既存レポートがあればスキップ（重複防止・先読みしたSetで判定）
-      if (doneToday.has(user.student_email)) { continue; }
+      const logs = logsFor(user.student_email, job.date);
+      if (logs.length === 0) continue;
 
       // 日付を跨いだ後の実行では、updateStreakが「翌日」を記録日として
       // 誤登録してしまうためスキップする（記録保存時にも更新されているので実害はない）
-      if (isSameDay) updateStreak(user.student_email);
+      if (!job.backfill && isSameDay) updateStreak(user.student_email);
       const report = generateReportWithClaude(user.student_email, user.name, logs);
-      if (!report) continue;
-      appendReportRow(today, user.student_email, report);
-      doneToday.add(user.student_email);
-      sendReportLineMessage(user, report);
-      notifyCoachOnReport(user, report);
+      if (!report) { Logger.log("nightlyReport: 生成失敗 " + user.student_email + " " + job.date + "（翌晩の穴埋めで再試行）"); continue; }
+      appendReportRow(job.date, user.student_email, report);
+      haveReport.add(user.student_email + "|" + job.date);
+      // 穴埋め分は当日の文脈で送ると混乱するため、LINE/コーチ通知は当日分のみ
+      if (!job.backfill) {
+        sendReportLineMessage(user, report);
+        notifyCoachOnReport(user, report);
+      }
     } catch (err) { Logger.log(err); }
   }
 
@@ -6801,6 +6844,62 @@ function setupTriggers() {
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // テスト用
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+// 過去days日ぶんの「記録があるのにレポートがない」欠落を洗い出して生成する管理者用API。
+// dryRun=1なら生成せず欠落一覧のみ返す。1回の呼び出しで生成するのはlimit件まで
+// （Claude呼び出しは1件数秒〜十数秒かかり、GASの実行上限に当たらないようにするため。
+// 残りがあれば戻り値のremainingで分かるので、続けてもう一度呼べばよい）
+function adminBackfillReports(coachEmail, days, limit, dryRun) {
+  if (!verifyCoach(coachEmail)) return { ok: false, error: "not a coach" };
+  const nDays = Math.min(Number(days) || 7, 31);
+  const nLimit = Math.min(Number(limit) || 5, 15);
+  const users = sheetToObjects(getSheet("Users")).filter(u => u.is_active.toUpperCase() === "TRUE");
+  const allLogs = sheetToObjects(getSheet("DailyLog"));
+  const haveReport = new Set(sheetToObjects(getSheet("Reports")).map(r => r.student_email + "|" + r.date));
+  const userByEmail = new Map(users.map(u => [u.student_email, u]));
+
+  const today = formatDate(new Date());
+  const dates = [];
+  for (let k = 1; k <= nDays; k++) {
+    const d = new Date(); d.setDate(d.getDate() - k);
+    dates.push(formatDate(d));
+  }
+  const dateSet = new Set(dates);
+
+  // (email, date)ごとにログを集める
+  const logsByKey = new Map();
+  allLogs.forEach(l => {
+    const em = String(l.student_email || "");
+    if (!em || !dateSet.has(l.date) || !userByEmail.has(em)) return;
+    const key = em + "|" + l.date;
+    (logsByKey.get(key) || logsByKey.set(key, []).get(key)).push(l);
+  });
+
+  const missing = [];
+  logsByKey.forEach((logs, key) => { if (!haveReport.has(key)) missing.push(key); });
+  missing.sort(); // 古い順・ユーザー順で安定させる
+
+  if (String(dryRun) === "1") {
+    return { ok: true, data: { missing: missing, count: missing.length } };
+  }
+
+  const doneList = [], failList = [];
+  for (const key of missing.slice(0, nLimit)) {
+    const sep = key.indexOf("|");
+    const email = key.slice(0, sep), date = key.slice(sep + 1);
+    const user = userByEmail.get(email);
+    try {
+      const logs = logsByKey.get(key)
+        .sort((a, b) => a.time_block > b.time_block ? 1 : -1)
+        .map(r => ({ time_block: r.time_block, task: r.task, focus_level: r.focus_level, memo: r.memo }));
+      const report = generateReportWithClaude(email, user.name, logs);
+      if (!report) { failList.push(key); continue; }
+      appendReportRow(date, email, report);
+      doneList.push(key + " score=" + report.score);
+    } catch (err) { failList.push(key + " " + err); }
+  }
+  return { ok: true, data: { generated: doneList, failed: failList, remaining: missing.length - Math.min(missing.length, nLimit) } };
+}
 
 function generateReportForDate(targetDate) {
   const users = sheetToObjects(getSheet("Users")).filter(u => u.is_active.toUpperCase() === "TRUE");
