@@ -84,6 +84,7 @@ function doGet(e) {
       case "adminTagCohortByJoinDate": result = adminTagCohortByJoinDate(e.parameter.coachEmail, e.parameter.date, e.parameter.cohort); break;
       case "adminListRecentRegistrations": result = adminListRecentRegistrations(e.parameter.coachEmail, e.parameter.days); break;
       case "adminBackfillReports": result = adminBackfillReports(e.parameter.coachEmail, e.parameter.days, e.parameter.limit, e.parameter.dryRun); break;
+      case "adminOpsHealthCheck": result = verifyAdmin(e.parameter.coachEmail) ? (dailyOpsHealthCheck(e.parameter.dryRun === "1") || {ok:true}) : {ok:false,error:"not admin"}; break;
       case "generateTalentReport": result = generateTalentReport(e.parameter.coachEmail, e.parameter.targetEmail); break;
       case "generateGakuchika": result = generateGakuchika(e.parameter.coachEmail, e.parameter.targetEmail); break;
       case "adminTagCohortByEmails": result = adminTagCohortByEmails(e.parameter.coachEmail, e.parameter.emails, e.parameter.cohort); break;
@@ -7007,6 +7008,8 @@ function setupTriggers() {
   ScriptApp.newTrigger("checkGrowthMilestones").timeBased().everyWeeks(1).onWeekDay(ScriptApp.WeekDay.MONDAY).atHour(9).create();
   ScriptApp.newTrigger("snsAutoFetchAll").timeBased().everyDays(1).atHour(21).create();
   ScriptApp.newTrigger("dailyLineWinback").timeBased().everyDays(1).atHour(19).create();
+  // 運営ヘルスチェック：夜間レポート(22時)＋穴埋めが落ち着いた翌朝7時に、前日の欠落等を管理者へ
+  ScriptApp.newTrigger("dailyOpsHealthCheck").timeBased().everyDays(1).atHour(7).nearMinute(30).create();
   console.log("トリガーを設定しました（合計15個）");
 }
 
@@ -7161,6 +7164,89 @@ function checkGrowthMilestones() {
   });
 
   props.setProperty("GROWTH_NOTIFIED", JSON.stringify(notified));
+}
+
+// ── 運営ヘルスチェック（毎朝、管理者のLINEに1通）──
+// 夜間処理が静かに壊れても気づけるよう、前日の「記録があるのにレポートが無い」欠落や
+// 再開トリガーの詰まり、LINE未連携などを毎朝チェックして管理者に要約を届ける。
+// 異常があれば🚨、無ければ✅で始める（毎朝届くこと自体が「動いている」証明になる）。
+function dailyOpsHealthCheck(dryRun) {
+  const admin = adminEmail();
+  if (!admin) { Logger.log("dailyOpsHealthCheck: ADMIN_EMAIL未設定"); return; }
+  const users = sheetToObjects(getSheet("Users")).filter(u => String(u.is_active).toUpperCase() === "TRUE");
+  const adminUser = users.find(u => u.student_email === admin);
+  const allLogs = sheetToObjects(getSheet("DailyLog"));
+  const allReports = sheetToObjects(getSheet("Reports"));
+  const activeEmails = new Set(users.map(u => u.student_email));
+
+  const today = formatDate(new Date());
+  const yesterday = formatDate(new Date(Date.now() - 86400000));
+  const daysAgoStr = n => formatDate(new Date(Date.now() - n * 86400000));
+  const d7 = daysAgoStr(7);
+
+  // 前日：記録した人 → レポートが生成された人（欠落の検出）
+  const loggedYesterday = new Set(allLogs.filter(l => l.date === yesterday && activeEmails.has(l.student_email)).map(l => l.student_email));
+  const reportKeys = new Set(allReports.map(r => r.student_email + "|" + r.date));
+  const missingYesterday = [...loggedYesterday].filter(em => !reportKeys.has(em + "|" + yesterday));
+
+  // 直近7日の欠落総数（当日を除く）
+  let missing7 = 0;
+  const seen = new Set();
+  allLogs.forEach(l => {
+    if (!activeEmails.has(l.student_email)) return;
+    if (l.date >= d7 && l.date < today) {
+      const k = l.student_email + "|" + l.date;
+      if (!seen.has(k)) { seen.add(k); if (!reportKeys.has(k)) missing7++; }
+    }
+  });
+
+  // 活動量（当日の記録件数・記録した人数）と離脱（7日以上記録なしの継続ユーザー）
+  const todayLogs = allLogs.filter(l => l.date === today && activeEmails.has(l.student_email));
+  const todayLoggers = new Set(todayLogs.map(l => l.student_email)).size;
+  const lastLogByEmail = {};
+  allLogs.forEach(l => { const p = lastLogByEmail[l.student_email]; if (!p || l.date > p) lastLogByEmail[l.student_email] = l.date; });
+  const churnRisk = users.filter(u => lastLogByEmail[u.student_email] && lastLogByEmail[u.student_email] < d7).length;
+
+  // 夜間処理の詰まり（再開トリガーが翌朝も残っている＝処理が完走していない兆候）
+  const props = PropertiesService.getScriptProperties();
+  const stuckResume = props.getProperty("NIGHTLY_REPORT_RESUME_DATE");
+  const triggerCount = ScriptApp.getProjectTriggers().length;
+
+  const problems = [];
+  if (missingYesterday.length > 0) problems.push("⚠️ 昨日のレポート欠落 " + missingYesterday.length + "件（記録したのに未生成）");
+  if (missing7 > 0) problems.push("⚠️ 直近7日の欠落 合計" + missing7 + "件");
+  if (stuckResume) problems.push("⚠️ 夜間処理が未完了のまま（再開待ち: " + stuckResume + "）");
+  if (triggerCount >= 18) problems.push("⚠️ トリガー数が上限に接近（" + triggerCount + "/20）");
+
+  const head = problems.length === 0 ? "✅ JIROKU 運営レポート（異常なし）" : "🚨 JIROKU 運営レポート（要確認）";
+  const lines = [
+    head,
+    today,
+    "",
+    "【昨日のレポート】記録 " + loggedYesterday.size + "人 → 生成 " + (loggedYesterday.size - missingYesterday.length) + "人" + (missingYesterday.length ? " / 欠落 " + missingYesterday.length + "人" : "（全員生成✓）"),
+    "【今日の記録】" + todayLogs.length + "件 / " + todayLoggers + "人",
+    "【離脱リスク】7日以上記録なし " + churnRisk + "人",
+    "【システム】トリガー " + triggerCount + "/20"
+  ];
+  if (problems.length > 0) {
+    lines.push("");
+    lines.push("── 要対応 ──");
+    problems.forEach(p => lines.push(p));
+    if (missing7 > 0) lines.push("→ CRMの管理者ダッシュボードで確認、または「レポート欠落を補充して」で自動修復できます");
+  }
+  const text = lines.join("\n");
+
+  // dryRunなら送信せず文面だけ返す（動作確認用）
+  if (dryRun) return { ok: true, data: { text: text, problems: problems.length, sent: false } };
+
+  // LINE優先、無ければメール
+  if (adminUser && adminUser.line_user_id) {
+    sendLineMessage(adminUser.line_user_id, text);
+  } else {
+    try { MailApp.sendEmail(admin, head, text); } catch (e) { Logger.log("ops health mail error: " + e); }
+  }
+  Logger.log("dailyOpsHealthCheck: " + head + " missing7=" + missing7);
+  return { ok: true, data: { text: text, problems: problems.length, sent: true } };
 }
 
 function generateYesterdayReport() {
