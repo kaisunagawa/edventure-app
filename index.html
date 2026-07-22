@@ -4616,6 +4616,46 @@ function TutorialOverlay({onDone}) {
   `;
 }
 
+// 月1回の満足度アンケート。星1〜5＋任意コメントだけの30秒設計。
+// 結果はコーチCRMの管理者ダッシュボード（運営メトリクス）に集計される
+function SurveyModal({onDone,onLater}){
+  const [stars,setStars]=useState(0);
+  const [comment,setComment]=useState("");
+  const [sending,setSending]=useState(false);
+  const submit=async()=>{
+    if(!stars||sending) return;
+    setSending(true);
+    const r=await gasPostJson("submitSurvey",{satisfaction:String(stars),comment});
+    setSending(false);
+    if(r.ok) onDone();
+    else onLater(); // 失敗時は静かに閉じて後日再表示（ユーザーを煩わせない）
+  };
+  return html`
+    <div style=${{position:"fixed",inset:0,height:"100dvh",background:"rgba(0,0,0,0.55)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:600,padding:20}}
+      onClick=${e=>{if(e.target===e.currentTarget)onLater();}}>
+      <div style=${{background:"var(--card)",borderRadius:20,width:"100%",maxWidth:360,padding:"26px 22px 22px",textAlign:"center"}}>
+        <div style=${{fontSize:34,marginBottom:8}}>💬</div>
+        <div style=${{fontSize:17,fontWeight:800,color:"var(--text)",marginBottom:6}}>JIROKU、最近どうですか？</div>
+        <div style=${{fontSize:12.5,color:"var(--sub)",lineHeight:1.7,marginBottom:16}}>月1回だけの簡単アンケートです。<br/>30秒で終わります🙏</div>
+        <div style=${{display:"flex",justifyContent:"center",gap:8,marginBottom:16}}>
+          ${[1,2,3,4,5].map(n=>html`
+            <button key=${n} onClick=${()=>setStars(n)}
+              style=${{background:"none",border:"none",fontSize:32,cursor:"pointer",padding:2,filter:n<=stars?"none":"grayscale(1) opacity(0.35)",transition:"filter .15s"}}>⭐</button>
+          `)}
+        </div>
+        <textarea value=${comment} onInput=${e=>setComment(e.target.value)}
+          placeholder="改善してほしいこと・気に入っている点など（任意）"
+          style=${{width:"100%",boxSizing:"border-box",minHeight:70,border:"1.5px solid var(--border)",borderRadius:12,padding:"10px 12px",fontSize:13,fontFamily:"inherit",color:"var(--text)",background:"var(--bg)",resize:"none",marginBottom:14}}/>
+        <button class="btn" disabled=${!stars||sending} onClick=${submit} style=${{opacity:stars?1:0.5}}>
+          ${sending?"送信中...":"送信する"}
+        </button>
+        <button onClick=${onLater}
+          style=${{display:"block",width:"100%",marginTop:8,background:"none",border:"none",color:"var(--sub)",fontSize:12.5,cursor:"pointer",fontFamily:"inherit",padding:8}}>あとで</button>
+      </div>
+    </div>
+  `;
+}
+
 // 新機能のお知らせモーダル（アプリ起動時に1回だけ）。今回は「気づき」タブの告知
 function FeatureAnnounce({onClose,onGo}){
   return html`
@@ -4759,6 +4799,24 @@ function App() {
   const [profile,setProfile]=useState(()=>({nickname:CURRENT_USER?.nickname||CURRENT_USER?.name||"",avatar:CURRENT_USER?.avatar||"🦊"}));
   // 独り言（クイック記録）。通知やアプリのURLに #quick が付いていたら自動で開く
   const [showQuick,setShowQuick]=useState(false);
+  // 月1回の満足度アンケート。今月未回答なら少し遅れて表示する。
+  // 「あとで」は3日スヌーズ（同じ月内に再表示）、回答したらその月はもう出さない。
+  // 初日から出すと鬱陶しいので、告知・チュートリアルが出ていない時だけ表示する
+  const monthKey="survey_answered_"+new Date().toISOString().slice(0,7);
+  const [showSurvey,setShowSurvey]=useState(false);
+  useEffect(()=>{
+    if(localStorage.getItem(monthKey)) return;
+    const snooze=Number(localStorage.getItem("survey_snooze_until")||0);
+    if(Date.now()<snooze) return;
+    const t=setTimeout(()=>{
+      if(localStorage.getItem("announce_seen")!==ANNOUNCE_ID) return; // 告知が先
+      if(localStorage.getItem("tutorial_seen")!=="1") return;         // 初回導線が先
+      setShowSurvey(true);
+    },2500);
+    return ()=>clearTimeout(t);
+  },[]);
+  const answerSurvey=()=>{ localStorage.setItem(monthKey,"1"); setShowSurvey(false); };
+  const snoozeSurvey=()=>{ localStorage.setItem("survey_snooze_until",String(Date.now()+3*24*60*60*1000)); setShowSurvey(false); };
   // FABの上にふわっと出る、記録したくなる可愛いひとことをランダムに巡回表示
   // 協調性・挑戦性を引き出す問いかけ（誰かと？初挑戦？）も混ぜて、
   // 日々の記録に「対人」「挑戦」のエピソードが自然と残るようにする
@@ -4821,6 +4879,7 @@ function App() {
   return html`
     <div style=${{height:"100%",position:"relative",display:"flex",flexDirection:"column"}}>
       ${showAnnounce && html`<${FeatureAnnounce} onClose=${dismissAnnounce} onGo=${()=>{dismissAnnounce();setTab("brain");}}/>`}
+      ${showSurvey && !showAnnounce && html`<${SurveyModal} onDone=${answerSurvey} onLater=${snoozeSurvey}/>`}
       ${user.lineLinked===false && !bannerDismissed && html`<${LineLinkBanner} email=${user.email} onDismiss=${()=>setBannerDismissed(true)}/>`}
       ${!calLinked && !calBannerDismissed && html`<${CalendarLinkBanner} onGoToSettings=${()=>setTab("settings")} onDismiss=${()=>setCalBannerDismissed(true)}/>`}
       <div style=${{position:"relative",flex:1,minHeight:0}}>

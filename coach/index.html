@@ -1627,6 +1627,67 @@ function AdminOverview() {
         </div>
       </div>
 
+      ${data.ops && html`
+        <div style=${{fontSize:13,fontWeight:700,color:"var(--sub)",margin:"4px 0 10px"}}>運営メトリクス</div>
+        <div style=${{display:"grid",gridTemplateColumns:"repeat(4, 1fr)",gap:16,marginBottom:16}}>
+          <div class="card">
+            <div class="card-label">満足度（直近90日）</div>
+            <div style=${{fontSize:22,fontWeight:700}}>${data.ops.survey.avgSatisfaction !== null ? data.ops.survey.avgSatisfaction : "―"}<span style=${{fontSize:12,color:"var(--sub)"}}> / 5（${data.ops.survey.count90d}件）</span></div>
+          </div>
+          <div class="card">
+            <div class="card-label">直近7日の記録</div>
+            <div style=${{fontSize:22,fontWeight:700}}>${data.ops.weeklyLogCount}<span style=${{fontSize:12,color:"var(--sub)"}}> 件 / ${data.ops.weeklyLoggers}人</span></div>
+          </div>
+          <div class="card">
+            <div class="card-label">LINE連携率</div>
+            <div style=${{fontSize:22,fontWeight:700}}>${data.ops.segments.core.lineLinked + data.ops.segments.student.lineLinked}<span style=${{fontSize:12,color:"var(--sub)"}}> / ${data.ops.segments.core.registered + data.ops.segments.student.registered}人</span></div>
+          </div>
+          <div class="card">
+            <div class="card-label">レポート欠落（7日）</div>
+            <div style=${{fontSize:22,fontWeight:700,color:data.ops.missingReports7d>0?"var(--red)":"inherit"}}>${data.ops.missingReports7d}<span style=${{fontSize:12,color:"var(--sub)"}}> 件</span></div>
+          </div>
+        </div>
+        <div class="card" style=${{marginBottom:16}}>
+          <div class="card-label">セグメント別の獲得・継続</div>
+          <table style=${{width:"100%",borderCollapse:"collapse",fontSize:12.5}}>
+            <thead>
+              <tr style=${{textAlign:"left",color:"var(--sub)",fontSize:11}}>
+                <th style=${{padding:"6px 8px",fontWeight:600}}>セグメント</th>
+                <th style=${{padding:"6px 8px",fontWeight:600}}>登録</th>
+                <th style=${{padding:"6px 8px",fontWeight:600}}>記録経験あり</th>
+                <th style=${{padding:"6px 8px",fontWeight:600}}>未記録</th>
+                <th style=${{padding:"6px 8px",fontWeight:600}}>3日以内</th>
+                <th style=${{padding:"6px 8px",fontWeight:600}}>7日以内</th>
+                <th style=${{padding:"6px 8px",fontWeight:600}}>LINE連携</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${[["コーチング（core）",data.ops.segments.core],["学生（for Student）",data.ops.segments.student]].map(([label,s])=>html`
+                <tr key=${label} style=${{borderTop:"1px solid var(--border)"}}>
+                  <td style=${{padding:"8px"}}>${label}</td>
+                  <td style=${{padding:"8px"}}>${s.registered}人</td>
+                  <td style=${{padding:"8px"}}>${s.everLogged}人（${s.registered?Math.round(s.everLogged/s.registered*100):0}%）</td>
+                  <td style=${{padding:"8px",color:s.neverLogged>0?"var(--red)":"var(--sub)"}}>${s.neverLogged}人</td>
+                  <td style=${{padding:"8px"}}>${s.active3}人</td>
+                  <td style=${{padding:"8px"}}>${s.active7}人（${s.everLogged?Math.round(s.active7/s.everLogged*100):0}%）</td>
+                  <td style=${{padding:"8px"}}>${s.lineLinked}人（${s.registered?Math.round(s.lineLinked/s.registered*100):0}%）</td>
+                </tr>
+              `)}
+            </tbody>
+          </table>
+        </div>
+        <div class="card" style=${{marginBottom:20}}>
+          <div class="card-label">アンケートの声（直近）</div>
+          ${data.ops.survey.comments.length===0
+            ? html`<div style=${{fontSize:12.5,color:"var(--sub)"}}>まだ回答がありません。アプリ側で月1回のアンケートが表示されます。</div>`
+            : data.ops.survey.comments.map((c,i)=>html`
+              <div key=${i} style=${{padding:"8px 0",borderTop:i>0?"1px solid var(--border)":"none",fontSize:12.5}}>
+                <span style=${{color:"var(--sub)"}}>${c.date} ・ ${c.name} ・ ${"★".repeat(c.satisfaction||0)}</span>
+                <div style=${{marginTop:2}}>${c.comment}</div>
+              </div>
+            `)}
+        </div>
+      `}
       <div class="card" style=${{marginBottom:20}}>
         <div class="card-label">順調な生徒の割合（参考値）</div>
         <div style=${{fontSize:11.5,color:"var(--sub)",marginBottom:10}}>アプリに「目標達成」を直接記録する仕組みがないため、直近レポートスコア75点以上を「順調」の目安として計算しています。厳密な達成率ではありません。</div>

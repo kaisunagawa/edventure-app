@@ -230,6 +230,7 @@ function doPost(e) {
       case "snsSavePost":    return jsonResponse(snsSavePost(studentEmail, body));
       case "saveTodayActions": return jsonResponse(saveTodayActions(studentEmail, body));
       case "generateWorkReport": return jsonResponse(generateWorkReport(studentEmail, body));
+      case "submitSurvey": return jsonResponse(submitSurvey(studentEmail, body));
       case "syncCalendar": return jsonResponse(syncCalendar(studentEmail, body));
       case "coachSaveProfile":     return jsonResponse(coachSaveProfile(body.coachEmail, body));
       case "coachSaveLead":        return jsonResponse(coachSaveLead(body.coachEmail, body));
@@ -2090,14 +2091,94 @@ function adminGetOverview(email) {
     };
   }).sort((a,b) => b.studentCount - a.studentCount);
 
+  // ── 運営メトリクス ──
+  // セグメント（core=cohortなし / student=cohortあり）ごとの獲得・継続の漏斗と、
+  // 通知インフラ（LINE連携）・品質（レポート欠落）・満足度（月次アンケート）を1画面に出す
+  const todayStr = formatDate(new Date());
+  const daysAgoStr = n => { const d = new Date(); d.setDate(d.getDate() - n); return formatDate(d); };
+  const d3 = daysAgoStr(3), d7 = daysAgoStr(7);
+  const segmentOf = u => String(u.cohort || "").trim() ? "student" : "core";
+  const segStats = { core: null, student: null };
+  ["core", "student"].forEach(seg => {
+    const us = allUsers.filter(u => segmentOf(u) === seg);
+    const withLog = us.filter(u => (logsByEmail.get(u.student_email) || []).length > 0);
+    const lastLogOf = u => { const ls = logsByEmail.get(u.student_email) || []; return ls.length ? ls.map(l => l.date).sort().pop() : null; };
+    segStats[seg] = {
+      registered: us.length,
+      everLogged: withLog.length,
+      neverLogged: us.length - withLog.length,
+      active3: withLog.filter(u => lastLogOf(u) >= d3).length,
+      active7: withLog.filter(u => lastLogOf(u) >= d7).length,
+      lineLinked: us.filter(u => String(u.line_user_id || "").trim()).length
+    };
+  });
+  // 品質: 直近7日で「記録があるのにレポートがない」件数（昨日まで）
+  const haveReportKeys = new Set(allReports.map(r => r.student_email + "|" + r.date));
+  const activeEmails = new Set(allUsers.map(u => u.student_email));
+  const missingKeys = new Set();
+  allLogs.forEach(l => {
+    if (!activeEmails.has(l.student_email)) return;
+    if (l.date >= d7 && l.date < todayStr && !haveReportKeys.has(l.student_email + "|" + l.date)) {
+      missingKeys.add(l.student_email + "|" + l.date);
+    }
+  });
+  // 活動量: 直近7日の記録件数・記録した人数
+  const recentLogs = allLogs.filter(l => l.date >= d7 && activeEmails.has(l.student_email));
+  const weeklyLogCount = recentLogs.length;
+  const weeklyLoggers = new Set(recentLogs.map(l => l.student_email)).size;
+  // 満足度: 月次アンケート（直近90日の平均と最新コメント）
+  const surveys = sheetToObjects(getSurveySheet());
+  const d90 = daysAgoStr(90);
+  const recentSurveys = surveys.filter(s => s.date >= d90);
+  const satVals = recentSurveys.map(s => Number(s.satisfaction)).filter(n => n >= 1 && n <= 5);
+  const userByEmailForSurvey = new Map(allUsers.map(u => [u.student_email, u]));
+  const surveyComments = recentSurveys
+    .filter(s => String(s.comment || "").trim())
+    .sort((a, b) => b.date > a.date ? 1 : -1)
+    .slice(0, 15)
+    .map(s => {
+      const u = userByEmailForSurvey.get(s.student_email);
+      return { date: s.date, name: u ? (u.nickname || u.name) : s.student_email, satisfaction: Number(s.satisfaction) || null, comment: String(s.comment).trim() };
+    });
+
   return { ok: true, data: {
     totalRevenue, revenueCurrency,
     activeStudentCount: allUsers.length,
     coachCount: coaches.length,
     avgScore, onTrackRate, onTrackCount, scoredCount: scored.length,
     coachStats: coachStats,
-    students: students.sort((a,b) => b.statusScore - a.statusScore)
+    students: students.sort((a,b) => b.statusScore - a.statusScore),
+    ops: {
+      segments: segStats,
+      weeklyLogCount, weeklyLoggers,
+      missingReports7d: missingKeys.size,
+      survey: {
+        count90d: satVals.length,
+        avgSatisfaction: satVals.length ? Math.round(satVals.reduce((a, b) => a + b, 0) / satVals.length * 10) / 10 : null,
+        comments: surveyComments
+      }
+    }
   } };
+}
+
+// ── 月次満足度アンケート ──
+function getSurveySheet() {
+  let sheet = getSheet("Surveys");
+  if (!sheet) {
+    sheet = getSpreadsheet().insertSheet("Surveys");
+    sheet.appendRow(["date", "student_email", "satisfaction", "comment", "created_at"]);
+  }
+  return sheet;
+}
+
+// 満足度(1〜5)と任意コメントを保存。同じ月の再送信は上書きせず追加のまま
+// （最新を集計に使う場面はないため、素直に追記のみ）
+function submitSurvey(studentEmail, body) {
+  const sat = Number(body.satisfaction);
+  if (!(sat >= 1 && sat <= 5)) return { ok: false, error: "満足度は1〜5で指定してください" };
+  const comment = String(body.comment || "").trim().slice(0, 1000);
+  getSurveySheet().appendRow([formatDate(new Date()), studentEmail, sat, comment, new Date().toISOString()]);
+  return { ok: true, data: { saved: true } };
 }
 
 // 過去のレポート（breakdown_reasonsが未生成のもの）に、後からコメントだけを
