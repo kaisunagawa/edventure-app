@@ -86,6 +86,7 @@ function doGet(e) {
       case "adminBackfillReports": result = adminBackfillReports(e.parameter.coachEmail, e.parameter.days, e.parameter.limit, e.parameter.dryRun); break;
       case "adminOpsHealthCheck": result = verifyAdmin(e.parameter.coachEmail) ? (dailyOpsHealthCheck(e.parameter.dryRun === "1") || {ok:true}) : {ok:false,error:"not admin"}; break;
       case "adminInstallTrigger": result = adminInstallTrigger(e.parameter.coachEmail, e.parameter.handler); break;
+      case "adminSendStudentCampaign": result = adminSendStudentCampaign(e.parameter.coachEmail, e.parameter); break;
       case "adminSystemHealth": result = verifyAdmin(e.parameter.coachEmail) ? systemHealthCheck(e.parameter.deep === "1") : {ok:false,error:"not admin"}; break;
       case "generateTalentReport": result = generateTalentReport(e.parameter.coachEmail, e.parameter.targetEmail); break;
       case "generateGakuchika": result = generateGakuchika(e.parameter.coachEmail, e.parameter.targetEmail); break;
@@ -7105,6 +7106,68 @@ function adminBackfillReports(coachEmail, days, limit, dryRun) {
     } catch (err) { failList.push(key + " " + err); }
   }
   return { ok: true, data: { generated: doneList, failed: failList, remaining: missing.length - Math.min(missing.length, nLimit) } };
+}
+
+// ── 学生向けLINE連携キャンペーンの一斉メール ──
+// 送信者はスクリプト所有者(Kai)のGmail名義。dryRun=1で「宛先一覧＋実際の文面」を
+// 返すだけ（送信しない）。承認後にdryRunなしで実送信する。宛先は九産大生(cohort付き)のみ。
+//   segment=nolog    … 登録したが一度も記録していない学生（初記録＋LINE連携を促す）
+//   segment=started  … 記録は始めたがLINE未連携の学生（毎晩レポートのためLINE連携を促す）
+function adminSendStudentCampaign(email, body) {
+  if (!verifyAdmin(email)) return { ok: false, error: "not admin" };
+  const segment = String(body.segment || "");
+  const dryRun = String(body.dryRun) === "1";
+  const users = sheetToObjects(getSheet("Users")).filter(u => String(u.is_active).toUpperCase() === "TRUE");
+  const students = users.filter(u => String(u.cohort || "").trim());
+  const loggedEmails = new Set(sheetToObjects(getSheet("DailyLog")).map(l => l.student_email));
+  const LINE_URL = "https://lin.ee/5pElLYY";
+
+  let recipients, subject, makeBody;
+  if (segment === "nolog") {
+    recipients = students.filter(u => !loggedEmails.has(u.student_email));
+    subject = "【JIROKU】登録ありがとう！30日記録すると“就活の武器”ができます";
+    makeBody = u => u.name + "さん\n\n" +
+      "ビジネスコーチング論の砂川です。\n" +
+      "JIROKUに登録してくれてありがとう。まだ最初の記録がない人へ、先に「これ何のためにやるの？」の答えを送ります。\n\n" +
+      "毎日の記録が30日たまると、この2つが自動で作れます。\n" +
+      "・行動アセスメント帳票 … あなたの強み・継続力・集中パターンを「事実」で証明する1枚。盛れないぶん、就活で信用されます。\n" +
+      "・ガクチカ素材集 … 面接でそのまま話せるエピソードの素材が、日々の記録から自動で貯まります。\n\n" +
+      "始め方は2ステップ、合計2分です。\n" +
+      "① アプリを開いて、今日やったことを1つ記録する（1分でOK）\n   " + APP_URL + "\n" +
+      "② LINE連携する … 下のリンクを友だち追加して、登録したメールアドレスを送るだけ。\n   " + LINE_URL + "\n   → 毎晩、AIコーチがあなたの1日を採点したレポートを届けます。\n\n" +
+      "記録は完璧じゃなくていい。「バイトだった」「ゲームしてた」でも、それが全部データになります。\n" +
+      "わからないことがあれば授業で声をかけてください。\n\n砂川";
+  } else if (segment === "started") {
+    recipients = students.filter(u => loggedEmails.has(u.student_email) && !String(u.line_user_id || "").trim());
+    subject = "【JIROKU】記録いいね！LINE連携で“毎晩のAIコーチレポート”が届きます";
+    makeBody = u => u.name + "さん\n\n" +
+      "ビジネスコーチング論の砂川です。\n" +
+      "もう記録を始めてくれていますね、いいスタートです。\n" +
+      "実は今、あなたに毎晩届くはずの「AIコーチのレポート」が届いていません。LINE連携がまだだからです。\n\n" +
+      "JIROKUは毎晩、あなたのその日の記録をAIコーチが読んで、点数と「明日はこうするといい」を返します。\n" +
+      "アプリを開かなくてもLINEに届くので、続けるのが一気にラクになります。\n\n" +
+      "連携は1分：\n下のリンクを友だち追加 → 登録したメールアドレスをトークで送る、これだけです。\n   " + LINE_URL + "\n\n" +
+      "このまま30日続くと、就活で使える「行動アセスメント帳票」と「ガクチカ素材集」が作れます。\n" +
+      "いいペースなので、もったいないところで止まらないように。\n\n砂川";
+  } else {
+    return { ok: false, error: "segmentは nolog か started を指定してください" };
+  }
+
+  if (dryRun) {
+    return { ok: true, data: {
+      segment: segment, count: recipients.length,
+      recipients: recipients.map(u => ({ name: u.name, email: u.student_email })),
+      subject: subject,
+      bodySample: makeBody(recipients[0] || { name: "（例）" })
+    } };
+  }
+  let sent = 0; const failed = [];
+  recipients.forEach(u => {
+    try { MailApp.sendEmail(u.student_email, subject, makeBody(u)); sent++; }
+    catch (e) { failed.push(u.student_email + " " + e); }
+  });
+  Logger.log("adminSendStudentCampaign: segment=" + segment + " sent=" + sent + " failed=" + failed.length);
+  return { ok: true, data: { segment: segment, sent: sent, failed: failed } };
 }
 
 function generateReportForDate(targetDate) {
