@@ -229,6 +229,7 @@ function doPost(e) {
       case "snsSaveMetrics": return jsonResponse(snsSaveMetrics(studentEmail, body));
       case "snsSavePost":    return jsonResponse(snsSavePost(studentEmail, body));
       case "saveTodayActions": return jsonResponse(saveTodayActions(studentEmail, body));
+      case "generateWorkReport": return jsonResponse(generateWorkReport(studentEmail, body));
       case "syncCalendar": return jsonResponse(syncCalendar(studentEmail, body));
       case "coachSaveProfile":     return jsonResponse(coachSaveProfile(body.coachEmail, body));
       case "coachSaveLead":        return jsonResponse(coachSaveLead(body.coachEmail, body));
@@ -4117,6 +4118,93 @@ function applyXPDecay(studentEmail, targetDate) {
 
 // 直近のレポート生成失敗の理由。adminRunNightlyReportが診断結果に含めるための変数
 let REPORT_GEN_LAST_ERROR = "";
+
+// 会社員向け「業務報告書」生成。1日の記録（時間帯・タスク・メモ）と
+// 今日のフォーカス・タスク（見積もり時間とチェック状態）から、上司に
+// そのまま提出できる報告文を作る。就業終わりに「レポートを生成する」ボタンから呼ばれる。
+// タスクのチェック状態や見積もり時間は端末（localStorage）にしかないため、
+// フロントからPOSTボディで受け取る
+function generateWorkReport(studentEmail, body) {
+  try {
+    return generateWorkReportInner(studentEmail, body);
+  } catch (err) {
+    Logger.log("generateWorkReport: " + (err && err.stack ? err.stack : err));
+    return { ok: false, error: "生成中にエラーが発生しました。時間をおいてもう一度お試しください。" };
+  }
+}
+function generateWorkReportInner(studentEmail, body) {
+  const apiKey = PropertiesService.getScriptProperties().getProperty("CLAUDE_API_KEY");
+  if (!apiKey) return { ok: false, error: "CLAUDE_API_KEY が未設定" };
+  const date = String(body.date || formatDate(new Date()));
+  const user = sheetToObjects(getSheet("Users")).find(u => u.student_email === studentEmail);
+  if (!user) return { ok: false, error: "User not found" };
+
+  const logs = getFilteredRows("DailyLog", "student_email", studentEmail)
+    .filter(l => l.date === date)
+    .sort((a, b) => a.time_block > b.time_block ? 1 : -1);
+  if (logs.length === 0) return { ok: false, error: "この日の記録がまだありません。まず今日やったことを記録してください。" };
+
+  const logLines = logs.map(l =>
+    `${l.time_block}: ${l.task}${String(l.memo || "").trim() ? "（メモ: " + String(l.memo).trim() + "）" : ""}`
+  ).join("\n");
+
+  // 任意情報：今日のフォーカス（宣言）とタスクリスト（予定時間・完了状態）
+  let intentText = "";
+  try {
+    const it = body.intent ? JSON.parse(body.intent) : null;
+    if (it && it.intent) intentText = `【今日一番達成したいと宣言していたこと】${it.intent}（予定 ${it.hours || "?"}時間）` + (it.done ? " → 達成" : " → 未達成");
+  } catch (e) {}
+  let tasksText = "";
+  try {
+    const ts = body.tasks ? JSON.parse(body.tasks) : [];
+    if (ts.length > 0) {
+      tasksText = "【今日のタスクリスト（予定時間・完了状態）】\n" + ts.map(t =>
+        `・${t.text}${t.min > 0 ? "（予定" + t.min + "分）" : ""} → ${t.done ? "完了" : "未完了"}`
+      ).join("\n");
+    }
+  } catch (e) {}
+
+  const prompt = `あなたは優秀なビジネスアシスタントです。以下の1日の作業記録から、上司・会社に提出する「業務報告書」を作成してください。
+
+【日付】${date}
+【報告者】${user.name}
+
+【時間帯ごとの作業記録】
+${logLines}
+
+${intentText}
+
+${tasksText}
+
+【作成ルール】
+- 記録された事実だけを書く。記録にない作業を創作・水増ししない
+- 構成は次の順で、この見出し記号をそのまま使う:
+【業務報告】日付(曜日) 氏名
+■ 勤務時間: 最初の記録〜最後の記録の時間帯から書く（例: 9:00〜17:30）
+■ 本日の業務: 時間帯順に「・9:00-10:30 やったこと ― 進捗や成果を1文で」。近い時間帯で同じ作業が続く場合はまとめてよい
+■ 完了したタスク: タスクリストで完了になっているもの。予定時間があるものは「予定◯分→実績」の形で、予定より早く終わった場合は「前倒しで完了」と明記する
+■ 未完了・持ち越し: 未完了タスク。記録から理由が読み取れれば簡潔に添える（読み取れなければ理由は書かない）
+■ 特記事項: 予定外の対応・トラブル・共有事項。該当がなければ「特になし」
+■ 明日の予定: 未完了タスクや記録の流れから自然に書ける範囲で。無理に埋めない
+- 文体は「です・ます」調。簡潔・具体的に。件数や時間などの数字は記録にあるものを必ず入れる
+- 記録が趣味・私用（例: ゲーム、昼食）と明確に分かるものは業務報告からは省く（勤務時間の計算にも含めない）
+- 出力は報告書本文のみ。前置き・解説・コードブロック記号は不要`;
+
+  const res = UrlFetchApp.fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
+    payload: JSON.stringify({ model: "claude-sonnet-5", max_tokens: 1500, messages: [{ role: "user", content: prompt }] }),
+    muteHttpExceptions: true
+  });
+  const result = JSON.parse(res.getContentText());
+  // Sonnet 5はcontent先頭にthinkingブロックが入ることがあるため、textブロックを探して取り出す
+  const textBlock = (result.content || []).find(c => c && c.type === "text" && typeof c.text === "string");
+  if (!textBlock) {
+    Logger.log("generateWorkReport: 予期しない応答 " + res.getContentText().slice(0, 500));
+    return { ok: false, error: "AI生成に失敗しました。少し待ってからもう一度お試しください。" };
+  }
+  return { ok: true, data: { text: textBlock.text.trim() } };
+}
 
 function generateReportWithClaude(studentEmail, studentName, logs) {
   REPORT_GEN_LAST_ERROR = "";

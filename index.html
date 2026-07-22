@@ -2488,6 +2488,34 @@ function ReportScreen() {
   const [timeUse, setTimeUse]=useState(null);
   const [showWeekly, setShowWeekly]=useState(false);
   const [showMonthly, setShowMonthly]=useState(false);
+  // 業務報告書（上司への報告文）。就業終わりに今日の記録から生成する
+  const [workReport, setWorkReport]=useState(null);
+  const [workReportLoading, setWorkReportLoading]=useState(false);
+  const [workReportError, setWorkReportError]=useState("");
+  const [workReportCopied, setWorkReportCopied]=useState(false);
+  const generateWorkReport = async () => {
+    setWorkReportLoading(true); setWorkReportError(""); setWorkReportCopied(false);
+    const todayKey = formatDateStr(new Date());
+    // タスクの完了状態と見積もり時間は端末にしかないため、ここで集めて送る
+    let tasks=[];
+    try{
+      const actions = JSON.parse(localStorage.getItem("jiroku_custom_actions_"+todayKey)||"[]")||[];
+      const checked = JSON.parse(localStorage.getItem("today_actions")||"{}");
+      const est = JSON.parse(localStorage.getItem("jiroku_task_estimates_"+todayKey)||"{}");
+      tasks = actions.map(t=>({text:t, done:!!checked[t], min:Number(est[t])||0}));
+    }catch(e){}
+    let intent=null;
+    try{ const s=JSON.parse(localStorage.getItem("jiroku_intent")||"null"); if(s&&s.date===todayKey) intent=s; }catch(e){}
+    const r = await gasPostJson("generateWorkReport", {date:todayKey, tasks:JSON.stringify(tasks), intent:intent?JSON.stringify(intent):""});
+    if(r.ok) setWorkReport(r.data.text);
+    else setWorkReportError(r.error||"生成に失敗しました。時間をおいてもう一度お試しください。");
+    setWorkReportLoading(false);
+  };
+  const copyWorkReport = () => {
+    try{
+      navigator.clipboard.writeText(workReport).then(()=>{ setWorkReportCopied(true); setTimeout(()=>setWorkReportCopied(false),2000); });
+    }catch(e){}
+  };
 
   useEffect(()=>{
     gasApi("getReportList").then(r=>{
@@ -2527,6 +2555,20 @@ function ReportScreen() {
             <div class="empty-body">記録を入力すると<br/>毎晩22時にAIがレポートを生成します</div>
           </div>`
         : html`<div>
+            <!-- 業務報告書：就業終わりに今日の記録から上司向けの報告文を生成 -->
+            <div class="card" style=${{marginBottom:8,display:"flex",alignItems:"center",justifyContent:"space-between",gap:12}}>
+              <div>
+                <div style=${{fontSize:13,fontWeight:700,color:"var(--text)"}}>📋 業務報告書</div>
+                <div style=${{fontSize:11.5,color:"var(--sub)",marginTop:2,lineHeight:1.5}}>今日の記録から、上司への報告文を自動作成</div>
+              </div>
+              <button onClick=${generateWorkReport} disabled=${workReportLoading}
+                style=${{flexShrink:0,background:"var(--accent)",color:"#fff",border:"none",borderRadius:10,padding:"10px 14px",fontSize:12.5,fontWeight:700,cursor:"pointer",fontFamily:"inherit",opacity:workReportLoading?0.6:1,display:"flex",alignItems:"center",gap:6}}>
+                ${workReportLoading?html`<div class="spin" style=${{borderColor:"rgba(255,255,255,.3)",borderTopColor:"#fff",width:12,height:12,borderWidth:2}}/>作成中…`:"レポートを生成する"}
+              </button>
+            </div>
+            ${workReportError&&html`
+              <div style=${{fontSize:12,color:"var(--red,#d33)",background:"var(--bg)",borderRadius:10,padding:"10px 14px",marginBottom:8}}>${workReportError}</div>
+            `}
             ${weeklySummary&&html`
               <div class="card" style=${{marginBottom:8}}>
                 <button onClick=${()=>setShowWeekly(!showWeekly)}
@@ -2645,6 +2687,21 @@ function ReportScreen() {
             <div style=${{marginBottom:8}}></div>
           </div>`
     }
+    ${workReport!==null&&html`
+      <div style=${{position:"fixed",inset:0,height:"100dvh",background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"flex-end",zIndex:500}}>
+        <div style=${{background:"var(--card)",width:"100%",borderRadius:"20px 20px 0 0",padding:"20px 20px calc(20px + env(safe-area-inset-bottom))",maxHeight:"85dvh",display:"flex",flexDirection:"column"}}>
+          <div style=${{fontSize:17,fontWeight:800,marginBottom:4,color:"var(--text)"}}>📋 業務報告書</div>
+          <div style=${{fontSize:12,color:"var(--sub)",marginBottom:12}}>内容を確認して、コピーしてメールやチャットに貼り付けてください。文面は自由に手直しできます。</div>
+          <textarea value=${workReport} onInput=${e=>setWorkReport(e.target.value)}
+            style=${{flex:1,minHeight:260,width:"100%",boxSizing:"border-box",border:"1.5px solid var(--border)",borderRadius:12,padding:"12px 14px",fontSize:13,lineHeight:1.7,fontFamily:"inherit",color:"var(--text)",background:"var(--bg)",resize:"none",marginBottom:12}}/>
+          <button class="btn" onClick=${copyWorkReport} style=${{marginBottom:8}}>
+            ${workReportCopied?"✓ コピーしました":"報告文をコピー"}
+          </button>
+          <button onClick=${()=>setWorkReport(null)}
+            style=${{width:"100%",padding:"12px",background:"none",border:"none",color:"var(--sub)",fontSize:13,cursor:"pointer",fontFamily:"inherit"}}>閉じる</button>
+        </div>
+      </div>
+    `}
   </div>`;
 
   // ── 詳細表示 ──
