@@ -4530,6 +4530,7 @@ const ONBOARDING_QUESTIONS = [
   { id:"tone", q:"どんな声かけが響く？", opts:["優しく応援してほしい","厳しめに喝を入れて","データで淡々と","一緒に伴走してほしい"], setting:"tone" },
   { id:"notify", q:"通知はどれくらい欲しい？", opts:["こまめに欲しい","ほどほどで","最小限でいい"], setting:"notify" },
   { id:"hours", q:"1日にどれくらい、目標に時間を使いたい？", opts:["30分","1時間","2時間","3時間以上"], setting:"hours" },
+  { id:"weekpace", q:"どれくらいのペースで記録を続けたい？", opts:["毎日","週5日","週3日くらい","週2日でゆるく"], setting:"weekpace", hint:"毎日じゃなくて大丈夫。自分のペースで続けるのが一番です。" },
   { id:"future", q:"3ヶ月後、どうなっていたい？", opts:["良い習慣が身についている","目標に向けて成果が出ている","時間の使い方に迷わない","新しいことに挑戦できている"] },
   { id:"selftype", q:"自分を一言でいうと？", opts:["コツコツ型","短距離集中型","気分屋","完璧主義"] },
 ];
@@ -4556,6 +4557,10 @@ function OnboardingQuiz({onDone}){
     const goalHours=hoursMap[answers.hours];
     // 設定へ反映（目標時間はローカル、通知間隔はサーバー＋ローカル）
     if(goalHours){ localStorage.setItem("jiroku_daily_goal_hours",String(goalHours)); }
+    // 週ペース目標（自分のペースで続ける土台）をローカルに保存
+    const paceMap={"毎日":7,"週5日":5,"週3日くらい":3,"週2日でゆるく":2};
+    const weekGoal=paceMap[answers.weekpace];
+    if(weekGoal){ localStorage.setItem("jiroku_weekly_goal",String(weekGoal)); }
     const savedNotify=JSON.parse(localStorage.getItem("notifySettings")||'{"start":7,"end":23,"interval":2}');
     localStorage.setItem("notifySettings",JSON.stringify({...savedNotify,interval}));
     try{ await gasPostJson("saveOnboarding",{profile_text:profileText,coach_tone:tone,notify_interval:String(interval)}); }catch(e){}
@@ -4573,6 +4578,7 @@ function OnboardingQuiz({onDone}){
     if(answers.struggle==="先延ばししてしまう") lines.push("朝の「今日のフォーカス」で、まず1つに絞って動き出せるようにします。");
     if(answers.tone==="厳しめに喝を入れて") lines.push("あなたの希望どおり、コーチは時にはっきりと喝を入れます。");
     if(answers.tone==="優しく応援してほしい") lines.push("あなたの希望どおり、コーチは優しく応援するトーンで寄り添います。");
+    if(answers.weekpace&&answers.weekpace!=="毎日") lines.push(`記録は「${answers.weekpace}」のペースでOK。毎日じゃなくても、あなたが決めたペースを守れたかで見ていきます。`);
     if(lines.length<2) lines.push("記録が溜まるほど、AIがあなたの強み・クセ・時間の使い道を教えてくれます（気づきタブ）。");
     return html`<div style=${{position:"fixed",inset:0,height:"100dvh",background:"var(--bg)",zIndex:400,overflowY:"auto",display:"flex",flexDirection:"column"}}>
       <div style=${{flex:1,display:"flex",flexDirection:"column",justifyContent:"center",padding:"32px 24px",maxWidth:440,margin:"0 auto",width:"100%"}}>
@@ -4603,7 +4609,8 @@ function OnboardingQuiz({onDone}){
     </div>
     <div style=${{flex:1,overflowY:"auto",padding:"8px 20px 24px",maxWidth:440,margin:"0 auto",width:"100%",boxSizing:"border-box"}}>
       ${step===0&&html`<div style=${{fontSize:12.5,color:"var(--sub)",lineHeight:1.7,marginBottom:16,background:"var(--accent-l)",borderRadius:12,padding:"12px 14px"}}>最初に、あなたのことを少しだけ教えてください。答えに合わせてコーチングをあなた仕様にします（1〜2分・直感でOK）。</div>`}
-      <div style=${{fontSize:19,fontWeight:800,color:"var(--text)",lineHeight:1.5,marginBottom:20}}>${cur.q}</div>
+      <div style=${{fontSize:19,fontWeight:800,color:"var(--text)",lineHeight:1.5,marginBottom:cur.hint?8:20}}>${cur.q}</div>
+      ${cur.hint&&html`<div style=${{fontSize:12.5,color:"var(--sub)",lineHeight:1.6,marginBottom:18}}>${cur.hint}</div>`}
       <div style=${{display:"flex",flexDirection:"column",gap:10}}>
         ${cur.opts.map((o,i)=>{
           const on=answers[cur.id]===o;
