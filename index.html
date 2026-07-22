@@ -4623,30 +4623,25 @@ function FeatureAnnounce({onClose,onGo}){
       onClick=${e=>{if(e.target===e.currentTarget)onClose();}}>
       <div style=${{background:"var(--card)",borderRadius:20,width:"100%",maxWidth:380,overflow:"hidden",boxShadow:"0 20px 50px rgba(0,0,0,0.3)"}}>
         <div style=${{background:"linear-gradient(135deg, var(--hero1) 0%, var(--hero2) 100%)",padding:"28px 22px 22px",textAlign:"center"}}>
-          <div style=${{fontSize:40,marginBottom:6}}>🎙</div>
+          <div style=${{fontSize:40,marginBottom:6}}>📋</div>
           <div style=${{fontSize:12,fontWeight:700,color:"rgba(255,255,255,0.85)",letterSpacing:"0.05em",marginBottom:4}}>UPDATE</div>
-          <div style=${{fontSize:20,fontWeight:800,color:"#fff",lineHeight:1.4}}>アップデートしました✨<br/>もっと記録がラクに</div>
+          <div style=${{fontSize:20,fontWeight:800,color:"#fff",lineHeight:1.4}}>アップデートしました✨<br/>記録が"報告"に変わる</div>
         </div>
         <div style=${{padding:"20px 22px 22px"}}>
           <div style=${{display:"flex",gap:10,marginBottom:14}}>
-            <div style=${{fontSize:20,flexShrink:0}}>🎙</div>
-            <div><div style=${{fontSize:13,fontWeight:700,color:"var(--text)"}}>独り言がパワーアップ</div>
-              <div style=${{fontSize:12,color:"var(--sub)",lineHeight:1.6,marginTop:1}}>右下のマイクで話すだけ。1日分まとめて話してもOK。「9時から9時半」も「これまでずっと〜してた」も、時間を自動で判断して記録します。</div></div>
+            <div style=${{fontSize:20,flexShrink:0}}>📋</div>
+            <div><div style=${{fontSize:13,fontWeight:700,color:"var(--text)"}}>業務報告書がワンタップで</div>
+              <div style=${{fontSize:12,color:"var(--sub)",lineHeight:1.6,marginTop:1}}>レポート画面の「レポートを生成する」を押すと、今日の記録から上司・会社への報告文を自動作成。コピーしてメールやチャットに貼るだけです。</div></div>
           </div>
           <div style=${{display:"flex",gap:10,marginBottom:14}}>
             <div style=${{fontSize:20,flexShrink:0}}>⏱️</div>
-            <div><div style=${{fontSize:13,fontWeight:700,color:"var(--text)"}}>今日のタスク × タイマー連携</div>
-              <div style=${{fontSize:12,color:"var(--sub)",lineHeight:1.6,marginTop:1}}>タスクに「想定時間」を決められるように。タイマーでそのタスクを選ぶと、その時間でそのままスタートします。</div></div>
-          </div>
-          <div style=${{display:"flex",gap:10,marginBottom:14}}>
-            <div style=${{fontSize:20,flexShrink:0}}>🗑️</div>
-            <div><div style=${{fontSize:13,fontWeight:700,color:"var(--text)"}}>記録を削除できるように</div>
-              <div style=${{fontSize:12,color:"var(--sub)",lineHeight:1.6,marginTop:1}}>間違えて記録した時は、その記録を開いて「何をしましたか」とメモを空にすると消せます。</div></div>
+            <div><div style=${{fontSize:13,fontWeight:700,color:"var(--text)"}}>朝の宣言でタスクも時間も</div>
+              <div style=${{fontSize:12,color:"var(--sub)",lineHeight:1.6,marginTop:1}}>「今日いちばん達成したいこと」の画面で、タスクと想定時間（分）を一緒に登録できるように。タスクの横に⏱時間が表示され、タイマーもその時間で始まります。</div></div>
           </div>
           <div style=${{display:"flex",gap:10,marginBottom:20}}>
-            <div style=${{fontSize:20,flexShrink:0}}>🏆</div>
-            <div><div style=${{fontSize:13,fontWeight:700,color:"var(--text)"}}>みんなの頑張りが賑やかに</div>
-              <div style=${{fontSize:12,color:"var(--sub)",lineHeight:1.6,marginTop:1}}>新しい仲間の一歩や、連続記録の節目なども「シェア」に載るようになりました。</div></div>
+            <div style=${{fontSize:20,flexShrink:0}}>🗓️</div>
+            <div><div style=${{fontSize:13,fontWeight:700,color:"var(--text)"}}>レポート一覧が月ごとに</div>
+              <div style=${{fontSize:12,color:"var(--sub)",lineHeight:1.6,marginTop:1}}>過去のレポートが「7月」「6月」と月ごとにまとまり、月の平均点も見えるようになりました。成長の振り返りがしやすくなります。</div></div>
           </div>
           <button class="btn" onClick=${onClose}>さっそく使ってみる</button>
           <button onClick=${onClose}
@@ -4750,7 +4745,7 @@ function App() {
   // 新機能のお知らせ（アプリを開いた時に1回だけ表示）。IDを変えれば次の告知を出せる。
   // チュートリアル中の新規ユーザーには出さない（既存ユーザーへの告知が目的のため）
   // チュートリアル中は下でreturnするので出ない。それ以外の全員に未読なら表示する
-  const ANNOUNCE_ID="update4_2026_07";
+  const ANNOUNCE_ID="update5_2026_07_22";
   const [showAnnounce,setShowAnnounce]=useState(()=>localStorage.getItem("announce_seen")!==ANNOUNCE_ID);
   const dismissAnnounce=()=>{ localStorage.setItem("announce_seen",ANNOUNCE_ID); setShowAnnounce(false); };
   // チュートリアル終了後は記録タブに着地させる（登録だけして使い始めない人が多いため、
