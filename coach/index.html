@@ -1575,6 +1575,14 @@ function AdminOverview() {
   const [error, setError] = useState("");
   const [backfilling, setBackfilling] = useState(false);
   const [backfillMsg, setBackfillMsg] = useState("");
+  const [health, setHealth] = useState(null);
+  const [healthLoading, setHealthLoading] = useState(false);
+  const runHealth = async () => {
+    setHealthLoading(true);
+    const r = await api("adminSystemHealth", { deep: "1" });
+    if (r.ok) setHealth(r.data); else setHealth({ overall: "fail", checks: [{ name: "実行", status: "fail", detail: r.error || "失敗" }] });
+    setHealthLoading(false);
+  };
 
   useEffect(() => {
     api("adminGetOverview").then(r => {
@@ -1627,8 +1635,31 @@ function AdminOverview() {
         </div>
       </div>
 
+      <div class="card" style=${{marginBottom:20}}>
+        <div style=${{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:health?10:0}}>
+          <div>
+            <div class="card-label" style=${{marginBottom:2}}>システム診断（アプリ全体のヘルスチェック）</div>
+            <div style=${{fontSize:11.5,color:"var(--sub)"}}>バックエンド・シート・API鍵・LINE・トリガー・フロント配信・データ鮮度を点検します</div>
+          </div>
+          <button class="btn" style=${{fontSize:12,flexShrink:0}} onClick=${runHealth} disabled=${healthLoading}>${healthLoading?"診断中...":"診断する"}</button>
+        </div>
+        ${health && html`
+          <div style=${{fontSize:13,fontWeight:700,marginBottom:8,color:health.overall==="ok"?"var(--green,#3aa675)":health.overall==="fail"?"var(--red)":"#c98500"}}>
+            ${health.overall==="ok"?"✅ 異常なし":health.overall==="fail"?"🔴 異常あり":"🟡 要注意"}
+            ${health.failCount!==undefined?html` <span style=${{fontWeight:400,color:"var(--sub)"}}>（失敗${health.failCount}・注意${health.warnCount}）</span>`:""}
+          </div>
+          ${health.checks.map((c,i)=>html`
+            <div key=${i} style=${{display:"flex",gap:8,alignItems:"flex-start",padding:"5px 0",borderTop:i>0?"1px solid var(--border)":"none",fontSize:12.5}}>
+              <span style=${{flexShrink:0}}>${c.status==="ok"?"🟢":c.status==="fail"?"🔴":"🟡"}</span>
+              <span style=${{flexShrink:0,fontWeight:600,minWidth:120}}>${c.name}</span>
+              <span style=${{color:"var(--sub)"}}>${c.detail}</span>
+            </div>
+          `)}
+        `}
+      </div>
       ${data.ops && html`
-        <div style=${{fontSize:13,fontWeight:700,color:"var(--sub)",margin:"4px 0 10px"}}>運営メトリクス</div>
+        <div style=${{fontSize:13,fontWeight:700,color:"var(--sub)",margin:"4px 0 10px"}}>運営メトリクス</div>`}
+      ${data.ops && html`
         <div style=${{display:"grid",gridTemplateColumns:"repeat(4, 1fr)",gap:16,marginBottom:16}}>
           <div class="card">
             <div class="card-label">満足度（直近90日）</div>

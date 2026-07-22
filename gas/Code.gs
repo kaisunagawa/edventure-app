@@ -85,6 +85,8 @@ function doGet(e) {
       case "adminListRecentRegistrations": result = adminListRecentRegistrations(e.parameter.coachEmail, e.parameter.days); break;
       case "adminBackfillReports": result = adminBackfillReports(e.parameter.coachEmail, e.parameter.days, e.parameter.limit, e.parameter.dryRun); break;
       case "adminOpsHealthCheck": result = verifyAdmin(e.parameter.coachEmail) ? (dailyOpsHealthCheck(e.parameter.dryRun === "1") || {ok:true}) : {ok:false,error:"not admin"}; break;
+      case "adminInstallTrigger": result = adminInstallTrigger(e.parameter.coachEmail, e.parameter.handler); break;
+      case "adminSystemHealth": result = verifyAdmin(e.parameter.coachEmail) ? systemHealthCheck(e.parameter.deep === "1") : {ok:false,error:"not admin"}; break;
       case "generateTalentReport": result = generateTalentReport(e.parameter.coachEmail, e.parameter.targetEmail); break;
       case "generateGakuchika": result = generateGakuchika(e.parameter.coachEmail, e.parameter.targetEmail); break;
       case "adminTagCohortByEmails": result = adminTagCohortByEmails(e.parameter.coachEmail, e.parameter.emails, e.parameter.cohort); break;
@@ -6988,6 +6990,20 @@ function adminSetupTriggers(email) {
   }
 }
 
+// 特定のハンドラのトリガーが無ければ1本だけ追加する（全張り直しを避けたい時用）。
+// 既にあれば何もしない。新しい定期処理を1つ足す時に安全に使える
+function adminInstallTrigger(email, handler) {
+  if (!verifyAdmin(email)) return { ok: false, error: "not admin" };
+  const name = String(handler || "").trim();
+  const allowed = { dailyOpsHealthCheck: 1 };
+  if (!allowed[name]) return { ok: false, error: "許可されていないハンドラ: " + name };
+  const exists = ScriptApp.getProjectTriggers().some(t => t.getHandlerFunction() === name);
+  if (exists) return { ok: true, data: { added: false, note: "既に登録済み" } };
+  if (ScriptApp.getProjectTriggers().length >= 20) return { ok: false, error: "トリガー上限(20)に達しています" };
+  ScriptApp.newTrigger(name).timeBased().everyDays(1).atHour(7).nearMinute(30).create();
+  return { ok: true, data: { added: true } };
+}
+
 function setupTriggers() {
   // GASは1スクリプトあたり時間主導トリガー最大20個までのため、
   // 「毎時7〜23時に個別トリガー」(17個)は他と合わせると上限を超えてしまう。
@@ -7218,6 +7234,16 @@ function dailyOpsHealthCheck(dryRun) {
   if (stuckResume) problems.push("⚠️ 夜間処理が未完了のまま（再開待ち: " + stuckResume + "）");
   if (triggerCount >= 18) problems.push("⚠️ トリガー数が上限に接近（" + triggerCount + "/20）");
 
+  // システム診断（非deep=無料の範囲）も毎朝ここで回し、fail/warnがあれば要対応に混ぜる
+  let sysLine = "確認失敗";
+  try {
+    const sys = systemHealthCheck(false).data;
+    sysLine = sys.overall === "ok" ? "正常" : (sys.overall === "fail" ? "🔴 異常あり" : "🟡 要注意");
+    sys.checks.filter(c => c.status !== "ok").forEach(c => {
+      problems.push((c.status === "fail" ? "🔴" : "🟡") + " [システム] " + c.name + ": " + c.detail);
+    });
+  } catch (e) { sysLine = "確認失敗"; }
+
   const head = problems.length === 0 ? "✅ JIROKU 運営レポート（異常なし）" : "🚨 JIROKU 運営レポート（要確認）";
   const lines = [
     head,
@@ -7226,7 +7252,7 @@ function dailyOpsHealthCheck(dryRun) {
     "【昨日のレポート】記録 " + loggedYesterday.size + "人 → 生成 " + (loggedYesterday.size - missingYesterday.length) + "人" + (missingYesterday.length ? " / 欠落 " + missingYesterday.length + "人" : "（全員生成✓）"),
     "【今日の記録】" + todayLogs.length + "件 / " + todayLoggers + "人",
     "【離脱リスク】7日以上記録なし " + churnRisk + "人",
-    "【システム】トリガー " + triggerCount + "/20"
+    "【システム】" + sysLine + "（トリガー " + triggerCount + "/20）"
   ];
   if (problems.length > 0) {
     lines.push("");
@@ -7247,6 +7273,96 @@ function dailyOpsHealthCheck(dryRun) {
   }
   Logger.log("dailyOpsHealthCheck: " + head + " missing7=" + missing7);
   return { ok: true, data: { text: text, problems: problems.length, sent: true } };
+}
+
+// ── アプリ全体のシステム診断 ──
+// 「レポートが出ているか」より一段下の“土台”を点検する。バックエンド・シート・
+// 外部APIキー・LINE・トリガー・フロント配信・データ鮮度が生きているかを一括チェックし、
+// ok / warn / fail の3段階で返す。deepPing=trueのときだけClaude/LINEに実際に軽い問い合わせをする
+// （鍵が「設定されている」だけでなく「本当に有効か」まで確認できるが、少額の費用がかかるため任意）。
+function systemHealthCheck(deepPing) {
+  const checks = [];
+  const add = (name, status, detail) => checks.push({ name: name, status: status, detail: detail });
+  const props = PropertiesService.getScriptProperties();
+
+  // 1) スプレッドシート到達性＋必須シート
+  try {
+    const ss = getSpreadsheet();
+    const names = ss.getSheets().map(s => s.getName());
+    const required = ["Users", "DailyLog", "Reports", "Coaches", "Journal", "Achievements", "Surveys"];
+    const missing = required.filter(n => names.indexOf(n) === -1);
+    if (missing.length) add("スプレッドシート", "fail", "必須シート欠落: " + missing.join(", "));
+    else add("スプレッドシート", "ok", names.length + "シート・必須シート揃っています");
+  } catch (e) { add("スプレッドシート", "fail", "アクセス不可: " + e); }
+
+  // 2) Claudeキー（存在 / deepなら実疎通）
+  const claudeKey = props.getProperty("CLAUDE_API_KEY");
+  if (!claudeKey) add("Claude APIキー", "fail", "未設定（夜間レポート・各種AI生成が動きません）");
+  else if (deepPing) {
+    try {
+      const r = UrlFetchApp.fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-api-key": claudeKey, "anthropic-version": "2023-06-01" },
+        payload: JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: 1, messages: [{ role: "user", content: "hi" }] }),
+        muteHttpExceptions: true
+      });
+      const c = r.getResponseCode();
+      if (c === 200) add("Claude APIキー", "ok", "有効（疎通OK）");
+      else if (c === 401) add("Claude APIキー", "fail", "認証エラー(401)：鍵が失効している可能性");
+      else if (c === 429) add("Claude APIキー", "warn", "レート制限(429)：一時的に混雑");
+      else add("Claude APIキー", "warn", "想定外の応答 code=" + c);
+    } catch (e) { add("Claude APIキー", "warn", "疎通確認に失敗: " + e); }
+  } else add("Claude APIキー", "ok", "設定あり（疎通は未確認）");
+
+  // 3) LINEトークン（存在 / deepなら /bot/info で有効性）
+  const lineTok = props.getProperty("LINE_CHANNEL_TOKEN");
+  if (!lineTok) add("LINE連携", "fail", "トークン未設定（通知が一切飛びません）");
+  else if (deepPing) {
+    try {
+      const r = UrlFetchApp.fetch("https://api.line.me/v2/bot/info", {
+        method: "GET", headers: { "Authorization": "Bearer " + lineTok }, muteHttpExceptions: true
+      });
+      add("LINE連携", r.getResponseCode() === 200 ? "ok" : "fail", r.getResponseCode() === 200 ? "トークン有効" : "無効 code=" + r.getResponseCode());
+    } catch (e) { add("LINE連携", "warn", "確認失敗: " + e); }
+  } else add("LINE連携", "ok", "トークン設定あり（有効性は未確認）");
+
+  // 4) トリガー（重要ハンドラの登録・上限）
+  try {
+    const trigs = ScriptApp.getProjectTriggers();
+    const handlers = trigs.map(t => t.getHandlerFunction());
+    const critical = ["nightlyReport", "morningScheduleNotify", "dailyOpsHealthCheck"];
+    const missing = critical.filter(h => handlers.indexOf(h) === -1);
+    const dupes = handlers.filter((h, i) => handlers.indexOf(h) !== i);
+    if (missing.length) add("定期処理トリガー", "fail", "未登録: " + missing.join(", ") + "（" + trigs.length + "/20）");
+    else if (trigs.length >= 18) add("定期処理トリガー", "warn", "上限に接近 " + trigs.length + "/20");
+    else if (dupes.length) add("定期処理トリガー", "warn", "重複: " + [...new Set(dupes)].join(", "));
+    else add("定期処理トリガー", "ok", trigs.length + "/20・重要トリガー登録済み");
+  } catch (e) { add("定期処理トリガー", "warn", "確認失敗: " + e); }
+
+  // 5) フロント配信（GitHub Pages が200かつ実体を返すか）
+  [["アプリ本体", APP_URL + "index.html"], ["コーチCRM", APP_URL + "coach/index.html"]].forEach(([label, url]) => {
+    try {
+      const r = UrlFetchApp.fetch(url + "?_hc=" + Date.now(), { muteHttpExceptions: true });
+      const code = r.getResponseCode();
+      const okBody = code === 200 && /JIROKU/.test(r.getContentText().slice(0, 4000));
+      add(label + "配信", okBody ? "ok" : "fail", okBody ? "200 OK" : "異常 code=" + code);
+    } catch (e) { add(label + "配信", "fail", "取得失敗: " + e); }
+  });
+
+  // 6) データ鮮度（パイプラインが生きているか：直近48hに記録があるか）
+  try {
+    const logs = sheetToObjects(getSheet("DailyLog"));
+    const latest = logs.reduce((m, l) => (l.date > m ? l.date : m), "");
+    const d2 = formatDate(new Date(Date.now() - 2 * 86400000));
+    if (!latest) add("データ鮮度", "warn", "記録がまだありません");
+    else if (latest < d2) add("データ鮮度", "warn", "直近48hに記録なし（最新 " + latest + "）");
+    else add("データ鮮度", "ok", "最新の記録 " + latest);
+  } catch (e) { add("データ鮮度", "warn", "確認失敗: " + e); }
+
+  const failCount = checks.filter(c => c.status === "fail").length;
+  const warnCount = checks.filter(c => c.status === "warn").length;
+  const overall = failCount ? "fail" : (warnCount ? "warn" : "ok");
+  return { ok: true, data: { overall: overall, failCount: failCount, warnCount: warnCount, checks: checks, deepPing: !!deepPing } };
 }
 
 function generateYesterdayReport() {
