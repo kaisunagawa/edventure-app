@@ -1622,8 +1622,9 @@ function AdminOverview() {
           <div style=${{fontSize:22,fontWeight:700}}>${data.totalRevenue.toLocaleString()}<span style=${{fontSize:12,color:"var(--sub)"}}> ${data.revenueCurrency.toUpperCase()}</span></div>
         </div>
         <div class="card">
-          <div class="card-label">在籍生徒数</div>
-          <div style=${{fontSize:22,fontWeight:700}}>${data.activeStudentCount}<span style=${{fontSize:12,color:"var(--sub)"}}> 人</span></div>
+          <div class="card-label">アクティブ生徒数</div>
+          <div style=${{fontSize:22,fontWeight:700}}>${data.activeCount !== undefined ? data.activeCount : data.activeStudentCount}<span style=${{fontSize:12,color:"var(--sub)"}}> 人</span></div>
+          ${data.untethered && data.untethered.count > 0 && html`<div style=${{fontSize:11,color:"var(--sub)",marginTop:2}}>+ 登録のみ ${data.untethered.count}人（未定着）</div>`}
         </div>
         <div class="card">
           <div class="card-label">コーチ数</div>
@@ -1755,7 +1756,7 @@ function AdminOverview() {
       </div>
 
       <div class="card">
-        <div class="card-label">生徒別の状況（ステータススコア順）</div>
+        <div class="card-label">生徒別の状況（アクティブのみ・ステータススコア順）</div>
         <table style=${{width:"100%",borderCollapse:"collapse",fontSize:12.5}}>
           <thead>
             <tr style=${{textAlign:"left",color:"var(--sub)",fontSize:11}}>
@@ -1780,6 +1781,14 @@ function AdminOverview() {
             `)}
           </tbody>
         </table>
+        ${data.untethered && data.untethered.count > 0 && html`
+          <details style=${{marginTop:12,fontSize:12}}>
+            <summary style=${{cursor:"pointer",color:"var(--sub)"}}>登録のみ・未定着 ${data.untethered.count}人（うち学生${data.untethered.studentCount}人）— 記録もLINE連携もなし</summary>
+            <div style=${{marginTop:8,color:"var(--sub)",lineHeight:1.8}}>
+              ${data.untethered.names.map(n => (n.cohort ? "🎓" : "💼") + n.name).join(" / ")}
+            </div>
+          </details>
+        `}
       </div>
     </div>
   `;

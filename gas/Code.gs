@@ -2062,16 +2062,32 @@ function adminGetOverview(email) {
     const lastLogDate = logs.length ? logs.map(l => l.date).sort().pop() : null;
     const profile = profileByEmail.get(u.student_email);
     const status = statuses[u.student_email];
+    const lineLinked = !!String(u.line_user_id || "").trim();
+    // 「アクティブ」= 記録あり または LINE連携済み。どちらも無い＝登録だけの未定着。
+    // LINE未連携でも記録している人は消えないよう、記録の有無をORで見る
+    const active = logs.length > 0 || lineLinked;
     return {
       email: u.student_email,
       name: u.name,
       coachEmail: u.coach_email || "",
+      cohort: String(u.cohort || "").trim(),
+      lineLinked: lineLinked,
+      active: active,
       latestScore: reports[0] ? Number(reports[0].score) : null,
       statusScore: status ? status.score : 0,
       lastLogDate: lastLogDate,
       stripeTotalPaid: profile ? Number(profile.stripe_total_paid || 0) : 0
     };
   });
+
+  // 未定着（登録のみ）は別枠に集約し、メインの一覧・数字はアクティブな人だけで綺麗に見せる
+  const untetheredList = students.filter(s => !s.active);
+  const untethered = {
+    count: untetheredList.length,
+    studentCount: untetheredList.filter(s => s.cohort).length,
+    names: untetheredList.map(s => ({ name: s.name, cohort: s.cohort }))
+  };
+  const activeStudents = students.filter(s => s.active);
 
   const scored = students.filter(s => s.latestScore !== null);
   const avgScore = scored.length ? Math.round(scored.reduce((sum,s) => sum + s.latestScore, 0) / scored.length) : null;
@@ -2150,7 +2166,9 @@ function adminGetOverview(email) {
     coachCount: coaches.length,
     avgScore, onTrackRate, onTrackCount, scoredCount: scored.length,
     coachStats: coachStats,
-    students: students.sort((a,b) => b.statusScore - a.statusScore),
+    students: activeStudents.sort((a,b) => b.statusScore - a.statusScore),
+    activeCount: activeStudents.length,
+    untethered: untethered,
     ops: {
       segments: segStats,
       weeklyLogCount, weeklyLoggers,
