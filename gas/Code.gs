@@ -7216,12 +7216,44 @@ function dailyOpsHealthCheck(dryRun) {
     }
   });
 
-  // 活動量（当日の記録件数・記録した人数）と離脱（7日以上記録なしの継続ユーザー）
+  // 名前解決とセグメント（core=cohortなし / student=cohortあり）
+  const userByEmail = new Map(users.map(u => [u.student_email, u]));
+  const nameOf = em => { const u = userByEmail.get(em); return u ? (u.nickname || u.name || em) : em; };
+  const isStudent = em => { const u = userByEmail.get(em); return u && String(u.cohort || "").trim(); };
+  const tag = em => isStudent(em) ? "🎓" : "💼"; // 学生/コーチングを一目で
+
+  // 昨日のレポート（生成できた人のスコア・欠落した人の名前）
+  const reportByKey = new Map(allReports.map(r => [r.student_email + "|" + r.date, r]));
+  const generatedYesterday = [...loggedYesterday]
+    .filter(em => reportByKey.has(em + "|" + yesterday))
+    .map(em => ({ em, score: Number(reportByKey.get(em + "|" + yesterday).score) }))
+    .sort((a, b) => b.score - a.score);
+  const avgYesterday = generatedYesterday.length ? Math.round(generatedYesterday.reduce((s, x) => s + x.score, 0) / generatedYesterday.length) : null;
+
+  // 活動量（当日の記録件数・記録した人数）＋セグメント内訳＋誰が何ブロック記録したか
   const todayLogs = allLogs.filter(l => l.date === today && activeEmails.has(l.student_email));
-  const todayLoggers = new Set(todayLogs.map(l => l.student_email)).size;
+  const blocksByEmailToday = {};
+  todayLogs.forEach(l => { blocksByEmailToday[l.student_email] = (blocksByEmailToday[l.student_email] || 0) + 1; });
+  const todayLoggerEmails = Object.keys(blocksByEmailToday);
+  const todayLoggers = todayLoggerEmails.length;
+  const todayCore = todayLoggerEmails.filter(em => !isStudent(em)).length;
+  const todayStudent = todayLoggers - todayCore;
+  const todayLoggerList = todayLoggerEmails
+    .sort((a, b) => blocksByEmailToday[b] - blocksByEmailToday[a])
+    .map(em => tag(em) + nameOf(em) + " " + blocksByEmailToday[em] + "件");
+
+  // 離脱リスク（最終記録からの経過日数つき）。一度でも記録した継続ユーザーが対象
   const lastLogByEmail = {};
   allLogs.forEach(l => { const p = lastLogByEmail[l.student_email]; if (!p || l.date > p) lastLogByEmail[l.student_email] = l.date; });
-  const churnRisk = users.filter(u => lastLogByEmail[u.student_email] && lastLogByEmail[u.student_email] < d7).length;
+  const daysSince = ds => Math.floor((new Date(today + "T00:00:00+09:00") - new Date(ds + "T00:00:00+09:00")) / 86400000);
+  const churnList = users
+    .filter(u => lastLogByEmail[u.student_email] && lastLogByEmail[u.student_email] < d7)
+    .map(u => ({ em: u.student_email, days: daysSince(lastLogByEmail[u.student_email]) }))
+    .sort((a, b) => a.days - b.days);
+  const churnRisk = churnList.length;
+  // 未記録（一度も記録がない登録者）はファネル漏れとして別で数える
+  const neverLogged = users.filter(u => !lastLogByEmail[u.student_email]);
+  const neverLoggedStudent = neverLogged.filter(u => String(u.cohort || "").trim()).length;
 
   // 夜間処理の詰まり（再開トリガーが翌朝も残っている＝処理が完走していない兆候）
   const props = PropertiesService.getScriptProperties();
@@ -7245,15 +7277,32 @@ function dailyOpsHealthCheck(dryRun) {
   } catch (e) { sysLine = "確認失敗"; }
 
   const head = problems.length === 0 ? "✅ JIROKU 運営レポート（異常なし）" : "🚨 JIROKU 運営レポート（要確認）";
-  const lines = [
-    head,
-    today,
-    "",
-    "【昨日のレポート】記録 " + loggedYesterday.size + "人 → 生成 " + (loggedYesterday.size - missingYesterday.length) + "人" + (missingYesterday.length ? " / 欠落 " + missingYesterday.length + "人" : "（全員生成✓）"),
-    "【今日の記録】" + todayLogs.length + "件 / " + todayLoggers + "人",
-    "【離脱リスク】7日以上記録なし " + churnRisk + "人",
-    "【システム】" + sysLine + "（トリガー " + triggerCount + "/20）"
-  ];
+  const lines = [head, today + "（🎓学生 / 💼コーチング）", ""];
+
+  // ① 昨日のレポート
+  lines.push("📋 昨日のレポート（" + yesterday + "）");
+  lines.push("記録 " + loggedYesterday.size + "人 → 生成 " + generatedYesterday.length + "人" + (missingYesterday.length ? " / 欠落 " + missingYesterday.length + "人" : "（全員生成✓）") + (avgYesterday !== null ? " / 平均 " + avgYesterday + "点" : ""));
+  if (generatedYesterday.length) {
+    lines.push(generatedYesterday.slice(0, 20).map(x => tag(x.em) + nameOf(x.em) + " " + x.score).join(" / "));
+  }
+  if (missingYesterday.length) lines.push("⚠️ 欠落: " + missingYesterday.map(em => tag(em) + nameOf(em)).join(" / "));
+  lines.push("");
+
+  // ② JIROKU（今日の記録の動き）
+  lines.push("⏱ JIROKU 今日の記録（" + today + "）");
+  lines.push(todayLogs.length + "件 / " + todayLoggers + "人（💼" + todayCore + " ・ 🎓" + todayStudent + "）");
+  if (todayLoggerList.length) lines.push(todayLoggerList.slice(0, 25).join(" / "));
+  lines.push("");
+
+  // ③ 離脱リスク
+  lines.push("📉 離脱リスク");
+  lines.push("7日以上記録なし " + churnRisk + "人 / 一度も記録なし " + neverLogged.length + "人（うち🎓" + neverLoggedStudent + "）");
+  if (churnList.length) lines.push(churnList.slice(0, 15).map(x => tag(x.em) + nameOf(x.em) + " " + x.days + "日").join(" / "));
+  lines.push("");
+
+  // ④ システム
+  lines.push("🩺 システム: " + sysLine + "（トリガー " + triggerCount + "/20）");
+
   if (problems.length > 0) {
     lines.push("");
     lines.push("── 要対応 ──");
