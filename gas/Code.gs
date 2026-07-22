@@ -1105,7 +1105,35 @@ function getGameStatus(studentEmail) {
     { goal: user.goal3 || "", deadline: user.goal_deadline3 || "" },
   ].filter(g => g.goal);
   const streakFreeze = Number(user.streak_freeze || 0);
-  return { ok: true, data: { xp, level, xpInLevel, xpForNextLevel, streak, streakFreeze, badges, goals } };
+  // 週ペース設計用: 直近8週の「記録した日数（ユニーク日付）」を週(月曜始まり)ごとに返す。
+  // クライアントが本人の週目標と突き合わせて「今週●/N日」「週ストリーク」を算出する
+  const weekDayCounts = computeWeekLogDays(getFilteredRows("DailyLog", "student_email", studentEmail), 8);
+  return { ok: true, data: { xp, level, xpInLevel, xpForNextLevel, streak, streakFreeze, badges, goals, weekDayCounts, weekLogDays: (weekDayCounts[0] ? weekDayCounts[0].days : 0) } };
+}
+
+// 日付文字列(YYYY-MM-DD)の週の月曜日を返す（JST固定・UTC基準で計算しTZに依存しない）
+function mondayOf(ds) {
+  const d = new Date(String(ds).substring(0, 10) + "T00:00:00Z");
+  const day = d.getUTCDay();               // 0=日..6=土
+  d.setUTCDate(d.getUTCDate() + (day === 0 ? -6 : 1 - day));
+  return d.toISOString().substring(0, 10);
+}
+// 直近nWeeksの週(月曜始まり)ごとの「記録したユニーク日数」を新しい順で返す
+function computeWeekLogDays(logs, nWeeks) {
+  const byWeek = {};
+  logs.forEach(l => {
+    if (!l.date) return;
+    const w = mondayOf(l.date);
+    (byWeek[w] = byWeek[w] || {})[String(l.date).substring(0, 10)] = 1;
+  });
+  const out = [];
+  let curMon = mondayOf(formatDate(new Date()));
+  for (let i = 0; i < nWeeks; i++) {
+    out.push({ weekStart: curMon, days: byWeek[curMon] ? Object.keys(byWeek[curMon]).length : 0 });
+    const d = new Date(curMon + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() - 7);
+    curMon = d.toISOString().substring(0, 10);
+  }
+  return out;
 }
 
 // 直近7日間の記録量（ブロック数・活動日数）で全アクティブユーザーを順位付けする。

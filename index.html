@@ -933,6 +933,11 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
   };
   const [showGoalTimeEdit, setShowGoalTimeEdit] = useState(false);
   const [dailyGoalHours, setDailyGoalHours] = useState(getDailyGoalHours);
+  // 週の記録目標（自分のペース）。毎日=7 / 週5 / 週4 / 週3 / 週2。既定は週3。
+  // 「毎日じゃない＝サボり」ではなく「自分で決めたペースを守れたか」で評価するための土台
+  const [weeklyGoal, setWeeklyGoal] = useState(()=>Number(localStorage.getItem("jiroku_weekly_goal"))||3);
+  const [showWeeklyGoalEdit, setShowWeeklyGoalEdit] = useState(false);
+  const pickWeeklyGoal = (n)=>{ localStorage.setItem("jiroku_weekly_goal", String(n)); setWeeklyGoal(n); setShowWeeklyGoalEdit(false); };
   // 0.5〜6時間までは選択肢を並べるだけで済んだが、12時間まで広げると
   // 0.5刻みで24個にもなり選びにくいため、+/-で刻むステッパー形式にする
   const [pendingGoalHours, setPendingGoalHours] = useState(dailyGoalHours);
@@ -1152,6 +1157,43 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
             </div>
           </div>`;
       })()}
+      ${game&&game.weekDayCounts&&(()=>{
+        const wc=game.weekDayCounts;               // 新しい順（[0]=今週）
+        const thisWeek=wc[0]?wc[0].days:0;
+        const met=thisWeek>=weeklyGoal;
+        // 週ストリーク: 直近の「完了した週」から遡って、目標達成した週が連続する数。
+        // 今週すでに達成していれば+1（今週も達成としてカウント）
+        let streakW=0;
+        for(let i=1;i<wc.length;i++){ if(wc[i].days>=weeklyGoal) streakW++; else break; }
+        if(met) streakW+=1;
+        const pctW=Math.min(100,Math.round(thisWeek/weeklyGoal*100));
+        return html`
+          <div style=${{background:"rgba(255,255,255,0.15)",borderRadius:12,padding:"10px 14px",backdropFilter:"blur(4px)",marginTop:10}}>
+            <div style=${{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:7}}>
+              <div style=${{display:"flex",alignItems:"baseline",gap:8}}>
+                <span style=${{fontSize:13,fontWeight:700,color:"#fff"}}>今週のペース</span>
+                <button onClick=${()=>setShowWeeklyGoalEdit(true)}
+                  style=${{fontSize:10.5,color:"rgba(255,255,255,0.8)",background:"rgba(255,255,255,0.18)",border:"none",borderRadius:20,padding:"2px 8px",fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>
+                  目標 ${weeklyGoal===7?"毎日":"週"+weeklyGoal}日 ✎
+                </button>
+              </div>
+              <span style=${{fontSize:13,fontWeight:800,color:"#fff"}}>
+                <span style=${{fontSize:18}}>${thisWeek}</span><span style=${{fontSize:12,color:"rgba(255,255,255,0.7)"}}>/${weeklyGoal===7?7:weeklyGoal}日</span>
+                ${met&&html` <span style=${{fontSize:12}}>✅</span>`}
+              </span>
+            </div>
+            <div style=${{display:"flex",gap:4}}>
+              ${Array.from({length:weeklyGoal===7?7:weeklyGoal}).map((_,i)=>html`
+                <div key=${i} style=${{flex:1,height:6,borderRadius:99,background:i<thisWeek?"#fff":"rgba(255,255,255,0.25)"}}/>
+              `)}
+            </div>
+            <div style=${{fontSize:11,color:"rgba(255,255,255,0.7)",marginTop:6}}>
+              ${streakW>0
+                ? html`🎯 <b style=${{color:"#fff"}}>${streakW}週連続</b>で目標達成中${met?"":"（今週あと"+Math.max(0,weeklyGoal-thisWeek)+"日）"}`
+                : (met?"🎯 今週の目標を達成！":"今週あと"+Math.max(0,weeklyGoal-thisWeek)+"日で目標達成")}
+            </div>
+          </div>`;
+      })()}
       <div style=${{display:"flex",gap:8,marginTop:10}}>
         ${ranking&&html`
           <div style=${{flex:1,minWidth:0,display:"flex",alignItems:"center",gap:7,background:"rgba(255,255,255,0.15)",borderRadius:12,padding:"7px 12px",backdropFilter:"blur(4px)"}}>
@@ -1346,6 +1388,27 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
             })}
           </div>
           <button class="btn" onClick=${()=>pickDailyGoal(pendingGoalHours)}>この時間で決定する</button>
+        </div>
+      </div>
+    `, document.body)}
+
+    ${showWeeklyGoalEdit&&ReactDOM.createPortal(html`
+      <div style=${{position:"fixed",inset:0,height:"100dvh",background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"flex-end",zIndex:500}}
+        onClick=${e=>{if(e.target===e.currentTarget)setShowWeeklyGoalEdit(false);}}>
+        <div style=${{background:"var(--card)",borderRadius:"20px 20px 0 0",padding:"24px 20px calc(28px + env(safe-area-inset-bottom))",width:"100%",boxSizing:"border-box",maxHeight:"70dvh",overflowY:"auto"}}>
+          <div style=${{fontSize:18,fontWeight:800,marginBottom:4,color:"var(--text)"}}>週の記録ペース</div>
+          <div style=${{fontSize:13,color:"var(--sub)",marginBottom:18,lineHeight:1.6}}>週に何日、記録したいですか？毎日じゃなくて大丈夫。<b style=${{color:"var(--text)"}}>自分で決めたペースを守れたか</b>で続けていきましょう。</div>
+          <div style=${{display:"flex",flexDirection:"column",gap:8,marginBottom:8}}>
+            ${[[7,"毎日","しっかり習慣にしたい"],[5,"週5日","平日ペース"],[4,"週4日","無理なく多め"],[3,"週3日","ちょうどいい"],[2,"週2日","まずはゆるく"]].map(([n,label,desc])=>{
+              const on=weeklyGoal===n;
+              return html`<button key=${n} onClick=${()=>pickWeeklyGoal(n)}
+                style=${{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"13px 16px",borderRadius:12,border:`1.5px solid ${on?"var(--accent)":"var(--border)"}`,background:on?"var(--accent-l)":"transparent",cursor:"pointer",fontFamily:"inherit",textAlign:"left"}}>
+                <span><span style=${{fontSize:15,fontWeight:700,color:on?"var(--accent)":"var(--text)"}}>${label}</span>
+                  <span style=${{fontSize:12,color:"var(--sub)",marginLeft:8}}>${desc}</span></span>
+                ${on&&html`<span style=${{color:"var(--accent)",fontWeight:800}}>✓</span>`}
+              </button>`;
+            })}
+          </div>
         </div>
       </div>
     `, document.body)}
