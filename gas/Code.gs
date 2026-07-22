@@ -7273,6 +7273,27 @@ function dailyOpsHealthCheck(dryRun) {
   const neverLogged = users.filter(u => !lastLogByEmail[u.student_email]);
   const neverLoggedStudent = neverLogged.filter(u => String(u.cohort || "").trim()).length;
 
+  // 要フォロー（CRMと同じ基準）：一度でも記録した人のうち、3日以上停滞／スコア15点以上の下降／
+  // 直近レポートが50点未満、のいずれか。未記録の未定着層はここには入れない（別枠の離脱・ファネルで扱う）
+  const reportsByEmailDesc = {};
+  allReports.forEach(r => { (reportsByEmailDesc[r.student_email] = reportsByEmailDesc[r.student_email] || []).push(r); });
+  Object.values(reportsByEmailDesc).forEach(arr => arr.sort((a, b) => a.date > b.date ? -1 : 1));
+  const followup = [];
+  users.forEach(u => {
+    const last = lastLogByEmail[u.student_email];
+    if (!last) return; // 未記録は対象外
+    const ago = daysSince(last);
+    const reps = reportsByEmailDesc[u.student_email] || [];
+    const latest = reps[0] ? Number(reps[0].score) : null;
+    const prev = reps[1] ? Number(reps[1].score) : null;
+    let reason = null, sev = 0;
+    if (ago >= 3) { reason = ago + "日記録なし"; sev = 100 + ago; }
+    else if (prev !== null && latest !== null && prev - latest >= 15) { reason = "スコア下降 " + prev + "→" + latest; sev = 50; }
+    else if (latest !== null && latest < 50) { reason = "直近スコア " + latest + "点"; sev = 40; }
+    if (reason) followup.push({ em: u.student_email, reason: reason, sev: sev });
+  });
+  followup.sort((a, b) => b.sev - a.sev);
+
   // 夜間処理の詰まり（再開トリガーが翌朝も残っている＝処理が完走していない兆候）
   const props = PropertiesService.getScriptProperties();
   const stuckResume = props.getProperty("NIGHTLY_REPORT_RESUME_DATE");
@@ -7312,13 +7333,21 @@ function dailyOpsHealthCheck(dryRun) {
   if (todayLoggerList.length) lines.push(todayLoggerList.slice(0, 25).join(" / "));
   lines.push("");
 
-  // ③ 離脱リスク
-  lines.push("📉 離脱リスク");
-  lines.push("7日以上記録なし " + churnRisk + "人 / 一度も記録なし " + neverLogged.length + "人（うち🎓" + neverLoggedStudent + "）");
-  if (churnList.length) lines.push(churnList.slice(0, 15).map(x => tag(x.em) + nameOf(x.em) + " " + x.days + "日").join(" / "));
+  // ③ 要フォロー（コーチが今日声をかけるべき人）
+  lines.push("🔔 要フォロー " + followup.length + "人");
+  if (followup.length) {
+    followup.slice(0, 20).forEach(f => lines.push("・" + tag(f.em) + nameOf(f.em) + "（" + f.reason + "）"));
+    if (followup.length > 20) lines.push("…ほか" + (followup.length - 20) + "人");
+  } else {
+    lines.push("該当なし👍");
+  }
   lines.push("");
 
-  // ④ システム
+  // ④ 離脱リスク・ファネル（件数サマリ。名前は要フォローに集約済み）
+  lines.push("📉 離脱リスク: 7日以上記録なし " + churnRisk + "人 / 一度も記録なし " + neverLogged.length + "人（うち🎓" + neverLoggedStudent + "）");
+  lines.push("");
+
+  // ⑤ システム
   lines.push("🩺 システム: " + sysLine + "（トリガー " + triggerCount + "/20）");
 
   if (problems.length > 0) {
