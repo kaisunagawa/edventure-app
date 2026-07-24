@@ -1391,25 +1391,43 @@ const HIGH_SCORE_ACHIEVEMENT_THRESHOLD = 88;
 const HIGH_SCORE_MESSAGES = [
   "今日はとても絶好調でした🔥", "充実した一日を過ごせました🌟", "いい流れに乗れています✨",
   "今日は自分史上ベストな一日でした💪", "納得のいく一日を過ごせました😊", "自分の時間をしっかり使えました⏱️",
-  "今日はやりたいことに集中できました🎯", "手応えのある一日でした👏"
+  "今日はやりたいことに集中できました🎯", "手応えのある一日でした👏",
+  "今日は理想の過ごし方ができました🌈", "気持ちよく一日を締めくくれました🌙",
+  "やるべきことをやり切りました✅", "自分をしっかりコントロールできた一日💯"
 ];
 // 新しく使い始めた人・戻ってきた人・小さな節目を積極的に取り上げて、
 // フィードが上位常連だけに偏らないようにレパートリーを増やす
 const NEWCOMER_MESSAGES = [
   "はじめての記録を残しました🌱 新しい一歩！", "記録デビューしました🎉 これからが楽しみ",
-  "JIROKUで最初の一歩を踏み出しました🌱", "はじめての記録、おめでとうございます✨"
+  "JIROKUで最初の一歩を踏み出しました🌱", "はじめての記録、おめでとうございます✨",
+  "記録の習慣、今日からスタート🚀", "自分と向き合う一歩を踏み出しました🌱"
 ];
 const COMEBACK_MESSAGES = [
   "久しぶりに記録を再開しました🌿 おかえりなさい！", "またコツコツ再スタート🌱 いい流れ",
-  "しばらくぶりの記録、戻ってきました👏", "再開の一歩を踏み出しました🌿"
+  "しばらくぶりの記録、戻ってきました👏", "再開の一歩を踏み出しました🌿",
+  "ブランクを越えてまた歩き出しました🌿", "戻ってきた、それが一番大事👏"
 ];
 const pickMsg = (arr) => arr[Math.floor(Math.random() * arr.length)];
 function streakShareMessage(streak) {
   if (streak >= 100) return streak + "日連続記録を達成しました🏆 圧巻の継続力！";
   if (streak >= 30) return streak + "日連続を達成しました🔥 習慣になってきました";
   if (streak >= 14) return streak + "日連続で記録中🔥 いい調子！";
-  if (streak >= 7) return "1週間連続で記録できました🔥 素晴らしい継続";
+  if (streak >= 7) return streak + "日連続で記録できました🔥 素晴らしい継続";
   return streak + "日連続で記録できました🌟 その調子！";
+}
+// 数字を前面に出したシェア文（時間帯数・週の記録日数・フリーズ・タスク完了数）
+function dailyVolumeShareMessage(blocks) {
+  const tail = blocks >= 12 ? "圧巻の集中力🔥" : blocks >= 10 ? "よく動いた一日💪" : "集中の一日👏";
+  return "今日は" + blocks + "時間帯を記録しました📝 " + tail;
+}
+function weeklyDaysShareMessage(days) {
+  return "今週は" + days + "日記録しました📅 自分のペースを守れています";
+}
+function freezeShareMessage(streak) {
+  return streak + "日連続でストリークフリーズを獲得🧊 休んでも連続が守られます";
+}
+function taskDoneShareMessage(n) {
+  return "今日はタスクを" + n + "個やり切りました✅ 有言実行！";
 }
 
 // 達成シェア欄への投稿を共通化（show_in_communityがFALSEの生徒は投稿しない）。
@@ -3894,7 +3912,10 @@ function updateStreak(studentEmail) {
       let freezeIdx = headers.indexOf("streak_freeze");
       if (freezeIdx === -1) { freezeIdx = headers.length; sheet.getRange(1, freezeIdx + 1).setValue("streak_freeze"); }
       const freezes = freezeIdx < data[i].length ? Number(data[i][freezeIdx] || 0) : 0;
-      if (freezes < 2) sheet.getRange(i + 1, freezeIdx + 1).setValue(freezes + 1);
+      if (freezes < 2) {
+        sheet.getRange(i + 1, freezeIdx + 1).setValue(freezes + 1);
+        try { postAchievementMessage(studentEmail, freezeShareMessage(newStreak), { category: "freeze", cooldownDays: 5 }); } catch (e) {}
+      }
     }
     break;
   }
@@ -4024,6 +4045,13 @@ function nightlyReport() {
       if (!job.backfill) {
         sendReportLineMessage(user, report);
         notifyCoachOnReport(user, report);
+        // その日たくさん記録した人を、時間帯数（数字）でシェア欄に取り上げる
+        try {
+          const blocks = logs.length;
+          if ([6, 8, 10, 12, 15].some(m => blocks === m) || blocks >= 15) {
+            postAchievementMessage(user.student_email, dailyVolumeShareMessage(blocks), { category: "daily_volume", cooldownDays: 1 });
+          }
+        } catch (e) {}
       }
     } catch (err) { Logger.log(err); }
   }
