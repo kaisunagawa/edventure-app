@@ -859,6 +859,15 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
   const [taskEstimates, setTaskEstimates] = useState(()=>{
     try { return JSON.parse(localStorage.getItem("jiroku_task_estimates_"+formatDateStr(new Date()))||"{}"); } catch(e){ return {}; }
   });
+  // タスクの進捗状態（ボード用）。"todo"=予定 / "doing"=実行中 / "done"=完了。
+  // 未設定なら既存のchecked（完了フラグ）から導出する（後方互換）
+  const [taskStatus, setTaskStatus] = useState(()=>{
+    try { return JSON.parse(localStorage.getItem("jiroku_task_status_"+formatDateStr(new Date()))||"{}"); } catch(e){ return {}; }
+  });
+  const [dragTask, setDragTask] = useState(null); // PCのドラッグ中タスク
+  // 画面幅でボードのレイアウトを切替（PC=横3列Trello風ドラッグ / スマホ=縦積みタップ操作）
+  const [boardWide, setBoardWide] = useState(()=> typeof window!=="undefined" && window.innerWidth>=900);
+  useEffect(()=>{ const on=()=>setBoardWide(window.innerWidth>=900); window.addEventListener("resize",on); return ()=>window.removeEventListener("resize",on); },[]);
   // 今日いちばんやりたいこと（朝の宣言）。その日の最初の起動でモーダルを出し、
   // 宣言した内容をホームに固定表示して、夜のレポートで達成状況をフォローする
   const [intent, setIntent] = useState(()=>{
@@ -1086,6 +1095,28 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
     gasPostJson("saveTodayActions", {checked: JSON.stringify(next)}); // 他端末にも同期
   };
 
+  // ── タスクボード用ヘルパー ──
+  // 状態: "todo"=予定 / "doing"=実行中 / "done"=完了。未設定はchecked（完了フラグ）から導出
+  const statusOf = (task) => taskStatus[task] || (checked[task] ? "done" : "todo");
+  const setStatus = (task, status) => {
+    const next = {...taskStatus, [task]: status};
+    setTaskStatus(next);
+    try { localStorage.setItem("jiroku_task_status_"+todayKey, JSON.stringify(next)); } catch(e){}
+    // 完了状態は既存のchecked(today_actions)とも同期し、レポート・完了フォルダ等の互換を保つ
+    const nc = {...checked};
+    if(status==="done") nc[task]=true; else delete nc[task];
+    setChecked(nc);
+    localStorage.setItem("today_actions", JSON.stringify(nc));
+    gasPostJson("saveTodayActions", {checked: JSON.stringify(nc)});
+  };
+  // カードをタップ→タイマー画面へ。想定時間つきならその時間で、タイマー側が自動選択する。
+  // タイマーに送ったタスクは「実行中」に進める（着手の可視化）
+  const goToTimerWith = (task) => {
+    try { localStorage.setItem("jiroku_timer_pending_task", JSON.stringify({text:task, min:(taskEstimates[task]||null), date:todayKey})); } catch(e){}
+    if(statusOf(task)==="todo") setStatus(task, "doing");
+    onGoTimer && onGoTimer();
+  };
+
   // 現在のタスク(文字列配列)＋想定時間マップから、編集用の {text,min} 配列を作る
   const toEditRows = (arr) => arr.map(t=>({text:t, min:(taskEstimates[t]!=null?String(taskEstimates[t]):"")}));
   // 編集モーダルには「未完了のタスクだけ」を出す。完了済みは編集対象にしない
@@ -1136,6 +1167,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
   // 元の並び順を保ったまま、チェック状態でフォルダ分けする
   const incompleteItems = actionItems.filter(item=>!checked[item]);
   const completedItems = actionItems.filter(item=>checked[item]);
+  const doneCount = actionItems.filter(item=>statusOf(item)==="done").length;
 
   return html`<div style=${{paddingBottom:40}}>
 
@@ -1518,48 +1550,66 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
       `;
     })()}
 
-    <!-- Today's Actions（ステータスの上に表示） -->
+    <!-- タスクボード（予定/実行中/完了。PC=ドラッグ、スマホ=移動ボタン。カードタップでタイマー） -->
     <div style=${{margin:"0 16px 10px",background:"var(--card)",borderRadius:16,border:"1px solid var(--border)",overflow:"hidden"}}>
-      <div style=${{padding:"14px 16px",borderBottom:actionItems.length>0?"1px solid var(--border)":"none",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+      <div style=${{padding:"14px 16px",borderBottom:"1px solid var(--border)",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
         <div style=${{display:"flex",alignItems:"center",gap:8}}>
-          <div style=${{fontSize:12,fontWeight:700,color:"var(--text)"}}>今日のタスク</div>
+          <div style=${{fontSize:12,fontWeight:700,color:"var(--text)"}}>タスクボード</div>
           ${actionItems.length>0&&html`
-            <div style=${{fontSize:11,background:checkedCount===actionItems.length?"var(--accent)":"var(--bg)",color:checkedCount===actionItems.length?"#fff":"var(--sub)",padding:"2px 8px",borderRadius:20,fontWeight:600}}>
-              ${checkedCount}/${actionItems.length}
-            </div>
-          `}
+            <div style=${{fontSize:11,background:doneCount===actionItems.length?"var(--accent)":"var(--bg)",color:doneCount===actionItems.length?"#fff":"var(--sub)",padding:"2px 8px",borderRadius:20,fontWeight:600}}>
+              ${doneCount}/${actionItems.length}
+            </div>`}
         </div>
-        <button onClick=${openEdit} style=${{background:"none",border:"none",cursor:"pointer",color:"var(--accent)",fontSize:12,fontWeight:600,padding:"2px 6px"}}>編集</button>
+        <div style=${{display:"flex",alignItems:"center",gap:10}}>
+          <span style=${{fontSize:10.5,color:"var(--sub)"}}>${boardWide?"カードをドラッグで移動":"カードをタップで計測"}</span>
+          <button onClick=${openEdit} style=${{background:"none",border:"none",cursor:"pointer",color:"var(--accent)",fontSize:12,fontWeight:600,padding:"2px 6px"}}>編集</button>
+        </div>
       </div>
-      ${(()=>{
-        // 1タスク行の描画（未完了・完了で共通利用）
-        const row = (item, showBorder) => html`
-          <button key=${item} onClick=${()=>toggleCheck(item)}
-            style=${{display:"flex",alignItems:"flex-start",gap:12,width:"100%",background:checked[item]?"var(--bg)":"none",border:"none",padding:"13px 16px",cursor:"pointer",borderBottom:showBorder?"1px solid var(--border)":"none",textAlign:"left",fontFamily:"inherit",transition:"background .15s"}}>
-            <div style=${{width:20,height:20,borderRadius:6,border:`2px solid ${checked[item]?"var(--accent)":"var(--border)"}`,background:checked[item]?"var(--accent)":"transparent",flexShrink:0,marginTop:1,display:"flex",alignItems:"center",justifyContent:"center",transition:"all .15s"}}>
-              ${checked[item]&&html`<svg width="11" height="11" viewBox="0 0 10 10" fill="none"><path d="M2 5l2.5 2.5L8 3" stroke="white" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`}
-            </div>
-            <span style=${{flex:1,minWidth:0,fontSize:14,color:checked[item]?"var(--sub)":"var(--text)",textDecoration:checked[item]?"line-through":"none",lineHeight:1.6,transition:"color .15s"}}>${item}</span>
-            ${taskEstimates[item]>0&&html`<span style=${{flexShrink:0,fontSize:11,fontWeight:600,color:checked[item]?"var(--sub)":"var(--accent)",background:checked[item]?"var(--bg)":"var(--accent-l)",borderRadius:20,padding:"2px 8px",marginTop:1}}>⏱${taskEstimates[item]}分</span>`}
-          </button>`;
-        if(actionItems.length===0) return html`
-          <div style=${{padding:"16px",fontSize:13,color:"var(--sub)",lineHeight:1.7}}>
-            ${report?"タスクを取得中...":"「＋ タスクを追加」で今日やることを登録できます"}
+      ${actionItems.length===0
+        ? html`<div style=${{padding:"16px",fontSize:13,color:"var(--sub)",lineHeight:1.7}}>${report?"タスクを取得中...":"「＋ タスクを追加」で今日やることを登録できます"}</div>`
+        : (()=>{
+          const COLS=[["todo","予定","📋","var(--sub)"],["doing","実行中","🔥","var(--accent)"],["done","完了","✅","var(--green,#1D9E75)"]];
+          const order=["todo","doing","done"];
+          const moveStatus=(task,dir)=>{ const i=order.indexOf(statusOf(task)); const n=Math.max(0,Math.min(2,i+dir)); if(n!==i) setStatus(task,order[n]); };
+          const chip={fontSize:15,lineHeight:1,color:"var(--sub)",background:"var(--bg)",border:"1px solid var(--border)",borderRadius:8,width:28,height:24,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",justifyContent:"center"};
+          const card=(item)=>{
+            const st=statusOf(item);
+            return html`<div key=${item} draggable=${boardWide}
+              onDragStart=${boardWide?(()=>setDragTask(item)):undefined} onDragEnd=${boardWide?(()=>setDragTask(null)):undefined}
+              style=${{background:"var(--card)",border:`1px solid ${st==="doing"?"var(--accent)":"var(--border)"}`,borderRadius:10,padding:"10px 11px",marginBottom:8,cursor:boardWide?"grab":"default",boxShadow:dragTask===item?"0 4px 14px rgba(0,0,0,0.15)":"none",opacity:dragTask===item?0.5:1,transition:"box-shadow .15s"}}>
+              <div onClick=${()=>goToTimerWith(item)} style=${{cursor:"pointer",display:"flex",alignItems:"flex-start",gap:8}}>
+                <span style=${{flex:1,minWidth:0,fontSize:13.5,color:st==="done"?"var(--sub)":"var(--text)",textDecoration:st==="done"?"line-through":"none",lineHeight:1.5,overflowWrap:"anywhere"}}>${item}</span>
+                ${taskEstimates[item]>0&&html`<span style=${{flexShrink:0,fontSize:10.5,fontWeight:600,color:"var(--accent)",background:"var(--accent-l)",borderRadius:20,padding:"2px 7px"}}>⏱${taskEstimates[item]}分</span>`}
+              </div>
+              <div style=${{display:"flex",alignItems:"center",gap:6,marginTop:9}}>
+                <button onClick=${()=>goToTimerWith(item)} style=${{fontSize:11,fontWeight:700,color:"#fff",background:"var(--accent)",border:"none",borderRadius:8,padding:"5px 10px",cursor:"pointer",fontFamily:"inherit"}}>⏱ 測る</button>
+                <div style=${{marginLeft:"auto",display:"flex",gap:5}}>
+                  ${st!=="todo"&&html`<button title="左の列へ" onClick=${()=>moveStatus(item,-1)} style=${chip}>‹</button>`}
+                  ${st!=="done"&&html`<button title="右の列へ" onClick=${()=>moveStatus(item,1)} style=${chip}>›</button>`}
+                </div>
+              </div>
+            </div>`;
+          };
+          const column=([key,label,emoji,color])=>{
+            const items=actionItems.filter(t=>statusOf(t)===key);
+            return html`<div key=${key}
+              onDragOver=${boardWide?(e=>{e.preventDefault();}):undefined}
+              onDrop=${boardWide?(()=>{ if(dragTask){ setStatus(dragTask,key); setDragTask(null);} }):undefined}
+              style=${{flex:boardWide?"1":"none",minWidth:0,background:"var(--bg)",borderRadius:12,padding:"10px 10px 4px",border:boardWide&&dragTask?"1.5px dashed var(--border)":"1.5px solid transparent"}}>
+              <div style=${{display:"flex",alignItems:"center",gap:6,marginBottom:9,padding:"0 2px"}}>
+                <span style=${{fontSize:12}}>${emoji}</span>
+                <span style=${{fontSize:12,fontWeight:700,color:"var(--text)"}}>${label}</span>
+                <span style=${{fontSize:10.5,color:"var(--sub)",fontWeight:600,background:"var(--card)",borderRadius:20,padding:"1px 7px"}}>${items.length}</span>
+              </div>
+              ${items.length===0
+                ? html`<div style=${{fontSize:11,color:"var(--sub)",opacity:.7,padding:"6px 2px 10px"}}>${boardWide?"ここにドラッグ":"—"}</div>`
+                : items.map(card)}
+            </div>`;
+          };
+          return html`<div style=${{display:"flex",flexDirection:boardWide?"row":"column",gap:10,padding:"12px",alignItems:"stretch",overflowX:boardWide?"auto":"visible"}}>
+            ${COLS.map(column)}
           </div>`;
-        return html`
-          ${incompleteItems.length>0
-            ? incompleteItems.map((item,i)=>row(item, i<incompleteItems.length-1 || completedItems.length>0))
-            : html`<div style=${{padding:"14px 16px",fontSize:12.5,color:"var(--sub)",borderBottom:completedItems.length>0?"1px solid var(--border)":"none"}}>🎉 未完了のタスクはありません。おつかれさまです！</div>`}
-          ${completedItems.length>0&&html`
-            <button onClick=${()=>setShowDoneTasks(v=>!v)}
-              style=${{display:"flex",alignItems:"center",gap:8,width:"100%",background:"var(--bg)",border:"none",padding:"10px 16px",cursor:"pointer",fontFamily:"inherit",textAlign:"left",borderBottom:showDoneTasks?"1px solid var(--border)":"none"}}>
-              <span style=${{fontSize:11,color:"var(--accent)",transform:showDoneTasks?"rotate(90deg)":"none",transition:"transform .15s"}}>▶</span>
-              <span style=${{fontSize:12,fontWeight:700,color:"var(--sub)"}}>完了</span>
-              <span style=${{fontSize:11,color:"#fff",background:"var(--accent)",borderRadius:20,padding:"1px 8px",fontWeight:600}}>${completedItems.length}</span>
-            </button>
-            ${showDoneTasks && completedItems.map((item,i)=>row(item, i<completedItems.length-1))}
-          `}`;
-      })()}
+        })()}
       <button onClick=${openAddTask}
         style=${{display:"flex",alignItems:"center",justifyContent:"center",gap:6,width:"100%",background:"none",border:"none",borderTop:"1px solid var(--border)",padding:"13px 16px",cursor:"pointer",color:"var(--accent)",fontSize:13,fontWeight:600,fontFamily:"inherit"}}>
         <span style=${{fontSize:16,lineHeight:1}}>＋</span> タスクを追加
@@ -3038,7 +3088,20 @@ function TimerScreen({onToast, isActive}) {
     return [];
   };
   const [todayActionOptions, setTodayActionOptions] = useState(readTodayActions);
-  useEffect(()=>{ if(isActive) setTodayActionOptions(readTodayActions()); },[isActive]);
+  useEffect(()=>{
+    if(!isActive) return;
+    setTodayActionOptions(readTodayActions());
+    // ボードのカードから「⏱測る」で遷移してきた場合、そのタスクを自動でセットして開始する
+    try{
+      const p = JSON.parse(localStorage.getItem("jiroku_timer_pending_task")||"null");
+      localStorage.removeItem("jiroku_timer_pending_task");
+      if(p && p.date===formatDateStr(new Date()) && p.text && !isRunning){
+        setTask(p.text);
+        const m = Number(p.min);
+        if(m>0){ setSelectedMin(m); setTimeLeft(m*60); }
+      }
+    }catch(e){}
+  },[isActive]);
 
   // 状態をlocalStorageに保存
   useEffect(()=>{
