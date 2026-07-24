@@ -937,6 +937,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
   // 「毎日じゃない＝サボり」ではなく「自分で決めたペースを守れたか」で評価するための土台
   const [weeklyGoal, setWeeklyGoal] = useState(()=>Number(localStorage.getItem("jiroku_weekly_goal"))||3);
   const [showWeeklyGoalEdit, setShowWeeklyGoalEdit] = useState(false);
+  const [showDoneTasks, setShowDoneTasks] = useState(false); // 完了タスク（フォルダ）の開閉
   const pickWeeklyGoal = (n)=>{ localStorage.setItem("jiroku_weekly_goal", String(n)); setWeeklyGoal(n); setShowWeeklyGoalEdit(false); };
   // 0.5〜6時間までは選択肢を並べるだけで済んだが、12時間まで広げると
   // 0.5刻みで24個にもなり選びにくいため、+/-で刻むステッパー形式にする
@@ -1119,6 +1120,10 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
   const hour = new Date().getHours();
   const greeting = hour < 12 ? "おはようございます" : hour < 18 ? "こんにちは" : "お疲れ様です";
   const checkedCount = actionItems.filter(item=>checked[item]).length;
+  // タスクを「未完了」「完了」で分けて表示する（完了は下に折りたたみ）。
+  // 元の並び順を保ったまま、チェック状態でフォルダ分けする
+  const incompleteItems = actionItems.filter(item=>!checked[item]);
+  const completedItems = actionItems.filter(item=>checked[item]);
 
   return html`<div style=${{paddingBottom:40}}>
 
@@ -1514,20 +1519,35 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
         </div>
         <button onClick=${openEdit} style=${{background:"none",border:"none",cursor:"pointer",color:"var(--accent)",fontSize:12,fontWeight:600,padding:"2px 6px"}}>編集</button>
       </div>
-      ${actionItems.length>0 ? actionItems.map((item,i)=>html`
-        <button key=${item} onClick=${()=>toggleCheck(item)}
-          style=${{display:"flex",alignItems:"flex-start",gap:12,width:"100%",background:checked[item]?"var(--bg)":"none",border:"none",padding:"13px 16px",cursor:"pointer",borderBottom:i<actionItems.length-1?"1px solid var(--border)":"none",textAlign:"left",fontFamily:"inherit",transition:"background .15s"}}>
-          <div style=${{width:20,height:20,borderRadius:6,border:`2px solid ${checked[item]?"var(--accent)":"var(--border)"}`,background:checked[item]?"var(--accent)":"transparent",flexShrink:0,marginTop:1,display:"flex",alignItems:"center",justifyContent:"center",transition:"all .15s"}}>
-            ${checked[item]&&html`<svg width="11" height="11" viewBox="0 0 10 10" fill="none"><path d="M2 5l2.5 2.5L8 3" stroke="white" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`}
-          </div>
-          <span style=${{flex:1,minWidth:0,fontSize:14,color:checked[item]?"var(--sub)":"var(--text)",textDecoration:checked[item]?"line-through":"none",lineHeight:1.6,transition:"color .15s"}}>${item}</span>
-          ${taskEstimates[item]>0&&html`<span style=${{flexShrink:0,fontSize:11,fontWeight:600,color:"var(--accent)",background:"var(--accent-l)",borderRadius:20,padding:"2px 8px",marginTop:1}}>⏱${taskEstimates[item]}分</span>`}
-        </button>
-      `) : html`
-        <div style=${{padding:"16px",fontSize:13,color:"var(--sub)",lineHeight:1.7}}>
-          ${report?"タスクを取得中...":"記録を入力すると毎晩AIがタスクを提案します"}
-        </div>
-      `}
+      ${(()=>{
+        // 1タスク行の描画（未完了・完了で共通利用）
+        const row = (item, showBorder) => html`
+          <button key=${item} onClick=${()=>toggleCheck(item)}
+            style=${{display:"flex",alignItems:"flex-start",gap:12,width:"100%",background:checked[item]?"var(--bg)":"none",border:"none",padding:"13px 16px",cursor:"pointer",borderBottom:showBorder?"1px solid var(--border)":"none",textAlign:"left",fontFamily:"inherit",transition:"background .15s"}}>
+            <div style=${{width:20,height:20,borderRadius:6,border:`2px solid ${checked[item]?"var(--accent)":"var(--border)"}`,background:checked[item]?"var(--accent)":"transparent",flexShrink:0,marginTop:1,display:"flex",alignItems:"center",justifyContent:"center",transition:"all .15s"}}>
+              ${checked[item]&&html`<svg width="11" height="11" viewBox="0 0 10 10" fill="none"><path d="M2 5l2.5 2.5L8 3" stroke="white" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`}
+            </div>
+            <span style=${{flex:1,minWidth:0,fontSize:14,color:checked[item]?"var(--sub)":"var(--text)",textDecoration:checked[item]?"line-through":"none",lineHeight:1.6,transition:"color .15s"}}>${item}</span>
+            ${taskEstimates[item]>0&&html`<span style=${{flexShrink:0,fontSize:11,fontWeight:600,color:checked[item]?"var(--sub)":"var(--accent)",background:checked[item]?"var(--bg)":"var(--accent-l)",borderRadius:20,padding:"2px 8px",marginTop:1}}>⏱${taskEstimates[item]}分</span>`}
+          </button>`;
+        if(actionItems.length===0) return html`
+          <div style=${{padding:"16px",fontSize:13,color:"var(--sub)",lineHeight:1.7}}>
+            ${report?"タスクを取得中...":"「＋ タスクを追加」で今日やることを登録できます"}
+          </div>`;
+        return html`
+          ${incompleteItems.length>0
+            ? incompleteItems.map((item,i)=>row(item, i<incompleteItems.length-1 || completedItems.length>0))
+            : html`<div style=${{padding:"14px 16px",fontSize:12.5,color:"var(--sub)",borderBottom:completedItems.length>0?"1px solid var(--border)":"none"}}>🎉 未完了のタスクはありません。おつかれさまです！</div>`}
+          ${completedItems.length>0&&html`
+            <button onClick=${()=>setShowDoneTasks(v=>!v)}
+              style=${{display:"flex",alignItems:"center",gap:8,width:"100%",background:"var(--bg)",border:"none",padding:"10px 16px",cursor:"pointer",fontFamily:"inherit",textAlign:"left",borderBottom:showDoneTasks?"1px solid var(--border)":"none"}}>
+              <span style=${{fontSize:11,color:"var(--accent)",transform:showDoneTasks?"rotate(90deg)":"none",transition:"transform .15s"}}>▶</span>
+              <span style=${{fontSize:12,fontWeight:700,color:"var(--sub)"}}>完了</span>
+              <span style=${{fontSize:11,color:"#fff",background:"var(--accent)",borderRadius:20,padding:"1px 8px",fontWeight:600}}>${completedItems.length}</span>
+            </button>
+            ${showDoneTasks && completedItems.map((item,i)=>row(item, i<completedItems.length-1))}
+          `}`;
+      })()}
       <button onClick=${openAddTask}
         style=${{display:"flex",alignItems:"center",justifyContent:"center",gap:6,width:"100%",background:"none",border:"none",borderTop:"1px solid var(--border)",padding:"13px 16px",cursor:"pointer",color:"var(--accent)",fontSize:13,fontWeight:600,fontFamily:"inherit"}}>
         <span style=${{fontSize:16,lineHeight:1}}>＋</span> タスクを追加
@@ -5085,7 +5105,7 @@ if('serviceWorker' in navigator){
   async function checkAppUpdate(){
     try{
       const now = Date.now();
-      if (now - lastVerCheck < 10*60*1000) return;
+      if (now - lastVerCheck < 5*60*1000) return;
       lastVerCheck = now;
       const res = await fetch("index.html", { cache: "no-store" });
       if (!res.ok) return;
@@ -5096,11 +5116,17 @@ if('serviceWorker' in navigator){
     }catch(e){}
   }
   checkAppUpdate(); // 起動時に基準ハッシュを取得
-  document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState !== 'visible') return;
-    navigator.serviceWorker.getRegistration().then(reg => { if (reg) reg.update(); });
+  const runUpdateCheck = () => {
+    navigator.serviceWorker.getRegistration().then(reg => { if (reg) reg.update(); }).catch(()=>{});
     checkAppUpdate();
-  });
+  };
+  // スマホはアプリ切替でvisibilitychangeが頻繁に発火し更新されるが、PCでタブを
+  // 開きっぱなしにするとvisibilitychangeが起きず、更新が止まって「PCだけ古い」状態に
+  // なっていた。①タブ/ウィンドウが可視化された時 ②別ウィンドウから戻って再フォーカス
+  // した時（PCの主要ケース）③定期チェック、の3経路で新バージョンを取りに行く
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') runUpdateCheck(); });
+  window.addEventListener('focus', runUpdateCheck);
+  setInterval(() => { if (document.visibilityState === 'visible') runUpdateCheck(); }, 5*60*1000);
 }
 </script>
 </body>
