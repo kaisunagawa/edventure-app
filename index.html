@@ -672,6 +672,21 @@ async function upsertCalendarEvent(dateStr, key, startISO, endISO, title, exactO
     }
   }
 }
+// その日の「記録(logs)」と「カレンダーに書き込み済みか(端末の対応表)」を突き合わせ、
+// まだカレンダーに書けていない記録を書き込む（＝取りこぼしの遡り補完）。
+// 独り言で作った過去の記録や、書き込み前にタブを閉じた分などをここで拾う。
+async function reconcileCalendarForDate(dateStr, logs){
+  if(!localStorage.getItem("cal_linked") || !Array.isArray(logs) || logs.length===0) return;
+  let map={}; try{ map=JSON.parse(localStorage.getItem(CAL_EVT_LS+dateStr)||"{}"); }catch(e){}
+  for(const l of logs){
+    const tb=String(l.time_block||""); if(!tb || map[tb]) continue; // 既に書き込み済みはスキップ
+    const [s,e]=tb.split("-");
+    const stt=new Date(dateStr+"T"+String(s).slice(0,5)+":00"); if(isNaN(stt)) continue;
+    const ett=e?new Date(dateStr+"T"+String(e).slice(0,5)+":00"):null;
+    const endDt=(ett&&ett>stt)?ett:new Date(stt.getTime()+3600000);
+    await upsertCalendarEvent(dateStr, tb, stt.toISOString(), endDt.toISOString(), l.task||"記録", null);
+  }
+}
 // 取得戦略: メモリ → 端末キャッシュ → 本人認証で取得 → サーバーの共有キャッシュ
 // 一度どこかで取得できれば端末とサーバーの両方に残るので、以後は認証なしで自動表示される。
 // ホーム・記録・日記など複数画面が同時にマウントされており、同じ日付を
@@ -1047,7 +1062,11 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
         if(game.data.goals?.length){ localStorage.setItem("jiroku_goals",JSON.stringify(game.data.goals)); onGoalSaved(game.data.goals); }
       }
       if(sched.ok) setSchedule(sched.data);
-      if(logs.ok) setTodayLogs(logs.data);
+      if(logs.ok){
+        setTodayLogs(logs.data);
+        // 今日の記録のうち、まだカレンダーに書けていないものを補完（独り言等の取りこぼし対策）
+        if(localStorage.getItem("cal_linked")) reconcileCalendarForDate(formatDateStr(new Date()), logs.data);
+      }
       if(rank.ok){
         // 順位変動（trend）はサーバー側で「前回のランキング開催日の順位」と比較して
         // 算出される。以前は端末内で前回閲覧時と比較していたため、ホームを開くたびに
@@ -1062,6 +1081,17 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
     if(localStorage.getItem("cal_linked")){
       // 前回書き込めずにキューに溜まった記録があれば、この機会にまとめて再送する
       flushCalendarQueue();
+      // 過去の記録の取りこぼしを1日1回だけ遡って補完する（独り言など、以前カレンダーに
+      // 書けていなかった分をここで拾う）。直近14日分を裏でゆっくり処理する
+      (async ()=>{
+        const today = formatDateStr(new Date());
+        if(localStorage.getItem("cal_backfill_done")===today) return;
+        for(let k=1;k<=14;k++){
+          const d = addDays(today,-k);
+          try{ const r = await gasApi("getLogs",{date:d}); if(r&&r.ok) await reconcileCalendarForDate(d, r.data); }catch(e){}
+        }
+        localStorage.setItem("cal_backfill_done", today);
+      })();
       fetchCalendarEvents(formatDateStr(new Date())).then(evs=>{
         if(evs&&evs.length) setSchedule(evs.map(e=>({time:e.time,title:e.title,sub:e.sub})));
       });
@@ -1630,19 +1660,46 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
     <div style=${{margin:"0 16px 10px",background:"var(--card)",borderRadius:16,border:"1px solid var(--border)",overflow:"hidden"}}>
       <div style=${{padding:"14px 16px",borderBottom:"1px solid var(--border)",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
         <div style=${{display:"flex",alignItems:"center",gap:8}}>
-          <div style=${{fontSize:12,fontWeight:700,color:"var(--text)"}}>タスクボード</div>
+          <div style=${{fontSize:12,fontWeight:700,color:"var(--text)"}}>${boardWide?"タスクボード":"今日のタスク"}</div>
           ${actionItems.length>0&&html`
             <div style=${{fontSize:11,background:doneCount===actionItems.length?"var(--accent)":"var(--bg)",color:doneCount===actionItems.length?"#fff":"var(--sub)",padding:"2px 8px",borderRadius:20,fontWeight:600}}>
               ${doneCount}/${actionItems.length}
             </div>`}
         </div>
         <div style=${{display:"flex",alignItems:"center",gap:10}}>
-          <span style=${{fontSize:10.5,color:"var(--sub)"}}>${boardWide?"カードをドラッグで移動":"カードをタップで計測"}</span>
+          ${boardWide&&html`<span style=${{fontSize:10.5,color:"var(--sub)"}}>カードをドラッグで移動</span>`}
           <button onClick=${openEdit} style=${{background:"none",border:"none",cursor:"pointer",color:"var(--accent)",fontSize:12,fontWeight:600,padding:"2px 6px"}}>編集</button>
         </div>
       </div>
       ${actionItems.length===0
         ? html`<div style=${{padding:"16px",fontSize:13,color:"var(--sub)",lineHeight:1.7}}>${report?"タスクを取得中...":"「＋ タスクを追加」で今日やることを登録できます"}</div>`
+        : !boardWide
+        ? (()=>{
+          // モバイルは元のシンプルなチェックリスト表示（未完了→完了フォルダ）。
+          // 行タップで完了トグル。時間つきは横に⏱表示
+          const row = (item, showBorder) => html`
+            <button key=${item} onClick=${()=>toggleCheck(item)}
+              style=${{display:"flex",alignItems:"flex-start",gap:12,width:"100%",background:checked[item]?"var(--bg)":"none",border:"none",padding:"13px 16px",cursor:"pointer",borderBottom:showBorder?"1px solid var(--border)":"none",textAlign:"left",fontFamily:"inherit",transition:"background .15s"}}>
+              <div style=${{width:20,height:20,borderRadius:6,border:`2px solid ${checked[item]?"var(--accent)":"var(--border)"}`,background:checked[item]?"var(--accent)":"transparent",flexShrink:0,marginTop:1,display:"flex",alignItems:"center",justifyContent:"center",transition:"all .15s"}}>
+                ${checked[item]&&html`<svg width="11" height="11" viewBox="0 0 10 10" fill="none"><path d="M2 5l2.5 2.5L8 3" stroke="white" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`}
+              </div>
+              <span style=${{flex:1,minWidth:0,fontSize:14,color:checked[item]?"var(--sub)":"var(--text)",textDecoration:checked[item]?"line-through":"none",lineHeight:1.6}}>${item}</span>
+              ${taskEstimates[item]>0&&html`<span style=${{flexShrink:0,fontSize:11,fontWeight:600,color:checked[item]?"var(--sub)":"var(--accent)",background:checked[item]?"var(--bg)":"var(--accent-l)",borderRadius:20,padding:"2px 8px",marginTop:1}}>⏱${taskEstimates[item]}分</span>`}
+            </button>`;
+          return html`
+            ${incompleteItems.length>0
+              ? incompleteItems.map((item,i)=>row(item, i<incompleteItems.length-1 || completedItems.length>0))
+              : html`<div style=${{padding:"14px 16px",fontSize:12.5,color:"var(--sub)",borderBottom:completedItems.length>0?"1px solid var(--border)":"none"}}>🎉 未完了のタスクはありません。おつかれさまです！</div>`}
+            ${completedItems.length>0&&html`
+              <button onClick=${()=>setShowDoneTasks(v=>!v)}
+                style=${{display:"flex",alignItems:"center",gap:8,width:"100%",background:"var(--bg)",border:"none",padding:"10px 16px",cursor:"pointer",fontFamily:"inherit",textAlign:"left",borderBottom:showDoneTasks?"1px solid var(--border)":"none"}}>
+                <span style=${{fontSize:11,color:"var(--accent)",transform:showDoneTasks?"rotate(90deg)":"none",transition:"transform .15s"}}>▶</span>
+                <span style=${{fontSize:12,fontWeight:700,color:"var(--sub)"}}>完了</span>
+                <span style=${{fontSize:11,color:"#fff",background:"var(--accent)",borderRadius:20,padding:"1px 8px",fontWeight:600}}>${completedItems.length}</span>
+              </button>
+              ${showDoneTasks && completedItems.map((item,i)=>row(item, i<completedItems.length-1))}
+            `}`;
+        })()
         : (()=>{
           const COLS=[["todo","予定","📋","var(--sub)"],["doing","実行中","🔥","var(--accent)"],["done","完了","✅","var(--green,#1D9E75)"]];
           const order=["todo","doing","done"];
