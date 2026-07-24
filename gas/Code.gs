@@ -4549,6 +4549,10 @@ ${tasksText}
       Logger.log("generateWorkReport: " + lastErr);
     }
   }
+  // 利用上限到達はコードでは回復できないため、ユーザーに分かる言葉で返す
+  if (/usage limits|rate_limit|credit balance/i.test(String(lastErr))) {
+    return { ok: false, error: "AIの利用上限に達しているため、いま生成できません。管理者が上限を更新するまでお待ちください（記録自体は保存されています）。" };
+  }
   return { ok: false, error: "AI生成に失敗しました。少し待ってからもう一度お試しください。（詳細: " + String(lastErr).slice(0, 160) + "）" };
 }
 
