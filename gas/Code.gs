@@ -62,6 +62,20 @@ function doGet(e) {
     let result;
     switch (action) {
       case "getUser":      result = getUser(studentEmail); break;
+      case "adminBackfillCalendar": {
+        // オーナー本人の過去days日分のDailyLogを、Kaiのカレンダーへ遡って書き込む
+        // （サーバー方式に切替える前の取りこぼしを補完。writeRecord…側で重複防止）
+        if (studentEmail !== adminEmail()) { result = { ok: false, error: "not owner" }; break; }
+        var _days = Math.min(Number(e.parameter.days) || 3, 31);
+        var _today = formatDate(new Date());
+        var _dates = {};
+        for (var _k = 0; _k <= _days; _k++) { var _dd = new Date(); _dd.setDate(_dd.getDate() - _k); _dates[formatDate(_dd)] = 1; }
+        var _logs = getFilteredRows("DailyLog", "student_email", studentEmail).filter(function (l) { return _dates[l.date]; });
+        var _cnt = 0;
+        _logs.forEach(function (l) { if (l.time_block && String(l.task || "").trim()) { writeRecordToOwnerCalendar(studentEmail, l.date, String(l.time_block), l.task); _cnt++; } });
+        result = { ok: true, processed: _cnt };
+        break;
+      }
       case "registerUser": result = registerUser(studentEmail, e.parameter); break;
       case "getStreak":    result = getStreak(studentEmail); break;
       case "getGameStatus": result = getGameStatus(studentEmail); break;
@@ -813,8 +827,16 @@ function writeRecordToOwnerCalendar(studentEmail, dateStr, timeBlock, task) {
     var existing = cal.getEvents(start, new Date(start.getTime() + 60000)).filter(function (ev) {
       return ev.getTag("jirokuRecord") === "1" && Math.abs(ev.getStartTime().getTime() - start.getTime()) < 1000;
     });
-    if (existing.length) { existing[0].setTitle(title); try { existing[0].setTime(start, end); } catch (e) {} }
-    else { var ev = cal.createEvent(title, start, end); try { ev.setTag("jirokuRecord", "1"); } catch (e) {} }
+    if (existing.length) {
+      existing[0].setTitle(title);
+      try { existing[0].setTime(start, end); } catch (e) {}
+      try { existing[0].setColor(CalendarApp.EventColor.GRAY); } catch (e) {}
+    } else {
+      var ev = cal.createEvent(title, start, end);
+      try { ev.setTag("jirokuRecord", "1"); } catch (e) {}
+      // クライアント書き込みと同じ灰色(graphite)に揃える（既定の青のままにしない）
+      try { ev.setColor(CalendarApp.EventColor.GRAY); } catch (e) {}
+    }
   } catch (err) { Logger.log("writeRecordToOwnerCalendar: " + err); }
 }
 
