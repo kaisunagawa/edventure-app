@@ -4495,20 +4495,33 @@ ${tasksText}
 - 記録が趣味・私用（例: ゲーム、昼食）と明確に分かるものは業務報告からは省く（勤務時間の計算にも含めない）
 - 出力は報告書本文のみ。前置き・解説・コードブロック記号は不要`;
 
-  const res = UrlFetchApp.fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
-    payload: JSON.stringify({ model: "claude-sonnet-5", max_tokens: 1500, messages: [{ role: "user", content: prompt }] }),
-    muteHttpExceptions: true
-  });
-  const result = JSON.parse(res.getContentText());
-  // Sonnet 5はcontent先頭にthinkingブロックが入ることがあるため、textブロックを探して取り出す
-  const textBlock = (result.content || []).find(c => c && c.type === "text" && typeof c.text === "string");
-  if (!textBlock) {
-    Logger.log("generateWorkReport: 予期しない応答 " + res.getContentText().slice(0, 500));
-    return { ok: false, error: "AI生成に失敗しました。少し待ってからもう一度お試しください。" };
+  // モデルを順に試す（1つ目が過負荷・権限・レート制限などで失敗しても、別モデルで
+  // 自動フォールバックして必ず生成を試みる）。失敗の実体はログに残し、最終失敗時は
+  // 原因の要約もエラー文に含めて、次回すぐ診断できるようにする
+  const MODELS = ["claude-sonnet-5", "claude-haiku-4-5-20251001"];
+  let lastErr = "";
+  for (let mi = 0; mi < MODELS.length; mi++) {
+    try {
+      const res = UrlFetchApp.fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
+        payload: JSON.stringify({ model: MODELS[mi], max_tokens: 1500, messages: [{ role: "user", content: prompt }] }),
+        muteHttpExceptions: true
+      });
+      const code = res.getResponseCode();
+      const bodyText = res.getContentText();
+      const result = JSON.parse(bodyText);
+      // thinkingブロックが先頭に入るモデルもあるため、textブロックを探して取り出す
+      const textBlock = (result.content || []).find(c => c && c.type === "text" && typeof c.text === "string");
+      if (textBlock) return { ok: true, data: { text: textBlock.text.trim() } };
+      lastErr = MODELS[mi] + " HTTP" + code + " " + bodyText.slice(0, 200);
+      Logger.log("generateWorkReport: " + lastErr);
+    } catch (e) {
+      lastErr = MODELS[mi] + " exception: " + e;
+      Logger.log("generateWorkReport: " + lastErr);
+    }
   }
-  return { ok: true, data: { text: textBlock.text.trim() } };
+  return { ok: false, error: "AI生成に失敗しました。少し待ってからもう一度お試しください。（詳細: " + String(lastErr).slice(0, 160) + "）" };
 }
 
 function generateReportWithClaude(studentEmail, studentName, logs) {
