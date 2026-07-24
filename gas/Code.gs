@@ -63,29 +63,8 @@ function doGet(e) {
     switch (action) {
       case "getUser":      result = getUser(studentEmail); break;
       case "adminDedupeCalendar": {
-        // Kaiのカレンダーから、JIROKU記録イベント(✔️/✅始まり or タグ付き)の重複を掃除する。
-        // 「開始時刻(分)＋タイトル」が同じものを1件だけ残して削除。通常の予定には触らない
         if (studentEmail !== adminEmail()) { result = { ok: false, error: "not owner" }; break; }
-        var _u2 = getFilteredRows("Users", "student_email", studentEmail)[0];
-        if (!_u2 || !_u2.google_calendar_id) { result = { ok: false, error: "no calendar id" }; break; }
-        var _cal2 = CalendarApp.getCalendarById(_u2.google_calendar_id);
-        if (!_cal2) { result = { ok: false, error: "calendar not accessible" }; break; }
-        var _days2 = Math.min(Number(e.parameter.days) || 7, 31);
-        var _from = new Date(); _from.setDate(_from.getDate() - _days2); _from.setHours(0, 0, 0, 0);
-        var _to = new Date(); _to.setDate(_to.getDate() + 1); _to.setHours(0, 0, 0, 0);
-        var _evs = _cal2.getEvents(_from, _to).filter(function (ev) {
-          if (ev.getTag("jirokuRecord") === "1") return true;
-          var t = String(ev.getTitle() || "");
-          return t.indexOf("✔️") === 0 || t.indexOf("✅") === 0;
-        });
-        var _seen = {}, _removed = 0;
-        _evs.forEach(function (ev) {
-          // 分単位の開始時刻＋タイトルで同一判定（秒ズレの揺れを吸収）
-          var key = Math.floor(ev.getStartTime().getTime() / 60000) + "|" + String(ev.getTitle() || "").trim();
-          if (_seen[key]) { try { ev.deleteEvent(); _removed++; } catch (err) {} }
-          else { _seen[key] = true; try { ev.setColor(CalendarApp.EventColor.GRAY); } catch (err) {} }
-        });
-        result = { ok: true, scanned: _evs.length, removed: _removed };
+        result = dedupeOwnerJirokuEvents(Math.min(Number(e.parameter.days) || 7, 31));
         break;
       }
       case "adminBackfillCalendar": {
@@ -874,6 +853,51 @@ function writeRecordToOwnerCalendar(studentEmail, dateStr, timeBlock, task) {
       try { ev.setColor(CalendarApp.EventColor.GRAY); } catch (e) {}
     }
   } catch (err) { Logger.log("writeRecordToOwnerCalendar: " + err); }
+}
+
+// KaiのアクセスできるJIROKU記録イベント(✔️/✅始まり or タグ付き)の重複を、
+// 「全カレンダー横断」で掃除する。旧方式(ブラウザ)はログイン中アカウントのメイン
+// カレンダーへ、新方式(サーバー)はUsersシートのgoogle_calendar_idへ書いており、
+// これが別カレンダーだと同じ記録が2つのカレンダーに跨って重複する。
+// 同一判定＝「開始時刻(分)＋タイトル」。残す優先度は google_calendar_id 内 ＞ その他。
+// 通常の予定(✔️/✅なし・タグなし)には一切触らない
+function dedupeOwnerJirokuEvents(days) {
+  var admin = adminEmail();
+  var u = getFilteredRows("Users", "student_email", admin)[0];
+  var primaryCalId = (u && u.google_calendar_id) ? u.google_calendar_id : null;
+  var from = new Date(); from.setDate(from.getDate() - (days || 7)); from.setHours(0, 0, 0, 0);
+  var to = new Date(); to.setDate(to.getDate() + 1); to.setHours(0, 0, 0, 0);
+  var isJiroku = function (ev) {
+    if (ev.getTag("jirokuRecord") === "1") return true;
+    var t = String(ev.getTitle() || "");
+    return t.indexOf("✔️") === 0 || t.indexOf("✅") === 0;
+  };
+  // 対象カレンダー: 登録カレンダー＋Kaiが所有する全カレンダー（重複回避のためIDで一意化）
+  var cals = [], seenCal = {};
+  var pushCal = function (c) { if (c && !seenCal[c.getId()]) { seenCal[c.getId()] = true; cals.push(c); } };
+  if (primaryCalId) { try { pushCal(CalendarApp.getCalendarById(primaryCalId)); } catch (e) {} }
+  // 所有だけでなく購読中の全カレンダーを見る（旧ブラウザ方式が別アカウントの
+  // カレンダーへ書いていた場合、その片割れは所有外にあるため）。編集権限が無い
+  // カレンダーのdeleteEventは例外になるだけで実害はない
+  try { CalendarApp.getAllCalendars().forEach(pushCal); } catch (e) {}
+  try { pushCal(CalendarApp.getDefaultCalendar()); } catch (e) {}
+
+  var seen = {}, removed = 0, scanned = 0, perCal = [];
+  // 残す優先度: google_calendar_id のカレンダーを先に走査（そこにある方を残す）
+  cals.sort(function (a, b) { return (a.getId() === primaryCalId ? -1 : 0) - (b.getId() === primaryCalId ? -1 : 0); });
+  cals.forEach(function (cal) {
+    var evs;
+    try { evs = cal.getEvents(from, to).filter(isJiroku); } catch (e) { return; }
+    scanned += evs.length;
+    var rem = 0;
+    evs.forEach(function (ev) {
+      var key = Math.floor(ev.getStartTime().getTime() / 60000) + "|" + String(ev.getTitle() || "").trim();
+      if (seen[key]) { try { ev.deleteEvent(); removed++; rem++; } catch (err) {} }
+      else { seen[key] = true; try { ev.setColor(CalendarApp.EventColor.GRAY); } catch (err) {} }
+    });
+    perCal.push(cal.getName() + ":" + evs.length + "件/削除" + rem);
+  });
+  return { ok: true, scanned: scanned, removed: removed, calendars: perCal };
 }
 
 function saveLog(studentEmail, body) {
@@ -7530,6 +7554,14 @@ function dailyOpsHealthCheck(dryRun) {
   const stuckResume = props.getProperty("NIGHTLY_REPORT_RESUME_DATE");
   const triggerCount = ScriptApp.getProjectTriggers().length;
 
+  // カレンダーの重複を毎朝自動で掃除する（どの経路で重複が生まれても翌朝には消える）。
+  // 失敗してもレポート本体は止めない
+  let dedupeNote = "";
+  try {
+    const dd = dedupeOwnerJirokuEvents(2);
+    if (dd && dd.removed > 0) dedupeNote = "🧹 カレンダー重複を" + dd.removed + "件掃除";
+  } catch (e) { Logger.log("auto dedupe error: " + e); }
+
   const problems = [];
   if (missingYesterday.length > 0) problems.push("⚠️ 昨日のレポート欠落 " + missingYesterday.length + "件（記録したのに未生成）");
   if (missing7 > 0) problems.push("⚠️ 直近7日の欠落 合計" + missing7 + "件");
@@ -7579,7 +7611,7 @@ function dailyOpsHealthCheck(dryRun) {
   lines.push("");
 
   // ⑤ システム
-  lines.push("🩺 システム: " + sysLine + "（トリガー " + triggerCount + "/20）");
+  lines.push("🩺 システム: " + sysLine + "（トリガー " + triggerCount + "/20）" + (dedupeNote ? " / " + dedupeNote : ""));
 
   if (problems.length > 0) {
     lines.push("");
