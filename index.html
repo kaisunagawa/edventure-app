@@ -1088,30 +1088,40 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
 
   // 現在のタスク(文字列配列)＋想定時間マップから、編集用の {text,min} 配列を作る
   const toEditRows = (arr) => arr.map(t=>({text:t, min:(taskEstimates[t]!=null?String(taskEstimates[t]):"")}));
+  // 編集モーダルには「未完了のタスクだけ」を出す。完了済みは編集対象にしない
+  // （完了フォルダにそのまま残す）。保存時に完了タスクは保持してマージする
   const openEdit = () => {
-    setEditItems(actionItems.length===0 ? [{text:"",min:""}] : toEditRows(actionItems));
+    const incomplete = actionItems.filter(t=>!checked[t]);
+    setEditItems(incomplete.length===0 ? [{text:"",min:""}] : toEditRows(incomplete));
     setEditMode(true);
   };
-  // 「＋ タスクを追加」用。今のタスクに空欄を1つ足した状態で編集モーダルを開き、すぐ入力できる
+  // 「＋ タスクを追加」用。未完了タスクに空欄を1つ足した状態で編集モーダルを開き、すぐ入力できる
   const openAddTask = () => {
-    setEditItems([...toEditRows(actionItems), {text:"",min:""}]);
+    setEditItems([...toEditRows(actionItems.filter(t=>!checked[t])), {text:"",min:""}]);
     setEditMode(true);
   };
   const saveEdit = () => {
     const rows = editItems.map(r=>({text:String(r.text||"").trim(), min:r.min})).filter(r=>r.text.length>0);
-    const filtered = rows.map(r=>r.text);
-    // 想定時間マップを作り直す（数値として妥当な分だけ保持）
+    const editedTexts = rows.map(r=>r.text);
+    // 完了済みタスクは編集画面に出していないので、ここで保持してマージする（未完了→完了の順）
+    const completed = actionItems.filter(t=>checked[t] && !editedTexts.includes(t));
+    const finalList = [...editedTexts, ...completed];
+    // 想定時間マップを作り直す（編集分＋完了分の既存値を維持）
     const est = {};
     rows.forEach(r=>{ const m=Math.round(Number(r.min)); if(m>0 && m<=600) est[r.text]=m; });
+    completed.forEach(c=>{ if(taskEstimates[c]>0) est[c]=taskEstimates[c]; });
     setTaskEstimates(est);
     try { localStorage.setItem("jiroku_task_estimates_"+todayKey, JSON.stringify(est)); }catch(e){}
+    // 完了タスクのチェック状態は保持する
+    const newChecked = {};
+    completed.forEach(c=>{ newChecked[c]=true; });
+    setChecked(newChecked);
+    localStorage.setItem("today_actions", JSON.stringify(newChecked));
     // 空で保存したらAIアクションに戻す
-    if(filtered.length===0){ setCustomActions(null); localStorage.removeItem("jiroku_custom_actions_"+todayKey); }
-    else { setCustomActions(filtered); localStorage.setItem("jiroku_custom_actions_"+todayKey, JSON.stringify(filtered)); }
-    setChecked({});
-    localStorage.removeItem("today_actions");
-    // 他端末にも同期（空=AIアクションに戻す。チェックもリセット）
-    gasPostJson("saveTodayActions", {actions: filtered.length===0?"":JSON.stringify(filtered), checked:"{}"});
+    if(finalList.length===0){ setCustomActions(null); localStorage.removeItem("jiroku_custom_actions_"+todayKey); }
+    else { setCustomActions(finalList); localStorage.setItem("jiroku_custom_actions_"+todayKey, JSON.stringify(finalList)); }
+    // 他端末にも同期
+    gasPostJson("saveTodayActions", {actions: finalList.length===0?"":JSON.stringify(finalList), checked: JSON.stringify(newChecked)});
     setEditMode(false);
   };
 
