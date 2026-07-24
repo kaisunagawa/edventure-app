@@ -5056,6 +5056,22 @@ function QuickLogSheet({onClose,onToast}){
       }
       if(r.xp_gained){ msg+=` +${r.xp_gained}XP`; if(r.level_up)msg+=` Lv.${r.level}！`; }
       onToast(msg);
+      // 独り言で作った記録も、フォーム/タイマーと同様にGoogleカレンダーへ書き戻す。
+      // （以前は独り言だけカレンダー書き込みが漏れており、音声・独り言の記録が
+      //  カレンダーに反映されない原因になっていた）。savedAll=保存された各レコード。
+      try{
+        if(localStorage.getItem("cal_linked") && Array.isArray(r.savedAll)){
+          const dateStr = formatDateStr(new Date());
+          r.savedAll.forEach(rec=>{
+            const tb = String(rec.time_block||""); if(!tb) return;
+            const [startHM, endHM] = tb.split("-");
+            const stt = new Date(dateStr+"T"+startHM.slice(0,5)+":00"); if(isNaN(stt)) return;
+            const ett = endHM ? new Date(dateStr+"T"+endHM.slice(0,5)+":00") : null;
+            const endDt = (ett && ett>stt) ? ett : new Date(stt.getTime()+3600000);
+            upsertCalendarEvent(dateStr, tb, stt.toISOString(), endDt.toISOString(), rec.task||"記録", null);
+          });
+        }
+      }catch(e){}
       onClose();
     } else {
       // 失敗時はテキストを消さず、モーダルも閉じないので、そのまま再送信できる
