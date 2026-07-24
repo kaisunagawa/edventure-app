@@ -551,6 +551,38 @@ function cleanupGcalLS(){
 // カレンダー未連携・書き込み権限が未許可（再連携前）の場合は静かに何もしない。
 // 記録の保存自体はGAS側で完了済みなので、ここで失敗しても記録には影響しない
 const CAL_EVT_LS = "jiroku_cal_evt_";
+// カレンダー書き込みの永続キュー。通信エラー・トークン一時失効・タブが閉じられた等で
+// 最終的に書き込めなかった記録をここに退避し、次回起動時などにまとめて再送する。
+// これで「JIROKUには記録があるのにカレンダーに反映されない」取りこぼしを無くす
+const CAL_QUEUE_LS = "jiroku_cal_queue";
+function readCalQueue(){ try{ return JSON.parse(localStorage.getItem(CAL_QUEUE_LS)||"[]"); }catch(e){ return []; } }
+function writeCalQueue(q){ try{ localStorage.setItem(CAL_QUEUE_LS, JSON.stringify(q.slice(-200))); }catch(e){} }
+function enqueueCalWrite(item){
+  const q = readCalQueue().filter(x=>!(x.dateStr===item.dateStr && x.key===item.key)); // 同じ枠は最新で上書き
+  q.push({...item, ts: Date.now()});
+  writeCalQueue(q);
+}
+function dequeueCalWrite(dateStr, key){
+  writeCalQueue(readCalQueue().filter(x=>!(x.dateStr===dateStr && x.key===key)));
+}
+// キューに溜まった書き込みを順に再送する。トークンが取れなければ何もしない（次の機会に再試行）
+let _calFlushing = false;
+async function flushCalendarQueue(){
+  if(_calFlushing) return;
+  if(!localStorage.getItem("cal_linked")) return;
+  const q = readCalQueue();
+  if(q.length===0) return;
+  const token = await getCalendarToken(false);
+  if(!token) return; // トークン無しなら今回は見送り（キューは保持）
+  _calFlushing = true;
+  try{
+    for(const it of q.slice()){
+      // upsertCalendarEvent側が成功時にdequeue、失敗時に再enqueueするので、ここでは呼ぶだけ
+      await upsertCalendarEvent(it.dateStr, it.key, it.startISO, it.endISO, it.title, it.exactOriginalEventId||null, true);
+    }
+  }catch(e){}
+  _calFlushing = false;
+}
 // 実際にやったこと（JIROKUが書き込む/更新する予定）は色を統一し、予定していただけの
 // 予定と見分けられるようにする（8 = Graphite、目立たない灰色。✅マークで判別できるため
 // 色自体は主張しすぎないものにする）
@@ -565,7 +597,8 @@ async function upsertCalendarEvent(dateStr, key, startISO, endISO, title, exactO
     if(!token) {
       if(!isRetry) console.warn("[JIROKU calendar] token取得失敗、1秒後に再試行", {dateStr, key, title});
       if(!isRetry) return setTimeout(()=>upsertCalendarEvent(dateStr, key, startISO, endISO, title, exactOriginalEventId, true), 1000);
-      console.error("[JIROKU calendar] token取得に再試行しても失敗", {dateStr, key, title});
+      console.error("[JIROKU calendar] token取得に再試行しても失敗→キューに退避", {dateStr, key, title});
+      enqueueCalWrite({dateStr, key, startISO, endISO, title, exactOriginalEventId});
       return;
     }
     let map = {};
@@ -594,6 +627,7 @@ async function upsertCalendarEvent(dateStr, key, startISO, endISO, title, exactO
       if(r0.ok){
         map[key] = exactOriginalEventId;
         try{ localStorage.setItem(CAL_EVT_LS+dateStr, JSON.stringify(map)); }catch{}
+        dequeueCalWrite(dateStr, key);
         return;
       }
       // 更新に失敗した場合は下の通常フローで新規作成にフォールバックする
@@ -601,7 +635,7 @@ async function upsertCalendarEvent(dateStr, key, startISO, endISO, title, exactO
 
     if(map[key]){
       const r = await fetch(base+"/"+encodeURIComponent(map[key]), { method:"PATCH", headers, body });
-      if(r.ok) return;
+      if(r.ok){ dequeueCalWrite(dateStr, key); return; }
       // カレンダー側で手動削除されていた場合(404/410)だけ作り直す。それ以外の失敗は
       // 一時的な通信エラーの可能性があるため、1回だけ再試行してから諦める
       if(r.status!==404 && r.status!==410){
@@ -609,7 +643,8 @@ async function upsertCalendarEvent(dateStr, key, startISO, endISO, title, exactO
           console.warn("[JIROKU calendar] 更新失敗、1秒後に再試行", {dateStr, key, title, status:r.status});
           setTimeout(()=>upsertCalendarEvent(dateStr, key, startISO, endISO, title, exactOriginalEventId, true), 1000);
         } else {
-          console.error("[JIROKU calendar] 更新に再試行しても失敗", {dateStr, key, title, status:r.status});
+          console.error("[JIROKU calendar] 更新に再試行しても失敗→キューに退避", {dateStr, key, title, status:r.status});
+          enqueueCalWrite({dateStr, key, startISO, endISO, title, exactOriginalEventId});
         }
         return;
       }
@@ -619,18 +654,21 @@ async function upsertCalendarEvent(dateStr, key, startISO, endISO, title, exactO
       const ev = await r2.json();
       map[key] = ev.id;
       try{ localStorage.setItem(CAL_EVT_LS+dateStr, JSON.stringify(map)); }catch{}
+      dequeueCalWrite(dateStr, key);
     } else if(!isRetry){
       console.warn("[JIROKU calendar] 新規作成失敗、1秒後に再試行", {dateStr, key, title, status:r2.status});
       setTimeout(()=>upsertCalendarEvent(dateStr, key, startISO, endISO, title, exactOriginalEventId, true), 1000);
     } else {
-      console.error("[JIROKU calendar] 新規作成に再試行しても失敗", {dateStr, key, title, status:r2.status});
+      console.error("[JIROKU calendar] 新規作成に再試行しても失敗→キューに退避", {dateStr, key, title, status:r2.status});
+      enqueueCalWrite({dateStr, key, startISO, endISO, title, exactOriginalEventId});
     }
   }catch(e){
     if(!isRetry){
       console.warn("[JIROKU calendar] 書き込み中に例外、1秒後に再試行", {dateStr, key, title, error:String(e)});
       setTimeout(()=>upsertCalendarEvent(dateStr, key, startISO, endISO, title, exactOriginalEventId, true), 1000);
     } else {
-      console.error("[JIROKU calendar] 再試行しても例外", {dateStr, key, title, error:String(e)});
+      console.error("[JIROKU calendar] 再試行しても例外→キューに退避", {dateStr, key, title, error:String(e)});
+      enqueueCalWrite({dateStr, key, startISO, endISO, title, exactOriginalEventId});
     }
   }
 }
@@ -1022,6 +1060,8 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
 
     // カレンダー連携済みなら本人権限で直接取得（GAS経由はスクリプト所有者しか読めないためのフォールバック）
     if(localStorage.getItem("cal_linked")){
+      // 前回書き込めずにキューに溜まった記録があれば、この機会にまとめて再送する
+      flushCalendarQueue();
       fetchCalendarEvents(formatDateStr(new Date())).then(evs=>{
         if(evs&&evs.length) setSchedule(evs.map(e=>({time:e.time,title:e.title,sub:e.sub})));
       });
