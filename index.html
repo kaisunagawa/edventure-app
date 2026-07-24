@@ -216,9 +216,11 @@
     /* ── Log rows ── */
     .log-row { display: flex; align-items: flex-start; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--border); }
     .log-row:last-child { border-bottom: none; }
+    .log-row > div:last-child { flex: 1; min-width: 0; }
     .log-time { font-size: 11px; font-weight: 600; color: var(--sub); min-width: 44px; padding-top: 2px; flex-shrink: 0; }
-    .log-task { font-size: 14px; font-weight: 500; color: var(--text); }
-    .log-meta { font-size: 12px; color: var(--sub); margin-top: 2px; display: flex; align-items: center; gap: 4px; }
+    .log-task { font-size: 14px; font-weight: 500; color: var(--text); overflow-wrap: anywhere; word-break: break-word; }
+    .log-meta { font-size: 12px; color: var(--sub); margin-top: 2px; display: flex; align-items: flex-start; gap: 4px; flex-wrap: wrap; overflow-wrap: anywhere; word-break: break-word; }
+    .log-meta .dot { flex-shrink: 0; margin-top: 5px; }
     .dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
 
     /* ── Chat ── */
@@ -2145,7 +2147,10 @@ function LogScreen({onToast, isActive}) {
             <label class="form-lbl" style=${{marginBottom:0}}>メモ（必須）</label>
             <span style=${{fontSize:10.5,color:"var(--sub)",whiteSpace:"nowrap"}}>うまくできたか・感じたこと・改善点</span>
           </div>
-          <textarea class="txa" style=${{marginTop:6}} placeholder="うまくいった点、感じたこと、次はこうしたい、など" value=${memo} onInput=${e=>setMemo(e.target.value)} />
+          <textarea class="txa" style=${{marginTop:6,maxHeight:280,overflowY:"auto"}}
+            placeholder="うまくいった点、感じたこと、次はこうしたい、など" value=${memo}
+            onInput=${e=>{setMemo(e.target.value);e.target.style.height="auto";e.target.style.height=Math.min(e.target.scrollHeight,280)+"px";}}
+            ref=${el=>{if(el){el.style.height="auto";el.style.height=Math.min(el.scrollHeight,280)+"px";}}} />
         </div>
         ${(()=>{
           const isEditing = recorded.has(block);
@@ -2984,6 +2989,17 @@ function TimerScreen({onToast, isActive}) {
 
   const [breakMin]       = useState(getBreak);
   const [selectedMin, setSelectedMin] = useState(saved?.selectedMin ?? defaultMin);
+  // 休憩の入れ方: 25分以下の短い集中は休憩なし。25分を超えたら休憩を挟む
+  // （45分→10分、60分超→15分）。休憩0＝そのまま次の集中へ戻す
+  const breakForFocus = (min) => min <= 25 ? 0 : (min <= 45 ? 10 : 15);
+  const [activeBreakMin, setActiveBreakMin] = useState(0);
+  // 集中セッション後に「休憩へ入る／休憩なしで集中に戻す」を切り替える
+  const goToBreakOrReset = () => {
+    const bm = breakForFocus(selectedMin);
+    setStartTime(null);
+    if(bm > 0){ setActiveBreakMin(bm); setMode("break"); setTimeLeft(bm*60); }
+    else { setMode("focus"); setTimeLeft(selectedMin*60); }
+  };
   const [timeLeft, setTimeLeft]       = useState(saved?.timeLeft ?? defaultMin*60);
   const [isRunning, setIsRunning]     = useState(saved?.isRunning ?? false);
   const [mode, setMode]               = useState(saved?.mode ?? "focus");
@@ -3194,13 +3210,13 @@ function TimerScreen({onToast, isActive}) {
     // （同じ時間帯キーを使うので、手動記録側で作ったイベントがあれば実測時刻に更新される）
     upsertCalendarEvent(formatDateStr(st), timeBlock, st.toISOString(), endDt.toISOString(), calTitle);
     setSaving(false); setShowModal(false); setLogMemo(""); setTask(""); setSessionResult(null);
-    setMode("break"); setTimeLeft(breakMin*60); setStartTime(null);
+    goToBreakOrReset();
   };
-  const skipLog = () => { setShowModal(false); setTask(""); setSessionResult(null); setMode("break"); setTimeLeft(breakMin*60); setStartTime(null); };
+  const skipLog = () => { setShowModal(false); setTask(""); setSessionResult(null); goToBreakOrReset(); };
 
   const mins = Math.floor(timeLeft/60);
   const secs = timeLeft%60;
-  const totalSec = (mode==="focus"?selectedMin:breakMin)*60;
+  const totalSec = (mode==="focus"?selectedMin:(activeBreakMin||breakMin))*60;
   const pct = Math.max(0,Math.min(100,((totalSec-timeLeft)/totalSec)*100));
   const r=90, circ=2*Math.PI*r, offset=circ*(1-pct/100);
   const accentColor = mode==="break"?"var(--green)":"var(--accent)";
@@ -3264,6 +3280,11 @@ function TimerScreen({onToast, isActive}) {
           <label class="form-lbl">何に集中しますか？（任意）</label>
           <input class="inp" placeholder="例：資料作成、家事、勉強など" value=${task}
             onInput=${e=>setTask(e.target.value)} disabled=${isRunning}/>
+          <!-- 計測中でも書けるメモ。ここに書いた内容は終了後の記録メモに引き継がれる -->
+          <label class="form-lbl" style=${{marginTop:12}}>メモ（計測中も書けます・任意）</label>
+          <textarea class="inp" placeholder="気づいたこと・やったことをここにメモ" value=${logMemo}
+            onInput=${e=>setLogMemo(e.target.value)}
+            style=${{minHeight:isRunning?96:64,resize:"vertical",lineHeight:1.6,fontFamily:"inherit"}}/>
         </div>
       `}
 
