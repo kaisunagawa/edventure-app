@@ -3870,8 +3870,12 @@ function hourlyReminder() {
       : -99;
     const hoursWithoutLog = hour - lastLogHour;
 
-    // 6時間以上記録がない場合はコーチメッセージ付き
-    if (hoursWithoutLog >= 6) {
+    // 6時間以上記録がない場合はコーチメッセージ付き。
+    // 【コスト対策】AI生成は「朝(9〜11時)・夕(17〜19時)の窓」かつ「1人あたり6時間に1回」
+    // だけに制限する（以前は毎時×全員でAIを呼び、アプリ内最大のクレジット消費源だった）。
+    // それ以外の時間帯は下の定型文ローテーションが送られる
+    const aiWindow = (hour >= 9 && hour <= 11) || (hour >= 17 && hour <= 19);
+    if (hoursWithoutLog >= 6 && aiWindow && !aiCapExceeded("hourlyAi", user.student_email, 1)) {
       const apiKey = PropertiesService.getScriptProperties().getProperty("CLAUDE_API_KEY");
       if (apiKey) {
         try {
@@ -3921,8 +3925,25 @@ ${EMOJI_STYLE}
         } catch(e) { Logger.log("hourlyCoach error: " + e); }
       }
     }
-    notifyUserTimeSlot(user, "⏱ 記録タイム", timeBlock + " の記録タイム！",
-      "⏱ " + timeBlock + " の記録タイム！\n📝 " + APP_URL + "#quick");
+    // 定型文ローテーション（AIなし・コストゼロ）。時間帯×日付で文面を回して単調さを避け、
+    // 記録済みかどうかでトーンを変える
+    const NUDGE_FRESH = [ // 今日まだ記録が少ない/直近が空いている人へ
+      "いまの時間、何してた？ひとことだけ記録しよ📝",
+      timeBlock + " の記録タイム！サクッといこう⏱",
+      "1分だけ。さっきまでのこと、残しておこう✍️",
+      "あとで思い出すの大変だから、今のうちに記録📝",
+      "ここまでの時間、ひとことでOK🎙",
+      "記録タイム！声でつぶやくだけでもOK🎙"
+    ];
+    const NUDGE_DONE = [ // 今日すでに記録が進んでいる人へ
+      "いいペース！この時間の分も残しておこう📝",
+      "続いてるね👏 いまの時間もサクッと記録",
+      "今日の記録、積み上がってる。この調子で⏱",
+      "あと1件だけ足しておこう✍️"
+    ];
+    const pool = todayLogs.length >= 3 ? NUDGE_DONE : NUDGE_FRESH;
+    const pick = pool[(hour + new Date().getDate()) % pool.length];
+    notifyUserTimeSlot(user, "⏱ 記録タイム", pick, pick + "\n📝 " + APP_URL + "#quick");
   });
 }
 
