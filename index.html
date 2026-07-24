@@ -1046,45 +1046,80 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
     if(cachedRanking) { try { setRanking(JSON.parse(cachedRanking)); } catch(e){} }
     if(cachedStatus) { try { setStatusSummary(JSON.parse(cachedStatus)); } catch(e){} }
 
-    // 週次ふりかえり: 今週のまとめが出ていて未記入なら、ホームに記入カードを出す
-    gasApi("getWeeklySummary").then(r=>{
-      if(r.ok && r.data){
-        setWeekly(r.data);
-        if(r.data.reflection) setWeekReflection(r.data.reflection);
-        if(r.data.nextIntention) setWeekIntention(r.data.nextIntention);
+    // ホームに必要なデータの適用処理（統合API・従来APIのどちらから来ても同じ形で受ける）
+    const todayStr = formatDateStr(new Date());
+    const applyHome = (d)=>{
+      if(d.report){ setReport(d.report); localStorage.setItem("cache_report", JSON.stringify(d.report)); }
+      if(d.game){
+        setGame(d.game);
+        localStorage.setItem("cache_gameStatus", JSON.stringify(d.game));
+        if(d.game.goals?.length){ localStorage.setItem("jiroku_goals",JSON.stringify(d.game.goals)); onGoalSaved(d.game.goals); }
       }
-    });
-
-    // 並列フェッチ
-    Promise.all([
-      gasApi("getReport"),
-      gasApi("getGameStatus"),
-      gasApi("getSchedule"),
-      gasApi("getLogs"),
-      gasApi("getRanking"),
-      gasApi("getStatusSummary"),
-    ]).then(([rep, game, sched, logs, rank, status])=>{
-      if(rep.ok){ setReport(rep.data); localStorage.setItem("cache_report", JSON.stringify(rep.data)); }
-      if(game.ok){
-        setGame(game.data);
-        localStorage.setItem("cache_gameStatus", JSON.stringify(game.data));
-        if(game.data.goals?.length){ localStorage.setItem("jiroku_goals",JSON.stringify(game.data.goals)); onGoalSaved(game.data.goals); }
-      }
-      if(sched.ok) setSchedule(sched.data);
-      if(logs.ok){
-        setTodayLogs(logs.data);
+      if(d.schedule) setSchedule(d.schedule);
+      if(d.logs){
+        setTodayLogs(d.logs);
         // 今日の記録のうち、まだカレンダーに書けていないものを補完（独り言等の取りこぼし対策）
-        if(localStorage.getItem("cal_linked")) reconcileCalendarForDate(formatDateStr(new Date()), logs.data);
+        if(localStorage.getItem("cal_linked")) reconcileCalendarForDate(todayStr, d.logs);
       }
-      if(rank.ok){
-        // 順位変動（trend）はサーバー側で「前回のランキング開催日の順位」と比較して
-        // 算出される。以前は端末内で前回閲覧時と比較していたため、ホームを開くたびに
-        // 基準が上書きされて常に「変わらず」になる不具合があった
-        setRanking(rank.data);
-        localStorage.setItem("cache_ranking", JSON.stringify(rank.data));
+      if(d.ranking){
+        // 順位変動（trend）はサーバー側で「前回のランキング開催日の順位」と比較して算出される
+        setRanking(d.ranking);
+        localStorage.setItem("cache_ranking", JSON.stringify(d.ranking));
       }
-      if(status.ok && status.data){ setStatusSummary(status.data); localStorage.setItem("cache_status", JSON.stringify(status.data)); }
-    });
+      if(d.status){ setStatusSummary(d.status); localStorage.setItem("cache_status", JSON.stringify(d.status)); }
+      if(d.weekly){
+        setWeekly(d.weekly);
+        if(d.weekly.reflection) setWeekReflection(d.weekly.reflection);
+        if(d.weekly.nextIntention) setWeekIntention(d.weekly.nextIntention);
+      }
+      // 今日のアクションの端末間同期
+      if(d.todayActions){
+        if(d.todayActions.actions !== null && localStorage.getItem("jiroku_custom_actions_"+todayStr) === null){
+          setCustomActions(d.todayActions.actions);
+          localStorage.setItem("jiroku_custom_actions_"+todayStr, JSON.stringify(d.todayActions.actions));
+        }
+        if(d.todayActions.checked && Object.keys(d.todayActions.checked).length > 0){
+          setChecked(prev=>{
+            const merged = {...d.todayActions.checked, ...prev};
+            localStorage.setItem("today_actions", JSON.stringify(merged));
+            return merged;
+          });
+        }
+      }
+      // 今日いちばんやりたいこと（サーバーを正として同期。未宣言なら朝〜夕方だけモーダル）
+      try {
+        const localIntent = JSON.parse(localStorage.getItem("jiroku_intent")||"null");
+        const hasToday = localIntent && localIntent.date === todayStr;
+        const skipped = localStorage.getItem("jiroku_intent_skip") === todayStr;
+        if(d.intent && d.intent.intent){
+          const next = {date:todayStr, intent:d.intent.intent, done:d.intent.done, hours:d.intent.hours};
+          localStorage.setItem("jiroku_intent", JSON.stringify(next));
+          setIntent(next);
+        } else if(!hasToday && !skipped){
+          const h = new Date().getHours();
+          if(h >= 6 && h < 18){ setIntentEditMode(false); setShowIntentModal(true); }
+        }
+      } catch(e){}
+    };
+
+    // 統合API1本で取得（9本の並列リクエストがGASの同時実行制限で順番待ちになり
+    // 遅かったため）。失敗時のみ従来の個別APIにフォールバックする
+    const legacyFetch = ()=>{
+      gasApi("getWeeklySummary").then(r=>{ if(r.ok) applyHome({weekly:r.data}); });
+      Promise.all([
+        gasApi("getReport"), gasApi("getGameStatus"), gasApi("getSchedule"),
+        gasApi("getLogs"), gasApi("getRanking"), gasApi("getStatusSummary"),
+      ]).then(([rep, game, sched, logs, rank, status])=>{
+        applyHome({report:rep.ok?rep.data:null, game:game.ok?game.data:null, schedule:sched.ok?sched.data:null,
+          logs:logs.ok?logs.data:null, ranking:rank.ok?rank.data:null, status:(status.ok&&status.data)?status.data:null});
+      });
+      gasApi("getTodayActions").then(r=>{ if(r.ok&&r.data) applyHome({todayActions:r.data}); });
+      gasApi("getIntent").then(r=>{ applyHome({intent:(r.ok&&r.data)?r.data:null}); });
+    };
+    gasApi("getHomeData").then(r=>{
+      if(r && r.ok && r.data) applyHome(r.data);
+      else legacyFetch();
+    }).catch(legacyFetch);
 
     // カレンダー連携済みなら本人権限で直接取得（GAS経由はスクリプト所有者しか読めないためのフォールバック）
     if(localStorage.getItem("cal_linked")){
@@ -1114,46 +1149,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
     const saved = localStorage.getItem("today_actions_date");
     if(saved !== today){ localStorage.removeItem("today_actions"); localStorage.setItem("today_actions_date", today); setChecked({}); }
 
-    // 今日のアクションの端末間同期: 別端末で編集したチェックリスト・チェック状態を取り込む。
-    // この端末で今日まだ編集していなければサーバー側を採用し、チェックは両端末の和集合にする
-    gasApi("getTodayActions").then(r=>{
-      if(!r.ok || !r.data) return;
-      if(r.data.actions !== null && localStorage.getItem("jiroku_custom_actions_"+today) === null){
-        setCustomActions(r.data.actions);
-        localStorage.setItem("jiroku_custom_actions_"+today, JSON.stringify(r.data.actions));
-      }
-      if(r.data.checked && Object.keys(r.data.checked).length > 0){
-        setChecked(prev=>{
-          const merged = {...r.data.checked, ...prev};
-          localStorage.setItem("today_actions", JSON.stringify(merged));
-          return merged;
-        });
-      }
-    });
-
-    // 今日いちばんやりたいこと: まだ宣言も「あとで」もしていなければ、その日の
-    // 最初の起動時にモーダルで聞く（別端末で宣言済みならサーバーから同期）
-    try {
-      const localIntent = JSON.parse(localStorage.getItem("jiroku_intent")||"null");
-      const hasToday = localIntent && localIntent.date === today;
-      const skipped = localStorage.getItem("jiroku_intent_skip") === today;
-      // まずローカルにあれば即表示（体感速度のため）
-      if(hasToday){ setIntent(localIntent); }
-      // 端末をまたいで必ず同期する。別端末（PC/携帯）で宣言・達成した内容を、
-      // この端末でスキップ済みでも取りこぼさないよう、毎回サーバーを正として取り込む
-      gasApi("getIntent").then(r=>{
-        if(r.ok && r.data && r.data.intent){
-          const next = {date:today, intent:r.data.intent, done:r.data.done, hours:r.data.hours};
-          localStorage.setItem("jiroku_intent", JSON.stringify(next));
-          setIntent(next);
-        } else if(!hasToday && !skipped){
-          // まだどの端末でも宣言していない時だけモーダルで聞く。
-          // 朝6時〜18時の間だけ自動表示（深夜に出てスキップされ朝に出ない取りこぼし防止）
-          const h = new Date().getHours();
-          if(h >= 6 && h < 18){ setIntentEditMode(false); setShowIntentModal(true); }
-        }
-      });
-    } catch(e){}
+    // （今日のアクション同期・今日いちばんやりたいことの同期は、上のapplyHome/統合APIに集約済み）
   },[isActive]);
 
   const goalsArr = Array.isArray(goalData) ? goalData : (goalData?.goal ? [goalData] : []);
@@ -3022,12 +3018,17 @@ function ReportScreen() {
           </div>`
     }
     ${workReport!==null&&html`
-      <div style=${{position:"fixed",inset:0,height:"100dvh",background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"flex-end",zIndex:500}}>
-        <div style=${{background:"var(--card)",width:"100%",borderRadius:"20px 20px 0 0",padding:"20px 20px calc(20px + env(safe-area-inset-bottom))",maxHeight:"85dvh",display:"flex",flexDirection:"column"}}>
+      <div style=${{position:"fixed",inset:0,height:"100dvh",background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"flex-end",zIndex:500,overscrollBehavior:"contain"}}
+        onClick=${e=>{if(e.target===e.currentTarget)setWorkReport(null);}}>
+        <div style=${{position:"relative",background:"var(--card)",width:"100%",borderRadius:"20px 20px 0 0",padding:"20px 20px calc(20px + env(safe-area-inset-bottom))",maxHeight:"85dvh",display:"flex",flexDirection:"column",overscrollBehavior:"contain"}}>
+          <button onClick=${()=>setWorkReport(null)} aria-label="閉じる"
+            style=${{position:"absolute",top:10,right:12,background:"none",border:"none",fontSize:24,color:"var(--sub)",cursor:"pointer",lineHeight:1,padding:6,zIndex:1}}>×</button>
           <div style=${{fontSize:17,fontWeight:800,marginBottom:4,color:"var(--text)"}}>📋 業務報告書</div>
           <div style=${{fontSize:12,color:"var(--sub)",marginBottom:12}}>内容を確認して、コピーしてメールやチャットに貼り付けてください。文面は自由に手直しできます。</div>
+          <!-- 長文でもテキストエリア内で確実にスクロールできるようにする（背景側に
+               スクロールが伝播して「背景だけ動く」問題があったため、overscrollBehaviorで遮断） -->
           <textarea value=${workReport} onInput=${e=>setWorkReport(e.target.value)}
-            style=${{flex:1,minHeight:260,width:"100%",boxSizing:"border-box",border:"1.5px solid var(--border)",borderRadius:12,padding:"12px 14px",fontSize:13,lineHeight:1.7,fontFamily:"inherit",color:"var(--text)",background:"var(--bg)",resize:"none",marginBottom:12}}/>
+            style=${{flex:"1 1 auto",minHeight:160,width:"100%",boxSizing:"border-box",border:"1.5px solid var(--border)",borderRadius:12,padding:"12px 14px",fontSize:13,lineHeight:1.7,fontFamily:"inherit",color:"var(--text)",background:"var(--bg)",resize:"none",marginBottom:12,overflowY:"auto",overscrollBehavior:"contain",WebkitOverflowScrolling:"touch"}}/>
           <button class="btn" onClick=${copyWorkReport} style=${{marginBottom:8}}>
             ${workReportCopied?"✓ コピーしました":"報告文をコピー"}
           </button>
@@ -3623,7 +3624,7 @@ function TimerScreen({onToast, isActive}) {
     ${showModal&&html`
       <div style=${{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"flex-end",zIndex:200}}
         onClick=${e=>{if(e.target===e.currentTarget)setShowModal(false);}}>
-        <div style=${{background:"var(--card)",borderRadius:"20px 20px 0 0",padding:"24px 20px 32px",width:"100%",boxSizing:"border-box"}}>
+        <div style=${{background:"var(--card)",borderRadius:"20px 20px 0 0",padding:"24px 20px calc(32px + env(safe-area-inset-bottom))",width:"100%",boxSizing:"border-box",maxHeight:"85dvh",overflowY:"auto",overscrollBehavior:"contain",WebkitOverflowScrolling:"touch"}}>
           <div style=${{fontSize:20,fontWeight:800,marginBottom:4}}>お疲れ様でした！🎉</div>
           <div style=${{fontSize:13,color:"var(--sub)",marginBottom:20}}>
             ${sessionResult
@@ -5158,7 +5159,7 @@ function QuickLogSheet({onClose,onToast}){
   return ReactDOM.createPortal(html`
     <div style=${{position:"fixed",inset:0,height:"100dvh",background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"flex-end",zIndex:550}}
       onClick=${e=>{if(e.target===e.currentTarget)onClose();}}>
-      <div style=${{background:"var(--card)",borderRadius:"20px 20px 0 0",padding:"22px 20px calc(24px + env(safe-area-inset-bottom))",width:"100%",boxSizing:"border-box"}}>
+      <div style=${{background:"var(--card)",borderRadius:"20px 20px 0 0",padding:"22px 20px calc(24px + env(safe-area-inset-bottom))",width:"100%",boxSizing:"border-box",maxHeight:"85dvh",overflowY:"auto",overscrollBehavior:"contain",WebkitOverflowScrolling:"touch"}}>
         <div style=${{fontSize:18,fontWeight:800,marginBottom:4,color:"var(--text)"}}>🎙 今なにしてた？</div>
         <div style=${{fontSize:12.5,color:"var(--sub)",marginBottom:14,lineHeight:1.6}}>話すだけ・書くだけでOK。あとはAIが記録に整えます。<br/>1日分をまとめて話しても大丈夫。何時に誰と何をしたか、思い出すままにどうぞ。<br/>（キーボードのマイクを押すと声で入力できます）</div>
         <textarea ref=${inputRef} class="txa" placeholder="例：8時に起きて朝ごはん、10時から友達とカフェで勉強、昼は移動して13時に打ち合わせ…と1日を丸ごと話してもOK" value=${text}

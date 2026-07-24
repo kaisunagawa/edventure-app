@@ -62,6 +62,7 @@ function doGet(e) {
     let result;
     switch (action) {
       case "getUser":      result = getUser(studentEmail); break;
+      case "getHomeData":  result = getHomeData(studentEmail); break;
       case "adminDedupeCalendar": {
         if (studentEmail !== adminEmail()) { result = { ok: false, error: "not owner" }; break; }
         result = dedupeOwnerJirokuEvents(Math.min(Number(e.parameter.days) || 7, 31));
@@ -517,6 +518,30 @@ function computeAllStatuses(preloadedLogObjects) {
 
   try { CacheService.getScriptCache().put(CACHE_KEY, JSON.stringify(result), 300); } catch (e) { /* サイズ超過時は無視してキャッシュなしで返す */ }
   return result;
+}
+
+// ホーム画面が起動時に必要とするデータを1リクエストにまとめて返す。
+// 以前は9本のAPIを並列で叩いており、GASの同時実行制限で実質順番待ちになって
+// 1本3〜4秒×待ち行列＝体感がとても遅かった。1本にまとめ、さらに実行内の
+// シート読取キャッシュで同じシートの読み直しを省くことで大幅に短縮する
+function getHomeData(studentEmail) {
+  _sheetReadCacheOn = true; _sheetReadCache = {};
+  try {
+    const safe = function (fn) { try { const r = fn(); return (r && r.ok) ? r.data : null; } catch (err) { Logger.log("getHomeData part: " + err); return null; } };
+    const data = {
+      user:         safe(function () { return getUser(studentEmail); }),
+      report:       safe(function () { return getReport(studentEmail, {}); }),
+      game:         safe(function () { return getGameStatus(studentEmail); }),
+      schedule:     safe(function () { return getSchedule(studentEmail); }),
+      logs:         safe(function () { return getLogs(studentEmail, {}); }),
+      ranking:      safe(function () { return getRanking(studentEmail); }),
+      status:       safe(function () { return getStatusSummary(studentEmail); }),
+      weekly:       safe(function () { return getWeeklySummary(studentEmail); }),
+      intent:       safe(function () { return getIntent(studentEmail); }),
+      todayActions: safe(function () { return getTodayActions(studentEmail); })
+    };
+    return { ok: true, data: data };
+  } finally { _sheetReadCacheOn = false; _sheetReadCache = {}; }
 }
 
 function getStatusSummary(studentEmail) {
@@ -4491,21 +4516,24 @@ ${tasksText}
 ■ 未完了・持ち越し: 未完了タスク。記録から理由が読み取れれば簡潔に添える（読み取れなければ理由は書かない）
 ■ 特記事項: 予定外の対応・トラブル・共有事項。該当がなければ「特になし」
 ■ 明日の予定: 未完了タスクや記録の流れから自然に書ける範囲で。無理に埋めない
-- 文体は「です・ます」調。簡潔・具体的に。件数や時間などの数字は記録にあるものを必ず入れる
+- 文体は「です・ます」調。簡潔だが情報量を削らない。件数・時間・金額・固有名詞（会社名・人名・日付）など、メモにある具体は必ず報告書に反映する
+- 各業務は1行の言い換えで済ませず、メモに書かれた進捗・成果・決定事項が上司に伝わるように書く（メモが詳しい業務ほど報告も具体的に）
 - 記録が趣味・私用（例: ゲーム、昼食）と明確に分かるものは業務報告からは省く（勤務時間の計算にも含めない）
 - 出力は報告書本文のみ。前置き・解説・コードブロック記号は不要`;
 
   // モデルを順に試す（1つ目が過負荷・権限・レート制限などで失敗しても、別モデルで
   // 自動フォールバックして必ず生成を試みる）。失敗の実体はログに残し、最終失敗時は
   // 原因の要約もエラー文に含めて、次回すぐ診断できるようにする
-  const MODELS = ["claude-sonnet-5", "claude-haiku-4-5-20251001"];
+  // 上司に出す文書なので品質最優先。フォールバック先も高品質モデルにする
+  // （以前Haikuに落ちた際、内容が薄い報告書になったため）
+  const MODELS = ["claude-sonnet-5", "claude-opus-4-8"];
   let lastErr = "";
   for (let mi = 0; mi < MODELS.length; mi++) {
     try {
       const res = UrlFetchApp.fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
-        payload: JSON.stringify({ model: MODELS[mi], max_tokens: 1500, messages: [{ role: "user", content: prompt }] }),
+        payload: JSON.stringify({ model: MODELS[mi], max_tokens: 2500, messages: [{ role: "user", content: prompt }] }),
         muteHttpExceptions: true
       });
       const code = res.getResponseCode();
@@ -7152,17 +7180,34 @@ function rowToObject(row, headers) {
   return obj;
 }
 
+// 読み取り専用のまとめ処理（getHomeData等）中だけ有効になる、実行内のシート読取キャッシュ。
+// 同じ実行の中で同じシートを何度もgetDataRange()で読み直すのが遅さの主因のため、
+// 有効中は1シート1回だけ読む。書き込みを伴う処理では絶対に有効にしないこと
+// （書いた直後の読み直しが古いままになるため）。
+var _sheetReadCacheOn = false, _sheetReadCache = {};
 function sheetToObjects(sheet) {
+  var key = null;
+  if (_sheetReadCacheOn && sheet) {
+    try { key = sheet.getName(); } catch (e) { key = null; }
+    if (key && _sheetReadCache[key]) return _sheetReadCache[key];
+  }
   const data = sheet.getDataRange().getValues();
-  if (data.length < 2) return [];
+  if (data.length < 2) { if (key) _sheetReadCache[key] = []; return []; }
   const headers = data[0];
-  return data.slice(1).map(row => rowToObject(row, headers));
+  const out = data.slice(1).map(row => rowToObject(row, headers));
+  if (key) _sheetReadCache[key] = out;
+  return out;
 }
 
 // 指定した列の値で先に絞り込んでから、対象行だけをオブジェクト化する。
 // sheetToObjects()でシート全体を毎回フル変換すると、行数（全生徒の履歴）が
 // 増えるほど遅くなるため、1人分のデータしか使わない関数はこちらを使う
 function getFilteredRows(sheetName, filterColumn, filterValue) {
+  // 読取キャッシュ有効中は、キャッシュ済みの全行からフィルタ（シート再読込を省く）
+  if (_sheetReadCacheOn) {
+    const all = sheetToObjects(getSheet(sheetName));
+    return all.filter(function (r) { return String(r[filterColumn]) === String(filterValue); });
+  }
   const sheet = getSheet(sheetName);
   const data = sheet.getDataRange().getValues();
   if (data.length < 2) return [];
