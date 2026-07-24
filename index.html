@@ -598,6 +598,8 @@ const JIROKU_RECORD_COLOR_ID = "8";
 // コンソールにログを残す（ユーザー体験は変えず、次に同じ問題が起きた時に調査できるように）
 async function upsertCalendarEvent(dateStr, key, startISO, endISO, title, exactOriginalEventId, isRetry){
   try{
+    // サーバー(Kai権限)がカレンダー書き込みを担う本人は、クライアント側では書かない（二重登録防止）
+    if(localStorage.getItem("server_calendar")) return;
     if(!localStorage.getItem("cal_linked") || !title) return;
     const token = await getCalendarToken(false);
     if(!token) {
@@ -682,6 +684,7 @@ async function upsertCalendarEvent(dateStr, key, startISO, endISO, title, exactO
 // まだカレンダーに書けていない記録を書き込む（＝取りこぼしの遡り補完）。
 // 独り言で作った過去の記録や、書き込み前にタブを閉じた分などをここで拾う。
 async function reconcileCalendarForDate(dateStr, logs){
+  if(localStorage.getItem("server_calendar")) return; // サーバーが書き込むので補完不要
   if(!localStorage.getItem("cal_linked") || !Array.isArray(logs) || logs.length===0) return;
   let map={}; try{ map=JSON.parse(localStorage.getItem(CAL_EVT_LS+dateStr)||"{}"); }catch(e){}
   for(const l of logs){
@@ -5183,6 +5186,8 @@ function App() {
       if(r.ok&&r.data){
         const u={...CURRENT_USER, lineLinked:r.data.lineLinked===undefined?true:!!r.data.lineLinked, cohort:r.data.cohort||"", recordDays:(r.data.recordDays===undefined?null:r.data.recordDays)};
         CURRENT_USER=u; localStorage.setItem("edventure_user",JSON.stringify(u)); setUser(u);
+        // サーバー側がカレンダー書き込みを担う本人なら、クライアント書き込みを止めて二重登録を防ぐ
+        if(r.data.serverCalendar) localStorage.setItem("server_calendar","1"); else localStorage.removeItem("server_calendar");
         return u.lineLinked;
       }
     } catch(e){}

@@ -377,7 +377,10 @@ function getUser(studentEmail) {
     recordDays: recordDays,
     access: accessState.access,          // "full" | "limited"
     plan: accessState.plan,              // grandfathered | trial | paid | free | expired
-    trialDaysLeft: accessState.trialDaysLeft
+    trialDaysLeft: accessState.trialDaysLeft,
+    // サーバー(Kai権限)から直接カレンダーに書ける本人（=オーナー）は、クライアント側の
+    // カレンダー書き込みを止めて二重登録を防ぐ。それ以外は従来通りクライアントで書く
+    serverCalendar: (studentEmail === adminEmail() && !!user.google_calendar_id)
   } };
 }
 
@@ -776,6 +779,45 @@ ${text}
   };
 }
 
+// サーバー(Kai権限)から、記録をKaiのGoogleカレンダーへ直接書き込む。
+// 全ての記録経路(フォーム/タイマー/独り言)はsaveLog/saveLogMultiを通るので、ここで書けば
+// 端末・OAuthトークン・タイミング・iOSの制限に一切依存せず確実に反映される。
+// Web appはUSER_DEPLOYING(=Kai)で動くため、Kai自身がアクセスできるカレンダーにのみ書ける
+// （他ユーザーのカレンダーはgetCalendarByIdがnullになりスキップ＝従来のクライアント書き込みに任せる）。
+var _ownerCalCache = {}, _ownerCalIdByEmail = {};
+function writeRecordToOwnerCalendar(studentEmail, dateStr, timeBlock, task) {
+  try {
+    if (!timeBlock || !String(task || "").trim()) return;
+    var calId = _ownerCalIdByEmail[studentEmail];
+    if (calId === undefined) {
+      var user = getFilteredRows("Users", "student_email", studentEmail)[0];
+      calId = (user && user.google_calendar_id) ? user.google_calendar_id : null;
+      _ownerCalIdByEmail[studentEmail] = calId;
+    }
+    if (!calId) return;
+    var cal = _ownerCalCache[calId];
+    if (cal === undefined) { cal = CalendarApp.getCalendarById(calId) || null; _ownerCalCache[calId] = cal; }
+    if (!cal) return;
+    var parts = String(timeBlock).split("-");
+    var pad = function (t) { t = String(t || "").slice(0, 5); return /^\d:\d\d$/.test(t) ? "0" + t : t; };
+    var sHM = pad(parts[0]);
+    if (!/^\d{2}:\d{2}$/.test(sHM)) return;
+    var start = new Date(dateStr + "T" + sHM + ":00+09:00");
+    if (isNaN(start.getTime())) return;
+    var end;
+    var eHM = parts[1] ? pad(parts[1]) : null;
+    if (eHM && /^\d{2}:\d{2}$/.test(eHM)) { var e2 = new Date(dateStr + "T" + eHM + ":00+09:00"); end = (e2 > start) ? e2 : new Date(start.getTime() + 3600000); }
+    else end = new Date(start.getTime() + 3600000);
+    var title = "✔️ " + String(task).slice(0, 120);
+    // 同じ開始時刻のJIROKU記録イベントがあれば更新、無ければ新規作成（重複防止）
+    var existing = cal.getEvents(start, new Date(start.getTime() + 60000)).filter(function (ev) {
+      return ev.getTag("jirokuRecord") === "1" && Math.abs(ev.getStartTime().getTime() - start.getTime()) < 1000;
+    });
+    if (existing.length) { existing[0].setTitle(title); try { existing[0].setTime(start, end); } catch (e) {} }
+    else { var ev = cal.createEvent(title, start, end); try { ev.setTag("jirokuRecord", "1"); } catch (e) {} }
+  } catch (err) { Logger.log("writeRecordToOwnerCalendar: " + err); }
+}
+
 function saveLog(studentEmail, body) {
   const sheet = getSheet("DailyLog");
   const today = formatDate(new Date());
@@ -831,6 +873,7 @@ function saveLog(studentEmail, body) {
       let grIdx = headers.indexOf("goal_related");
       if(grIdx === -1){ grIdx = headers.length; sheet.getRange(1, grIdx+1).setValue("goal_related"); }
       sheet.getRange(i+1, grIdx+1).setValue(body.goal_related || "false");
+      writeRecordToOwnerCalendar(studentEmail, targetDate, String(body.time_block), body.task);
       if (!isPast) { updateStreak(studentEmail); invalidateStatusCache(); }
 
       // 「まだXP未付与」かつ「今回きちんと評価が入っている」記録にだけ、1回だけXPを付与する。
@@ -851,6 +894,7 @@ function saveLog(studentEmail, body) {
   const newRow = sheet.getLastRow() + 1;
   sheet.appendRow([logId, studentEmail, targetDate, "", body.task, body.focus_level, body.memo || "", now, body.goal_related || "false"]);
   sheet.getRange(newRow, 4).setNumberFormat("@").setValue(String(body.time_block));
+  writeRecordToOwnerCalendar(studentEmail, targetDate, String(body.time_block), body.task);
   let awardedIdxN = headers.indexOf("xp_awarded");
   if (awardedIdxN === -1) { awardedIdxN = headers.length; sheet.getRange(1, awardedIdxN + 1).setValue("xp_awarded"); }
 
@@ -1005,6 +1049,9 @@ function saveLogMulti(studentEmail, body) {
     sheet.getRange(startRow, 1, newRows.length, headers.length).setValues(newRows);
     sheet.getRange(startRow, idx.time + 1, newRows.length, 1).setNumberFormat("@");
   }
+
+  // 各ブロックをKaiのカレンダーへ直接書き込む（端末・トークンに依存しない確実な反映）
+  blocks.forEach(function (b) { writeRecordToOwnerCalendar(studentEmail, targetDate, b, body.task); });
 
   if (isPast) return { ok: true, xp_gained: 0, updated: updatedAny, count: blocks.length };
 
