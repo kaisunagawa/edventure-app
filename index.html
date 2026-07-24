@@ -3250,6 +3250,13 @@ function TimerScreen({onToast, isActive}) {
   const [task, setTask]               = useState(saved?.task ?? "");
   const [startTime, setStartTime]     = useState(saved?.startTime ? new Date(saved.startTime) : null);
   const [showModal, setShowModal]     = useState(false);
+  // タイマー完了の記録モーダルが開いている間は、自動アップデートのリロードを保留させる
+  // （メモ入力中に画面が突然消えるのを防ぐ）。data-entry-openをルート要素に立てる
+  useEffect(()=>{
+    if(showModal) document.documentElement.setAttribute("data-entry-open","1");
+    else document.documentElement.removeAttribute("data-entry-open");
+    return ()=>document.documentElement.removeAttribute("data-entry-open");
+  },[showModal]);
   // タイマー完了後の記録をワンタップで確定できるよう、自己評価は初期値を入れておく
   // （毎回5段階から選び直す手間を減らす。もちろん自由に変更できる）
   const [logFocus, setLogFocus]       = useState("4 — よくできた");
@@ -5384,14 +5391,35 @@ if('serviceWorker' in navigator){
   // （カレンダーの✅なし等）が混ざる問題があった。アプリを前面に戻したタイミングで
   // Service Workerの更新を確認し、新バージョンが有効になったら一度だけ再読み込みする。
   // 入力途中の内容は下書き自動保存・タイマー状態もlocalStorageに保存済みなので消えない
-  let swReloaded = false;
+  let swReloaded = false, pendingReload = false;
+  // ユーザーが入力中（メモ・タスク名などのテキスト入力にフォーカス中／記録入力モーダルが
+  // 開いている）かどうか。入力中に自動リロードすると、タイマー終了後のメモ入力が
+  // 突然消える等が起きるため、その間は再読み込みを保留する
+  function isUserBusy(){
+    try{
+      const ae = document.activeElement;
+      if (ae){
+        const tag = ae.tagName;
+        if (tag === "TEXTAREA") return true;
+        if (tag === "INPUT"){ const t = (ae.type||"text").toLowerCase(); if (["checkbox","radio","button","submit","range","file","image"].indexOf(t) === -1) return true; }
+        if (ae.isContentEditable) return true;
+      }
+      if (document.documentElement.getAttribute("data-entry-open") === "1") return true;
+    }catch(e){}
+    return false;
+  }
+  // 入力中なら再読み込みを保留し、手が空いたら実行する
+  function safeReload(){
+    if (swReloaded) return;
+    if (isUserBusy()){ pendingReload = true; return; }
+    swReloaded = true; location.reload();
+  }
   // 初回訪問時のSW初回登録(claim)でもcontrollerchangeが発火するため、
   // 「既にSWが制御していた状態からの交代」の時だけ再読み込みする
   const hadController = !!navigator.serviceWorker.controller;
   navigator.serviceWorker.addEventListener('controllerchange', () => {
     if (swReloaded || !hadController) return;
-    swReloaded = true;
-    if (document.visibilityState === 'visible') location.reload();
+    if (document.visibilityState === 'visible') safeReload();
   });
 
   // controllerchangeはsw.js自体が変わった時しか発火しないため、アプリ本体
@@ -5409,11 +5437,13 @@ if('serviceWorker' in navigator){
       const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(await res.text()));
       const h = Array.from(new Uint8Array(buf)).join(",");
       if (baselineHtmlHash === null) { baselineHtmlHash = h; return; }
-      if (h !== baselineHtmlHash && !swReloaded) { swReloaded = true; location.reload(); }
+      if (h !== baselineHtmlHash) { pendingReload = true; safeReload(); }
     }catch(e){}
   }
   checkAppUpdate(); // 起動時に基準ハッシュを取得
   const runUpdateCheck = () => {
+    // 新版が見つかっているが入力中で保留していた場合、手が空いた今のタイミングで再読み込み
+    if (pendingReload && !swReloaded){ safeReload(); if (swReloaded) return; }
     navigator.serviceWorker.getRegistration().then(reg => { if (reg) reg.update(); }).catch(()=>{});
     checkAppUpdate();
   };
@@ -5424,6 +5454,8 @@ if('serviceWorker' in navigator){
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') runUpdateCheck(); });
   window.addEventListener('focus', runUpdateCheck);
   setInterval(() => { if (document.visibilityState === 'visible') runUpdateCheck(); }, 5*60*1000);
+  // 入力欄から手が離れた／モーダルを閉じた直後に、保留していた更新があれば反映する
+  document.addEventListener('focusout', () => { if (pendingReload) setTimeout(() => { if (!swReloaded && pendingReload && !isUserBusy()) safeReload(); }, 600); });
 }
 </script>
 </body>
