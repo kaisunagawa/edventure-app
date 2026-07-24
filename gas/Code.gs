@@ -867,10 +867,18 @@ function dedupeOwnerJirokuEvents(days) {
   var primaryCalId = (u && u.google_calendar_id) ? u.google_calendar_id : null;
   var from = new Date(); from.setDate(from.getDate() - (days || 7)); from.setHours(0, 0, 0, 0);
   var to = new Date(); to.setDate(to.getDate() + 1); to.setHours(0, 0, 0, 0);
+  // 「✔️」は ✔(U+2714)＋飾り記号(U+FE0F) の2文字。経路によって飾り記号が
+  // 付いたり落ちたりして「✔️」と「✔」が別文字列になり、重複判定をすり抜けていた。
+  // 飾り記号を除去してから判定・比較する
+  var stripVS = function (s) { return String(s || "").replace(/\uFE0F/g, ""); };
   var isJiroku = function (ev) {
     if (ev.getTag("jirokuRecord") === "1") return true;
-    var t = String(ev.getTitle() || "");
-    return t.indexOf("✔️") === 0 || t.indexOf("✅") === 0;
+    var t = stripVS(ev.getTitle()).trim();
+    return t.charAt(0) === "✔" || t.charAt(0) === "✅"; // ✔ or ✅
+  };
+  // 同一判定用にタイトルを正規化: 飾り記号除去→先頭のチェックマーク類と空白を除去
+  var normTitle = function (s) {
+    return stripVS(s).replace(/^[✔✅\s]+/, "").trim();
   };
   // 対象カレンダー: 登録カレンダー＋Kaiが所有する全カレンダー（重複回避のためIDで一意化）
   var cals = [], seenCal = {};
@@ -882,7 +890,7 @@ function dedupeOwnerJirokuEvents(days) {
   try { CalendarApp.getAllCalendars().forEach(pushCal); } catch (e) {}
   try { pushCal(CalendarApp.getDefaultCalendar()); } catch (e) {}
 
-  var seen = {}, removed = 0, scanned = 0, perCal = [];
+  var seen = {}, removed = 0, scanned = 0, perCal = [], debugList = [];
   // 残す優先度: google_calendar_id のカレンダーを先に走査（そこにある方を残す）
   cals.sort(function (a, b) { return (a.getId() === primaryCalId ? -1 : 0) - (b.getId() === primaryCalId ? -1 : 0); });
   cals.forEach(function (cal) {
@@ -891,13 +899,15 @@ function dedupeOwnerJirokuEvents(days) {
     scanned += evs.length;
     var rem = 0;
     evs.forEach(function (ev) {
-      var key = Math.floor(ev.getStartTime().getTime() / 60000) + "|" + String(ev.getTitle() || "").trim();
+      var key = Math.floor(ev.getStartTime().getTime() / 60000) + "|" + normTitle(ev.getTitle());
+      debugList.push(Utilities.formatDate(ev.getStartTime(), "Asia/Tokyo", "MM-dd HH:mm:ss") + " key=[" + key + "] id=" + String(ev.getId()).slice(0, 12) + " " + String(ev.getTitle() || "").slice(0, 30));
       if (seen[key]) { try { ev.deleteEvent(); removed++; rem++; } catch (err) {} }
       else { seen[key] = true; try { ev.setColor(CalendarApp.EventColor.GRAY); } catch (err) {} }
     });
     perCal.push(cal.getName() + ":" + evs.length + "件/削除" + rem);
   });
-  return { ok: true, scanned: scanned, removed: removed, calendars: perCal };
+  // eventsは診断用（レスポンスが重くなるので通常運用のLINEレポート等では参照しない）
+  return { ok: true, scanned: scanned, removed: removed, calendars: perCal, events: debugList.sort() };
 }
 
 function saveLog(studentEmail, body) {
