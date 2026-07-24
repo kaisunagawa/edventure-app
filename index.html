@@ -493,7 +493,13 @@ async function getCalendarToken(interactive){
   // アクセストークン（約1時間有効）を再利用する。これで毎回の起動時にGISを
   // 呼ばずに済み、「毎回一瞬Googleのサインイン画面が出る」現象を防ぐ
   try{ const s=JSON.parse(localStorage.getItem("gcal_token")||"null"); if(s&&s.token&&Date.now()<s.exp-60000){ gcalToken=s.token; gcalTokenExp=s.exp; return gcalToken; } }catch(e){}
-  if(!interactive && !localStorage.getItem("cal_linked")) return null;
+  // ★重要: 非対話（起動時の予定取得・記録の書き戻し等）では、絶対にGoogleへ
+  // トークン要求(requestAccessToken)をしない。GISのサイレント要求は実際には
+  // accounts.google.comへページ遷移して「しばらくお待ちください」画面を一瞬出すため、
+  // 「毎回Googleのサインイン画面が出る」現象の原因になっていた。
+  // 保存済みトークンが無ければnullを返し、読み取りはサーバーキャッシュ、書き込みは
+  // キューに退避する。トークンの取得・更新はユーザーが明示的に操作した時(interactive)だけ行う。
+  if(!interactive) return null;
   const ready=await waitForGis();
   if(!ready) return null;
   return new Promise((resolve)=>{
@@ -2118,7 +2124,7 @@ function LogScreen({onToast, isActive}) {
   },[date, isActive]);
   const loadCalByTap=()=>{
     fetchCalendarEvents(date, true).then(evs=>{
-      if(evs){ setDayEvents(evs); setCalNeedsTap(false); onToast("予定を読み込みました"); }
+      if(evs){ setDayEvents(evs); setCalNeedsTap(false); onToast("予定を読み込みました"); flushCalendarQueue(); }
       else onToast("予定の読み込みに失敗しました");
     });
   };
@@ -3913,6 +3919,7 @@ function SettingsScreen({onToast,onLogout,onGoalSaved,profile,onProfileSaved,onC
           await gasPost("saveSettings",{google_calendar_id:calId});
           onCalLinked && onCalLinked();
           fetchCalendarEvents(formatDateStr(new Date())); // 今日の予定を先読み
+          flushCalendarQueue(); // 連携でトークンが取れたので、溜まっていた書き込みを送信
           onToast("カレンダーを連携しました！");
         }catch{ onToast("カレンダー取得に失敗しました"); }
         setCalLoading(false);
