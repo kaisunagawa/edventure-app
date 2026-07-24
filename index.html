@@ -2228,6 +2228,9 @@ function LogScreen({onToast, isActive}) {
           if(k.startsWith(DRAFT_LS)&&k.slice(DRAFT_LS.length)<limit) localStorage.removeItem(k);
         });
       }catch(e){}
+      // 記録タブでその日を表示した時にも、カレンダー未反映の記録を補完する
+      // （独り言などの直近の記録を、ホームに戻らなくてもここで同期する）
+      if(localStorage.getItem("cal_linked")) reconcileCalendarForDate(date, data);
       setLogs(data);
       // ユーザーがまだ入力を始めていない場合だけ、選択中ブロックのフォームも最新化
       const f=formRef.current, l=lastLoadedRef.current;
