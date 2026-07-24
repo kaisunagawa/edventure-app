@@ -489,6 +489,10 @@ function waitForGis(ms=4000){
 }
 async function getCalendarToken(interactive){
   if(gcalToken && Date.now() < gcalTokenExp-60000) return gcalToken;
+  // 再読み込みでメモリ上のトークンは消えるため、localStorageに保存した
+  // アクセストークン（約1時間有効）を再利用する。これで毎回の起動時にGISを
+  // 呼ばずに済み、「毎回一瞬Googleのサインイン画面が出る」現象を防ぐ
+  try{ const s=JSON.parse(localStorage.getItem("gcal_token")||"null"); if(s&&s.token&&Date.now()<s.exp-60000){ gcalToken=s.token; gcalTokenExp=s.exp; return gcalToken; } }catch(e){}
   if(!interactive && !localStorage.getItem("cal_linked")) return null;
   const ready=await waitForGis();
   if(!ready) return null;
@@ -503,12 +507,13 @@ async function getCalendarToken(interactive){
       const client=google.accounts.oauth2.initTokenClient({
         client_id: GOOGLE_CLIENT_ID,
         scope: "https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/calendar.events",
-        use_fedcm_for_prompt: true,
+        // FedCMのプロンプトはサイレント認証(prompt:"none")でも一瞬Googleの画面を出すため使わない
         callback: (t)=>{
           clearTimeout(timeout);
           if(t.error){ finish(null); return; }
           gcalToken=t.access_token;
           gcalTokenExp=Date.now()+(Number(t.expires_in)||3600)*1000;
+          try{ localStorage.setItem("gcal_token", JSON.stringify({token:gcalToken, exp:gcalTokenExp})); }catch(e){}
           finish(gcalToken);
         },
         error_callback: ()=>{ clearTimeout(timeout); finish(null); },
@@ -865,6 +870,11 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
     try { return JSON.parse(localStorage.getItem("jiroku_task_status_"+formatDateStr(new Date()))||"{}"); } catch(e){ return {}; }
   });
   const [dragTask, setDragTask] = useState(null); // PCのドラッグ中タスク
+  const [detailTask, setDetailTask] = useState(null); // タスク詳細画面で開いているタスク名（Trello風カード詳細）
+  // タスクごとのメモ（詳細画面で編集）。日付キーで保持
+  const [taskNotes, setTaskNotes] = useState(()=>{
+    try { return JSON.parse(localStorage.getItem("jiroku_task_memo_"+formatDateStr(new Date()))||"{}"); } catch(e){ return {}; }
+  });
   // 画面幅でボードのレイアウトを切替（PC=横3列Trello風ドラッグ / スマホ=縦積みタップ操作）
   const [boardWide, setBoardWide] = useState(()=> typeof window!=="undefined" && window.innerWidth>=900);
   useEffect(()=>{ const on=()=>setBoardWide(window.innerWidth>=900); window.addEventListener("resize",on); return ()=>window.removeEventListener("resize",on); },[]);
@@ -1115,6 +1125,32 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
     try { localStorage.setItem("jiroku_timer_pending_task", JSON.stringify({text:task, min:(taskEstimates[task]||null), date:todayKey})); } catch(e){}
     if(statusOf(task)==="todo") setStatus(task, "doing");
     onGoTimer && onGoTimer();
+  };
+  // タスクのメモを保存（詳細画面）
+  const setTaskNote = (task, note) => {
+    const next = {...taskNotes, [task]: note};
+    setTaskNotes(next);
+    try { localStorage.setItem("jiroku_task_memo_"+todayKey, JSON.stringify(next)); } catch(e){}
+  };
+  // タスクの想定時間を更新（詳細画面）
+  const setTaskTime = (task, min) => {
+    const m = Math.round(Number(min));
+    const next = {...taskEstimates};
+    if(m>0 && m<=600) next[task]=m; else delete next[task];
+    setTaskEstimates(next);
+    try { localStorage.setItem("jiroku_task_estimates_"+todayKey, JSON.stringify(next)); } catch(e){}
+  };
+  // タスクを削除（詳細画面）。関連する状態・時間・メモ・チェックも掃除する
+  const deleteTask = (task) => {
+    const list = actionItems.filter(t=>t!==task);
+    if(list.length===0){ setCustomActions(null); localStorage.removeItem("jiroku_custom_actions_"+todayKey); }
+    else { setCustomActions(list); localStorage.setItem("jiroku_custom_actions_"+todayKey, JSON.stringify(list)); }
+    const est={...taskEstimates}; delete est[task]; setTaskEstimates(est); localStorage.setItem("jiroku_task_estimates_"+todayKey, JSON.stringify(est));
+    const stt={...taskStatus}; delete stt[task]; setTaskStatus(stt); localStorage.setItem("jiroku_task_status_"+todayKey, JSON.stringify(stt));
+    const nt={...taskNotes}; delete nt[task]; setTaskNotes(nt); localStorage.setItem("jiroku_task_memo_"+todayKey, JSON.stringify(nt));
+    const nc={...checked}; delete nc[task]; setChecked(nc); localStorage.setItem("today_actions", JSON.stringify(nc));
+    gasPostJson("saveTodayActions", {actions: list.length===0?"":JSON.stringify(list), checked: JSON.stringify(nc)});
+    setDetailTask(null);
   };
 
   // 現在のタスク(文字列配列)＋想定時間マップから、編集用の {text,min} 配列を作る
@@ -1571,23 +1607,20 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
           const COLS=[["todo","予定","📋","var(--sub)"],["doing","実行中","🔥","var(--accent)"],["done","完了","✅","var(--green,#1D9E75)"]];
           const order=["todo","doing","done"];
           const moveStatus=(task,dir)=>{ const i=order.indexOf(statusOf(task)); const n=Math.max(0,Math.min(2,i+dir)); if(n!==i) setStatus(task,order[n]); };
-          const chip={fontSize:15,lineHeight:1,color:"var(--sub)",background:"var(--bg)",border:"1px solid var(--border)",borderRadius:8,width:28,height:24,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",justifyContent:"center"};
+          const chip={fontSize:15,lineHeight:1,color:"var(--sub)",background:"var(--bg)",border:"1px solid var(--border)",borderRadius:8,width:26,height:24,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0};
+          const stop=(fn)=>(e)=>{ e.stopPropagation(); fn(); };
           const card=(item)=>{
             const st=statusOf(item);
             return html`<div key=${item} draggable=${boardWide}
               onDragStart=${boardWide?(()=>setDragTask(item)):undefined} onDragEnd=${boardWide?(()=>setDragTask(null)):undefined}
-              style=${{background:"var(--card)",border:`1px solid ${st==="doing"?"var(--accent)":"var(--border)"}`,borderRadius:10,padding:"10px 11px",marginBottom:8,cursor:boardWide?"grab":"default",boxShadow:dragTask===item?"0 4px 14px rgba(0,0,0,0.15)":"none",opacity:dragTask===item?0.5:1,transition:"box-shadow .15s"}}>
-              <div onClick=${()=>goToTimerWith(item)} style=${{cursor:"pointer",display:"flex",alignItems:"flex-start",gap:8}}>
-                <span style=${{flex:1,minWidth:0,fontSize:13.5,color:st==="done"?"var(--sub)":"var(--text)",textDecoration:st==="done"?"line-through":"none",lineHeight:1.5,overflowWrap:"anywhere"}}>${item}</span>
-                ${taskEstimates[item]>0&&html`<span style=${{flexShrink:0,fontSize:10.5,fontWeight:600,color:"var(--accent)",background:"var(--accent-l)",borderRadius:20,padding:"2px 7px"}}>⏱${taskEstimates[item]}分</span>`}
-              </div>
-              <div style=${{display:"flex",alignItems:"center",gap:6,marginTop:9}}>
-                <button onClick=${()=>goToTimerWith(item)} style=${{fontSize:11,fontWeight:700,color:"#fff",background:"var(--accent)",border:"none",borderRadius:8,padding:"5px 10px",cursor:"pointer",fontFamily:"inherit"}}>⏱ 測る</button>
-                <div style=${{marginLeft:"auto",display:"flex",gap:5}}>
-                  ${st!=="todo"&&html`<button title="左の列へ" onClick=${()=>moveStatus(item,-1)} style=${chip}>‹</button>`}
-                  ${st!=="done"&&html`<button title="右の列へ" onClick=${()=>moveStatus(item,1)} style=${chip}>›</button>`}
-                </div>
-              </div>
+              onClick=${()=>setDetailTask(item)}
+              style=${{background:"var(--card)",border:`1px solid ${st==="doing"?"var(--accent)":"var(--border)"}`,borderRadius:10,padding:"10px 11px",marginBottom:8,cursor:"pointer",boxShadow:dragTask===item?"0 4px 14px rgba(0,0,0,0.15)":"none",opacity:dragTask===item?0.5:1,transition:"box-shadow .15s",display:"flex",alignItems:"center",gap:8}}>
+              <span style=${{flex:1,minWidth:0,fontSize:13.5,color:st==="done"?"var(--sub)":"var(--text)",textDecoration:st==="done"?"line-through":"none",lineHeight:1.5,overflowWrap:"anywhere"}}>${item}</span>
+              ${taskEstimates[item]>0&&html`<span style=${{flexShrink:0,fontSize:10.5,fontWeight:600,color:"var(--accent)",background:"var(--accent-l)",borderRadius:20,padding:"2px 7px"}}>⏱${taskEstimates[item]}分</span>`}
+              ${st!=="done"&&html`<button title="タイマーで計測" aria-label="計測" onClick=${stop(()=>goToTimerWith(item))}
+                style=${{...chip,color:"#fff",background:"var(--accent)",border:"none",fontSize:13}}>⏱</button>`}
+              ${st!=="todo"&&html`<button title="左の列へ" onClick=${stop(()=>moveStatus(item,-1))} style=${chip}>‹</button>`}
+              ${st!=="done"&&html`<button title="右の列へ" onClick=${stop(()=>moveStatus(item,1))} style=${chip}>›</button>`}
             </div>`;
           };
           const column=([key,label,emoji,color])=>{
@@ -1615,6 +1648,47 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
         <span style=${{fontSize:16,lineHeight:1}}>＋</span> タスクを追加
       </button>
     </div>
+
+    <!-- タスク詳細画面（Trello風カード詳細。状態変更・時間・メモ・計測・削除） -->
+    ${detailTask!==null && ReactDOM.createPortal((()=>{
+      const t=detailTask, st=statusOf(t);
+      const STS=[["todo","予定","📋"],["doing","実行中","🔥"],["done","完了","✅"]];
+      return html`<div style=${{position:"fixed",inset:0,height:"100dvh",background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"flex-end",justifyContent:"center",zIndex:600}}
+        onClick=${e=>{if(e.target===e.currentTarget)setDetailTask(null);}}>
+        <div style=${{background:"var(--card)",width:"100%",maxWidth:520,borderRadius:"20px 20px 0 0",padding:"18px 20px calc(20px + env(safe-area-inset-bottom))",maxHeight:"88dvh",overflowY:"auto"}}>
+          <div style=${{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+            <span style=${{fontSize:11,fontWeight:700,color:"var(--sub)"}}>タスクの詳細</span>
+            <button onClick=${()=>setDetailTask(null)} style=${{background:"none",border:"none",fontSize:22,color:"var(--sub)",cursor:"pointer",lineHeight:1}}>×</button>
+          </div>
+          <div style=${{fontSize:19,fontWeight:800,color:"var(--text)",lineHeight:1.4,marginBottom:16,overflowWrap:"anywhere"}}>${t}</div>
+
+          <label class="form-lbl">状態</label>
+          <div style=${{display:"flex",gap:8,marginBottom:16}}>
+            ${STS.map(([k,lb,em])=>{
+              const on=st===k;
+              return html`<button key=${k} onClick=${()=>setStatus(t,k)}
+                style=${{flex:1,padding:"10px 4px",borderRadius:10,border:`1.5px solid ${on?"var(--accent)":"var(--border)"}`,background:on?"var(--accent-l)":"transparent",color:on?"var(--accent)":"var(--sub)",fontSize:12.5,fontWeight:on?700:500,cursor:"pointer",fontFamily:"inherit"}}>${em} ${lb}</button>`;
+            })}
+          </div>
+
+          <label class="form-lbl">想定時間（分）</label>
+          <div style=${{display:"flex",alignItems:"center",gap:8,marginBottom:16}}>
+            <input class="inp" type="number" inputmode="numeric" value=${taskEstimates[t]||""} placeholder="例：25"
+              onInput=${e=>setTaskTime(t, e.target.value)} style=${{width:110,margin:0,textAlign:"center"}}/>
+            <span style=${{fontSize:12.5,color:"var(--sub)"}}>分（タイマーがこの時間で始まります）</span>
+          </div>
+
+          <label class="form-lbl">メモ</label>
+          <textarea class="inp" placeholder="このタスクのメモ・詳細・持ち物など" value=${taskNotes[t]||""}
+            onInput=${e=>setTaskNote(t, e.target.value)}
+            style=${{minHeight:90,resize:"vertical",lineHeight:1.6,fontFamily:"inherit",marginBottom:16}}/>
+
+          ${st!=="done"&&html`<button class="btn" style=${{marginBottom:10}} onClick=${()=>{ goToTimerWith(t); setDetailTask(null); }}>⏱ タイマーで計測する</button>`}
+          <button onClick=${()=>{ if(confirm("このタスクを削除しますか？")) deleteTask(t); }}
+            style=${{width:"100%",padding:"11px",background:"none",border:"1.5px solid var(--border)",borderRadius:10,color:"var(--red,#d33)",fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>削除する</button>
+        </div>
+      </div>`;
+    })(), document.body)}
 
     <!-- ステータス -->
     ${statusSummary&&html`
@@ -3734,6 +3808,7 @@ function SettingsScreen({onToast,onLogout,onGoalSaved,profile,onProfileSaved,onC
         try{
           gcalToken=tokenResp.access_token;
           gcalTokenExp=Date.now()+(Number(tokenResp.expires_in)||3600)*1000;
+          try{ localStorage.setItem("gcal_token", JSON.stringify({token:gcalToken, exp:gcalTokenExp})); }catch(e){}
           const calRes=await fetch("https://www.googleapis.com/calendar/v3/users/me/calendarList/primary",{
             headers:{Authorization:"Bearer "+tokenResp.access_token}
           }).then(r=>r.json());
