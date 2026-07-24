@@ -62,6 +62,32 @@ function doGet(e) {
     let result;
     switch (action) {
       case "getUser":      result = getUser(studentEmail); break;
+      case "adminDedupeCalendar": {
+        // Kaiのカレンダーから、JIROKU記録イベント(✔️/✅始まり or タグ付き)の重複を掃除する。
+        // 「開始時刻(分)＋タイトル」が同じものを1件だけ残して削除。通常の予定には触らない
+        if (studentEmail !== adminEmail()) { result = { ok: false, error: "not owner" }; break; }
+        var _u2 = getFilteredRows("Users", "student_email", studentEmail)[0];
+        if (!_u2 || !_u2.google_calendar_id) { result = { ok: false, error: "no calendar id" }; break; }
+        var _cal2 = CalendarApp.getCalendarById(_u2.google_calendar_id);
+        if (!_cal2) { result = { ok: false, error: "calendar not accessible" }; break; }
+        var _days2 = Math.min(Number(e.parameter.days) || 7, 31);
+        var _from = new Date(); _from.setDate(_from.getDate() - _days2); _from.setHours(0, 0, 0, 0);
+        var _to = new Date(); _to.setDate(_to.getDate() + 1); _to.setHours(0, 0, 0, 0);
+        var _evs = _cal2.getEvents(_from, _to).filter(function (ev) {
+          if (ev.getTag("jirokuRecord") === "1") return true;
+          var t = String(ev.getTitle() || "");
+          return t.indexOf("✔️") === 0 || t.indexOf("✅") === 0;
+        });
+        var _seen = {}, _removed = 0;
+        _evs.forEach(function (ev) {
+          // 分単位の開始時刻＋タイトルで同一判定（秒ズレの揺れを吸収）
+          var key = Math.floor(ev.getStartTime().getTime() / 60000) + "|" + String(ev.getTitle() || "").trim();
+          if (_seen[key]) { try { ev.deleteEvent(); _removed++; } catch (err) {} }
+          else { _seen[key] = true; try { ev.setColor(CalendarApp.EventColor.GRAY); } catch (err) {} }
+        });
+        result = { ok: true, scanned: _evs.length, removed: _removed };
+        break;
+      }
       case "adminBackfillCalendar": {
         // オーナー本人の過去days日分のDailyLogを、Kaiのカレンダーへ遡って書き込む
         // （サーバー方式に切替える前の取りこぼしを補完。writeRecord…側で重複防止）
@@ -823,14 +849,24 @@ function writeRecordToOwnerCalendar(studentEmail, dateStr, timeBlock, task) {
     if (eHM && /^\d{2}:\d{2}$/.test(eHM)) { var e2 = new Date(dateStr + "T" + eHM + ":00+09:00"); end = (e2 > start) ? e2 : new Date(start.getTime() + 3600000); }
     else end = new Date(start.getTime() + 3600000);
     var title = "✔️ " + String(task).slice(0, 120);
-    // 同じ開始時刻のJIROKU記録イベントがあれば更新、無ければ新規作成（重複防止）
+    // 同じ開始時刻のJIROKU記録イベントがあれば更新、無ければ新規作成（重複防止）。
+    // 判定はタグだけに頼らない：クライアント(API)書き込みの目印(private extendedProperties)は
+    // CalendarAppのgetTagで読めないため、タイトルが✔️/✅始まりの「JIROKU記録イベント」も
+    // 同一視する。これを怠ると、旧方式で書いた記録に気づけず二重登録になる（実際に発生した）
+    var isJirokuEvent = function (ev) {
+      if (ev.getTag("jirokuRecord") === "1") return true;
+      var t = String(ev.getTitle() || "");
+      return t.indexOf("✔️") === 0 || t.indexOf("✅") === 0;
+    };
     var existing = cal.getEvents(start, new Date(start.getTime() + 60000)).filter(function (ev) {
-      return ev.getTag("jirokuRecord") === "1" && Math.abs(ev.getStartTime().getTime() - start.getTime()) < 1000;
+      return isJirokuEvent(ev) && Math.abs(ev.getStartTime().getTime() - start.getTime()) < 1000;
     });
     if (existing.length) {
       existing[0].setTitle(title);
       try { existing[0].setTime(start, end); } catch (e) {}
       try { existing[0].setColor(CalendarApp.EventColor.GRAY); } catch (e) {}
+      // 同じ開始時刻のJIROKU記録が既に複数ある＝過去の二重登録。1件だけ残して掃除する
+      for (var _di = 1; _di < existing.length; _di++) { try { existing[_di].deleteEvent(); } catch (e) {} }
     } else {
       var ev = cal.createEvent(title, start, end);
       try { ev.setTag("jirokuRecord", "1"); } catch (e) {}
