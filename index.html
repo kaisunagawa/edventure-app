@@ -949,6 +949,9 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
   };
   useEffect(()=>{
     if(!isActive) return;
+    // タイマーでタスクが完了扱いになっている場合があるため、チェック状態を再読込して
+    // 「今日のタスク」の✓を最新化する（タイマー→ホームに戻った時に反映）
+    try { const c = JSON.parse(localStorage.getItem("today_actions")||"{}"); setChecked(c); } catch(e){}
     // キャッシュで即時表示
     const cachedGame = localStorage.getItem("cache_gameStatus");
     const cachedReport = localStorage.getItem("cache_report");
@@ -3035,10 +3038,37 @@ function TimerScreen({onToast, isActive}) {
   const isRunningRef = useRef(isRunning);
   const selectedMinRef = useRef(selectedMin);
   const modeRef = useRef(mode);
+  const taskRef = useRef(task);
   useEffect(()=>{ timeLeftRef.current = timeLeft; },[timeLeft]);
   useEffect(()=>{ isRunningRef.current = isRunning; },[isRunning]);
   useEffect(()=>{ selectedMinRef.current = selectedMin; },[selectedMin]);
   useEffect(()=>{ modeRef.current = mode; },[mode]);
+  useEffect(()=>{ taskRef.current = task; },[task]);
+
+  // タイマーの時間が終了した＝そのタスクは完了とみなす。
+  // ①今日のタスクに自動でチェックを付け（today_actions）、②タイマーの選択肢から消す。
+  // 集中対象が「今日のタスク」の項目に一致する時だけ実行する（フリー入力の時は何もしない）。
+  // ホーム側はチェック状態を再読込して✓を反映＆共有リストを更新する。
+  const completeTaskIfListed = (taskText) => {
+    const t = String(taskText||"").trim();
+    if(!t) return;
+    if(!todayActionOptions.some(o=>o.text===t)) return; // 今日のタスク由来でなければ対象外
+    try {
+      const checked = JSON.parse(localStorage.getItem("today_actions")||"{}");
+      if(!checked[t]){
+        checked[t] = true;
+        localStorage.setItem("today_actions", JSON.stringify(checked));
+        gasPostJson("saveTodayActions", {checked: JSON.stringify(checked)}); // 他端末にも同期
+      }
+      // 共有リスト（タイマーの選択肢）からも即座に除外
+      const shared = JSON.parse(localStorage.getItem("jiroku_today_actions_shared")||"null");
+      if(shared && Array.isArray(shared.items)){
+        shared.items = shared.items.filter(it=> (typeof it==="string"?it:String(it.text||"")) !== t);
+        localStorage.setItem("jiroku_today_actions_shared", JSON.stringify(shared));
+      }
+    } catch(e){}
+    setTodayActionOptions(opts=>opts.filter(o=>o.text!==t));
+  };
 
   // アプリが閉じられていても気づけるよう、開始時にLINE通知をGAS側に予約し、
   // 一時停止・リセット・アプリ内で完了を検知できたときは予約を取り消す
@@ -3062,7 +3092,7 @@ function TimerScreen({onToast, isActive}) {
               setIsRunning(false);
               playBeep();
               cancelEndNotify(); // アプリ内で気づけたのでLINE通知は不要
-              if(modeRef.current === "focus"){ setSessionCount(c=>c+1); setSessionResult({planned:selectedMinRef.current, actual:selectedMinRef.current}); setShowModal(true); }
+              if(modeRef.current === "focus"){ setSessionCount(c=>c+1); setSessionResult({planned:selectedMinRef.current, actual:selectedMinRef.current}); completeTaskIfListed(taskRef.current); setShowModal(true); }
               else { setMode("focus"); setTimeLeft(selectedMinRef.current*60); }
             }
           }
@@ -3079,7 +3109,7 @@ function TimerScreen({onToast, isActive}) {
       setIsRunning(false);
       playBeep();
       cancelEndNotify(); // アプリ内で気づけたのでLINE通知は不要
-      if(mode==="focus"){ setSessionCount(c=>c+1); setSessionResult({planned:selectedMin, actual:selectedMin}); setShowModal(true); }
+      if(mode==="focus"){ setSessionCount(c=>c+1); setSessionResult({planned:selectedMin, actual:selectedMin}); completeTaskIfListed(task); setShowModal(true); }
       else { setMode("focus"); setTimeLeft(selectedMin*60); }
       return;
     }
