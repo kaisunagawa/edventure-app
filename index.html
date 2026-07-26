@@ -214,13 +214,16 @@
     .t-a { background: var(--amber-l); color: #92400E; }
 
     /* ── Log rows ── */
-    .log-row { display: flex; align-items: flex-start; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--border); }
+    .log-row { display: flex; align-items: flex-start; gap: 12px; padding: 13px 0; border-bottom: 1px solid var(--border); }
     .log-row:last-child { border-bottom: none; }
     .log-row > div:last-child { flex: 1; min-width: 0; }
-    .log-time { font-size: 11px; font-weight: 600; color: var(--sub); min-width: 44px; padding-top: 2px; flex-shrink: 0; }
-    .log-task { font-size: 14px; font-weight: 500; color: var(--text); overflow-wrap: anywhere; word-break: break-word; }
-    .log-meta { font-size: 12px; color: var(--sub); margin-top: 2px; display: flex; align-items: flex-start; gap: 4px; flex-wrap: wrap; overflow-wrap: anywhere; word-break: break-word; }
-    .log-meta .dot { flex-shrink: 0; margin-top: 5px; }
+    /* 時間帯を主役に：はっきり読める大きさ・色。範囲(HH:MM-HH:MM)も折り返さず表示 */
+    .log-time { font-size: 12.5px; font-weight: 700; color: var(--accent); min-width: 92px; padding-top: 1px; flex-shrink: 0; letter-spacing: .01em; white-space: nowrap; }
+    .log-task { font-size: 14.5px; font-weight: 600; color: var(--text); line-height: 1.5; overflow-wrap: anywhere; word-break: break-word; }
+    /* 集中度は小さなチップに。メモは独立行で読みやすく */
+    .log-focus { display: inline-flex; align-items: center; gap: 5px; margin-top: 5px; font-size: 11px; font-weight: 600; color: var(--sub); background: var(--bg); border-radius: 20px; padding: 2px 9px 2px 7px; }
+    .log-focus .dot { flex-shrink: 0; }
+    .log-memo { font-size: 12.5px; color: var(--text); opacity: .78; line-height: 1.7; margin-top: 6px; overflow-wrap: anywhere; word-break: break-word; white-space: pre-wrap; }
     .dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
 
     /* ── Chat ── */
@@ -2409,10 +2412,16 @@ function LogScreen({onToast, isActive}) {
         ${logs.map((l,i)=>{
           const num=l.focus_level?.charAt(0);
           const isTimer = !isFullHourBlock(l.time_block);
+          // 集中度「5 — 完璧にできた」を「数字」と「ラベル」に分解して、チップに整える
+          const focusStr = String(l.focus_level||"");
+          const focusLabel = focusStr.replace(/^\s*\d+\s*[—–-]\s*/,"").trim();
           return html`<div key=${i} class="log-row" style=${{cursor:"pointer"}} onClick=${()=>{handleBlockSelect(l.time_block);window.scrollTo?.(0,0);}}>
             <div class="log-time">${isTimer?"⏱ ":""}${l.time_block}</div>
-            <div><div class="log-task">${l.task}</div>
-            <div class="log-meta"><span class="dot" style=${{background:DOT[num]||"var(--sub)"}}/>${l.focus_level}${l.memo?` · ${l.memo}`:""}</div></div>
+            <div>
+              <div class="log-task">${l.task}</div>
+              ${focusStr&&html`<span class="log-focus"><span class="dot" style=${{background:DOT[num]||"var(--sub)"}}/>${num?num+"・":""}${focusLabel||focusStr}</span>`}
+              ${l.memo&&html`<div class="log-memo">${l.memo}</div>`}
+            </div>
           </div>`;
         })}
       </div>
