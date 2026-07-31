@@ -91,3 +91,51 @@ Apps Scriptエディタの**「プロジェクトの履歴」から古いバー�
 ```bash
 curl -sL "https://script.google.com/macros/s/<本番ID>/exec?action=authConfig&_=$(date +%s)"
 ```
+
+---
+
+## 運用コマンドの叩き方（2026-08-01 以降）
+
+**鍵をURLに載せない。** 署名だけを送る。
+
+```bash
+export P1_ADMIN_SECRET='...'        # 履歴に残さないよう、環境変数で渡す
+bash gas/ops.sh p1Status
+bash gas/ops.sh adminOpsHealthCheck dryRun=1
+bash gas/ops.sh authSetEnforce kind=WRITE on=1
+TARGET=test bash gas/ops.sh p1Status   # 検証環境へ
+```
+
+### なぜ変えたか
+
+以前は `?action=...&secret=xxxxx` と鍵をそのままURLに載せていた。
+
+| 弱点 | 旧 | 新 |
+|---|---|---|
+| 鍵がURLに残る（履歴・中間ログ） | ❌ | ✅ 鍵は一度も送らない |
+| 有効期限 | ❌ なし | ✅ 5分 |
+| リプレイ | ❌ 傍受すれば何度でも | ✅ nonce で一度きり |
+| パラメータの改ざん | ❌ 自由に変えられる | ✅ 全パラメータが署名対象 |
+
+最後が重要。`dryRun=1` を付けた無害な確認コマンドを傍受しても、
+それを外して本送信に変えることはできない。1文字でも変えれば署名が合わない。
+
+### 署名の作り方
+
+```
+署名対象 = sig を除く全パラメータを key=value でキー順に & 連結
+sig      = HMAC-SHA256(P1_ADMIN_SECRET, 署名対象) を base64url 化（末尾の = は削る）
+ts       = 現在時刻（秒）
+nonce    = 毎回ランダム
+```
+
+### 実行できる操作
+
+`ADMIN_SECRET_ALLOWLIST` に載っている29件のみ（状態確認・定期処理の手動実行・
+補完・一斉送信・セットアップ）。顧客情報の閲覧や編集、ファイル操作は**通らない**。
+それらはブラウザでKaiのセッションを使うこと。
+
+### 旧方式について
+
+移行期のため当面は受け付けるが、監査ログに `via_admin_secret_LEGACY` と印が付く。
+`authAuditTail` でこの印を検索し、ゼロになったら旧方式を削除する。

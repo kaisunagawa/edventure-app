@@ -116,14 +116,38 @@ if [ "$MODE" = "live" ] || [ "$MODE" = "all" ]; then
     ok "p1Status は鍵なしで拒否（fail-closed）"
   else ng "p1Status の拒否が異常: $(echo "$r" | head -c 140)"; fi
 
-  # 管理者以外は鍵があっても通らないこと
+  # 運用リクエストは署名方式で確認する。
+  # ★鍵をURLに載せない★（履歴や中間ログに残さないため）
   if [ -n "$SECRET" ]; then
-    r=$(call "&action=p1Status&studentEmail=not-the-owner@example.com&secret=${SECRET}")
-    if echo "$r" | grep -q 'not owner'; then ok "管理者以外は鍵があっても拒否"; else ng "管理者以外の拒否が異常: $(echo "$r" | head -c 140)"; fi
-    r=$(call "&action=p1Status&studentEmail=${ADMIN}&secret=${SECRET}")
-    if echo "$r" | grep -q '"ok":true'; then ok "正しい鍵で管理APIが通る"; else ng "正しい鍵で通らない: $(echo "$r" | head -c 140)"; fi
+    # 署名付きのクエリを作る（鍵は環境変数でPythonへ渡し、引数には出さない）
+    sign() {  # $1=action  $2=studentEmail  [$3=追加パラメータ]
+      ACTION="$1" WHO="$2" EXTRA="${3:-}" python3 - <<'PYEOF'
+import os, hmac, hashlib, base64, secrets, time, urllib.parse
+p = {"action": os.environ["ACTION"], "studentEmail": os.environ["WHO"],
+     "coachEmail": os.environ["WHO"], "ts": str(int(time.time())),
+     "nonce": secrets.token_urlsafe(12)}
+for kv in os.environ.get("EXTRA", "").split():
+    if "=" in kv:
+        k, v = kv.split("=", 1); p[k] = v
+c = "&".join("%s=%s" % (k, p[k]) for k in sorted(p))
+p["sig"] = base64.urlsafe_b64encode(hmac.new(
+    os.environ["P1_ADMIN_SECRET"].encode(), c.encode(), hashlib.sha256).digest()).decode().rstrip("=")
+print(urllib.parse.urlencode(p))
+PYEOF
+    }
+    r=$(curl -sL --max-time 120 "${URL}?$(sign p1Status "$ADMIN")")
+    if echo "$r" | grep -q '"ok":true'; then ok "署名付きで管理APIが通る"; else ng "署名付きで通らない: $(echo "$r" | head -c 140)"; fi
+
+    r=$(curl -sL --max-time 120 "${URL}?$(sign p1Status not-the-owner@example.com)")
+    if echo "$r" | grep -q '"ok":false'; then ok "管理者以外は署名があっても拒否"; else ng "管理者以外の拒否が異常: $(echo "$r" | head -c 140)"; fi
+
+    # 同じ署名の使い回し（リプレイ）が拒否されること
+    Q=$(sign p1Status "$ADMIN")
+    curl -sL --max-time 120 "${URL}?$Q" >/dev/null
+    r=$(curl -sL --max-time 120 "${URL}?$Q")
+    if echo "$r" | grep -q '"ok":false'; then ok "署名の使い回しを拒否"; else ng "リプレイが通ってしまう: $(echo "$r" | head -c 140)"; fi
   else
-    echo "  － P1_ADMIN_SECRET 未設定のため鍵ありのテストはスキップ"
+    echo "  － P1_ADMIN_SECRET 未設定のため運用リクエストのテストはスキップ"
   fi
 
   # ── 認証（Auth CP1 / Production Gate 1.5）──
