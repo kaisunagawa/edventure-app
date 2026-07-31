@@ -4118,48 +4118,61 @@ function ReauthGate() {
 
 // LINE連携の設定セクション。認証済みの本人だけが「連携用のことば」を発行できる。
 // 発行したことばをLINEへ送ると連携が完了する（5分間・1回限り）。
-function LineLinkSection({onToast}) {
-  const [word,setWord]=useState("");
+function LineLinkSection({onToast, linked}) {
+  const [code,setCode]=useState("");
   const [left,setLeft]=useState(0);
   const [busy,setBusy]=useState(false);
-  useEffect(()=>{
-    if(left<=0) return;
-    const t=setTimeout(()=>setLeft(left-1),1000);
-    return ()=>clearTimeout(t);
-  },[left]);
+  useEffect(()=>{ if(left<=0) return; const t=setTimeout(()=>setLeft(left-1),1000); return ()=>clearTimeout(t); },[left]);
+
+  // すでに連携済みなら、連携コードは出さない。
+  // 出してしまうと「送っても何も起きない」状態になり、壊れているように見える
+  if (linked) {
+    return html`
+      <div style=${{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
+        <span style=${{fontSize:16}}>✅</span>
+        <span style=${{fontSize:13.5,fontWeight:700,color:"var(--text)"}}>連携済みです</span>
+      </div>
+      <div style=${{fontSize:12.5,color:"var(--sub)",lineHeight:1.8}}>
+        毎時間のリマインダーと、毎晩のAIレポートがLINEに届きます。<br/>
+        機種変更などで連携し直したいときは、運営までご連絡ください。
+      </div>`;
+  }
+
   const issue=async()=>{
     setBusy(true);
     const r=await authedPost("issueLineLinkToken");
     setBusy(false);
-    if(r&&r.ok&&r.linkWord){ setWord(r.linkWord); setLeft(r.expiresInSec||300); }
+    if(r&&r.ok&&r.linkWord){ setCode(r.linkWord); setLeft(r.expiresInSec||300); }
     else onToast&&onToast(r&&r.error==="AUTH_REQUIRED" ? "もう一度ログインしてください" : "発行できませんでした");
   };
-  const copy=()=>{ navigator.clipboard.writeText("LINK "+word).then(()=>onToast&&onToast("コピーしました")); };
+  const copy=()=>{ navigator.clipboard.writeText("LINK "+code).then(()=>onToast&&onToast("コピーしました")); };
   const mm=String(Math.floor(left/60)), ss=String(left%60).padStart(2,"0");
+
   return html`
     <div style=${{fontSize:12.5,color:"var(--sub)",lineHeight:1.8,marginBottom:14}}>
-      LINEで毎時間のリマインダーと毎晩のAIレポートを受け取れます。<br/>
-      下のボタンで「連携のことば」を出して、JIROKUのLINEにそのまま送ってください。
+      LINEで毎時間のリマインダーと、毎晩のAIレポートを受け取れます。
     </div>
-    ${!word ? html`
-      <button class="btn" onClick=${issue} disabled=${busy}>${busy?"発行中…":"連携のことばを出す"}</button>
+    ${!code ? html`
+      <button class="btn" onClick=${issue} disabled=${busy}>${busy?"準備中…":"連携をはじめる"}</button>
+      <div style=${{fontSize:11.5,color:"var(--sub)",marginTop:10,lineHeight:1.7}}>
+        ボタンを押すと連携コードが出ます。それをJIROKUのLINEに送ると完了です。
+      </div>
     ` : html`
+      <div style=${{fontSize:12.5,color:"var(--text)",fontWeight:700,marginBottom:8}}>
+        ① 下の文字をコピー　② JIROKUのLINEに貼り付けて送信
+      </div>
       <div style=${{background:"var(--bg)",border:"1px solid var(--border)",borderRadius:12,padding:14,marginBottom:10}}>
-        <div style=${{fontSize:11,color:"var(--sub)",marginBottom:6}}>これをLINEに送ってください</div>
-        <div style=${{fontFamily:"monospace",fontSize:14,fontWeight:700,color:"var(--text)",wordBreak:"break-all",lineHeight:1.6}}>LINK ${word}</div>
-        <div style=${{fontSize:11,color:left<60?"var(--red,#e57373)":"var(--sub)",marginTop:8}}>
-          ${left>0 ? "あと "+mm+":"+ss+" で使えなくなります" : "期限切れです。もう一度出してください"}
+        <div style=${{fontFamily:"monospace",fontSize:14,fontWeight:700,color:"var(--text)",wordBreak:"break-all",lineHeight:1.6}}>LINK ${code}</div>
+        <div style=${{fontSize:11,color:left<60?"#e57373":"var(--sub)",marginTop:8}}>
+          ${left>0 ? "有効期限 あと "+mm+":"+ss : "期限切れです。もう一度お試しください"}
         </div>
       </div>
-      <div style=${{display:"flex",gap:8}}>
+      <div style=${{display:"flex",gap:8,marginBottom:8}}>
         <button class="btn" onClick=${copy} style=${{flex:1}}>コピーする</button>
-        <button onClick=${issue} disabled=${busy} style=${{background:"none",border:"1px solid var(--border)",borderRadius:10,padding:"0 16px",color:"var(--sub)",fontSize:13,fontWeight:600,cursor:"pointer"}}>出し直す</button>
+        <button onClick=${()=>window.open("https://lin.ee/5pElLYY","_blank")} style=${{background:"#06C755",border:"none",borderRadius:10,padding:"0 16px",color:"#fff",fontSize:13,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap"}}>LINEを開く</button>
       </div>
-    `}
-    <div style=${{fontSize:11,color:"var(--sub)",marginTop:12,lineHeight:1.7}}>
-      すでに連携している場合は、この操作は不要です。<br/>
-      連携先を変えたいときは運営までご連絡ください。
-    </div>`;
+      <button onClick=${issue} disabled=${busy} style=${{background:"none",border:"1px solid var(--border)",borderRadius:10,padding:"9px",color:"var(--sub)",fontSize:12.5,fontWeight:600,cursor:"pointer",width:"100%"}}>コードを出し直す</button>
+    `}`;
 }
 
 // 週次ふりかえりを出してよいかの判定。
@@ -4172,7 +4185,6 @@ function LineLinkSection({onToast}) {
 function shouldShowWeeklyReview(weekly) {
   if (!weekly || !weekly.weekEnd) return false;
   const now = new Date();
-  // 深夜0〜4時は、本人の感覚ではまだ前日。日付をずらして判定する
   const eff = new Date(now.getTime() - (now.getHours() < 4 ? 4 * 3600 * 1000 : 0));
   if (eff.getDay() !== 0) return false;                       // 日曜だけ
   const h = eff.getHours();
@@ -4483,7 +4495,7 @@ function SettingsScreen({onToast,onLogout,onGoalSaved,profile,onProfileSaved,onC
            以前はメールアドレスを送るだけで連携できたが、それだと他人になりすまして
            通知の宛先を奪えたため、アプリで発行したことばでのみ連携する -->
       <${SettingsSec} k="linelink" icon="💬" title="LINE連携" open=${openSec==="linelink"} onToggle=${()=>setOpenSec(openSec==="linelink"?"":"linelink")}>
-        <${LineLinkSection} onToast=${onToast}/>
+        <${LineLinkSection} onToast=${onToast} linked=${CURRENT_USER&&CURRENT_USER.lineLinked!==false}/>
       <//>
 
       <!-- 新・目標。3か月目標→週間目標の階層。goals_v1 が有効な人はこちらが本体 -->
@@ -4935,21 +4947,14 @@ function LoginScreen({onLogin}) {
       <div class="login-box">
         <div style=${{background:"var(--card)",borderRadius:14,padding:"20px 18px",border:"1px solid var(--border)"}}>
           <div style=${{fontSize:13,color:"var(--sub)",lineHeight:1.7,marginBottom:16}}>
-            LINEボットに<b>あなたのGmailアドレス</b>を送信すると連携完了！<br/>
-            連携すると毎時間のリマインダーとAIレポートが届きます。
+            連携すると、毎時間のリマインダーと毎晩のAIレポートがLINEに届きます。<br/>
+            <b style=${{color:"var(--text)"}}>設定 →「LINE連携」</b>から連携できます。
           </div>
-          <div style=${{fontSize:11,color:"var(--sub)",marginBottom:6}}>あなたのGmailアドレス</div>
-          <div style=${{display:"flex",gap:8,alignItems:"center",marginBottom:16}}>
-            <div style=${{flex:1,background:"var(--bg)",border:"1px solid var(--border)",borderRadius:8,padding:"10px 12px",fontSize:14,fontWeight:600,color:"var(--text)",wordBreak:"break-all"}}>${pendingUser?.email}</div>
-            <button onClick=${copyEmail} style=${{padding:"10px 14px",borderRadius:8,border:"1px solid var(--border)",background:lineCopied?"#06C755":"var(--card)",color:lineCopied?"#fff":"var(--text)",fontSize:13,cursor:"pointer",whiteSpace:"nowrap",fontWeight:600}}>
-              ${lineCopied?"✓コピー済み":"コピー"}
-            </button>
-          </div>
-          <button class="btn" style=${{background:"#06C755",fontSize:15}} onClick=${openLine}>LINEを開く</button>
-          <div style=${{fontSize:12,color:"var(--sub)",marginTop:10,lineHeight:1.6}}>
-            ① 上のアドレスをコピー<br/>
-            ② 「LINEを開く」→ ボットに貼り付けて送信<br/>
-            ③ 連携完了のメッセージが届いたら↓をタップ
+          <button class="btn" style=${{background:"#06C755",fontSize:15}} onClick=${openLine}>LINEを友だち追加</button>
+          <div style=${{fontSize:12,color:"var(--sub)",marginTop:10,lineHeight:1.7}}>
+            ① 上のボタンでJIROKUのLINEを友だち追加<br/>
+            ② アプリの <b>設定 →「LINE連携」</b>で「連携のことば」を出す<br/>
+            ③ それをLINEにそのまま送ると連携完了
           </div>
         </div>
         ${lineWarning && html`
@@ -5071,7 +5076,7 @@ function LoginScreen({onLogin}) {
 // LINE未連携の生徒に毎回の起動時に気づいてもらうためのバナー。
 // 登録直後の「line」ステップはスキップ可能なため、その後も本人が気づけるように
 // 連携が完了するまでホーム画面の上に毎回表示する（セッション内での「閉じる」は一時的）
-function LineLinkBanner({email, onDismiss}) {
+function LineLinkBanner({email, onDismiss, onGoToSettings}) {
   const [copied,setCopied]=useState(false);
   const copyEmail=()=>{
     navigator.clipboard.writeText(email||"").then(()=>{ setCopied(true); setTimeout(()=>setCopied(false),2000); });
@@ -5081,12 +5086,12 @@ function LineLinkBanner({email, onDismiss}) {
       <div style=${{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
         <div style=${{lineHeight:1.6}}>
           LINE連携が未完了です。連携するとリマインダー・AIレポートが届くようになります。<br/>
-          <b>${email}</b>をコピーして、LINEボットに送ってください。
+          <b>設定 →「LINE連携」</b>から「連携のことば」を出して、LINEに送ってください。
         </div>
         <button onClick=${onDismiss} style=${{background:"none",border:"none",color:"#8a6d1f",fontSize:16,cursor:"pointer",flexShrink:0}}>×</button>
       </div>
       <div style=${{display:"flex",gap:8,marginTop:8}}>
-        <button onClick=${copyEmail} style=${{padding:"6px 12px",borderRadius:7,border:"1px solid #ffe08a",background:"#fff",fontSize:12,cursor:"pointer",fontWeight:600,color:"#8a6d1f"}}>${copied?"✓コピー済み":"メールをコピー"}</button>
+        <button onClick=${onGoToSettings} style=${{padding:"6px 12px",borderRadius:7,border:"1px solid #ffe08a",background:"#fff",fontSize:12,cursor:"pointer",fontWeight:600,color:"#8a6d1f"}}>設定を開く</button>
         <button onClick=${()=>window.open("https://lin.ee/5pElLYY","_blank")} style=${{padding:"6px 12px",borderRadius:7,border:"none",background:"#06C755",color:"#fff",fontSize:12,cursor:"pointer",fontWeight:600}}>LINEを開く</button>
       </div>
     </div>
@@ -5829,7 +5834,7 @@ function App() {
     <div style=${{height:"100%",position:"relative",display:"flex",flexDirection:"column"}}>
       ${showAnnounce && html`<${FeatureAnnounce} onClose=${dismissAnnounce} onGo=${()=>{dismissAnnounce();setTab("brain");}}/>`}
       ${showSurvey && !showAnnounce && html`<${SurveyModal} onDone=${answerSurvey} onLater=${snoozeSurvey}/>`}
-      ${user.lineLinked===false && !bannerDismissed && html`<${LineLinkBanner} email=${user.email} onDismiss=${()=>setBannerDismissed(true)}/>`}
+      ${user.lineLinked===false && !bannerDismissed && html`<${LineLinkBanner} email=${user.email} onDismiss=${()=>setBannerDismissed(true)} onGoToSettings=${()=>{setBannerDismissed(true);setTab("settings");}}/>`}
       ${!calLinked && !calBannerDismissed && !isServerCalendar() && html`<${CalendarLinkBanner} onGoToSettings=${()=>setTab("settings")} onDismiss=${()=>setCalBannerDismissed(true)}/>`}
       <div style=${{position:"relative",flex:1,minHeight:0}}>
         <div class="screen">

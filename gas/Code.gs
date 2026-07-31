@@ -387,6 +387,21 @@ function doPost(e) {
         if (event.type === "message" && event.message.type === "text") {
           const lineUserId = event.source.userId;
           const text = event.message.text.trim().toLowerCase();
+          // ★連携コマンドは、連携済みかどうかより先に処理する★
+          // 以前はこの下の early return が先にあったため、連携済みの人が LINK を
+          // 送っても何も返らず「壊れている」ように見えた（2026-08-01に発生）
+          if (/^LINK\s+\S+/i.test(event.message.text.trim())) {
+            const tok0 = event.message.text.trim().replace(/^LINK\s+/i, "");
+            const already0 = sheetToObjects(getSheet("Users")).find(u => u.line_user_id === lineUserId);
+            if (already0) {
+              sendLineMessage(lineUserId, "このLINEはすでに " + String(already0.name || "") + " さんのアカウントと連携済みです。\nあらためて連携する必要はありません。");
+              return;
+            }
+            const r0 = consumeLineLinkToken(tok0, lineUserId);
+            sendLineMessage(lineUserId, r0.message);
+            return;
+          }
+
           // 既に連携済みなら、案内メッセージの再送はしない（雑談等の通常メッセージのため）
           const alreadyLinked = sheetToObjects(getSheet("Users")).find(u => u.line_user_id === lineUserId);
           if (alreadyLinked) return;
@@ -396,11 +411,7 @@ function doPost(e) {
           // メールアドレスは誰でも知りうる情報なので、それを本人確認の根拠にすると
           // 「他人になりすまして通知の宛先を奪う」ことができてしまう。
           // 連携はアプリ（認証済み）で発行したワンタイムトークンでのみ行う。
-          if (/^LINK\s+\S+/i.test(event.message.text.trim())) {
-            const tok = event.message.text.trim().replace(/^LINK\s+/i, "");
-            const r = consumeLineLinkToken(tok, lineUserId);
-            sendLineMessage(lineUserId, r.message);
-          } else if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(text)) {
+          if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(text)) {
             // 従来どおりメールを送ってきた人への案内（連携はしない）
             sendLineMessage(lineUserId, "連携のやり方が新しくなりました🙏\n\nJIROKUアプリを開き、設定 →「LINE連携」で連携用のことばを発行してください。\nそれをこのトークにそのまま送ると連携できます。\n\n" + APP_URL);
             try { authAudit("LINE_LINK_BLOCKED", { result: "DENY", action: "lineWebhookLink",
