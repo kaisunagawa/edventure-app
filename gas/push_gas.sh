@@ -40,15 +40,34 @@ cp Code.gs "コード.js"
 clasp push --force >/dev/null
 echo "✓ push完了"
 
+# ★GASはバージョンを200個までしか持てない。上限に達すると deploy が失敗するが、
+#   終了コードに現れないことがあるため、出力を見て明示的に止める。
+#   （2026-07-31に上限へ到達。既存バージョンへ向け直して回避した）
+deploy_or_die() {  # $1=deploymentId  $2=説明
+  local out
+  out=$(clasp deploy -i "$1" -d "$2" 2>&1)
+  if printf '%s' "$out" | grep -q "limit of 200 versions"; then
+    echo "✗ バージョン数が上限(200)に達しています。新しいバージョンを作れません。"
+    echo "   対処: Apps Scriptの「プロジェクトの履歴」で古い版を削除するか、"
+    echo "         既存バージョンへ向け直す:  clasp deploy -i $1 -V <既存の版番号>"
+    return 1
+  fi
+  if ! printf '%s' "$out" | grep -q "^Deployed"; then
+    echo "✗ デプロイに失敗しました:"; printf '%s\n' "$out"; return 1
+  fi
+  printf '%s\n' "$out" | tail -1
+  return 0
+}
+
 DESC="${1:-Claude Codeによる自動デプロイ $(date '+%Y-%m-%d %H:%M')}"
 
 if [ "$SMOKE" != "1" ]; then
   echo "【3/6】テスト用デプロイへ反映"
-  clasp deploy -i "$TEST_DEPLOYMENT_ID" -d "test: $DESC" >/dev/null
+  deploy_or_die "$TEST_DEPLOYMENT_ID" "test: $DESC" || exit 1
   echo "✓ 完了"
 
   echo "【4/6】テスト用URLへ実機スモークテスト"
-  if ! bash smoke_test.sh live "$BASE/$TEST_DEPLOYMENT_ID/exec"; then
+  if ! EXPECT_AUTH_MODE="${EXPECT_AUTH_MODE_TEST:-}" bash smoke_test.sh live "$BASE/$TEST_DEPLOYMENT_ID/exec"; then
     echo "✗ テスト環境で失敗。本番へは出しません（本番は今も無傷です）"; exit 1
   fi
 fi
@@ -61,12 +80,12 @@ if [ "${TEST_ONLY:-0}" = "1" ]; then
 fi
 
 echo "【5/6】本番デプロイ"
-clasp deploy -i "$DEPLOYMENT_ID" -d "$DESC" >/dev/null
+deploy_or_die "$DEPLOYMENT_ID" "$DESC" || exit 1
 echo "✓ 本番デプロイ完了（新バージョンを公開）"
 
 if [ "$SMOKE" != "1" ]; then
   echo "【6/6】本番URLへ実機スモークテスト（読み取りのみ）"
-  if ! bash smoke_test.sh live "$BASE/$DEPLOYMENT_ID/exec"; then
+  if ! EXPECT_AUTH_MODE="${EXPECT_AUTH_MODE_PROD:-}" bash smoke_test.sh live "$BASE/$DEPLOYMENT_ID/exec"; then
     echo ""
     echo "✗✗ 本番が異常です。ただちに戻してください:"
     echo "     cd ~/Projects/edventure-app && git revert --no-commit HEAD && git commit -m '緊急revert' && bash gas/push_gas.sh"
