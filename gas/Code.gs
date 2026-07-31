@@ -374,11 +374,29 @@ function doPost(e) {
             const lineIdx = headers.indexOf("line_user_id");
             const nameIdx = headers.indexOf("name");
             for (let i = 1; i < data.length; i++) {
-              if (String(data[i][emailIdx]).toLowerCase() === text) {
-                sheet.getRange(i + 1, lineIdx + 1).setValue(lineUserId);
-                sendLineMessage(lineUserId, "✅ 連携完了！\n" + String(data[i][nameIdx]) + "さんのアカウントと連携しました。\n\n毎時間の記録リマインダーと毎晩のAIレポートをお届けします！");
+              if (String(data[i][emailIdx]).toLowerCase() !== text) continue;
+
+              // ★緊急封じ込め（2026-08-01）★
+              // LINEのWebhookは署名を検証できない（GASはリクエストヘッダーを
+              // 取得できないことを実測済み）。したがってこのPOSTは誰でも偽造できる。
+              // 以前はここで無条件に line_user_id を上書きしていたため、
+              // 他人のメールを送るだけで「その人の通知の宛先」を奪えた。
+              // 夜のAIレポート（本人の内省・点数・コーチ所見）が攻撃者へ届く。
+              // → 既に連携済みの人の宛先は、絶対に上書きしない。
+              const existing = String(data[i][lineIdx] || "").trim();
+              if (existing && existing !== lineUserId) {
+                sendLineMessage(lineUserId, "このメールアドレスは、すでに別のLINEアカウントと連携済みです。\n\nご本人で連携をやり直したい場合は、運営までご連絡ください。");
+                try {
+                  authAudit("LINE_LINK_BLOCKED", { result: "DENY", targetUserId: text,
+                            action: "lineWebhookLink", failureReason: "already_linked_to_other" });
+                } catch (e2) {}
+                try { notifyAdminAuthAnomaly("LINEの連携先を書き換えようとする要求を拒否しました（対象: " + text + "）"); } catch (e3) {}
                 return;
               }
+
+              sheet.getRange(i + 1, lineIdx + 1).setValue(lineUserId);
+              sendLineMessage(lineUserId, "✅ 連携完了！\n" + String(data[i][nameIdx]) + "さんのアカウントと連携しました。\n\n毎時間の記録リマインダーと毎晩のAIレポートをお届けします！");
+              return;
             }
             sendLineMessage(lineUserId, "❌ このメールアドレスは見つかりませんでした。\nアプリで登録したGmailアドレスを確認して、もう一度送ってください。");
           } else {
@@ -8905,6 +8923,14 @@ function enforceFlag(kind) {
 // 段階に応じて、そのアクションに適用するポリシーを返す
 function policyFor(action) {
   if (ACTION_POLICIES[action]) return ACTION_POLICIES[action];
+
+  // ★fail-closed★ admin* / coach* で始まるものは、台帳に書き忘れても公開しない。
+  // 「ポリシーに書かなかったので従来どおり誰でも叩ける」という状態を作らないため。
+  // 個別に登録すればそちらが優先される（上のACTION_POLICIES）。
+  const a = String(action || "");
+  if (a.indexOf("admin") === 0) return { roles: ["JIROKU_ADMIN"], scope: "GLOBAL", audit: true };
+  if (a.indexOf("coach") === 0) return { roles: ["COACH", "JIROKU_ADMIN"], scope: "ASSIGNED", audit: true };
+
   if (enforceFlag("WRITE") && ACTION_POLICIES_WRITE[action]) {
     return { roles: ["USER","COACH","JIROKU_ADMIN"], scope: "SELF" };
   }
