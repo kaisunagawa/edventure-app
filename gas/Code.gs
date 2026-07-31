@@ -76,6 +76,12 @@ function doGet(e) {
       case "getGoalTree": result = getGoalTree(studentEmail); break;
       // ── Auth CP1: 公開アクション（認証不要）──
       case "authChallenge": result = authChallenge(); break;
+      case "rotateSessionSecret": {
+        var _rs = verifyP1Admin(studentEmail, e.parameter.secret);
+        if (!_rs.ok) { result = _rs; break; }
+        result = rotateSessionSecret(String(e.parameter.force || "") === "1");
+        break;
+      }
       case "authAuditTail": {
         var _aa = verifyP1Admin(studentEmail, e.parameter.secret);
         if (!_aa.ok) { result = _aa; break; }
@@ -8143,6 +8149,34 @@ function newSessionToken(userId) {
   ].join("|");
   const raw = Utilities.computeHmacSha256Signature(material, secret);
   return Utilities.base64EncodeWebSafe(raw).replace(/=+$/, "");
+}
+
+// ── セッション鍵の設定 ──
+// 鍵そのものをネットワークへ流さないため、GASの内部で生成してそのまま保存する。
+// 戻り値は指紋（ハッシュの先頭12文字）だけで、鍵は絶対に返さない・ログにも出さない。
+//
+// 乱数源について: Utilities.getUuid() はJavaの UUID.randomUUID() 相当で、
+// SecureRandom を用いた 122bit の乱数を返す。これを6回分＋時刻と混ぜて
+// SHA-256 に通し、256bit の鍵材料とする。
+// ※より厳密にはOS側のCSPRNGで作った鍵を手で設定する方が確実だが、
+//   その場合は鍵を人の手で運ぶことになる。ここでは「鍵を一切外に出さない」ことを優先した。
+function rotateSessionSecret(force) {
+  const props = PropertiesService.getScriptProperties();
+  const existing = props.getProperty("SESSION_TOKEN_SECRET");
+  if (existing && !force) {
+    return { ok: true, alreadySet: true, fingerprint: sha256Hex(existing).slice(0, 12) };
+  }
+  const material = [];
+  for (let i = 0; i < 6; i++) material.push(Utilities.getUuid());
+  material.push(String(new Date().getTime()));
+  material.push(String(Math.random()));
+  const secret = Utilities.base64EncodeWebSafe(
+    Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, material.join("|"), Utilities.Charset.UTF_8)
+  ).replace(/=+$/, "");
+  props.setProperty("SESSION_TOKEN_SECRET", secret);
+  // 鍵を変えると既存セッションはすべて検証できなくなる＝全端末ログアウトと同じ
+  return { ok: true, rotated: true, fingerprint: sha256Hex(secret).slice(0, 12),
+           note: "既存のセッションはすべて無効になりました" };
 }
 
 // ── 監査ログ ──
