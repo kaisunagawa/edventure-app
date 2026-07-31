@@ -84,6 +84,12 @@ function doGet(e) {
         result = p1BackupInfo(e.parameter.id);
         break;
       }
+      case "lineQuota": {
+        var _lq = verifyP1Admin(studentEmail, e.parameter.secret);
+        if (!_lq.ok) { result = _lq; break; }
+        result = lineQuotaStatus();
+        break;
+      }
       case "p1PurgeArchived": {
         // 検証データの後始末。鍵が必須。dryRun=1 なら数えるだけ
         var _ap = verifyP1Admin(studentEmail, e.parameter.secret);
@@ -8006,6 +8012,31 @@ function refreshWeeklyActuals(studentEmail, weekStart) {
   return { ok: true, weekStart: weekStart || mondayOf(formatDate(new Date())), results: agg };
 }
 
+// LINEの送信枠を確認する。無料プランには月あたりの上限があり、
+// 使い切ると push が失敗する。失敗はログに残るだけで誰も気づけないため、
+// 「届かない」の原因を特定できるようにしておく。
+function lineQuotaStatus() {
+  const token = PropertiesService.getScriptProperties().getProperty("LINE_CHANNEL_TOKEN");
+  if (!token) return { ok: false, error: "LINE_CHANNEL_TOKEN未設定" };
+  const get = (path) => {
+    const r = UrlFetchApp.fetch("https://api.line.me/v2/bot/" + path, {
+      headers: { "Authorization": "Bearer " + token }, muteHttpExceptions: true
+    });
+    return { code: r.getResponseCode(), body: r.getContentText() };
+  };
+  const q = get("message/quota");
+  const c = get("message/quota/consumption");
+  let limit = null, used = null;
+  try { const j = JSON.parse(q.body); limit = (j.type === "limited") ? j.value : "無制限"; } catch (e) {}
+  try { used = JSON.parse(c.body).totalUsage; } catch (e) {}
+  return {
+    ok: q.code === 200 && c.code === 200,
+    limit: limit, used: used,
+    remaining: (typeof limit === "number" && typeof used === "number") ? (limit - used) : null,
+    raw: { quota: q, consumption: c }
+  };
+}
+
 // ── 管理操作の保護 ──
 // 【重要な前提】このWeb appは「リクエストに書かれたメールアドレス」をそのまま信用している。
 // つまり adminEmail() との比較だけでは、他人が管理者のメールを書けば通ってしまう。
@@ -8653,17 +8684,26 @@ function dailyOpsHealthCheck(dryRun) {
   }
   const text = lines.join("\n");
 
-  // dryRunなら送信せず文面だけ返す（動作確認用）
-  if (dryRun) return { ok: true, data: { text: text, problems: problems.length, sent: false } };
+  // dryRunなら送信せず文面だけ返す（動作確認用）。
+  // ★=== が必須 ===★ 時間主導トリガーから呼ばれると、GASは第1引数にイベントオブジェクトを
+  // 渡してくる。それは truthy なので if (dryRun) だと毎回ここで返ってしまい、
+  // 文面を作った直後に捨てていた（2026-07-31まで運営レポートが1通も届かなかった原因）。
+  // 明示的に true の時だけ dryRun とみなす。
+  if (dryRun === true) return { ok: true, data: { text: text, problems: problems.length, sent: false } };
 
-  // LINE優先、無ければメール
+  // LINE優先。ただし「LINEが失敗したら黙って消える」ことがないよう、
+  // 送信できなかった場合は必ずメールへ回す（届かない日があった原因）
+  let sentBy = "";
   if (adminUser && adminUser.line_user_id) {
-    sendLineMessage(adminUser.line_user_id, text);
-  } else {
-    try { MailApp.sendEmail(admin, head, text); } catch (e) { Logger.log("ops health mail error: " + e); }
+    if (sendLineMessage(adminUser.line_user_id, text)) sentBy = "line";
+    else Logger.log("dailyOpsHealthCheck: LINE送信に失敗したためメールへ切り替えます");
+  }
+  if (!sentBy) {
+    try { MailApp.sendEmail(admin, head, text); sentBy = "mail"; }
+    catch (e) { Logger.log("ops health mail error: " + e); sentBy = "failed"; }
   }
   Logger.log("dailyOpsHealthCheck: " + head + " missing7=" + missing7);
-  return { ok: true, data: { text: text, problems: problems.length, sent: true } };
+  return { ok: true, data: { text: text, problems: problems.length, sent: sentBy !== "failed", sentBy: sentBy } };
 }
 
 // ── アプリ全体のシステム診断 ──

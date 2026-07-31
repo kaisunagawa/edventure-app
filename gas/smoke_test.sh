@@ -53,6 +53,20 @@ if [ "$MODE" = "static" ] || [ "$MODE" = "all" ]; then
     if grep -q "case \"${bad}\"" Code.gs; then ng "一時エンドポイント ${bad} が残っている"; else ok "一時エンドポイント ${bad} なし"; fi
   done
 
+  # トリガー関数が引数を取る場合、GASはイベントオブジェクトを渡してくる。
+  # if (arg) のような真偽判定をすると必ず truthy になり、意図しない分岐に入る。
+  # （運営レポートが毎日「dryRun扱い」で捨てられていた実例があるため必ず確認する）
+  for fn in $(grep -o 'newTrigger("[a-zA-Z]*"' Code.gs | sed 's/newTrigger("//;s/"//' | sort -u); do
+    sig=$(grep "^function ${fn}(" Code.gs | head -1)
+    arg=$(printf '%s' "$sig" | sed 's/.*(\(.*\)).*/\1/')
+    if [ -n "$arg" ]; then
+      first=$(printf '%s' "$arg" | cut -d, -f1 | tr -d ' ')
+      if grep -A40 "^function ${fn}(" Code.gs | grep -qE "if \(${first}\)"; then
+        ng "トリガー関数 ${fn} が if (${first}) で真偽判定（イベントで必ずtrueになる）"
+      else ok "トリガー関数 ${fn} の引数判定"; fi
+    fi
+  done
+
   # 管理APIが鍵チェックを通しているか（チェックを外した状態で出さない）
   for ac in adminSetupPhase1 p1Status; do
     if grep -A3 "case \"${ac}\"" Code.gs | grep -q "verifyP1Admin"; then ok "${ac} は鍵チェックあり"; else ng "${ac} の鍵チェックが無い"; fi
