@@ -4632,8 +4632,11 @@ function LoginScreen({onLogin}) {
   };
 
   const handleGoogleLogin=async(res)=>{
+    // Googleから戻った直後にサーバーへ本人確認を投げる。その数秒間、
+    // 何も出ていないとログイン画面へ戻ったように見えるため、真っ先に待機表示を出す
+    setLoading(true); setError("");
     const payload=parseJwt(res.credential);
-    if(!payload) { setError("ログインに失敗しました"); return; }
+    if(!payload) { setLoading(false); setError("ログインに失敗しました"); return; }
 
     // ★IDトークンをサーバーへ送り、検証してもらってセッションを受け取る。
     //   ここで初めて「本人であること」がサーバー側で確定する。
@@ -4876,7 +4879,10 @@ function LoginScreen({onLogin}) {
       <div class="login-sub">時間を記録し、目標を達成する</div>
       <div class="login-box" style=${{alignItems:"center"}}>
         ${loading
-          ? html`<div style=${{color:"var(--sub)",fontSize:14}}>確認中...</div>`
+          ? html`<div style=${{color:"var(--sub)",fontSize:14,textAlign:"center",lineHeight:1.8}}>
+              ログインしています…<br/>
+              <span style=${{fontSize:12,opacity:.75}}>数秒かかります。そのままお待ちください</span>
+            </div>`
           : html`<button onClick=${handleGoogleSignIn} style=${{display:"flex",alignItems:"center",gap:10,padding:"10px 20px",borderRadius:8,border:"1px solid #dadce0",background:"#fff",cursor:"pointer",fontSize:15,fontWeight:500,color:"#3c4043",width:280,justifyContent:"center"}}>
               <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" width="18" height="18"/>
               Googleでサインイン
