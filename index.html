@@ -3801,6 +3801,213 @@ function FAQSection(){
   </div>`;
 }
 
+// ══════════════════════════════════════════════════════════════════
+// 目標階層（3か月目標 → 週間目標）　※features に goals_v1 がある人だけに出る
+// 「今の1時間が、3か月後のどの目標につながっているか」を見えるようにするための土台。
+// 既存の「目標・期限」（設定内の自由記述3つ）はそのまま残す。置き換えない。
+// ※フォーム部品はモジュール直下に置く。コンポーネント内で定義すると入力のたびに
+//   作り直されてフォーカスが外れる（過去に同じ不具合を出している）
+// ══════════════════════════════════════════════════════════════════
+function GoalField({label, hint, children}) {
+  return html`
+    <div style=${{marginBottom:12}}>
+      <label class="form-lbl" style=${{fontSize:11.5,marginBottom:4,display:"block"}}>${label}</label>
+      ${children}
+      ${hint&&html`<div style=${{fontSize:10.5,color:"var(--sub)",marginTop:4,lineHeight:1.5}}>${hint}</div>`}
+    </div>`;
+}
+
+const EMPTY_GOAL = {quarterly_goal_id:"",title:"",category:"",target_value:"",unit:"",start_date:"",end_date:"",why:"",success_condition:"",guardrails:"",priority:3};
+const EMPTY_WG = {weekly_goal_id:"",link_quarterly_goal_id:"",title:"",metric_type:"count",unit:"",target_total:"",min_line:"",std_line:"",stretch_line:""};
+const METRIC_LABELS = {count:"回数（何回やるか）", minutes:"時間（何分やるか）", boolean:"やったかどうか"};
+
+function GoalEditor({draft, setDraft, onSave, onCancel, saving}) {
+  const f=(k)=>(e)=>setDraft({...draft,[k]:e.target.value});
+  return html`
+    <div style=${{background:"var(--bg)",borderRadius:12,padding:14,border:"1px solid var(--border)",marginBottom:10}}>
+      <${GoalField} label="3か月で達成したいこと">
+        <textarea class="txa" placeholder="例：月商100万円を安定して出せるようにする" value=${draft.title}
+          onChange=${f("title")} style=${{minHeight:44,padding:"9px 12px",resize:"none"}}/>
+      <//>
+      <div style=${{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+        <${GoalField} label="目標の数値"><input class="inp" type="number" inputmode="decimal" placeholder="100" value=${draft.target_value} onChange=${f("target_value")}/><//>
+        <${GoalField} label="単位"><input class="inp" placeholder="万円 / 件 / kg" value=${draft.unit} onChange=${f("unit")}/><//>
+        <${GoalField} label="開始日"><input class="inp" type="date" value=${draft.start_date} onChange=${f("start_date")}/><//>
+        <${GoalField} label="期限"><input class="inp" type="date" value=${draft.end_date} onChange=${f("end_date")}/><//>
+      </div>
+      <${GoalField} label="なぜこれをやるのか" hint="迷ったときに立ち返る場所です。うまく書けなくても大丈夫。">
+        <textarea class="txa" placeholder="例：家族との時間を増やしたいから、収入を仕組みで作れるようにしたい" value=${draft.why}
+          onChange=${f("why")} style=${{minHeight:44,padding:"9px 12px",resize:"none"}}/>
+      <//>
+      <${GoalField} label="達成したと言える条件" hint="「なんとなく頑張った」で終わらせないための線引きです。">
+        <textarea class="txa" placeholder="例：3か月連続で月商100万円を超えている" value=${draft.success_condition}
+          onChange=${f("success_condition")} style=${{minHeight:44,padding:"9px 12px",resize:"none"}}/>
+      <//>
+      <div style=${{display:"flex",gap:8}}>
+        <button class="btn" onClick=${onSave} disabled=${saving} style=${{flex:1,opacity:saving?.6:1}}>${saving?"保存中…":"保存する"}</button>
+        <button onClick=${onCancel} style=${{background:"none",border:"1px solid var(--border)",borderRadius:10,padding:"0 16px",color:"var(--sub)",fontSize:13,fontWeight:600,cursor:"pointer"}}>やめる</button>
+      </div>
+    </div>`;
+}
+
+function WeeklyGoalEditor({draft, setDraft, onSave, onCancel, saving}) {
+  const f=(k)=>(e)=>setDraft({...draft,[k]:e.target.value});
+  const isBool = draft.metric_type==="boolean";
+  return html`
+    <div style=${{background:"var(--card)",borderRadius:10,padding:12,border:"1px dashed var(--accent)",marginBottom:8}}>
+      <${GoalField} label="今週やること">
+        <input class="inp" placeholder="例：見込み客に提案を出す" value=${draft.title} onChange=${f("title")}/>
+      <//>
+      <${GoalField} label="何で測るか">
+        <select class="inp" value=${draft.metric_type} onChange=${f("metric_type")}>
+          ${Object.keys(METRIC_LABELS).map(k=>html`<option key=${k} value=${k}>${METRIC_LABELS[k]}</option>`)}
+        </select>
+      <//>
+      ${!isBool&&html`
+        <div style=${{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+          <${GoalField} label="今週の目標"><input class="inp" type="number" inputmode="numeric" placeholder="10" value=${draft.target_total} onChange=${f("target_total")}/><//>
+          <${GoalField} label="単位"><input class="inp" placeholder=${draft.metric_type==="minutes"?"分":"件"} value=${draft.unit} onChange=${f("unit")}/><//>
+        </div>
+        <${GoalField} label="最低ここまでやる" hint="調子が悪い週でも、ここを超えれば連続記録は途切れません。">
+          <input class="inp" type="number" inputmode="numeric" placeholder="3" value=${draft.min_line} onChange=${f("min_line")}/>
+        <//>
+      `}
+      <div style=${{display:"flex",gap:8}}>
+        <button class="btn" onClick=${onSave} disabled=${saving} style=${{flex:1,opacity:saving?.6:1}}>${saving?"保存中…":"保存"}</button>
+        <button onClick=${onCancel} style=${{background:"none",border:"1px solid var(--border)",borderRadius:10,padding:"0 14px",color:"var(--sub)",fontSize:12.5,fontWeight:600,cursor:"pointer"}}>やめる</button>
+      </div>
+    </div>`;
+}
+
+function GoalTreeSheet({onClose, onToast}) {
+  const [tree,setTree]=useState(null);
+  const [loading,setLoading]=useState(true);
+  const [saving,setSaving]=useState(false);
+  const [goalDraft,setGoalDraft]=useState(null);   // 3か月目標の編集中データ
+  const [wgDraft,setWgDraft]=useState(null);       // 週間目標の編集中データ
+
+  const load=async()=>{
+    setLoading(true);
+    const r=await gasApi("getGoalTree");
+    if(r&&r.ok) setTree(r.data); else onToast&&onToast(r&&r.error?r.error:"読み込みに失敗しました");
+    setLoading(false);
+  };
+  useEffect(()=>{load();},[]);
+
+  const saveGoalRow=async()=>{
+    if(!String(goalDraft.title||"").trim()){ onToast&&onToast("目標を入力してください"); return; }
+    setSaving(true);
+    const r=await gasPostJson("saveGoal", goalDraft);
+    setSaving(false);
+    if(r&&r.ok){ setGoalDraft(null); onToast&&onToast("保存しました"); load(); }
+    else onToast&&onToast(r&&r.error?r.error:"保存に失敗しました");
+  };
+  const saveWgRow=async()=>{
+    if(!String(wgDraft.title||"").trim()){ onToast&&onToast("やることを入力してください"); return; }
+    setSaving(true);
+    const r=await gasPostJson("saveWeeklyGoal", wgDraft);
+    setSaving(false);
+    if(r&&r.ok){ setWgDraft(null); onToast&&onToast("保存しました"); load(); }
+    else onToast&&onToast(r&&r.error?r.error:"保存に失敗しました");
+  };
+  const archive=async(kind,id)=>{
+    const msg = kind==="goal" ? "この3か月目標と、ぶら下がっている週間目標をしまいます。よろしいですか？" : "この週間目標をしまいます。よろしいですか？";
+    if(!confirm(msg)) return;
+    const body = kind==="goal" ? {kind:"goal",quarterly_goal_id:id} : {kind:"weekly",weekly_goal_id:id};
+    const r=await gasPostJson("archiveGoalItem", body);
+    if(r&&r.ok){ onToast&&onToast("しまいました"); load(); } else onToast&&onToast("失敗しました");
+  };
+
+  const goals = (tree&&tree.goals)||[];
+  return html`
+    <div style=${{position:"fixed",inset:0,zIndex:400,background:"var(--bg)",display:"flex",flexDirection:"column"}}>
+      <div style=${{display:"flex",alignItems:"center",gap:10,padding:"14px 16px",borderBottom:"1px solid var(--border)",flexShrink:0,paddingTop:"calc(14px + var(--safe-top, 0px))"}}>
+        <div style=${{fontSize:15,fontWeight:800,color:"var(--text)",flex:1}}>目標のつながり</div>
+        <button onClick=${onClose} style=${{background:"none",border:"none",color:"var(--sub)",fontSize:22,cursor:"pointer",lineHeight:1,padding:"0 4px"}}>×</button>
+      </div>
+
+      <div style=${{flex:1,overflowY:"auto",WebkitOverflowScrolling:"touch",padding:"14px 16px calc(28px + var(--safe-bottom, 0px))"}}>
+        <div style=${{fontSize:12,color:"var(--sub)",lineHeight:1.7,marginBottom:14}}>
+          3か月後にたどり着きたい場所を決めて、その下に「今週やること」をぶら下げます。
+          毎時間の記録がどの目標につながっているかを、これから見えるようにしていきます。
+        </div>
+
+        ${loading&&html`<div style=${{textAlign:"center",padding:"40px 0",color:"var(--sub)",fontSize:13}}>読み込み中…</div>`}
+
+        ${!loading&&goals.length===0&&!goalDraft&&html`
+          <div style=${{textAlign:"center",padding:"28px 16px",color:"var(--sub)",fontSize:13,lineHeight:1.7}}>
+            まだ3か月目標がありません。<br/>まずは1つだけ決めてみましょう。
+          </div>`}
+
+        ${goals.map(g=>html`
+          <div key=${g.quarterly_goal_id} style=${{marginBottom:14}}>
+            ${goalDraft&&goalDraft.quarterly_goal_id===g.quarterly_goal_id
+              ? html`<${GoalEditor} draft=${goalDraft} setDraft=${setGoalDraft} onSave=${saveGoalRow} onCancel=${()=>setGoalDraft(null)} saving=${saving}/>`
+              : html`
+              <div class="card" style=${{padding:14}}>
+                <div style=${{display:"flex",alignItems:"flex-start",gap:8,marginBottom:6}}>
+                  <div style=${{fontSize:14.5,fontWeight:800,color:"var(--text)",flex:1,lineHeight:1.5}}>${g.title}</div>
+                  <button onClick=${()=>setGoalDraft({...EMPTY_GOAL,...g})} style=${{background:"none",border:"none",color:"var(--accent)",fontSize:12,fontWeight:700,cursor:"pointer",flexShrink:0}}>編集</button>
+                  <button onClick=${()=>archive("goal",g.quarterly_goal_id)} style=${{background:"none",border:"none",color:"var(--sub)",fontSize:16,cursor:"pointer",lineHeight:1,flexShrink:0}}>×</button>
+                </div>
+                ${(g.target_value!==""&&g.target_value!=null)&&html`
+                  <div style=${{fontSize:12,color:"var(--sub)",marginBottom:4}}>目標 ${g.target_value}${g.unit||""}${g.end_date?"　/　期限 "+g.end_date:""}</div>`}
+                ${g.why&&html`<div style=${{fontSize:11.5,color:"var(--sub)",lineHeight:1.6,marginBottom:8}}>${g.why}</div>`}
+
+                <div style=${{borderTop:"1px solid var(--border)",marginTop:10,paddingTop:10}}>
+                  <div style=${{fontSize:11,fontWeight:700,color:"var(--sub)",marginBottom:8}}>今週やること</div>
+                  ${(g.weeklyGoals||[]).map(w=>html`
+                    <div key=${w.weekly_goal_id}>
+                      ${wgDraft&&wgDraft.weekly_goal_id===w.weekly_goal_id
+                        ? html`<${WeeklyGoalEditor} draft=${wgDraft} setDraft=${setWgDraft} onSave=${saveWgRow} onCancel=${()=>setWgDraft(null)} saving=${saving}/>`
+                        : html`
+                        <div style=${{display:"flex",alignItems:"center",gap:8,padding:"8px 10px",background:"var(--bg)",borderRadius:9,marginBottom:6}}>
+                          <div style=${{flex:1,minWidth:0}}>
+                            <div style=${{fontSize:12.5,fontWeight:600,color:"var(--text)"}}>${w.title}</div>
+                            <div style=${{fontSize:10.5,color:"var(--sub)",marginTop:2}}>
+                              ${w.metric_type==="boolean"?"やったかどうか":(w.target_total!==""&&w.target_total!=null?"目標 "+w.target_total+(w.unit||""):"目標未設定")}
+                              ${(w.min_line!==""&&w.min_line!=null)?"　最低 "+w.min_line+(w.unit||""):""}
+                            </div>
+                          </div>
+                          <button onClick=${()=>setWgDraft({...EMPTY_WG,...w})} style=${{background:"none",border:"none",color:"var(--accent)",fontSize:11.5,fontWeight:700,cursor:"pointer",flexShrink:0}}>編集</button>
+                          <button onClick=${()=>archive("weekly",w.weekly_goal_id)} style=${{background:"none",border:"none",color:"var(--sub)",fontSize:15,cursor:"pointer",lineHeight:1,flexShrink:0}}>×</button>
+                        </div>`}
+                    </div>
+                  `)}
+                  ${wgDraft&&!wgDraft.weekly_goal_id&&wgDraft.link_quarterly_goal_id===g.quarterly_goal_id
+                    ? html`<${WeeklyGoalEditor} draft=${wgDraft} setDraft=${setWgDraft} onSave=${saveWgRow} onCancel=${()=>setWgDraft(null)} saving=${saving}/>`
+                    : html`
+                    <button onClick=${()=>setWgDraft({...EMPTY_WG,link_quarterly_goal_id:g.quarterly_goal_id})}
+                      style=${{background:"none",border:"1.5px dashed var(--border)",borderRadius:9,padding:"8px",color:"var(--accent)",fontSize:12,fontWeight:600,cursor:"pointer",width:"100%"}}>
+                      ＋ 今週やることを足す
+                    </button>`}
+                </div>
+              </div>`}
+          </div>
+        `)}
+
+        ${goalDraft&&!goalDraft.quarterly_goal_id&&html`
+          <${GoalEditor} draft=${goalDraft} setDraft=${setGoalDraft} onSave=${saveGoalRow} onCancel=${()=>setGoalDraft(null)} saving=${saving}/>`}
+
+        ${!loading&&!goalDraft&&html`
+          <button onClick=${()=>setGoalDraft({...EMPTY_GOAL})}
+            style=${{background:"none",border:"1.5px dashed var(--border)",borderRadius:12,padding:"12px",color:"var(--accent)",fontSize:13,fontWeight:700,cursor:"pointer",width:"100%"}}>
+            ＋ 3か月目標を追加する
+          </button>`}
+
+        ${!loading&&tree&&(tree.orphanWeeklyGoals||[]).length>0&&html`
+          <div style=${{marginTop:16}}>
+            <div style=${{fontSize:11,fontWeight:700,color:"var(--sub)",marginBottom:8}}>どの目標にもつながっていないもの</div>
+            ${tree.orphanWeeklyGoals.map(w=>html`
+              <div key=${w.weekly_goal_id} style=${{display:"flex",alignItems:"center",gap:8,padding:"8px 10px",background:"var(--bg)",borderRadius:9,marginBottom:6}}>
+                <div style=${{flex:1,fontSize:12.5,color:"var(--text)"}}>${w.title}</div>
+                <button onClick=${()=>setWgDraft({...EMPTY_WG,...w})} style=${{background:"none",border:"none",color:"var(--accent)",fontSize:11.5,fontWeight:700,cursor:"pointer"}}>編集</button>
+              </div>`)}
+          </div>`}
+      </div>
+    </div>`;
+}
+
 // ── Settings ──
 // 設定の折りたたみセクション。安定した識別子を保つためコンポーネント外に定義する
 // （以前はSettingsScreen内で毎回定義しており、入力のたびに中身が作り直されて
@@ -4013,8 +4220,10 @@ function SettingsScreen({onToast,onLogout,onGoalSaved,profile,onProfileSaved,onC
   // 折りたたみ式セクション。開閉状態は openSec で管理し、本体は安定した
   // モジュール外コンポーネント SettingsSec を使う（下の各セクションで直接呼ぶ）
   const [openSec,setOpenSec]=useState("");
+  const [showGoalTree,setShowGoalTree]=useState(false); // 目標階層（段階公開）
 
   return html`<div style=${{paddingBottom:48}}>
+    ${showGoalTree&&html`<${GoalTreeSheet} onClose=${()=>setShowGoalTree(false)} onToast=${onToast}/>`}
 
     <!-- Hero -->
     <div style=${{background:"linear-gradient(135deg, var(--hero1) 0%, var(--hero2) 100%)",padding:"36px 20px 28px",position:"relative",overflow:"hidden"}}>
@@ -4086,6 +4295,17 @@ function SettingsScreen({onToast,onLogout,onGoalSaved,profile,onProfileSaved,onC
         `}
         <button class="btn" onClick=${saveGoal}>保存する</button>
       <//>
+
+      <!-- 目標階層（段階公開中）。features に goals_v1 がある人にだけ出す。
+           上の「目標・期限」は今までどおり残す（置き換えない） -->
+      ${CURRENT_USER&&CURRENT_USER.goalsV1&&html`
+      <${SettingsSec} k="goaltree" icon="🧭" title="目標のつながり" sub="ベータ" open=${openSec==="goaltree"} onToggle=${()=>setOpenSec(openSec==="goaltree"?"":"goaltree")}>
+        <div style=${{fontSize:12,color:"var(--sub)",lineHeight:1.7,marginBottom:12}}>
+          3か月後にたどり着きたい場所を決めて、その下に「今週やること」をぶら下げます。
+          毎時間の記録がどの目標につながっているかを、これから見えるようにしていきます。
+        </div>
+        <button class="btn" onClick=${()=>setShowGoalTree(true)}>目標のつながりを開く</button>
+      <//>`}
 
       <!-- タイマー -->
       <${SettingsSec} k="timer" icon="⏱" title="タイマー設定" open=${openSec==="timer"} onToggle=${()=>setOpenSec(openSec==="timer"?"":"timer")}>
@@ -5206,7 +5426,7 @@ function App() {
       url.searchParams.set("studentEmail",CURRENT_USER.email);
       const r=await (await fetch(url)).json();
       if(r.ok&&r.data){
-        const u={...CURRENT_USER, lineLinked:r.data.lineLinked===undefined?true:!!r.data.lineLinked, cohort:r.data.cohort||"", recordDays:(r.data.recordDays===undefined?null:r.data.recordDays)};
+        const u={...CURRENT_USER, lineLinked:r.data.lineLinked===undefined?true:!!r.data.lineLinked, cohort:r.data.cohort||"", recordDays:(r.data.recordDays===undefined?null:r.data.recordDays), goalsV1:!!r.data.goalsV1};
         CURRENT_USER=u; localStorage.setItem("edventure_user",JSON.stringify(u)); setUser(u);
         // サーバー側がカレンダー書き込みを担う本人なら、クライアント書き込みを止めて二重登録を防ぐ
         if(r.data.serverCalendar) localStorage.setItem("server_calendar","1"); else localStorage.removeItem("server_calendar");
@@ -5295,7 +5515,7 @@ function App() {
       if(r.ok&&r.data){
         // lineLinkedがレスポンスに無い場合（GAS未再デプロイ等）は「未連携」と誤判定してバナーを
         // 誤表示しないよう、不明な場合は連携済み扱いにする（安全側に倒す）
-        const u={...CURRENT_USER, name:r.data.name||CURRENT_USER.name, nickname:r.data.nickname||CURRENT_USER.name, avatar:r.data.avatar||"🦊", coachName:r.data.coachName||"コーチ", coachEmail:r.data.coach_email||"", lineLinked:r.data.lineLinked===undefined?true:!!r.data.lineLinked, showInCommunity:r.data.showInCommunity===undefined?true:!!r.data.showInCommunity, cohort:r.data.cohort||"", recordDays:(r.data.recordDays===undefined?null:r.data.recordDays)};
+        const u={...CURRENT_USER, name:r.data.name||CURRENT_USER.name, nickname:r.data.nickname||CURRENT_USER.name, avatar:r.data.avatar||"🦊", coachName:r.data.coachName||"コーチ", coachEmail:r.data.coach_email||"", lineLinked:r.data.lineLinked===undefined?true:!!r.data.lineLinked, showInCommunity:r.data.showInCommunity===undefined?true:!!r.data.showInCommunity, cohort:r.data.cohort||"", recordDays:(r.data.recordDays===undefined?null:r.data.recordDays), goalsV1:!!r.data.goalsV1};
         CURRENT_USER=u; localStorage.setItem("edventure_user",JSON.stringify(u)); setUser(u);
         setProfile({nickname:u.nickname,avatar:u.avatar});
       } else if(r.error==="User not found"){

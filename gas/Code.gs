@@ -70,6 +70,7 @@ function doGet(e) {
         result = setupPhase1();
         break;
       }
+      case "getGoalTree": result = getGoalTree(studentEmail); break;
       case "p1Status": {
         // 基盤の状態確認。件数のみを返すが、全体情報なので同様に保護する
         var _a2 = verifyP1Admin(studentEmail, e.parameter.secret);
@@ -283,6 +284,10 @@ function doPost(e) {
       case "saveTodayActions": return jsonResponse(saveTodayActions(studentEmail, body));
       case "generateWorkReport": return jsonResponse(generateWorkReport(studentEmail, body));
       case "migrateLocalTasks": return jsonResponse(migrateLocalTasks(studentEmail, body));
+      // 目標階層（Checkpoint 2）。いずれも本人の行しか読み書きできない
+      case "saveGoal":          return jsonResponse(saveGoal(studentEmail, body));
+      case "saveWeeklyGoal":    return jsonResponse(saveWeeklyGoal(studentEmail, body));
+      case "archiveGoalItem":   return jsonResponse(archiveGoalItem(studentEmail, body));
       case "submitSurvey": return jsonResponse(submitSurvey(studentEmail, body));
       case "syncCalendar": return jsonResponse(syncCalendar(studentEmail, body));
       case "coachSaveProfile":     return jsonResponse(coachSaveProfile(body.coachEmail, body));
@@ -7544,6 +7549,197 @@ function p1Upsert(sheetName, idColumn, record) {
     sheet.appendRow(row);
     return { id: record[idColumn], created: true };
   } finally { lock.releaseLock(); }
+}
+
+// ══════════════════════════════════════════════════════════════════
+// 目標階層のCRUD（Checkpoint 2）
+// 3か月目標(Goals) → 週間目標(WeeklyGoals) の2階層。
+// ※2週間スプリント(Sprints)はKai合意のうえ後回し。シートだけ先に用意してある。
+//
+// 【認可の原則】どのAPIも「リクエストのstudentEmail本人の行」しか読み書きできない。
+// p1Upsert はID一致だけで更新するため、他人のIDを渡されると上書きできてしまう。
+// そこで保存前に必ず「既存行の持ち主が本人か」を確認する（p1OwnedRow）。
+// ※このWeb appはメールを信用する構造なので、これは「なりすまし防止」ではなく
+//   「別人の行を書き換える経路を作らない」ためのもの。トークン認証は別途。
+// ══════════════════════════════════════════════════════════════════
+
+// 機能が有効な本人かを確認する。段階公開のため、features に goals_v1 を持つ人だけ通す
+function p1RequireUser(studentEmail) {
+  const user = getFilteredRows("Users", "student_email", studentEmail)[0];
+  if (!user || String(user.is_active).toUpperCase() !== "TRUE") return { ok: false, error: "invalid user" };
+  if (!hasFeature(user, P1_FEATURE_KEY)) return { ok: false, error: "feature not enabled" };
+  return { ok: true, user: user };
+}
+
+// 指定IDの行を返す。存在しない、または持ち主が違う場合は null（＝他人の行は触れない）
+function p1OwnedRow(sheetName, idColumn, id, studentEmail) {
+  if (!id) return null;
+  const rows = p1List(sheetName, studentEmail);
+  return rows.find(r => String(r[idColumn]) === String(id)) || null;
+}
+
+const P1_STATUSES = ["ACTIVE", "COMPLETED", "ARCHIVED"];
+function p1Status_(v, fallback) {
+  const s = String(v || "").toUpperCase();
+  return P1_STATUSES.indexOf(s) !== -1 ? s : fallback;
+}
+// 数値欄。空文字は空のまま残す（0と「未入力」を区別したいため）
+function p1Num_(v) {
+  if (v === undefined || v === null || String(v).trim() === "") return "";
+  const n = Number(v);
+  return isNaN(n) ? "" : n;
+}
+function p1Text_(v, max) {
+  return String(v == null ? "" : v).slice(0, max || 500);
+}
+
+// 目標階層をまとめて1回で返す。画面表示に必要なものを1リクエストに収める
+// （APIを何本も叩くとGASの同時実行待ちで一気に遅くなるため、getHomeDataと同じ方針）
+function getGoalTree(studentEmail) {
+  const chk = p1RequireUser(studentEmail);
+  if (!chk.ok) return chk;
+
+  const goals = p1List("Goals", studentEmail)
+    .filter(g => p1Status_(g.status, "ACTIVE") !== "ARCHIVED")
+    .sort((a, b) => (Number(a.priority) || 99) - (Number(b.priority) || 99));
+  const weeklies = p1List("WeeklyGoals", studentEmail)
+    .filter(w => p1Status_(w.status, "ACTIVE") !== "ARCHIVED");
+
+  // 週間目標を3か月目標の下にぶら下げる。どの目標にも紐づかないものは orphans に入れ、
+  // 画面から見えなくなってしまわないようにする
+  const byGoal = {};
+  const orphans = [];
+  weeklies.forEach(w => {
+    const k = String(w.link_quarterly_goal_id || "");
+    if (k && goals.some(g => String(g.quarterly_goal_id) === k)) (byGoal[k] = byGoal[k] || []).push(w);
+    else orphans.push(w);
+  });
+
+  return {
+    ok: true,
+    data: {
+      goals: goals.map(g => ({
+        quarterly_goal_id: g.quarterly_goal_id,
+        title: g.title, category: g.category,
+        current_value: g.current_value, target_value: g.target_value, unit: g.unit,
+        start_date: g.start_date, end_date: g.end_date,
+        why: g.why, success_condition: g.success_condition, guardrails: g.guardrails,
+        priority: g.priority, status: p1Status_(g.status, "ACTIVE"),
+        weeklyGoals: byGoal[String(g.quarterly_goal_id)] || []
+      })),
+      orphanWeeklyGoals: orphans
+    }
+  };
+}
+
+// 3か月目標の作成・更新。quarterly_goal_id があれば更新、無ければ新規
+function saveGoal(studentEmail, body) {
+  const chk = p1RequireUser(studentEmail);
+  if (!chk.ok) return chk;
+
+  const id = String(body.quarterly_goal_id || "").trim();
+  if (id && !p1OwnedRow("Goals", "quarterly_goal_id", id, studentEmail)) {
+    return { ok: false, error: "not found" }; // 他人の行・存在しない行は触らせない
+  }
+  const title = p1Text_(body.title, 120).trim();
+  if (!title) return { ok: false, error: "目標のタイトルを入力してください" };
+  // 1人あたりの上限。3か月で追える数には限りがあるし、行の量産も防げる
+  if (!id && p1List("Goals", studentEmail).filter(g => p1Status_(g.status, "ACTIVE") === "ACTIVE").length >= 10) {
+    return { ok: false, error: "3か月目標は10件までです。使わないものを完了/保留にしてください" };
+  }
+
+  const rec = {
+    quarterly_goal_id: id || makeP1Id("goal"),
+    student_email: studentEmail, // ★常にリクエスト本人。bodyの値は使わない
+    title: title,
+    category: p1Text_(body.category, 40),
+    current_value: p1Num_(body.current_value),
+    target_value: p1Num_(body.target_value),
+    unit: p1Text_(body.unit, 20),
+    start_date: p1Text_(body.start_date, 10),
+    end_date: p1Text_(body.end_date, 10),
+    why: p1Text_(body.why, 1000),
+    success_condition: p1Text_(body.success_condition, 1000),
+    guardrails: p1Text_(body.guardrails, 1000),
+    priority: p1Num_(body.priority) === "" ? 3 : p1Num_(body.priority),
+    status: p1Status_(body.status, "ACTIVE")
+  };
+  const r = p1Upsert("Goals", "quarterly_goal_id", rec);
+  return { ok: true, id: r.id, created: r.created };
+}
+
+// 週間目標の作成・更新。3か月目標に紐づける（紐づけ先も本人のものか確認する）
+function saveWeeklyGoal(studentEmail, body) {
+  const chk = p1RequireUser(studentEmail);
+  if (!chk.ok) return chk;
+
+  const id = String(body.weekly_goal_id || "").trim();
+  if (id && !p1OwnedRow("WeeklyGoals", "weekly_goal_id", id, studentEmail)) {
+    return { ok: false, error: "not found" };
+  }
+  const title = p1Text_(body.title, 120).trim();
+  if (!title) return { ok: false, error: "週間目標のタイトルを入力してください" };
+
+  // 紐づけ先の3か月目標。他人の目標にはぶら下げられない
+  const link = String(body.link_quarterly_goal_id || "").trim();
+  if (link && !p1OwnedRow("Goals", "quarterly_goal_id", link, studentEmail)) {
+    return { ok: false, error: "紐づけ先の3か月目標が見つかりません" };
+  }
+  if (!id && p1List("WeeklyGoals", studentEmail).filter(w => p1Status_(w.status, "ACTIVE") === "ACTIVE").length >= 30) {
+    return { ok: false, error: "週間目標は30件までです" };
+  }
+
+  // metric_type: count(回数) / minutes(時間) / boolean(やったか) の3種。
+  // boolean は「関連ログがあるだけ」では達成にせず、本人が完了にした時だけ達成扱いにする
+  const mt = ["count", "minutes", "boolean"].indexOf(String(body.metric_type || "").trim()) !== -1
+    ? String(body.metric_type).trim() : "count";
+
+  const rec = {
+    weekly_goal_id: id || makeP1Id("wg"),
+    student_email: studentEmail, // ★常にリクエスト本人
+    link_quarterly_goal_id: link,
+    link_sprint_id: "", // スプリントは後回しのため空のまま
+    title: title,
+    metric_type: mt,
+    unit: p1Text_(body.unit, 20),
+    target_total: p1Num_(body.target_total),
+    min_line: p1Num_(body.min_line),
+    std_line: p1Num_(body.std_line),
+    stretch_line: p1Num_(body.stretch_line),
+    planned_days: p1Text_(body.planned_days, 60),
+    status: p1Status_(body.status, "ACTIVE")
+  };
+  const r = p1Upsert("WeeklyGoals", "weekly_goal_id", rec);
+  return { ok: true, id: r.id, created: r.created };
+}
+
+// 削除は行を消さず status を変えるだけ（記録から参照されているIDが宙に浮かないように）。
+// kind: "goal" | "weekly"
+function archiveGoalItem(studentEmail, body) {
+  const chk = p1RequireUser(studentEmail);
+  if (!chk.ok) return chk;
+
+  const kind = String(body.kind || "").trim();
+  const status = p1Status_(body.status, "ARCHIVED");
+  if (kind === "goal") {
+    const row = p1OwnedRow("Goals", "quarterly_goal_id", body.quarterly_goal_id, studentEmail);
+    if (!row) return { ok: false, error: "not found" };
+    p1Upsert("Goals", "quarterly_goal_id", { quarterly_goal_id: row.quarterly_goal_id, status: status });
+    // ぶら下がっている週間目標も一緒に片付ける（親だけ消えて子が残らないように）
+    if (status === "ARCHIVED") {
+      p1List("WeeklyGoals", studentEmail)
+        .filter(w => String(w.link_quarterly_goal_id) === String(row.quarterly_goal_id))
+        .forEach(w => p1Upsert("WeeklyGoals", "weekly_goal_id", { weekly_goal_id: w.weekly_goal_id, status: "ARCHIVED" }));
+    }
+    return { ok: true };
+  }
+  if (kind === "weekly") {
+    const row = p1OwnedRow("WeeklyGoals", "weekly_goal_id", body.weekly_goal_id, studentEmail);
+    if (!row) return { ok: false, error: "not found" };
+    p1Upsert("WeeklyGoals", "weekly_goal_id", { weekly_goal_id: row.weekly_goal_id, status: status });
+    return { ok: true };
+  }
+  return { ok: false, error: "invalid kind" };
 }
 
 // ── 管理操作の保護 ──
