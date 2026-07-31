@@ -4270,6 +4270,9 @@ function SettingsScreen({onToast,onLogout,onGoalSaved,profile,onProfileSaved,onC
 
       ${GroupLabel("目標と記録")}
       <!-- 目標 -->
+      <!-- 旧・目標入力（自由記述3つ）。goals_v1 が有効な人には出さず、
+           下の「目標」（3か月目標→週間目標）に一本化する -->
+      ${!(CURRENT_USER&&CURRENT_USER.goalsV1)&&html`
       <${SettingsSec} k="goals" icon="🎯" title="目標・期限" open=${openSec==="goals"} onToggle=${()=>setOpenSec(openSec==="goals"?"":"goals")}>
         ${goals.map((g,i)=>html`
           <div key=${i} style=${{background:"var(--bg)",borderRadius:12,padding:"14px",marginBottom:10,border:"1px solid var(--border)"}}>
@@ -4294,17 +4297,16 @@ function SettingsScreen({onToast,onLogout,onGoalSaved,profile,onProfileSaved,onC
           </button>
         `}
         <button class="btn" onClick=${saveGoal}>保存する</button>
-      <//>
+      <//>`}
 
-      <!-- 目標階層（段階公開中）。features に goals_v1 がある人にだけ出す。
-           上の「目標・期限」は今までどおり残す（置き換えない） -->
+      <!-- 新・目標。3か月目標→週間目標の階層。goals_v1 が有効な人はこちらが本体 -->
       ${CURRENT_USER&&CURRENT_USER.goalsV1&&html`
-      <${SettingsSec} k="goaltree" icon="🧭" title="目標のつながり" sub="ベータ" open=${openSec==="goaltree"} onToggle=${()=>setOpenSec(openSec==="goaltree"?"":"goaltree")}>
+      <${SettingsSec} k="goaltree" icon="🎯" title="目標" open=${openSec==="goaltree"} onToggle=${()=>setOpenSec(openSec==="goaltree"?"":"goaltree")}>
         <div style=${{fontSize:12,color:"var(--sub)",lineHeight:1.7,marginBottom:12}}>
           3か月後にたどり着きたい場所を決めて、その下に「今週やること」をぶら下げます。
           毎時間の記録がどの目標につながっているかを、これから見えるようにしていきます。
         </div>
-        <button class="btn" onClick=${()=>setShowGoalTree(true)}>目標のつながりを開く</button>
+        <button class="btn" onClick=${()=>setShowGoalTree(true)}>目標を設定する</button>
       <//>`}
 
       <!-- タイマー -->

@@ -767,7 +767,7 @@ function quickLog(studentEmail, body) {
   const today = formatDate(now);
 
   const user = sheetToObjects(getSheet("Users")).find(u => u.student_email === studentEmail);
-  const goalsText = user ? [user.goal, user.goal2, user.goal3].filter(Boolean).join(" / ") : "";
+  const goalsText = user ? effectiveGoalsText(user.student_email, user) : "";
 
   // 今日すでに記録済みの「最後の終了時刻」を出す。「これまで/さっきから」と話した時に、
   // 直近の記録の終わり〜今 の空白を、その内容で自動で埋めるための起点にする。
@@ -1396,11 +1396,7 @@ function getGameStatus(studentEmail) {
   const badgeIds = user.badges ? user.badges.split(",").filter(Boolean) : [];
   const badgeMap = { first:"🌱 はじめての記録", streak3:"🔥 3日連続達成", streak7:"⚡ 7日連続達成", memo10:"📝 メモ名人", xp500:"🌟 XP500達成" };
   const badges = badgeIds.map(id => ({ id, label: badgeMap[id] || id }));
-  const goals = [
-    { goal: user.goal || "", deadline: user.goal_deadline || "" },
-    { goal: user.goal2 || "", deadline: user.goal_deadline2 || "" },
-    { goal: user.goal3 || "", deadline: user.goal_deadline3 || "" },
-  ].filter(g => g.goal);
+  const goals = effectiveGoals(user.student_email, user);
   const streakFreeze = Number(user.streak_freeze || 0);
   // 週ペース設計用: 直近8週の「記録した日数（ユニーク日付）」を週(月曜始まり)ごとに返す。
   // クライアントが本人の週目標と突き合わせて「今週●/N日」「週ストリーク」を算出する
@@ -2809,11 +2805,7 @@ function coachGetStudentDetail(coachEmail, studentEmail) {
     joined_at: user.joined_at || "",
     joinedJiroku: joinedJiroku,
     accessState: computeAccessState(user),
-    goals: [
-      { goal: user.goal, deadline: user.goal_deadline },
-      { goal: user.goal2, deadline: user.goal_deadline2 },
-      { goal: user.goal3, deadline: user.goal_deadline3 }
-    ].filter(g => g.goal),
+    goals: effectiveGoals(user.student_email, user),
     status: status,
     reports: reports,
     diaries: diaries,
@@ -4089,7 +4081,7 @@ function dailyLineWinback() {
 // 生成できなければ null を返し、呼び出し側がテンプレにフォールバックする。
 function generateWinbackText(user, days, recentLogs, apiKey) {
   const name = String(user.name || user.nickname || "").trim();
-  const goals = [user.goal, user.goal2, user.goal3].filter(Boolean).join(" / ");
+  const goals = effectiveGoalsText(user.student_email, user);
   const logLines = (recentLogs || []).map(function (l) {
     const m = String(l.memo || "").trim();
     return "・" + l.date + " " + (l.time_block || "") + " " + (l.task || "") + (m ? "（" + m.slice(0, 40) + "）" : "");
@@ -5391,11 +5383,7 @@ function buildStudentContext(studentEmail, user, preloaded) {
   const scoreTrend = avgScore !== null ? `全期間平均${avgScore}点（${allScores.length}日分）` : "データなし";
 
   // 目標と期限
-  const goalsWithDeadline = [
-    { goal: user.goal, deadline: user.goal_deadline },
-    { goal: user.goal2, deadline: user.goal_deadline2 },
-    { goal: user.goal3, deadline: user.goal_deadline3 }
-  ].filter(g => g.goal).map((g, i) => {
+  const goalsWithDeadline = effectiveGoals(user.student_email, user).map((g, i) => {
     const daysLeft = g.deadline ? Math.ceil((new Date(g.deadline) - new Date(today)) / 86400000) : null;
     const totalDays = g.deadline && user.joined_at ? Math.ceil((new Date(g.deadline) - new Date(user.joined_at)) / 86400000) : null;
     const progress = totalDays > 0 && daysLeft !== null ? Math.round((1 - daysLeft / totalDays) * 100) : null;
@@ -6430,7 +6418,7 @@ function generateTalentReport(email, targetEmail) {
   const user = sheetToObjects(getSheet("Users")).find(u => u.student_email === who);
   if (!user) return { ok: false, error: "user not found" };
   const name = user.name || "本人";
-  const goals = [user.goal, user.goal2, user.goal3].filter(Boolean).join(" / ");
+  const goals = effectiveGoalsText(user.student_email, user);
 
   const cutoff = formatDate(new Date(Date.now() - 180 * 86400000));
   const logs = getFilteredRows("DailyLog", "student_email", who)
@@ -7740,6 +7728,33 @@ function archiveGoalItem(studentEmail, body) {
     return { ok: true };
   }
   return { ok: false, error: "invalid kind" };
+}
+
+// 目標の取得元をここ1箇所に集約する。
+// goals_v1 が有効な人は Goals シート（3か月目標）を正とし、無効な人は従来どおり
+// Users の goal/goal2/goal3 を使う。階層をまだ1つも入れていない間は従来の目標に戻すので、
+// 切り替えた瞬間にAIコーチ・レポート・独り言の整形が「目標なし」になることはない。
+function effectiveGoals(studentEmail, user) {
+  const legacy = [
+    { goal: String((user && user.goal) || ""),  deadline: String((user && user.goal_deadline) || "") },
+    { goal: String((user && user.goal2) || ""), deadline: String((user && user.goal_deadline2) || "") },
+    { goal: String((user && user.goal3) || ""), deadline: String((user && user.goal_deadline3) || "") }
+  ].filter(g => g.goal);
+  if (!hasFeature(user, P1_FEATURE_KEY)) return legacy;
+  try {
+    const rows = p1List("Goals", studentEmail)
+      .filter(g => String(g.status || "ACTIVE").toUpperCase() === "ACTIVE")
+      .sort((a, b) => (Number(a.priority) || 99) - (Number(b.priority) || 99));
+    if (!rows.length) return legacy;
+    return rows.map(g => ({
+      goal: String(g.title || "") + ((g.target_value !== "" && g.target_value != null)
+        ? "（目標 " + g.target_value + String(g.unit || "") + "）" : ""),
+      deadline: String(g.end_date || "")
+    })).filter(g => g.goal);
+  } catch (e) { return legacy; } // シート未作成などでも既存機能を止めない
+}
+function effectiveGoalsText(studentEmail, user) {
+  return effectiveGoals(studentEmail, user).map(g => g.goal).join(" / ");
 }
 
 // ── 管理操作の保護 ──
