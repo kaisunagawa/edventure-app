@@ -249,6 +249,12 @@ function doGet(e) {
         result = setupAuthPhase1();
         break;
       }
+      case "weeklyBackup": {
+        var _wb = verifyP1Admin(studentEmail, e.parameter.secret, e.parameter);
+        if (!_wb.ok) { result = _wb; break; }
+        result = weeklyBackup();
+        break;
+      }
       case "p1Backup": {
         // バックアップ（複製）作成。鍵が必須
         var _ab = verifyP1Admin(studentEmail, e.parameter.secret, e.parameter);
@@ -9203,7 +9209,7 @@ const ADMIN_SECRET_ALLOWLIST = {
   adminSetupTriggers:1, adminInstallTrigger:1, adminSetupPhase1:1, adminSetupAuth:1,
   authSetMode:1, authSetEnforce:1, authRoleApply:1, authRoleDryRun:1, authRevokeAll:1,
   authCleanupTestData:1, authBreakerReset:1, rotateSessionSecret:1,
-  p1Backup:1, p1BackupInfo:1, p1PurgeArchived:1
+  p1Backup:1, p1BackupInfo:1, p1PurgeArchived:1, weeklyBackup:1
 };
 
 // ── 署名付きの運用リクエスト ──
@@ -9320,6 +9326,106 @@ function authorizeAction(action, token, targetEmail, secretEmail, secret, sigPar
   }
   // scope=SELF は「本人の分だけ」。呼び出し側で studentEmail をこの値に差し替える
   return { ok: true, actor: actor, forceSelfEmail: policy.scope === "SELF" ? actor.email : null };
+}
+
+// ══════════════════════════════════════════════════════════════════
+// 週1回の自動バックアップ
+//
+// 作成は SpreadsheetApp.copy()（Drive権限の承認ダイアログが不要）。
+// 古い分の削除だけ DriveApp を使うが、失敗してもバックアップ自体は成功させる。
+//
+// 【安全装置】削除で本番を消したら取り返しがつかないので、多重に守る。
+//   ① 名前が JIROKU_backup_ で始まるものだけ
+//   ② 本番のスプレッドシートIDと一致するものは、いかなる場合も対象外
+//   ③ 1回の実行で削除できるのは最大3件
+//   ④ 保持期間を過ぎたものだけ（既定8週間）
+//   ⑤ 削除は「ゴミ箱へ移動」。完全削除はしない（30日間は戻せる）
+// ══════════════════════════════════════════════════════════════════
+const BACKUP_KEEP_WEEKS = 8;
+const BACKUP_MAX_DELETE_PER_RUN = 3;
+const BACKUP_PREFIX = "JIROKU_backup_";
+const BACKUP_LOG_SHEET = "BackupLog";
+const BACKUP_LOG_COLUMNS = ["created_at","name","spreadsheet_id","sheet_count","row_counts","url","deleted_at"];
+
+function getBackupLogSheet() {
+  let sh = getSheet(BACKUP_LOG_SHEET);
+  if (!sh) { sh = getSpreadsheet().insertSheet(BACKUP_LOG_SHEET); sh.appendRow(BACKUP_LOG_COLUMNS); }
+  return sh;
+}
+
+function weeklyBackup() {
+  const started = new Date();
+  let created = null, verifyNote = "", deleted = 0, deleteNote = "";
+  try {
+    // ① 複製を作る
+    const src = getSpreadsheet();
+    const stamp = Utilities.formatDate(started, "Asia/Tokyo", "yyyyMMdd_HHmm");
+    const copy = src.copy(BACKUP_PREFIX + stamp);
+
+    // ② 元とコピーで件数が一致するか確かめる（壊れたバックアップを「取れた」としない）
+    const srcCounts = {}, dstCounts = {};
+    src.getSheets().forEach(function (x) { srcCounts[x.getName()] = Math.max(0, x.getLastRow() - 1); });
+    copy.getSheets().forEach(function (x) { dstCounts[x.getName()] = Math.max(0, x.getLastRow() - 1); });
+    const mismatch = Object.keys(srcCounts).filter(function (k) { return srcCounts[k] !== dstCounts[k]; });
+    verifyNote = mismatch.length ? "件数の不一致: " + mismatch.join(", ") : "件数一致";
+
+    // ③ 外部に公開されていないか
+    let shareNote = "";
+    try {
+      const viewers = copy.getViewers().map(function (u) { return u.getEmail(); });
+      const editors = copy.getEditors().map(function (u) { return u.getEmail(); });
+      const outside = viewers.concat(editors).filter(function (e) { return e && e !== adminEmail(); });
+      shareNote = outside.length ? "★外部共有あり: " + outside.length + "件" : "外部共有なし";
+    } catch (e) { shareNote = "共有範囲を確認できず"; }
+    verifyNote += " / " + shareNote;
+
+    created = { name: copy.getName(), id: copy.getId(), url: copy.getUrl(),
+                sheets: copy.getSheets().length, counts: dstCounts };
+    getBackupLogSheet().appendRow([started.toISOString(), created.name, created.id,
+      created.sheets, JSON.stringify(dstCounts), created.url, ""]);
+  } catch (e) {
+    notifyAdminBackup("❌ バックアップの作成に失敗しました\n" + e);
+    return { ok: false, error: String(e) };
+  }
+
+  // ④ 古い分をゴミ箱へ（失敗してもバックアップ自体は成功扱い）
+  try {
+    const keepBefore = new Date(started.getTime() - BACKUP_KEEP_WEEKS * 7 * 86400000);
+    const sh = getBackupLogSheet();
+    const data = sh.getDataRange().getValues(), h = data[0];
+    const iAt = h.indexOf("created_at"), iName = h.indexOf("name"),
+          iId = h.indexOf("spreadsheet_id"), iDel = h.indexOf("deleted_at");
+    for (let i = 1; i < data.length && deleted < BACKUP_MAX_DELETE_PER_RUN; i++) {
+      if (String(data[i][iDel] || "").trim()) continue;                       // 既に削除済み
+      const name = String(data[i][iName] || ""), id = String(data[i][iId] || "");
+      if (name.indexOf(BACKUP_PREFIX) !== 0) continue;                        // ①名前で守る
+      if (!id || id === SPREADSHEET_ID) continue;                             // ②本番は絶対に消さない
+      if (new Date(String(data[i][iAt])).getTime() > keepBefore.getTime()) continue;  // ④保持期間内
+      try {
+        DriveApp.getFileById(id).setTrashed(true);                            // ⑤ゴミ箱へ
+        sh.getRange(i + 1, iDel + 1).setValue(new Date().toISOString());
+        deleted++;
+      } catch (e2) { deleteNote += "削除失敗(" + name + ") "; }
+    }
+  } catch (e) { deleteNote = "古い分の整理を実行できず: " + e; }
+
+  const msg = "🗂 JIROKU 週次バックアップ\n" +
+    created.name + "\n" +
+    "シート " + created.sheets + "枚 / " + verifyNote + "\n" +
+    (deleted ? "古い分を" + deleted + "件ゴミ箱へ移動\n" : "") +
+    (deleteNote ? deleteNote + "\n" : "") +
+    created.url;
+  notifyAdminBackup(msg);
+  return { ok: true, created: created, verify: verifyNote, deleted: deleted, note: deleteNote };
+}
+
+function notifyAdminBackup(text) {
+  try {
+    const admin = adminEmail();
+    const u = sheetToObjects(getSheet("Users")).find(function (x) { return x.student_email === admin; });
+    if (u && u.line_user_id && sendLineMessage(u.line_user_id, text)) return;
+    MailApp.sendEmail(admin, "JIROKU 週次バックアップ", text);
+  } catch (e) { Logger.log("バックアップ通知に失敗: " + e); }
 }
 
 // ── 管理操作の保護 ──
@@ -9570,6 +9676,8 @@ function setupTriggers() {
   ScriptApp.newTrigger("generateAllInsights").timeBased().onMonthDay(1).atHour(5).create();
   ScriptApp.newTrigger("generateAllTimeThemes").timeBased().onMonthDay(1).atHour(6).create();
   ScriptApp.newTrigger("generateWeeklySummaries").timeBased().everyWeeks(1).onWeekDay(ScriptApp.WeekDay.SATURDAY).atHour(8).create();
+  // 週次バックアップ。利用が最も少ない日曜の早朝に取る
+  ScriptApp.newTrigger("weeklyBackup").timeBased().everyWeeks(1).onWeekDay(ScriptApp.WeekDay.SUNDAY).atHour(3).create();
   ScriptApp.newTrigger("checkTimerQueue").timeBased().everyMinutes(1).create();
   ScriptApp.newTrigger("hourlyReminder").timeBased().everyHours(1).create();
   ScriptApp.newTrigger("syncStripeTotals").timeBased().everyDays(1).atHour(4).create();
@@ -10062,7 +10170,7 @@ function systemHealthCheck(deepPing) {
   try {
     const trigs = ScriptApp.getProjectTriggers();
     const handlers = trigs.map(t => t.getHandlerFunction());
-    const critical = ["nightlyReport", "morningScheduleNotify", "dailyOpsHealthCheck"];
+    const critical = ["nightlyReport", "morningScheduleNotify", "dailyOpsHealthCheck", "weeklyBackup"];
     const missing = critical.filter(h => handlers.indexOf(h) === -1);
     const dupes = handlers.filter((h, i) => handlers.indexOf(h) !== i);
     if (missing.length) add("定期処理トリガー", "fail", "未登録: " + missing.join(", ") + "（" + trigs.length + "/20）");
