@@ -135,17 +135,41 @@ p["sig"] = base64.urlsafe_b64encode(hmac.new(
 print(urllib.parse.urlencode(p))
 PYEOF
     }
-    r=$(curl -sL --max-time 120 "${URL}?$(sign p1Status "$ADMIN")")
-    if echo "$r" | grep -q '"ok":true'; then ok "署名付きで管理APIが通る"; else ng "署名付きで通らない: $(echo "$r" | head -c 140)"; fi
+    # 署名付きは毎回nonceが変わるのでキャッシュ回避のパラメータを足せない
+    # （足すと署名対象がずれて必ず落ちる）。空応答のときだけ署名を作り直して再試行する。
+    # ★空応答を「拒否された」と誤判定しないこと★
+    #   以前はこれで「リプレイが通ってしまう」と誤検知し、正常な本番デプロイを止めた
+    callSigned() {   # $1=action $2=who [$3=extra]  → 応答を返す。空なら空文字
+      local r
+      for _t in 1 2 3; do
+        r=$(curl -sL --max-time 120 "${URL}?$(sign "$1" "$2" "${3:-}")")
+        [ -n "$r" ] && { printf '%s' "$r"; return 0; }
+        sleep 5
+      done
+      printf '%s' ""
+    }
+    r=$(callSigned p1Status "$ADMIN")
+    if [ -z "$r" ]; then ng "署名付きの応答が空（通信不良の可能性）"
+    elif echo "$r" | grep -q '"ok":true'; then ok "署名付きで管理APIが通る"
+    else ng "署名付きで通らない: $(echo "$r" | head -c 140)"; fi
 
-    r=$(curl -sL --max-time 120 "${URL}?$(sign p1Status not-the-owner@example.com)")
-    if echo "$r" | grep -q '"ok":false'; then ok "管理者以外は署名があっても拒否"; else ng "管理者以外の拒否が異常: $(echo "$r" | head -c 140)"; fi
+    r=$(callSigned p1Status not-the-owner@example.com)
+    if [ -z "$r" ]; then ng "管理者以外テストの応答が空"
+    elif echo "$r" | grep -q '"ok":false'; then ok "管理者以外は署名があっても拒否"
+    else ng "管理者以外の拒否が異常: $(echo "$r" | head -c 140)"; fi
 
-    # 同じ署名の使い回し（リプレイ）が拒否されること
+    # 同じ署名の使い回し（リプレイ）が拒否されること。
+    # 1回目が実際に通ったことを確認してから2回目を試す（前提が崩れた状態で判定しない）
     Q=$(sign p1Status "$ADMIN")
-    curl -sL --max-time 120 "${URL}?$Q" >/dev/null
-    r=$(curl -sL --max-time 120 "${URL}?$Q")
-    if echo "$r" | grep -q '"ok":false'; then ok "署名の使い回しを拒否"; else ng "リプレイが通ってしまう: $(echo "$r" | head -c 140)"; fi
+    first=$(curl -sL --max-time 120 "${URL}?$Q")
+    if ! echo "$first" | grep -q '"ok":true'; then
+      ng "リプレイ検査の前提が崩れた（1回目が通らない）: $(echo "$first" | head -c 100)"
+    else
+      second=$(curl -sL --max-time 120 "${URL}?$Q")
+      if [ -z "$second" ]; then ng "リプレイ検査の2回目が空応答（判定不能）"
+      elif echo "$second" | grep -q '"ok":false'; then ok "署名の使い回しを拒否"
+      else ng "リプレイが通ってしまう: $(echo "$second" | head -c 140)"; fi
+    fi
   else
     echo "  － P1_ADMIN_SECRET 未設定のため運用リクエストのテストはスキップ"
   fi
