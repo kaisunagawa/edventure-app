@@ -82,7 +82,7 @@ function doGet(e) {
           var h = s.getRange(1, 1, 1, s.getLastColumn()).getValues()[0];
           _cols[n] = P1_ADDED_COLUMNS[n].filter(function (c) { return h.indexOf(c) !== -1; });
         });
-        result = { ok: true, sheets: _st, presentColumns: _cols };
+        result = { ok: true, sheets: _st, presentColumns: _cols, userKeyCollisions: findUserKeyCollisions() };
         break;
       }
       case "getHomeData":  result = getHomeData(studentEmail); break;
@@ -7480,8 +7480,27 @@ function makeUserKey(email) {
 function makeExecutionId(email, dateStr, timeBlock) {
   return "exec_" + makeUserKey(email) + "_" + String(dateStr) + "_" + String(timeBlock).replace(/[^0-9]/g, "");
 }
+// makeUserKeyは8文字(32bit)なので理屈の上では衝突しうる。人数が増えたときに
+// 黙って別人のIDが混ざると原因究明が困難になるため、衝突を検出できるようにしておく。
+// 40人規模ではまず起きないが、起きたら即座に気づける状態にしておくのが目的。
+function findUserKeyCollisions() {
+  const byKey = {};
+  sheetToObjects(getSheet("Users")).forEach(u => {
+    const em = String(u.student_email || "").trim();
+    if (!em) return;
+    (byKey[makeUserKey(em)] = byKey[makeUserKey(em)] || []).push(em);
+  });
+  return Object.keys(byKey)
+    .filter(k => new Set(byKey[k].map(e => e.toLowerCase())).size > 1)
+    .map(k => ({ key: k, emails: byKey[k] }));
+}
+
 // タスクIDも決定的に作る。移行が途中で失敗して再試行されても同じIDになるよう、
-// 連番ではなくタイトル由来のハッシュ＋同名の出現順で構成する
+// 連番ではなくタイトル由来のハッシュ＋同名の出現順で構成する。
+// ★重要★ この関数を呼ぶのは migrateLocalTasks（localStorageからの一度きりの移行）だけ。
+// 一度発行したtask_idはTasksシートに保存され、以後はその値を使い回す。
+// タイトルを編集してもIDは作り直さない（作り直すと別タスク扱いになり、
+// 記録との紐付け link_task_id が切れてしまうため）。
 function makeTaskId(email, dateStr, title, occurrenceIndex) {
   const h = Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, String(title || ""))
     .slice(0, 3).map(b => ((b & 0xFF) + 0x100).toString(16).slice(1)).join("");
@@ -7653,6 +7672,49 @@ function setupPhase1() {
     if (added.length) addedCols[name] = added;
   });
   return { ok: true, createdSheets: created, addedColumns: addedCols };
+}
+
+// ══════════════════════════════════════════════════════════════════
+// 以下2つは Apps Script のエディタから手で実行する専用の関数。
+// ★doGet/doPostのcaseには絶対に追加しないこと★
+// Web app経由にすると「リクエストに書いたメールを信用する」構造に乗ってしまい、
+// 誰でも叩けてしまう。エディタからの実行はGoogleログイン＝本物の認証なので、
+// 鍵の発行とデータのバックアップはこちらに置いている。
+// ══════════════════════════════════════════════════════════════════
+
+// 管理APIの共有シークレットを発行して保存する。実行後、ログに出た文字列を控える。
+// 既に設定済みなら上書きせず、設定済みである旨だけ返す（誤って鍵を作り替えないため）。
+function p1GenerateAdminSecret() {
+  const props = PropertiesService.getScriptProperties();
+  if (props.getProperty("P1_ADMIN_SECRET")) {
+    Logger.log("P1_ADMIN_SECRET は既に設定済みです。作り直したい場合は先に削除してください。");
+    return { ok: true, alreadySet: true };
+  }
+  const chars = "abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // 紛らわしい0/O/1/l/Iは除く
+  let secret = "";
+  const bytes = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, Utilities.getUuid() + String(new Date().getTime()));
+  bytes.forEach(b => { if (secret.length < 32) secret += chars.charAt(((b & 0xFF)) % chars.length); });
+  props.setProperty("P1_ADMIN_SECRET", secret);
+  Logger.log("P1_ADMIN_SECRET を設定しました:\n" + secret + "\n管理APIを叩くときは &secret=" + secret + " を付けてください。");
+  return { ok: true, secret: secret };
+}
+
+// スプレッドシート（本番データ）をまるごと複製してバックアップを取る。
+// 個人情報を含むため、コピー先はKaiのGoogleドライブ内のフォルダのみ。
+// GitHubや外部には絶対に出さない。古いものは自動で消さない（手で判断する）。
+function p1BackupSpreadsheet() {
+  const FOLDER_NAME = "JIROKUバックアップ";
+  const it = DriveApp.getFoldersByName(FOLDER_NAME);
+  const folder = it.hasNext() ? it.next() : DriveApp.createFolder(FOLDER_NAME);
+  const stamp = Utilities.formatDate(new Date(), "Asia/Tokyo", "yyyyMMdd_HHmm");
+  const src = DriveApp.getFileById(SPREADSHEET_ID);
+  const copy = src.makeCopy("JIROKU_backup_" + stamp, folder);
+  const counts = {};
+  getSpreadsheet().getSheets().forEach(s => { counts[s.getName()] = Math.max(0, s.getLastRow() - 1); });
+  const msg = "バックアップ完了\n場所: マイドライブ/" + FOLDER_NAME + "/" + copy.getName()
+    + "\nURL: " + copy.getUrl() + "\n件数: " + JSON.stringify(counts, null, 2);
+  Logger.log(msg);
+  return { ok: true, name: copy.getName(), url: copy.getUrl(), counts: counts };
 }
 
 function setupSheets() {
