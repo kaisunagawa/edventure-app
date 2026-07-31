@@ -63,7 +63,17 @@ DESC="${1:-Claude Codeによる自動デプロイ $(date '+%Y-%m-%d %H:%M')}"
 
 if [ "$SMOKE" != "1" ]; then
   echo "【3/6】テスト用デプロイへ反映"
-  deploy_or_die "$TEST_DEPLOYMENT_ID" "test: $DESC" || exit 1
+  # ★バージョンを1回だけ作り、検証と本番で同じ版を使い回す。
+  #   以前は検証用と本番で clasp deploy を別々に呼び、1回の変更で
+  #   2バージョン消費していた。上限200に達した原因のひとつ。
+  VER=$(clasp version "$DESC" 2>&1 | sed -n 's/^Created version \([0-9]*\)\.*/\1/p')
+  if [ -z "$VER" ]; then
+    echo "✗ バージョンを作成できませんでした（上限200に達している可能性）"
+    echo "   Apps Scriptの「プロジェクトの履歴」で古い版を削除してください"
+    exit 1
+  fi
+  echo "  作成した版: @$VER"
+  clasp deploy -i "$TEST_DEPLOYMENT_ID" -V "$VER" -d "test: $DESC" >/dev/null || { echo "✗ テスト用デプロイに失敗"; exit 1; }
   echo "✓ 完了"
 
   echo "【4/6】テスト用URLへ実機スモークテスト"
@@ -80,8 +90,14 @@ if [ "${TEST_ONLY:-0}" = "1" ]; then
 fi
 
 echo "【5/6】本番デプロイ"
-deploy_or_die "$DEPLOYMENT_ID" "$DESC" || exit 1
-echo "✓ 本番デプロイ完了（新バージョンを公開）"
+# 検証で通したのと同じ版をそのまま本番へ出す（別の版を作らない＝差異も生まれない）
+if [ -n "${VER:-}" ]; then
+  clasp deploy -i "$DEPLOYMENT_ID" -V "$VER" -d "$DESC" >/dev/null || { echo "✗ 本番デプロイに失敗"; exit 1; }
+  echo "✓ 本番デプロイ完了（@$VER を公開。検証と同一の版）"
+else
+  deploy_or_die "$DEPLOYMENT_ID" "$DESC" || exit 1
+  echo "✓ 本番デプロイ完了"
+fi
 
 if [ "$SMOKE" != "1" ]; then
   echo "【6/6】本番URLへ実機スモークテスト（読み取りのみ）"
