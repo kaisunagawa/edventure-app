@@ -8178,15 +8178,31 @@ function getAuthSheet(name) {
   if (!sh) { sh = getSpreadsheet().insertSheet(name); sh.appendRow(AUTH_SHEETS[name]); }
   return sh;
 }
+// 認証用シートに不足している列を足す。
+// ★AuthAuditに列を追加した際、既存シートのヘッダーを更新していなかったため、
+//   12個の値を10列のシートへ書き込み、値が1つずつずれて記録されていた
+//   （2026-07-31に発覚）。ヘッダーは必ず定義と揃える。
+function ensureAuthColumns(name) {
+  const sh = getSheet(name);
+  if (!sh) return [];
+  const want = AUTH_SHEETS[name] || [];
+  const headers = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0];
+  const missing = want.filter(c => headers.indexOf(c) === -1);
+  if (missing.length) sh.getRange(1, headers.length + 1, 1, missing.length).setValues([missing]);
+  return missing;
+}
+
 function setupAuthPhase1() {
   const created = [];
   Object.keys(AUTH_SHEETS).forEach(n => { if (!getSheet(n)) { getAuthSheet(n); created.push(n); } });
+  const addedCols = {};
+  Object.keys(AUTH_SHEETS).forEach(n => { const m = ensureAuthColumns(n); if (m.length) addedCols[n] = m; });
   // Users への列追加（削除・改名はしない）
   const u = getSheet("Users");
   const headers = u.getRange(1, 1, 1, u.getLastColumn()).getValues()[0];
   const missing = AUTH_USER_COLUMNS.filter(c => headers.indexOf(c) === -1);
   if (missing.length) u.getRange(1, headers.length + 1, 1, missing.length).setValues([missing]);
-  return { ok: true, createdSheets: created, addedUserColumns: missing };
+  return { ok: true, createdSheets: created, addedAuthColumns: addedCols, addedUserColumns: missing };
 }
 
 // ── ハッシュ・比較 ──
@@ -8253,16 +8269,27 @@ function rotateSessionSecret(force) {
 function authAudit(eventType, o) {
   try {
     const sh = getAuthSheet("AuthAudit");
-    sh.appendRow([
-      "ae_" + Utilities.getUuid().slice(0, 12),
-      new Date().toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" }),
-      String(eventType),
-      String((o && o.actorUserId) || ""), String((o && o.targetUserId) || ""),
-      String((o && o.sessionId) || ""), String((o && o.credentialFingerprint) || ""),
-      String((o && o.action) || ""),
-      String((o && o.result) || ""), String((o && o.failureReason) || ""),
-      currentDeploymentId(), currentEnvironment()
-    ]);
+    ensureAuthColumns("AuthAudit");
+    // ★位置ではなく列名で書く★
+    // 以前は定義順にappendRowしていたが、後から足した列はシート末尾に付くため
+    // 定義の並びと実際の並びがずれ、値が別の列に入っていた（2026-07-31）。
+    // 実際のヘッダーを読んで、名前で対応させる。
+    const headers = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0];
+    const v = {
+      event_id: "ae_" + Utilities.getUuid().slice(0, 12),
+      timestamp: new Date().toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" }),
+      event_type: String(eventType),
+      actor_user_id: String((o && o.actorUserId) || ""),
+      target_user_id: String((o && o.targetUserId) || ""),
+      session_id: String((o && o.sessionId) || ""),
+      credential_fingerprint: String((o && o.credentialFingerprint) || ""),
+      action: String((o && o.action) || ""),
+      result: String((o && o.result) || ""),
+      failure_reason: String((o && o.failureReason) || ""),
+      deployment_id: currentDeploymentId(),
+      environment: currentEnvironment()
+    };
+    sh.appendRow(headers.map(function (h) { return v[h] !== undefined ? v[h] : ""; }));
   } catch (e) { Logger.log("authAudit失敗: " + e); }
 }
 
