@@ -357,7 +357,17 @@
 const { useState, useEffect, useRef, useCallback } = React;
 const html = htm.bind(React.createElement);
 
-const GAS_URL = "https://script.google.com/macros/s/AKfycbzJ-QEpPVnmp-LFU5Jxww4VFP1qaseMtwCrzKxAA6ZULr1y3h_UeKzVdhHnl5ze57U/exec";
+const GAS_PROD = "https://script.google.com/macros/s/AKfycbzJ-QEpPVnmp-LFU5Jxww4VFP1qaseMtwCrzKxAA6ZULr1y3h_UeKzVdhHnl5ze57U/exec";
+// 認証の段階導入中だけ使う検証用の切り替え。?gas=test を付けた時だけテスト用バックエンドを見る。
+// Googleログインのリダイレクト先は本番ドメインに固定されているため、
+// 実機（スマホ・LINE内ブラウザ）でログインを検証するにはこの仕組みが要る。
+const GAS_TEST = "https://script.google.com/macros/s/AKfycbw-MhcAhOaqd_JJTlN4LltE-liM-WriznSgcDGIBR0uUMMB-rnYI74GUoXkmyNgTsx5/exec";
+const GAS_URL = (()=>{ try{
+  const q=new URLSearchParams(location.search).get("gas");
+  if(q==="test"){ sessionStorage.setItem("gas_mode","test"); return GAS_TEST; }
+  if(q==="prod"){ sessionStorage.removeItem("gas_mode"); return GAS_PROD; }
+  return sessionStorage.getItem("gas_mode")==="test" ? GAS_TEST : GAS_PROD;
+}catch{ return GAS_PROD; } })();
 let CURRENT_USER = JSON.parse(localStorage.getItem("edventure_user") || "null");
 
 // タイマー終了などをバックグラウンド（アプリを閉じている間）でも通知するためのFirebase Cloud Messaging設定。
@@ -473,6 +483,32 @@ async function gasPostJson(action, body = {}) {
     });
     return await r.json();
   } catch { return { ok:false }; }
+}
+
+// ── セッション（Auth CP1）──
+// セッショントークンはPOSTのJSON本文でのみ送る。
+// URL・クエリ文字列・location.hash には絶対に入れない（履歴やログに残るため）。
+// コンソールにも出さない。
+const SESSION_KEY = "jiroku_session";
+function getSessionToken() {
+  try { return localStorage.getItem(SESSION_KEY) || ""; } catch { return ""; }
+}
+function setSessionToken(t) {
+  try { if (t) localStorage.setItem(SESSION_KEY, t); else localStorage.removeItem(SESSION_KEY); } catch {}
+}
+// 認証付きPOST。CP1では既存APIへの強制はまだ行わないが、
+// これから追加するAPIはすべてこれを通す
+async function authedPost(action, body = {}) {
+  const token = getSessionToken();
+  if (!token) return { ok:false, error:"AUTH_REQUIRED" };
+  try {
+    const r = await fetch(GAS_URL, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain" },
+      body: JSON.stringify({ action, token, ...body })
+    });
+    return await r.json();
+  } catch { return { ok:false, error:"NETWORK" }; }
 }
 
 // ── Googleカレンダー（各ユーザー本人の権限でブラウザから直接読む） ──
@@ -4550,21 +4586,50 @@ function LoginScreen({onLogin}) {
     }
   },[]);
 
-  const handleGoogleSignIn=()=>{
-    const nonce=Math.random().toString(36).slice(2);
+  const handleGoogleSignIn=async()=>{
+    // state と nonce はサーバーが発行する。戻ってきた時に必ず突き合わせる
+    // （以前はnonceを自分で作って照合していなかったため、リプレイを防げなかった）
+    let ch=null;
+    try{
+      const u=new URL(GAS_URL); u.searchParams.set("action","authChallenge");
+      ch=await (await fetch(u.toString())).json();
+    }catch{}
+    // サーバー側にまだ認証基盤が無い（段階導入中）場合でも、ログインは従来どおり通す。
+    // ここで止めると全利用者が締め出されるため、必ず縮退させる
+    const useCh = !!(ch && ch.ok && ch.challenge_id);
+    if(useCh){ try{ sessionStorage.setItem("auth_ch", JSON.stringify({id:ch.challenge_id, state:ch.state})); }catch{} }
+    else { try{ sessionStorage.removeItem("auth_ch"); }catch{} }
     const params=new URLSearchParams({
       client_id: GOOGLE_CLIENT_ID,
       redirect_uri: "https://kaisunagawa.github.io/edventure-app/",
       response_type: "id_token",
       scope: "openid email profile",
-      nonce,
+      nonce: useCh ? ch.nonce : Math.random().toString(36).slice(2),
     });
+    if(useCh) params.set("state", ch.state);
     window.location.href="https://accounts.google.com/o/oauth2/v2/auth?"+params;
   };
 
   const handleGoogleLogin=async(res)=>{
     const payload=parseJwt(res.credential);
     if(!payload) { setError("ログインに失敗しました"); return; }
+
+    // ★IDトークンをサーバーへ送り、検証してもらってセッションを受け取る。
+    //   ここで初めて「本人であること」がサーバー側で確定する。
+    //   受け取ったらIDトークンは即座に捨てる（長期保存しない）。
+    try{
+      const saved=JSON.parse(sessionStorage.getItem("auth_ch")||"null");
+      if(saved){
+        const r=await fetch(GAS_URL,{ method:"POST", headers:{"Content-Type":"text/plain"},
+          body: JSON.stringify({ action:"login", idToken:res.credential,
+                                 challenge_id:saved.id, state:saved.state }) });
+        const j=await r.json();
+        if(j&&j.ok&&j.token) setSessionToken(j.token);
+      }
+    }catch{}
+    try{ sessionStorage.removeItem("auth_ch"); }catch{}
+    res.credential=null;   // IDトークンを保持し続けない
+
     const email=payload.email;
     const name=payload.name||payload.given_name||"";
     setLoading(true); setError("");

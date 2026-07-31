@@ -53,6 +53,13 @@ if [ "$SMOKE" != "1" ]; then
   fi
 fi
 
+# TEST_ONLY=1 のときはテスト用デプロイまでで止める（本番へ出さない）
+if [ "${TEST_ONLY:-0}" = "1" ]; then
+  echo "TEST_ONLY=1 のため本番デプロイは行いません（本番は無傷のままです）"
+  echo "テスト用URL: $BASE/$TEST_DEPLOYMENT_ID/exec"
+  exit 0
+fi
+
 echo "【5/6】本番デプロイ"
 clasp deploy -i "$DEPLOYMENT_ID" -d "$DESC" >/dev/null
 echo "✓ 本番デプロイ完了（新バージョンを公開）"

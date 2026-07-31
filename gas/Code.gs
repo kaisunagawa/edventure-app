@@ -3,6 +3,9 @@
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 const SPREADSHEET_ID = "1EbGxrI6e-rmzgDk4jczOX1RfHIYY-6Q1jOPpr5Hybqc";
+// IDトークンの aud を照合するために、サーバー側でもクライアントIDを持つ。
+// これは秘密情報ではない（公開されている値）
+const GOOGLE_CLIENT_ID_SERVER = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 const APP_URL = "https://kaisunagawa.github.io/edventure-app/";
 const CLAUDE_API_KEY = PropertiesService.getScriptProperties().getProperty("CLAUDE_API_KEY");
 const LINE_CHANNEL_TOKEN = PropertiesService.getScriptProperties().getProperty("LINE_CHANNEL_TOKEN");
@@ -71,6 +74,22 @@ function doGet(e) {
         break;
       }
       case "getGoalTree": result = getGoalTree(studentEmail); break;
+      // ── Auth CP1: 公開アクション（認証不要）──
+      case "authChallenge": result = authChallenge(); break;
+      case "authAuditTail": {
+        var _aa = verifyP1Admin(studentEmail, e.parameter.secret);
+        if (!_aa.ok) { result = _aa; break; }
+        var _rows = sheetToObjects(getAuthSheet("AuthAudit"));
+        result = { ok: true, total: _rows.length, recent: _rows.slice(-12) };
+        break;
+      }
+      case "healthCheck":   result = { ok: true, mode: AUTH_VERIFIER_MODE }; break;
+      case "adminSetupAuth": {
+        var _sa = verifyP1Admin(studentEmail, e.parameter.secret);
+        if (!_sa.ok) { result = _sa; break; }
+        result = setupAuthPhase1();
+        break;
+      }
       case "p1Backup": {
         // バックアップ（複製）作成。鍵が必須
         var _ab = verifyP1Admin(studentEmail, e.parameter.secret);
@@ -310,6 +329,21 @@ function doPost(e) {
       case "saveTodayActions": return jsonResponse(saveTodayActions(studentEmail, body));
       case "generateWorkReport": return jsonResponse(generateWorkReport(studentEmail, body));
       case "migrateLocalTasks": return jsonResponse(migrateLocalTasks(studentEmail, body));
+      // ── Auth CP1 ──
+      case "login":  return jsonResponse(authLogin(body));
+      case "logout": {
+        // セッション必須。トークンが無い/無効なら拒否する
+        var _vs = verifySession(body.token, false);
+        if (!_vs.ok) return jsonResponse({ ok: false, error: "AUTH_REQUIRED" });
+        authAudit("LOGOUT", { result: "SUCCESS", actorUserId: _vs.actor.actor_user_id, action: "logout" });
+        return jsonResponse(revokeSession(body.token));
+      }
+      // 検証用。認証済みの本人情報を返すだけ（CP1のテストで使う）
+      case "authWhoAmI": {
+        var _w = verifySession(body.token, true);
+        if (!_w.ok) return jsonResponse({ ok: false, error: "AUTH_REQUIRED", reason: _w.reason });
+        return jsonResponse({ ok: true, actor: _w.actor, cached: _w.cached });
+      }
       // 目標階層（Checkpoint 2）。いずれも本人の行しか読み書きできない
       case "saveGoal":          return jsonResponse(saveGoal(studentEmail, body));
       case "saveWeeklyGoal":    return jsonResponse(saveWeeklyGoal(studentEmail, body));
@@ -8035,6 +8069,346 @@ function lineQuotaStatus() {
     remaining: (typeof limit === "number" && typeof used === "number") ? (limit - used) : null,
     raw: { quota: q, consumption: c }
   };
+}
+
+
+// ══════════════════════════════════════════════════════════════════
+// Auth CP1: 本人確認とセッション基盤
+//
+// 【なぜ必要か】このWeb appは長らく「リクエストに書かれたメールアドレス」を
+// そのまま信用していた。認証情報を持たないクライアントから、管理者のアドレスを
+// 書くだけで生徒21名の氏名とメールが取得できることを実測で確認している。
+//
+// 【この段階でやること】本人確認とセッションの土台を作るところまで。
+// 既存143アクションへの認証強制は、次の段階(Auth CP2)以降で行う。
+// ══════════════════════════════════════════════════════════════════
+
+const AUTH_SHEETS = {
+  AuthChallenges: ["challenge_id","state_hash","nonce_hash","created_at","expires_at","used_at","attempt_count","result"],
+  Sessions: ["session_token_hash","user_id","google_sub","role","organization_id",
+             "expires_at","created_at","last_seen_at","revoked_at","token_version","device_label"],
+  AuthAudit: ["event_id","timestamp","event_type","actor_user_id","target_user_id",
+              "session_id","action","result","failure_reason","deployment_id"]
+};
+const AUTH_USER_COLUMNS = ["user_id","google_sub","token_version","role","organization_id","auth_linked_at"];
+
+const SESSION_ABSOLUTE_DAYS = 14;  // 絶対有効期限
+const SESSION_IDLE_DAYS     = 7;   // 無操作で切れるまで
+const SESSION_MAX_DEVICES   = 5;   // 1人あたりの同時端末数
+const CHALLENGE_TTL_MS      = 5 * 60 * 1000;
+const CHALLENGE_MAX_ATTEMPTS = 3;
+
+function getAuthSheet(name) {
+  let sh = getSheet(name);
+  if (!sh) { sh = getSpreadsheet().insertSheet(name); sh.appendRow(AUTH_SHEETS[name]); }
+  return sh;
+}
+function setupAuthPhase1() {
+  const created = [];
+  Object.keys(AUTH_SHEETS).forEach(n => { if (!getSheet(n)) { getAuthSheet(n); created.push(n); } });
+  // Users への列追加（削除・改名はしない）
+  const u = getSheet("Users");
+  const headers = u.getRange(1, 1, 1, u.getLastColumn()).getValues()[0];
+  const missing = AUTH_USER_COLUMNS.filter(c => headers.indexOf(c) === -1);
+  if (missing.length) u.getRange(1, headers.length + 1, 1, missing.length).setValues([missing]);
+  return { ok: true, createdSheets: created, addedUserColumns: missing };
+}
+
+// ── ハッシュ・比較 ──
+function sha256Hex(s) {
+  return Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, String(s), Utilities.Charset.UTF_8)
+    .map(b => ((b & 0xFF) + 0x100).toString(16).slice(1)).join("");
+}
+// 入力によって処理時間が大きく変わらない比較。長さが違う場合も最後まで走らせる
+function safeEquals(a, b) {
+  const x = String(a || ""), y = String(b || "");
+  let diff = x.length ^ y.length;
+  const n = Math.max(x.length, y.length);
+  for (let i = 0; i < n; i++) diff |= (x.charCodeAt(i) || 0) ^ (y.charCodeAt(i) || 0);
+  return diff === 0;
+}
+
+// ── セッショントークンの生成 ──
+// GASには暗号学的乱数が無い（Math.random も getUuid も予測困難性を保証しない）。
+// そこで「ローカルのOS CSPRNGで作った秘密鍵」を ScriptProperties に置き、
+// それを鍵としたHMAC-SHA256の出力をトークンにする。
+// 秘密鍵はコード・GitHub・ログのどこにも出さない。
+function newSessionToken(userId) {
+  const secret = PropertiesService.getScriptProperties().getProperty("SESSION_TOKEN_SECRET");
+  if (!secret) throw new Error("SESSION_TOKEN_SECRET未設定");
+  const material = [
+    Utilities.getUuid(), Utilities.getUuid(), Utilities.getUuid(),
+    String(userId), String(new Date().getTime()),
+    String(Math.floor(Math.random() * 1e12))
+  ].join("|");
+  const raw = Utilities.computeHmacSha256Signature(material, secret);
+  return Utilities.base64EncodeWebSafe(raw).replace(/=+$/, "");
+}
+
+// ── 監査ログ ──
+// 平文トークン・IDトークン・記録本文は絶対に書かない
+function authAudit(eventType, o) {
+  try {
+    const sh = getAuthSheet("AuthAudit");
+    sh.appendRow([
+      "ae_" + Utilities.getUuid().slice(0, 12),
+      new Date().toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" }),
+      String(eventType),
+      String((o && o.actorUserId) || ""), String((o && o.targetUserId) || ""),
+      String((o && o.sessionId) || ""), String((o && o.action) || ""),
+      String((o && o.result) || ""), String((o && o.failureReason) || ""),
+      String((o && o.deploymentId) || "")
+    ]);
+  } catch (e) { Logger.log("authAudit失敗: " + e); }
+}
+
+// ── ログイン開始（公開アクション）──
+// state と nonce をサーバーで作り、ハッシュだけを保存する。
+// 正はシート。CacheServiceは速度のためだけに使い、消えていてもシートで確認できる。
+function authChallenge() {
+  const challengeId = "ch_" + Utilities.getUuid();
+  const state = Utilities.base64EncodeWebSafe(Utilities.computeHmacSha256Signature(
+    Utilities.getUuid() + challengeId, Utilities.getUuid())).replace(/=+$/, "").slice(0, 32);
+  const nonce = Utilities.base64EncodeWebSafe(Utilities.computeHmacSha256Signature(
+    Utilities.getUuid() + "n" + challengeId, Utilities.getUuid())).replace(/=+$/, "").slice(0, 32);
+  const now = new Date();
+  const exp = new Date(now.getTime() + CHALLENGE_TTL_MS);
+  getAuthSheet("AuthChallenges").appendRow([
+    challengeId, sha256Hex(state), sha256Hex(nonce),
+    now.toISOString(), exp.toISOString(), "", 0, "ISSUED"
+  ]);
+  try {
+    CacheService.getScriptCache().put("ch_" + challengeId,
+      JSON.stringify({ s: sha256Hex(state), n: sha256Hex(nonce), e: exp.getTime() }), 360);
+  } catch (e) { /* キャッシュは無くても動く */ }
+  return { ok: true, challenge_id: challengeId, state: state, nonce: nonce, expires_in: 300 };
+}
+
+// challenge を1回だけ消費する。成功・失敗にかかわらず再利用させない
+function consumeChallenge(challengeId, state) {
+  const sh = getAuthSheet("AuthChallenges");
+  const data = sh.getDataRange().getValues();
+  const h = data[0];
+  const iId = h.indexOf("challenge_id"), iState = h.indexOf("state_hash"), iNonce = h.indexOf("nonce_hash");
+  const iExp = h.indexOf("expires_at"), iUsed = h.indexOf("used_at"), iAtt = h.indexOf("attempt_count"), iRes = h.indexOf("result");
+  for (let i = data.length - 1; i >= 1; i--) {
+    if (String(data[i][iId]) !== String(challengeId)) continue;
+    const row = i + 1;
+    const attempts = Number(data[i][iAtt] || 0) + 1;
+    sh.getRange(row, iAtt + 1).setValue(attempts);
+    const fail = (reason) => { sh.getRange(row, iRes + 1).setValue(reason); sh.getRange(row, iUsed + 1).setValue(new Date().toISOString()); return { ok: false, reason: reason }; };
+    if (String(data[i][iUsed] || "").trim()) return { ok: false, reason: "CHALLENGE_ALREADY_USED" };
+    if (attempts > CHALLENGE_MAX_ATTEMPTS) return fail("CHALLENGE_TOO_MANY_ATTEMPTS");
+    if (new Date(String(data[i][iExp])).getTime() < Date.now()) return fail("CHALLENGE_EXPIRED");
+    if (!safeEquals(sha256Hex(state), String(data[i][iState]))) return fail("STATE_MISMATCH");
+    // ここまで通ったら消費する（nonceの照合は呼び出し側でIDトークンと突き合わせる）
+    sh.getRange(row, iUsed + 1).setValue(new Date().toISOString());
+    sh.getRange(row, iRes + 1).setValue("CONSUMED");
+    try { CacheService.getScriptCache().remove("ch_" + challengeId); } catch (e) {}
+    return { ok: true, nonceHash: String(data[i][iNonce]) };
+  }
+  return { ok: false, reason: "CHALLENGE_NOT_FOUND" };
+}
+
+// ── IDトークンの検証（短期: tokeninfo）──
+// 【重要】これは緊急移行用。2026-08-31 / 法人導入前 / 利用者拡大前 の
+// 最も早い時点までに、正式な検証基盤へ移行する。AUTH_PLAN.md 参照。
+const AUTH_VERIFIER_MODE = "tokeninfo-2026-08";
+function verifyIdToken(idToken, expectedNonceHash) {
+  if (!idToken) return { ok: false, reason: "NO_ID_TOKEN" };
+  let res;
+  try {
+    res = UrlFetchApp.fetch("https://oauth2.googleapis.com/tokeninfo?id_token=" + encodeURIComponent(idToken),
+      { muteHttpExceptions: true });
+  } catch (e) {
+    return { ok: false, reason: "TOKENINFO_UNREACHABLE" }; // タイムアウトも拒否。フォールバックしない
+  }
+  if (res.getResponseCode() !== 200) return { ok: false, reason: "TOKENINFO_HTTP_" + res.getResponseCode() };
+  let p;
+  try { p = JSON.parse(res.getContentText()); } catch (e) { return { ok: false, reason: "TOKENINFO_BAD_JSON" }; }
+
+  const nowSec = Math.floor(Date.now() / 1000);
+  if (!safeEquals(p.aud, GOOGLE_CLIENT_ID_SERVER)) return { ok: false, reason: "AUD_MISMATCH" };
+  if (["accounts.google.com", "https://accounts.google.com"].indexOf(String(p.iss)) === -1) return { ok: false, reason: "ISS_MISMATCH" };
+  if (!p.exp || Number(p.exp) <= nowSec) return { ok: false, reason: "TOKEN_EXPIRED" };
+  if (!p.iat || Number(p.iat) < nowSec - 3600) return { ok: false, reason: "IAT_TOO_OLD" };
+  if (String(p.email_verified) !== "true" && p.email_verified !== true) return { ok: false, reason: "EMAIL_NOT_VERIFIED" };
+  if (!p.sub) return { ok: false, reason: "NO_SUB" };
+  if (!p.nonce || !safeEquals(sha256Hex(p.nonce), expectedNonceHash)) return { ok: false, reason: "NONCE_MISMATCH" };
+
+  return { ok: true, sub: String(p.sub), email: String(p.email || "").trim().toLowerCase(), hd: String(p.hd || "") };
+}
+
+// ── google_sub と既存ユーザーの紐づけ ──
+// ログインだけでUsers行を作らない（招待制のため）
+function resolveUserByIdentity(sub, email, hd) {
+  const sh = getSheet("Users");
+  const data = sh.getDataRange().getValues();
+  const h = data[0];
+  const iEmail = h.indexOf("student_email"), iSub = h.indexOf("google_sub");
+  const iActive = h.indexOf("is_active"), iUid = h.indexOf("user_id");
+  const iLinked = h.indexOf("auth_linked_at"), iRole = h.indexOf("role");
+  if (iSub === -1) return { ok: false, reason: "AUTH_COLUMNS_MISSING" };
+
+  // ① 検証済み sub で探す（メールが変わっていても同一人物）
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][iSub] || "").trim() && safeEquals(String(data[i][iSub]).trim(), sub)) {
+      if (String(data[i][iActive]).toUpperCase() !== "TRUE") return { ok: false, reason: "USER_INACTIVE" };
+      return { ok: true, row: i + 1, userId: ensureUserId(sh, i + 1, iUid, data[i][iUid]),
+               email: String(data[i][iEmail]), role: String(data[i][iRole] || "USER") };
+    }
+  }
+  // ② sub 未登録の時だけ、検証済み email で探す
+  const norm = (v) => String(v || "").trim().toLowerCase();
+  const matches = [];
+  for (let i = 1; i < data.length; i++) if (norm(data[i][iEmail]) === norm(email)) matches.push(i);
+  if (matches.length === 0) return { ok: false, reason: "AUTH_NOT_INVITED" };
+  if (matches.length > 1) return { ok: false, reason: "DUPLICATE_EMAIL_ROWS" }; // 曖昧なので拒否
+  const i = matches[0];
+  if (String(data[i][iSub] || "").trim()) return { ok: false, reason: "SUB_ALREADY_LINKED_TO_OTHER" };
+  if (String(data[i][iActive]).toUpperCase() !== "TRUE") return { ok: false, reason: "USER_INACTIVE" };
+  // Gmail以外かつhd無し＝ドメインの持ち主を確認できないので、自動では紐づけない
+  const isGmail = /@gmail\.com$/.test(norm(email));
+  if (!isGmail && !hd) return { ok: false, reason: "NEEDS_ADMIN_APPROVAL" };
+
+  sh.getRange(i + 1, iSub + 1).setValue(sub);                       // 1回だけ紐づける
+  if (iLinked !== -1) sh.getRange(i + 1, iLinked + 1).setValue(new Date().toISOString());
+  return { ok: true, row: i + 1, userId: ensureUserId(sh, i + 1, iUid, data[i][iUid]),
+           email: String(data[i][iEmail]), role: String(data[i][iRole] || "USER"), linked: true };
+}
+function ensureUserId(sheet, rowNum, colIdx, current) {
+  if (colIdx === -1) return "";
+  const v = String(current || "").trim();
+  if (v) return v;
+  const id = "u_" + Utilities.getUuid().slice(0, 12);
+  sheet.getRange(rowNum, colIdx + 1).setValue(id);
+  return id;
+}
+
+// ── セッションの発行 ──
+function issueSession(user) {
+  const sh = getAuthSheet("Sessions");
+  const token = newSessionToken(user.userId);
+  const now = new Date();
+  const exp = new Date(now.getTime() + SESSION_ABSOLUTE_DAYS * 86400000);
+
+  // 同時端末数の上限。超える分は古い順に失効させる
+  const data = sh.getDataRange().getValues();
+  const h = data[0];
+  const iUid = h.indexOf("user_id"), iRev = h.indexOf("revoked_at"), iCreated = h.indexOf("created_at");
+  const alive = [];
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][iUid]) === String(user.userId) && !String(data[i][iRev] || "").trim()) {
+      alive.push({ row: i + 1, created: String(data[i][iCreated]) });
+    }
+  }
+  alive.sort((a, b) => a.created > b.created ? 1 : -1);
+  while (alive.length >= SESSION_MAX_DEVICES) {
+    const old = alive.shift();
+    sh.getRange(old.row, iRev + 1).setValue(now.toISOString());
+  }
+
+  sh.appendRow([
+    sha256Hex(token), user.userId, user.sub, user.role || "USER", user.organizationId || "",
+    exp.toISOString(), now.toISOString(), now.toISOString(), "", Number(user.tokenVersion || 0), ""
+  ]);
+  return { token: token, expiresAt: exp.toISOString() };
+}
+
+// ── セッションの検証 ──
+// Sessionsシートが正。CacheServiceは速度のためだけに使い、消えていてもシートで確認する。
+// 破壊的な操作では allowCache=false にして必ずシートを読む。
+function verifySession(token, allowCache) {
+  if (!token) return { ok: false, reason: "NO_TOKEN" };
+  const hash = sha256Hex(token);
+  const cacheKey = "sess_" + hash;
+  const cache = CacheService.getScriptCache();
+
+  if (allowCache !== false) {
+    try {
+      const c = cache.get(cacheKey);
+      if (c) {
+        const o = JSON.parse(c);
+        // キャッシュに載っていても期限は必ず見る
+        if (new Date(o.expiresAt).getTime() > Date.now()) return { ok: true, cached: true, actor: o };
+        cache.remove(cacheKey);
+      }
+    } catch (e) { /* キャッシュ不調でもシートで続行 */ }
+  }
+
+  const sh = getAuthSheet("Sessions");
+  const data = sh.getDataRange().getValues();
+  const h = data[0];
+  const iHash = h.indexOf("session_token_hash"), iUid = h.indexOf("user_id"), iSub = h.indexOf("google_sub");
+  const iRole = h.indexOf("role"), iOrg = h.indexOf("organization_id"), iExp = h.indexOf("expires_at");
+  const iSeen = h.indexOf("last_seen_at"), iRev = h.indexOf("revoked_at"), iTv = h.indexOf("token_version");
+
+  for (let i = 1; i < data.length; i++) {
+    if (!safeEquals(String(data[i][iHash]), hash)) continue;
+    if (String(data[i][iRev] || "").trim()) return { ok: false, reason: "SESSION_REVOKED" };
+    const now = Date.now();
+    if (new Date(String(data[i][iExp])).getTime() <= now) return { ok: false, reason: "SESSION_EXPIRED" };
+    const lastSeen = new Date(String(data[i][iSeen] || data[i][h.indexOf("created_at")])).getTime();
+    if (now - lastSeen > SESSION_IDLE_DAYS * 86400000) {
+      sh.getRange(i + 1, iRev + 1).setValue(new Date().toISOString());
+      return { ok: false, reason: "SESSION_IDLE_EXPIRED" };
+    }
+    // ユーザー側の失効条件（token_version・無効化・subの不整合）を確認する
+    const user = sheetToObjects(getSheet("Users")).find(u => String(u.user_id) === String(data[i][iUid]));
+    if (!user) return { ok: false, reason: "USER_NOT_FOUND" };
+    if (String(user.is_active).toUpperCase() !== "TRUE") return { ok: false, reason: "USER_INACTIVE" };
+    if (Number(user.token_version || 0) !== Number(data[i][iTv] || 0)) return { ok: false, reason: "TOKEN_VERSION_CHANGED" };
+    if (String(user.google_sub || "") !== String(data[i][iSub])) return { ok: false, reason: "SUB_MISMATCH" };
+
+    sh.getRange(i + 1, iSeen + 1).setValue(new Date().toISOString());
+    const actor = {
+      actor_user_id: String(data[i][iUid]), google_sub: String(data[i][iSub]),
+      email: String(user.student_email), role: String(user.role || data[i][iRole] || "USER"),
+      organization_id: String(data[i][iOrg] || ""), expiresAt: String(data[i][iExp])
+    };
+    try { cache.put(cacheKey, JSON.stringify(actor), 300); } catch (e) {}
+    return { ok: true, cached: false, actor: actor };
+  }
+  return { ok: false, reason: "SESSION_NOT_FOUND" };
+}
+
+function revokeSession(token) {
+  const hash = sha256Hex(token);
+  const sh = getAuthSheet("Sessions");
+  const data = sh.getDataRange().getValues();
+  const h = data[0];
+  const iHash = h.indexOf("session_token_hash"), iRev = h.indexOf("revoked_at");
+  for (let i = 1; i < data.length; i++) {
+    if (!safeEquals(String(data[i][iHash]), hash)) continue;
+    sh.getRange(i + 1, iRev + 1).setValue(new Date().toISOString());
+    try { CacheService.getScriptCache().remove("sess_" + hash); } catch (e) {}
+    return { ok: true };
+  }
+  return { ok: true, notFound: true }; // 存在しなくても成功扱い（情報を漏らさない）
+}
+
+// ── ログイン（公開アクション）──
+// 失敗理由はユーザーへ返さず、AuthAuditにだけ残す
+function authLogin(body) {
+  const generic = { ok: false, error: "ログインできませんでした。管理者へ確認してください" };
+  const fp = body.idToken ? sha256Hex(body.idToken).slice(0, 16) : "";
+
+  const ch = consumeChallenge(body.challenge_id, body.state);
+  if (!ch.ok) { authAudit("LOGIN", { result: "FAIL", failureReason: ch.reason, action: "login", sessionId: fp }); return generic; }
+
+  const v = verifyIdToken(body.idToken, ch.nonceHash);
+  if (!v.ok) { authAudit("LOGIN", { result: "FAIL", failureReason: v.reason, action: "login", sessionId: fp }); return generic; }
+
+  const u = resolveUserByIdentity(v.sub, v.email, v.hd);
+  if (!u.ok) { authAudit("LOGIN", { result: "FAIL", failureReason: u.reason, action: "login", sessionId: fp }); return generic; }
+
+  const userRow = sheetToObjects(getSheet("Users")).find(x => String(x.user_id) === String(u.userId)) || {};
+  const sess = issueSession({ userId: u.userId, sub: v.sub, role: userRow.role || "USER",
+                              organizationId: userRow.organization_id || "", tokenVersion: userRow.token_version || 0 });
+  authAudit("LOGIN", { result: "SUCCESS", actorUserId: u.userId, action: "login",
+                       failureReason: u.linked ? "sub_linked" : "" });
+  return { ok: true, token: sess.token, expiresAt: sess.expiresAt,
+           user: { email: u.email, role: userRow.role || "USER" } };
 }
 
 // ── 管理操作の保護 ──
