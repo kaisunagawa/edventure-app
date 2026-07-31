@@ -76,6 +76,26 @@ function doGet(e) {
       case "getGoalTree": result = getGoalTree(studentEmail); break;
       // ── Auth CP1: 公開アクション（認証不要）──
       case "authChallenge": result = authChallenge(); break;
+      case "authRevokeAll": {
+        // 全端末ログアウト。token_version を1つ上げると既存セッションは
+        // すべて検証に失敗する（verifySessionが版ずれを検出する）
+        var _ra = verifyP1Admin(studentEmail, e.parameter.secret);
+        if (!_ra.ok) { result = _ra; break; }
+        var _sh = getSheet("Users");
+        var _dt = _sh.getDataRange().getValues(), _hd = _dt[0];
+        var _ie = _hd.indexOf("student_email"), _iv = _hd.indexOf("token_version");
+        var _target = String(e.parameter.target || studentEmail);
+        for (var _k = 1; _k < _dt.length; _k++) {
+          if (String(_dt[_k][_ie]) !== _target) continue;
+          var _nv = Number(_dt[_k][_iv] || 0) + 1;
+          _sh.getRange(_k + 1, _iv + 1).setValue(_nv);
+          authAudit("REVOKE_ALL", { result: "SUCCESS", actorUserId: studentEmail, targetUserId: _target, action: "authRevokeAll" });
+          result = { ok: true, target: _target, newTokenVersion: _nv };
+          break;
+        }
+        if (!result) result = { ok: false, error: "user not found" };
+        break;
+      }
       case "authInspect": {
         var _ai = verifyP1Admin(studentEmail, e.parameter.secret);
         if (!_ai.ok) { result = _ai; break; }
