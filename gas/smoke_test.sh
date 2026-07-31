@@ -126,6 +126,32 @@ if [ "$MODE" = "live" ] || [ "$MODE" = "all" ]; then
     echo "  － P1_ADMIN_SECRET 未設定のため鍵ありのテストはスキップ"
   fi
 
+  # ── 認証（Auth CP1 / Production Gate 1.5）──
+  r=$(call "&action=authConfig")
+  MODE=$(printf '%s' "$r" | sed -n 's/.*"auth_mode":"\([A-Z_]*\)".*/\1/p')
+  ENVN=$(printf '%s' "$r" | sed -n 's/.*"environment":"\([A-Z]*\)".*/\1/p')
+  if [ -n "$MODE" ]; then ok "auth_mode = ${MODE} (${ENVN})"; else ng "authConfig が auth_mode を返さない: $(echo "$r" | head -c 120)"; fi
+  if [ -n "${EXPECT_AUTH_MODE:-}" ]; then
+    [ "$MODE" = "$EXPECT_AUTH_MODE" ] && ok "auth_mode が期待値と一致" || ng "auth_mode が期待値と不一致（期待 ${EXPECT_AUTH_MODE} / 実際 ${MODE}）"
+  fi
+
+  # 認証まわりの拒否（いずれも書き込みは発生しない）
+  post() { curl -sL --max-time 120 -H "Content-Type: text/plain;charset=utf-8" --data-binary "$1" "$URL"; }
+  r=$(post '{"action":"login","challenge_id":"ch_nope","state":"x","idToken":"dummy"}')
+  echo "$r" | grep -q '"ok":false' && ok "存在しないchallengeを拒否" || ng "challenge拒否が異常: $(echo "$r"|head -c 100)"
+  echo "$r" | grep -qi "STATE_MISMATCH\|CHALLENGE\|reason" && ng "失敗理由が利用者へ漏れている" || ok "失敗理由を利用者へ返していない"
+
+  r=$(post '{"action":"authWhoAmI","token":"tampered-session-token-xxxx"}')
+  echo "$r" | grep -q "AUTH_REQUIRED" && ok "改ざんセッションを拒否" || ng "改ざんセッションの拒否が異常"
+
+  r=$(post '{"action":"authWhoAmI"}')
+  echo "$r" | grep -q "AUTH_REQUIRED" && ok "トークン無しを拒否" || ng "トークン無しの拒否が異常"
+
+  # 検証環境が認証回避経路になっていないこと
+  if [ "$ENVN" = "TEST" ]; then
+    grep -q 'TEST_ENV_ADMIN_ONLY' Code.gs && ok "検証環境のログインは管理者限定" || ng "検証環境が一般に開いている"
+  fi
+
   # goals_v1 が無効な相手には目標階層を開かないこと
   r=$(call "&action=getGoalTree&studentEmail=not-a-user@example.com")
   if echo "$r" | grep -q '"ok":false'; then ok "対象外ユーザーには getGoalTree を返さない"; else ng "対象外ユーザーに応答している: $(echo "$r" | head -c 120)"; fi

@@ -96,6 +96,34 @@ function doGet(e) {
         if (!result) result = { ok: false, error: "user not found" };
         break;
       }
+      case "authCleanupTestData": {
+        var _ac = verifyP1Admin(studentEmail, e.parameter.secret);
+        if (!_ac.ok) { result = _ac; break; }
+        result = authCleanupTestData();
+        break;
+      }
+      case "authRoleDryRun": {
+        var _ar = verifyP1Admin(studentEmail, e.parameter.secret);
+        if (!_ar.ok) { result = _ar; break; }
+        result = authRoleDryRun();
+        break;
+      }
+      case "authBreakerReset": {
+        var _br = verifyP1Admin(studentEmail, e.parameter.secret);
+        if (!_br.ok) { result = _br; break; }
+        result = breakerReset();
+        break;
+      }
+      case "authSetMode": {
+        var _am = verifyP1Admin(studentEmail, e.parameter.secret);
+        if (!_am.ok) { result = _am; break; }
+        var _mv = String(e.parameter.mode || "").toUpperCase();
+        if (["LEGACY","SESSION_OPTIONAL","SESSION_REQUIRED"].indexOf(_mv) === -1) { result = { ok:false, error:"invalid mode" }; break; }
+        PropertiesService.getScriptProperties().setProperty(isTestDeployment() ? "AUTH_MODE_TEST" : "AUTH_MODE_PROD", _mv);
+        authAudit("AUTH_MODE_CHANGE", { result: "SUCCESS", actorUserId: studentEmail, action: "authSetMode", failureReason: _mv });
+        result = authConfig();
+        break;
+      }
       case "authInspect": {
         var _ai = verifyP1Admin(studentEmail, e.parameter.secret);
         if (!_ai.ok) { result = _ai; break; }
@@ -125,7 +153,8 @@ function doGet(e) {
         result = { ok: true, total: _rows.length, recent: _rows.slice(-12) };
         break;
       }
-      case "healthCheck":   result = { ok: true, mode: AUTH_VERIFIER_MODE }; break;
+      case "healthCheck":   result = authConfig(); break;
+      case "authConfig":    result = authConfig(); break;
       case "adminSetupAuth": {
         var _sa = verifyP1Admin(studentEmail, e.parameter.secret);
         if (!_sa.ok) { result = _sa; break; }
@@ -8129,8 +8158,12 @@ const AUTH_SHEETS = {
   AuthChallenges: ["challenge_id","state_hash","nonce_hash","created_at","expires_at","used_at","attempt_count","result"],
   Sessions: ["session_token_hash","user_id","google_sub","role","organization_id",
              "expires_at","created_at","last_seen_at","revoked_at","token_version","device_label"],
+  // session_id は「発行済みセッションの識別子」、credential_fingerprint は
+  // 「まだセッションが無い段階でIDトークンの再試行を追う」ための別物。
+  // 混同すると監査の意味が壊れるので列を分けている。
   AuthAudit: ["event_id","timestamp","event_type","actor_user_id","target_user_id",
-              "session_id","action","result","failure_reason","deployment_id"]
+              "session_id","credential_fingerprint","action","result","failure_reason",
+              "deployment_id","environment"]
 };
 const AUTH_USER_COLUMNS = ["user_id","google_sub","token_version","role","organization_id","auth_linked_at"];
 
@@ -8225,11 +8258,137 @@ function authAudit(eventType, o) {
       new Date().toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" }),
       String(eventType),
       String((o && o.actorUserId) || ""), String((o && o.targetUserId) || ""),
-      String((o && o.sessionId) || ""), String((o && o.action) || ""),
+      String((o && o.sessionId) || ""), String((o && o.credentialFingerprint) || ""),
+      String((o && o.action) || ""),
       String((o && o.result) || ""), String((o && o.failureReason) || ""),
-      String((o && o.deploymentId) || "")
+      currentDeploymentId(), currentEnvironment()
     ]);
   } catch (e) { Logger.log("authAudit失敗: " + e); }
+}
+
+// 検証で作ったセッションを片付ける。AuthAuditは監査記録なので消さない
+// （environment列でTEST/PRODを区別できるようにしてある）。
+function authCleanupTestData() {
+  const now = new Date().toISOString();
+  const sh = getAuthSheet("Sessions");
+  const data = sh.getDataRange().getValues(), h = data[0];
+  const iRev = h.indexOf("revoked_at");
+  let revoked = 0;
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][iRev] || "").trim()) continue;
+    sh.getRange(i + 1, iRev + 1).setValue(now); revoked++;
+  }
+  // 期限切れ・未使用のchallengeを閉じる
+  const cs = getAuthSheet("AuthChallenges");
+  const cd = cs.getDataRange().getValues(), ch = cd[0];
+  const iUsed = ch.indexOf("used_at"), iExp = ch.indexOf("expires_at"), iRes = ch.indexOf("result");
+  let closed = 0;
+  for (let i = 1; i < cd.length; i++) {
+    if (String(cd[i][iUsed] || "").trim()) continue;
+    if (new Date(String(cd[i][iExp])).getTime() > Date.now()) continue;
+    cs.getRange(i + 1, iUsed + 1).setValue(now);
+    cs.getRange(i + 1, iRes + 1).setValue("EXPIRED_CLEANUP"); closed++;
+  }
+  return { ok: true, revokedSessions: revoked, closedChallenges: closed,
+           note: "AuthAuditは監査記録のため削除していない" };
+}
+
+// ロール割り当ての下見。★書き込みは一切しない★
+// Kai=JIROKU_ADMIN / Coachesに載っている人=COACH / それ以外=USER
+// MANAGER と ORG_ADMIN は法人機能の導入まで割り当てない
+function authRoleDryRun() {
+  const admin = String(adminEmail()).toLowerCase();
+  const coachEmails = {};
+  try {
+    sheetToObjects(getSheet("Coaches")).forEach(function (c) {
+      const e = String(c.coach_email || c.email || "").trim().toLowerCase();
+      if (e) coachEmails[e] = true;
+    });
+  } catch (e) {}
+  const users = sheetToObjects(getSheet("Users"));
+  const counts = { JIROKU_ADMIN: 0, COACH: 0, USER: 0 };
+  const exceptions = [];
+  const seen = {};
+  users.forEach(function (u) {
+    const em = String(u.student_email || "").trim().toLowerCase();
+    if (!em) { exceptions.push({ issue: "メール未設定の行", detail: String(u.name || "(名前なし)") }); return; }
+    if (seen[em]) { exceptions.push({ issue: "メールの重複", detail: em }); return; }
+    seen[em] = true;
+    let role = "USER";
+    if (em === admin) role = "JIROKU_ADMIN";
+    else if (coachEmails[em]) role = "COACH";
+    counts[role]++;
+    const cur = String(u.role || "").trim();
+    if (cur && cur !== role) exceptions.push({ issue: "既存roleと提案が不一致", detail: em + " 現在=" + cur + " 提案=" + role });
+    if (String(u.is_active).toUpperCase() !== "TRUE") exceptions.push({ issue: "無効なユーザー", detail: em });
+  });
+  return { ok: true, dryRun: true, totalUsers: users.length, proposed: counts,
+           coachSheetEntries: Object.keys(coachEmails).length,
+           exceptions: exceptions,
+           note: "書き込みは行っていない。MANAGER/ORG_ADMINは法人機能まで割り当てない" };
+}
+
+// ── ログインの濫用対策 ──
+// GASでは送信元IPを取得できない（リクエストヘッダー自体が取れないことを実測で確認済み）。
+// そのためIPベースの制限は実装できない。代わりに
+//   ①IDトークンの指紋 ②確定後のgoogle_sub ③全体の失敗率
+// を使う。単なる呼び出し回数で全員を締め出すことは絶対にしない
+// （攻撃者が数百回叩くだけで正規利用者をログイン不能にできてしまうため）。
+const LOGIN_FP_MAX_PER_HOUR = 10;      // 同じIDトークン指紋からの試行
+const LOGIN_SUB_MAX_PER_HOUR = 20;     // 本人確定後の試行
+const BREAKER_WINDOW_MIN = 10;         // 障害率を見る窓
+const BREAKER_MIN_SAMPLES = 8;
+const BREAKER_FAIL_RATIO = 0.8;        // tokeninfo障害がこの割合を超えたら一時停止
+const BREAKER_COOLDOWN_MIN = 5;
+
+function rateHit(key, maxPerHour) {
+  const cache = CacheService.getScriptCache();
+  const k = "rl_" + key;
+  const n = Number(cache.get(k) || 0) + 1;
+  cache.put(k, String(n), 3600);
+  return { count: n, exceeded: n > maxPerHour };
+}
+
+// tokeninfo が連続して落ちている時だけ短時間止める。
+// ★止まっている間も既存セッションは使える（verifySessionには影響しない）★
+function breakerState() {
+  const props = PropertiesService.getScriptProperties();
+  const until = Number(props.getProperty("AUTH_BREAKER_UNTIL") || 0);
+  if (until > Date.now()) return { open: true, until: new Date(until).toISOString() };
+  return { open: false };
+}
+function breakerRecord(isFailure) {
+  const cache = CacheService.getScriptCache();
+  const kf = "brk_fail", kt = "brk_total";
+  const total = Number(cache.get(kt) || 0) + 1;
+  const fail = Number(cache.get(kf) || 0) + (isFailure ? 1 : 0);
+  cache.put(kt, String(total), BREAKER_WINDOW_MIN * 60);
+  cache.put(kf, String(fail), BREAKER_WINDOW_MIN * 60);
+  if (total >= BREAKER_MIN_SAMPLES && (fail / total) >= BREAKER_FAIL_RATIO) {
+    PropertiesService.getScriptProperties()
+      .setProperty("AUTH_BREAKER_UNTIL", String(Date.now() + BREAKER_COOLDOWN_MIN * 60000));
+    cache.remove(kf); cache.remove(kt);
+    notifyAdminAuthAnomaly("tokeninfoの失敗が続いたため、ログインを" + BREAKER_COOLDOWN_MIN + "分間停止しました（既存のログインは影響なし）");
+  }
+}
+// 管理者による即時解除
+function breakerReset() {
+  PropertiesService.getScriptProperties().deleteProperty("AUTH_BREAKER_UNTIL");
+  try { CacheService.getScriptCache().remove("brk_fail"); CacheService.getScriptCache().remove("brk_total"); } catch (e) {}
+  return { ok: true, reset: true };
+}
+// 異常時に管理者へ知らせる。1時間に1回までに抑える（通知で埋まらないように）
+function notifyAdminAuthAnomaly(msg) {
+  try {
+    const cache = CacheService.getScriptCache();
+    if (cache.get("auth_notice_sent")) return;
+    cache.put("auth_notice_sent", "1", 3600);
+    const admin = adminEmail();
+    const u = sheetToObjects(getSheet("Users")).find(function (x) { return x.student_email === admin; });
+    const text = "⚠️ JIROKU 認証の異常\n" + msg;
+    if (u && u.line_user_id) { if (sendLineMessage(u.line_user_id, text)) return; }
+    MailApp.sendEmail(admin, "JIROKU 認証の異常", text);
+  } catch (e) { Logger.log("認証異常の通知に失敗: " + e); }
 }
 
 // ── ログイン開始（公開アクション）──
@@ -8284,6 +8443,35 @@ function consumeChallenge(challengeId, state) {
 // 【重要】これは緊急移行用。2026-08-31 / 法人導入前 / 利用者拡大前 の
 // 最も早い時点までに、正式な検証基盤へ移行する。AUTH_PLAN.md 参照。
 const AUTH_VERIFIER_MODE = "tokeninfo-2026-08";
+const AUTH_VERSION = "cp1-2026-07-31";
+const TEST_DEPLOYMENT_MARK = "AKfycbw-MhcAhOaqd_JJTlN4LltE";
+
+// 実行中のデプロイを見分ける。本番と検証で同じスクリプトを共有しているため、
+// スクリプトプロパティを1つにすると両方が同じ設定になってしまう。
+function currentDeploymentId() {
+  try { var u = ScriptApp.getService().getUrl() || ""; var m = u.match(/\/s\/([^\/]+)\//); return m ? m[1] : ""; }
+  catch (e) { return ""; }
+}
+function isTestDeployment() { return currentDeploymentId().indexOf(TEST_DEPLOYMENT_MARK) === 0; }
+function currentEnvironment() { return isTestDeployment() ? "TEST" : "PROD"; }
+
+// 認証の段階をクライアントに推測させない。
+//   LEGACY           … 認証基盤が未導入。従来ログインのみ
+//   SESSION_OPTIONAL … 基盤は稼働。既存APIはまだ認証強制前。
+//                      ただし認証に失敗しても従来ログインへ戻ってはいけない
+//   SESSION_REQUIRED … セッション必須
+function authMode() {
+  const props = PropertiesService.getScriptProperties();
+  const key = isTestDeployment() ? "AUTH_MODE_TEST" : "AUTH_MODE_PROD";
+  const v = String(props.getProperty(key) || "").toUpperCase();
+  if (["LEGACY", "SESSION_OPTIONAL", "SESSION_REQUIRED"].indexOf(v) !== -1) return v;
+  return isTestDeployment() ? "SESSION_OPTIONAL" : "LEGACY"; // 本番の既定は安全側
+}
+function authConfig() {
+  return { ok: true, auth_mode: authMode(), auth_version: AUTH_VERSION,
+           verifier_mode: AUTH_VERIFIER_MODE, deployment_id: currentDeploymentId(),
+           environment: currentEnvironment() };
+}
 function verifyIdToken(idToken, expectedNonceHash) {
   if (!idToken) return { ok: false, reason: "NO_ID_TOKEN" };
   let res;
@@ -8462,21 +8650,38 @@ function revokeSession(token) {
 function authLogin(body) {
   const generic = { ok: false, error: "ログインできませんでした。管理者へ確認してください" };
   const fp = body.idToken ? sha256Hex(body.idToken).slice(0, 16) : "";
+  const fail = function (reason) {
+    authAudit("LOGIN", { result: "FAIL", failureReason: reason, action: "login", credentialFingerprint: fp });
+    return generic;
+  };
+
+  const brk = breakerState();
+  if (brk.open) return { ok: false, error: "ただいまログインが混み合っています。数分後にもう一度お試しください" };
+
+  // 同じIDトークンを何度も投げ込むのを止める（IPが使えないための代替）
+  if (fp && rateHit("fp_" + fp, LOGIN_FP_MAX_PER_HOUR).exceeded) return fail("FP_RATE_LIMIT");
 
   const ch = consumeChallenge(body.challenge_id, body.state);
-  if (!ch.ok) { authAudit("LOGIN", { result: "FAIL", failureReason: ch.reason, action: "login", sessionId: fp }); return generic; }
+  if (!ch.ok) return fail(ch.reason);
 
   const v = verifyIdToken(body.idToken, ch.nonceHash);
-  if (!v.ok) { authAudit("LOGIN", { result: "FAIL", failureReason: v.reason, action: "login", sessionId: fp }); return generic; }
+  breakerRecord(!v.ok && String(v.reason).indexOf("TOKENINFO_") === 0);
+  if (!v.ok) return fail(v.reason);
+
+  if (rateHit("sub_" + v.sub, LOGIN_SUB_MAX_PER_HOUR).exceeded) return fail("SUB_RATE_LIMIT");
+
+  // 検証環境は本番と同じスプレッドシートを見ている。
+  // 一般利用者が ?gas=test を付けて別の認証状態に入れないよう、管理者だけに限定する
+  if (isTestDeployment() && v.email !== String(adminEmail()).toLowerCase()) return fail("TEST_ENV_ADMIN_ONLY");
 
   const u = resolveUserByIdentity(v.sub, v.email, v.hd);
-  if (!u.ok) { authAudit("LOGIN", { result: "FAIL", failureReason: u.reason, action: "login", sessionId: fp }); return generic; }
+  if (!u.ok) return fail(u.reason);
 
   const userRow = sheetToObjects(getSheet("Users")).find(x => String(x.user_id) === String(u.userId)) || {};
   const sess = issueSession({ userId: u.userId, sub: v.sub, role: userRow.role || "USER",
                               organizationId: userRow.organization_id || "", tokenVersion: userRow.token_version || 0 });
   authAudit("LOGIN", { result: "SUCCESS", actorUserId: u.userId, action: "login",
-                       failureReason: u.linked ? "sub_linked" : "" });
+                       credentialFingerprint: fp, failureReason: u.linked ? "sub_linked" : "" });
   return { ok: true, token: sess.token, expiresAt: sess.expiresAt,
            user: { email: u.email, role: userRow.role || "USER" } };
 }

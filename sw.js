@@ -1,4 +1,8 @@
-const CACHE = "jiroku-v8";
+// 認証基盤(Auth CP1)の導入にあわせて更新。古いキャッシュは activate 時に削除され、
+// skipWaiting + clients.claim で即座に新しい版へ切り替わる。
+// index.html はネットワーク優先(2.5秒でキャッシュ)のため、認証前のフロントが
+// 残り続けることはない
+const CACHE = "jiroku-v9-auth";
 
 // タイマー終了などをバックグラウンドでも通知するためのFirebase Cloud Messaging。
 // 別ファイル（firebase-messaging-sw.js）として登録すると、同じスコープ('/')の

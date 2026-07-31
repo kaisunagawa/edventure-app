@@ -490,6 +490,23 @@ async function gasPostJson(action, body = {}) {
 // URL・クエリ文字列・location.hash には絶対に入れない（履歴やログに残るため）。
 // コンソールにも出さない。
 const SESSION_KEY = "jiroku_session";
+// サーバーの認証段階。クライアントが推測せず、サーバーの申告に従う。
+//   LEGACY … 従来ログインのみ
+//   SESSION_OPTIONAL … 基盤稼働。既存APIは未強制だが、認証に失敗したら従来ログインへ戻さない
+//   SESSION_REQUIRED … セッション必須
+const AUTH_MODE_KEY = "auth_mode_seen";
+const AUTH_RANK = { LEGACY:0, SESSION_OPTIONAL:1, SESSION_REQUIRED:2 };
+function rememberedAuthMode(){
+  try { return localStorage.getItem(AUTH_MODE_KEY) || "LEGACY"; } catch { return "LEGACY"; }
+}
+// 一度 SESSION_OPTIONAL 以上を見た端末が、通信失敗を理由に LEGACY へ戻らないようにする
+function noteAuthMode(mode){
+  const m = String(mode||"").toUpperCase();
+  if (AUTH_RANK[m] === undefined) return rememberedAuthMode();
+  const prev = rememberedAuthMode();
+  if ((AUTH_RANK[m]||0) >= (AUTH_RANK[prev]||0)) { try{ localStorage.setItem(AUTH_MODE_KEY, m); }catch{} return m; }
+  return prev;  // 降格は受け付けない
+}
 function getSessionToken() {
   try { return localStorage.getItem(SESSION_KEY) || ""; } catch { return ""; }
 }
@@ -4598,22 +4615,28 @@ function LoginScreen({onLogin}) {
     // ・対応済みと分かったら十分に待つ。ここで早々に諦めると、
     //   「サーバーは認証を求めているのに黙って未認証ログインになる」という
     //   一番まずい状態を作ってしまうため
-    const CAP_KEY="auth_backend_ok";
-    let known=null;
-    try{ known=localStorage.getItem(CAP_KEY); }catch{}
+    // サーバーの認証段階を確認する。以前に SESSION_OPTIONAL 以上を見ていれば
+    // 通信が不調でもその前提を維持する（勝手に従来方式へ落ちないため）
+    let mode = rememberedAuthMode();
+    try{
+      const cu=new URL(GAS_URL); cu.searchParams.set("action","authConfig");
+      const cfg=await (await fetch(cu.toString())).json();
+      if(cfg&&cfg.ok&&cfg.auth_mode) mode = noteAuthMode(cfg.auth_mode);
+    }catch{}
+    const strict = (AUTH_RANK[mode]||0) >= 1;   // SESSION_OPTIONAL 以上は縮退禁止
+
     let ch=null;
     try{
       const u=new URL(GAS_URL); u.searchParams.set("action","authChallenge");
       const ctl=new AbortController();
-      const timer=setTimeout(()=>ctl.abort(), known==="1" ? 15000 : 2500);
+      const timer=setTimeout(()=>ctl.abort(), strict ? 15000 : 2500);
       ch=await (await fetch(u.toString(),{signal:ctl.signal})).json();
       clearTimeout(timer);
     }catch{}
-    try{
-      if(ch&&ch.ok) localStorage.setItem(CAP_KEY,"1");
-      else if(ch&&ch.error) localStorage.removeItem(CAP_KEY);   // 明確に未対応
-      // 通信失敗（chがnull）の時は判定を変えない
-    }catch{}
+    if(strict && !(ch&&ch.ok&&ch.challenge_id)){
+      setError("ログインの準備に失敗しました。通信環境を確認して、もう一度お試しください");
+      return;   // ★従来のメール方式へは戻さない★
+    }
     // サーバー側にまだ認証基盤が無い（段階導入中）場合でも、ログインは従来どおり通す。
     // ここで止めると全利用者が締め出されるため、必ず縮退させる
     // challenge_id を state に埋め込んで往復させる。
@@ -4649,6 +4672,7 @@ function LoginScreen({onLogin}) {
     // （直列にすると2つのGAS呼び出しで合計6〜8秒かかり、待ち時間が長すぎた）
     const raw=String(res.state||"");
     const sep=raw.indexOf("~");
+    const strictNow = (AUTH_RANK[rememberedAuthMode()]||0) >= 1;
     const sessionPromise = (sep>0)
       ? fetch(GAS_URL,{ method:"POST", headers:{"Content-Type":"text/plain"},
           body: JSON.stringify({ action:"login", idToken:res.credential,
@@ -4669,6 +4693,13 @@ function LoginScreen({onLogin}) {
       const url=new URL(GAS_URL); url.searchParams.set("action","getUser"); url.searchParams.set("studentEmail",email);
       const r=await fetch(url).then(res=>res.json());
       await sessionPromise;   // 並行で走らせていた本人確認の完了をここで待つ
+      // 認証段階が SESSION_OPTIONAL 以上なら、セッションを取れていない状態で
+      // 従来のメール方式のまま中へ入れてはいけない
+      if(strictNow && !getSessionToken()){
+        setLoading(false);
+        setError("ログインを確認できませんでした。もう一度お試しください");
+        return;
+      }
       if(r.ok&&r.data){
         // 既存ユーザー → ログイン
         const u={email,name:r.data.name||name,nickname:r.data.nickname||r.data.name||name,avatar:r.data.avatar||"🦊",coachName:r.data.coachName||"コーチ",coachEmail:r.data.coach_email||""};
