@@ -5814,11 +5814,17 @@ function App() {
         const u={...CURRENT_USER, name:r.data.name||CURRENT_USER.name, nickname:r.data.nickname||CURRENT_USER.name, avatar:r.data.avatar||"🦊", coachName:r.data.coachName||"コーチ", coachEmail:r.data.coach_email||"", lineLinked:r.data.lineLinked===undefined?true:!!r.data.lineLinked, showInCommunity:r.data.showInCommunity===undefined?true:!!r.data.showInCommunity, cohort:r.data.cohort||"", recordDays:(r.data.recordDays===undefined?null:r.data.recordDays), goalsV1:!!r.data.goalsV1};
         CURRENT_USER=u; localStorage.setItem("edventure_user",JSON.stringify(u)); setUser(u);
         setProfile({nickname:u.nickname,avatar:u.avatar});
+        // サーバーがこの人のカレンダーへ直接書き込む設定かを毎回反映する。
+        // 以前は recheckUser（初回セットアップの「確認する」）の中でしか
+        // 保存しておらず、通常の起動では一度も設定されなかった。
+        // そのため「カレンダー連携がまだです」が消えなかった
+        if(r.data.serverCalendar) localStorage.setItem("server_calendar","1");
+        else localStorage.removeItem("server_calendar");
+        setCalLinked(x=>x || !!r.data.serverCalendar);
       } else if(r.error==="User not found"){
         // スプレッドシートに存在しない → キャッシュ削除してログイン画面へ
         localStorage.removeItem("edventure_user");
         localStorage.removeItem("line_prompted");
-        localStorage.removeItem("cal_linked");
         CURRENT_USER=null; setUser(null);
       }
     }).catch(()=>{}); // 通信エラー時はキャッシュのまま続行
