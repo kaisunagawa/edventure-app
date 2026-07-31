@@ -67,8 +67,21 @@ if [ "$MODE" = "live" ] || [ "$MODE" = "all" ]; then
   SECRET="${P1_ADMIN_SECRET:-}"
   echo "── 実機チェック（${URL:0:60}…）──"
 
-  # 同じURLはGoogle側でキャッシュされるため、毎回ユニークにする
-  call() { curl -sL --max-time 90 "${URL}?_=$(date +%s%N)$1"; }
+  # 同じURLはGoogle側でキャッシュされるため、毎回ユニークにする。
+  # デプロイ直後は反映待ちで空応答が返ることがあり、そのまま失敗にすると
+  # 「壊れていないのにデプロイが止まる」誤検知になるため、空のときだけ2回まで再試行する。
+  call() {
+    local r
+    for _t in 1 2 3; do
+      r=$(curl -sL --max-time 120 "${URL}?_=$(date +%s%N)$1")
+      [ -n "$r" ] && { printf '%s' "$r"; return 0; }
+      sleep 5
+    done
+    printf '%s' ""
+  }
+
+  # 反映待ちのウォームアップ（結果は判定に使わない）
+  call "&action=getUser&studentEmail=${SMOKE_ADMIN_EMAIL:-work.sunagawa@gmail.com}" >/dev/null
 
   # 一般APIが ReferenceError や例外で落ちていないこと
   for ac in getUser getLogs getReportList getHomeData; do

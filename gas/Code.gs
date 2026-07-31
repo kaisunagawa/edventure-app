@@ -1147,8 +1147,10 @@ function saveLog(studentEmail, body) {
         const xpResult = addXP(studentEmail, body.memo, todaysLogCount, {
           totalLogs, memoCount: memoCount + ((body.memo || "").trim() ? 1 : 0)
         });
+        writeP1LogFields(sheet, i + 1, studentEmail, targetDate, String(body.time_block), body);
         return { ok: true, log_id: String(data[i][0]), updated: true, ...xpResult };
       }
+      writeP1LogFields(sheet, i + 1, studentEmail, targetDate, String(body.time_block), body);
       return { ok: true, log_id: String(data[i][0]), updated: true, xp_gained: 0 };
     }
   }
@@ -1157,6 +1159,7 @@ function saveLog(studentEmail, body) {
   const newRow = sheet.getLastRow() + 1;
   sheet.appendRow([logId, studentEmail, targetDate, "", body.task, body.focus_level, body.memo || "", now, body.goal_related || "false"]);
   sheet.getRange(newRow, 4).setNumberFormat("@").setValue(String(body.time_block));
+  writeP1LogFields(sheet, newRow, studentEmail, targetDate, String(body.time_block), body);
   writeRecordToOwnerCalendar(studentEmail, targetDate, String(body.time_block), body.task);
   let awardedIdxN = headers.indexOf("xp_awarded");
   if (awardedIdxN === -1) { awardedIdxN = headers.length; sheet.getRange(1, awardedIdxN + 1).setValue("xp_awarded"); }
@@ -7607,6 +7610,11 @@ function getGoalTree(studentEmail) {
   const chk = p1RequireUser(studentEmail);
   if (!chk.ok) return chk;
 
+  // 今週の実績をその場で集計して返す（画面が別APIを叩かずに済むように）
+  const weekStart = mondayOf(formatDate(new Date()));
+  let agg = {};
+  try { agg = aggregateWeeklyActual(studentEmail, weekStart); } catch (e) { agg = {}; }
+
   const goals = p1List("Goals", studentEmail)
     .filter(g => p1Status_(g.status, "ACTIVE") !== "ARCHIVED")
     .sort((a, b) => (Number(a.priority) || 99) - (Number(b.priority) || 99));
@@ -7623,9 +7631,25 @@ function getGoalTree(studentEmail) {
     else orphans.push(w);
   });
 
+  // 週間目標に「今週どこまで進んだか」を付ける。
+  // 達成の判定は最低ライン(min_line)を超えたかどうかを基準にする
+  // （調子が悪い週でも最低ラインを超えれば continue 扱いにできるようにするため）
+  const withProgress = (w) => {
+    const a = agg[String(w.weekly_goal_id)] || { actual: 0, logCount: 0 };
+    const target = Number(w.target_total);
+    const min = Number(w.min_line);
+    return Object.assign({}, w, {
+      actual_value: a.actual,
+      log_count: a.logCount,
+      percent: (!isNaN(target) && target > 0) ? Math.min(999, Math.round(a.actual / target * 100)) : null,
+      met_min: (!isNaN(min) && min > 0) ? a.actual >= min : null
+    });
+  };
+
   return {
     ok: true,
     data: {
+      weekStart: weekStart,
       goals: goals.map(g => ({
         quarterly_goal_id: g.quarterly_goal_id,
         title: g.title, category: g.category,
@@ -7633,9 +7657,9 @@ function getGoalTree(studentEmail) {
         start_date: g.start_date, end_date: g.end_date,
         why: g.why, success_condition: g.success_condition, guardrails: g.guardrails,
         priority: g.priority, status: p1Status_(g.status, "ACTIVE"),
-        weeklyGoals: byGoal[String(g.quarterly_goal_id)] || []
+        weeklyGoals: (byGoal[String(g.quarterly_goal_id)] || []).map(withProgress)
       })),
-      orphanWeeklyGoals: orphans
+      orphanWeeklyGoals: orphans.map(withProgress)
     }
   };
 }
@@ -7868,6 +7892,118 @@ function p1BackupInfo(id) {
     viewers: ss.getViewers().map(u => u.getEmail()),
     sheetCount: ss.getSheets().length
   };
+}
+
+// ══════════════════════════════════════════════════════════════════
+// Checkpoint 3: 記録と週間目標の接続
+//
+// 【二重加点を防ぐ考え方】
+// 1件の記録が計上されるのは「1つの週間目標」だけ（primary_weekly_goal_id）。
+// 複数の目標に効く行動でも、集計対象は必ず1つに寄せる。
+// これをしないと、同じ1時間が3つの目標それぞれで満点になり、点数が実態と乖離する。
+// 将来「関連はしている」を記録したくなったら related_goal_ids に入れるが、
+// 集計には使わない（表示だけに使う）という前提を守る。
+// ══════════════════════════════════════════════════════════════════
+
+// "09:00-10:30" → 90分。"09:00" のような単発は1時間とみなす。
+function timeBlockMinutes(tb) {
+  const s = String(tb || "");
+  const m = s.match(/^(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})$/);
+  if (m) {
+    let mins = (Number(m[3]) * 60 + Number(m[4])) - (Number(m[1]) * 60 + Number(m[2]));
+    if (mins < 0) mins += 24 * 60; // 日をまたぐ記録
+    return mins;
+  }
+  return /^\d{1,2}:\d{2}/.test(s) ? 60 : 0;
+}
+
+// 記録に紐づける週間目標を決める。本人のACTIVEな週間目標でなければ空にする
+// （他人の目標IDや、しまった目標のIDを渡されても紐づけない）。
+function resolvePrimaryWeeklyGoal(studentEmail, wanted) {
+  const id = String(wanted || "").trim();
+  if (!id) return "";
+  const row = p1OwnedRow("WeeklyGoals", "weekly_goal_id", id, studentEmail);
+  if (!row) return "";
+  return String(row.status || "ACTIVE").toUpperCase() === "ACTIVE" ? id : "";
+}
+
+// saveLog / saveLogMulti から呼ぶ。Phase 1 で足した列だけを埋める。
+// 既存の列には一切触らない（万一この処理が失敗しても、記録そのものは残る）。
+function writeP1LogFields(sheet, rowNum, studentEmail, targetDate, timeBlock, body) {
+  try {
+    const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+    const set = (col, val) => {
+      const i = headers.indexOf(col);
+      if (i !== -1) sheet.getRange(rowNum, i + 1).setValue(val);
+    };
+    set("action_execution_id", makeExecutionId(studentEmail, targetDate, timeBlock));
+    if (body.quantity !== undefined) set("quantity", p1Num_(body.quantity));
+    if (body.unit !== undefined) set("unit", p1Text_(body.unit, 20));
+    if (body.primary_weekly_goal_id !== undefined) {
+      set("primary_weekly_goal_id", resolvePrimaryWeeklyGoal(studentEmail, body.primary_weekly_goal_id));
+    }
+    if (body.link_task_id !== undefined) {
+      const t = p1OwnedRow("Tasks", "task_id", body.link_task_id, studentEmail);
+      set("link_task_id", t ? String(body.link_task_id) : "");
+    }
+  } catch (e) {
+    Logger.log("writeP1LogFields 失敗（記録本体は保存済み）: " + e);
+  }
+}
+
+// 週間目標の実績を集計する。weekStart は月曜(YYYY-MM-DD)。
+// metric_type ごとに数え方を変える:
+//   count   … quantity の合計（未入力の記録は1件＝1とみなす）
+//   minutes … time_block から出した分の合計
+//   boolean … 本人が「達成」にした時だけ1（記録があるだけでは達成にしない）
+function aggregateWeeklyActual(studentEmail, weekStart) {
+  const monday = weekStart ? String(weekStart) : mondayOf(formatDate(new Date()));
+  const end = new Date(monday + "T00:00:00Z");
+  end.setUTCDate(end.getUTCDate() + 6);
+  const sunday = end.toISOString().substring(0, 10);
+
+  const weeklies = p1List("WeeklyGoals", studentEmail)
+    .filter(w => String(w.status || "ACTIVE").toUpperCase() !== "ARCHIVED");
+  if (!weeklies.length) return {};
+
+  const logs = sheetToObjects(getSheet("DailyLog")).filter(l => {
+    if (l.student_email !== studentEmail) return false;
+    if (String(l.deleted_at || "").trim()) return false; // 論理削除済みは数えない
+    const d = String(l.date).substring(0, 10);
+    return d >= monday && d <= sunday;
+  });
+
+  const out = {};
+  weeklies.forEach(w => {
+    const id = String(w.weekly_goal_id);
+    const mt = String(w.metric_type || "count");
+    let actual = 0;
+    if (mt === "boolean") {
+      actual = String(w.status || "").toUpperCase() === "COMPLETED" ? 1 : 0;
+    } else {
+      // primary_weekly_goal_id が一致する記録だけを数える＝二重加点しない
+      const mine = logs.filter(l => String(l.primary_weekly_goal_id || "") === id);
+      actual = mine.reduce((sum, l) => {
+        if (mt === "minutes") return sum + timeBlockMinutes(l.time_block);
+        const q = Number(l.quantity);
+        return sum + (isNaN(q) || String(l.quantity).trim() === "" ? 1 : q);
+      }, 0);
+    }
+    out[id] = { actual: actual, metric_type: mt, logCount: logs.filter(l => String(l.primary_weekly_goal_id || "") === id).length };
+  });
+  return out;
+}
+
+// 集計結果を WeeklyGoals に書き戻す（画面が毎回集計し直さなくて済むように）
+function refreshWeeklyActuals(studentEmail, weekStart) {
+  const agg = aggregateWeeklyActual(studentEmail, weekStart);
+  const now = new Date().toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" });
+  Object.keys(agg).forEach(id => {
+    p1Upsert("WeeklyGoals", "weekly_goal_id", {
+      weekly_goal_id: id, actual_value: agg[id].actual, actual_calculated_at: now
+    });
+  });
+  return { ok: true, weekStart: weekStart || mondayOf(formatDate(new Date())), results: agg };
 }
 
 // ── 管理操作の保護 ──
