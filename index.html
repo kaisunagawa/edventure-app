@@ -15,9 +15,9 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
   <script src="https://accounts.google.com/gsi/client" async defer></script>
-  <script crossorigin="anonymous" integrity="sha384-DGyLxAyjq0f9SPpVevD6IgztCFlnMF6oW/XQGmfe+IsZ8TqEiDrcHkMLKI6fiB/Z" src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"></script>
-  <script crossorigin="anonymous" integrity="sha384-gTGxhz21lVGYNMcdJOyq01Edg0jhn/c22nsx0kyqP0TxaV5WVdsSH1fSDUf5YJj1" src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
-  <script crossorigin="anonymous" integrity="sha384-iPOMe3E8jVgp/PepuDy7lJvw7L/QP97X5POfi+X1EVyDVQi8Kuv/MooNVB5OFXVN" src="https://unpkg.com/htm@3.1.1/dist/htm.js"></script>
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/htm/dist/htm.js"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -357,17 +357,7 @@
 const { useState, useEffect, useRef, useCallback } = React;
 const html = htm.bind(React.createElement);
 
-const GAS_PROD = "https://script.google.com/macros/s/AKfycbzJ-QEpPVnmp-LFU5Jxww4VFP1qaseMtwCrzKxAA6ZULr1y3h_UeKzVdhHnl5ze57U/exec";
-// 認証の段階導入中だけ使う検証用の切り替え。?gas=test を付けた時だけテスト用バックエンドを見る。
-// Googleログインのリダイレクト先は本番ドメインに固定されているため、
-// 実機（スマホ・LINE内ブラウザ）でログインを検証するにはこの仕組みが要る。
-const GAS_TEST = "https://script.google.com/macros/s/AKfycbw-MhcAhOaqd_JJTlN4LltE-liM-WriznSgcDGIBR0uUMMB-rnYI74GUoXkmyNgTsx5/exec";
-const GAS_URL = (()=>{ try{
-  const q=new URLSearchParams(location.search).get("gas");
-  if(q==="test"){ localStorage.setItem("gas_mode","test"); return GAS_TEST; }
-  if(q==="prod"){ localStorage.removeItem("gas_mode"); return GAS_PROD; }
-  return localStorage.getItem("gas_mode")==="test" ? GAS_TEST : GAS_PROD;
-}catch{ return GAS_PROD; } })();
+const GAS_URL = "https://script.google.com/macros/s/AKfycbzJ-QEpPVnmp-LFU5Jxww4VFP1qaseMtwCrzKxAA6ZULr1y3h_UeKzVdhHnl5ze57U/exec";
 let CURRENT_USER = JSON.parse(localStorage.getItem("edventure_user") || "null");
 
 // タイマー終了などをバックグラウンド（アプリを閉じている間）でも通知するためのFirebase Cloud Messaging設定。
@@ -483,32 +473,6 @@ async function gasPostJson(action, body = {}) {
     });
     return await r.json();
   } catch { return { ok:false }; }
-}
-
-// ── セッション（Auth CP1）──
-// セッショントークンはPOSTのJSON本文でのみ送る。
-// URL・クエリ文字列・location.hash には絶対に入れない（履歴やログに残るため）。
-// コンソールにも出さない。
-const SESSION_KEY = "jiroku_session";
-function getSessionToken() {
-  try { return localStorage.getItem(SESSION_KEY) || ""; } catch { return ""; }
-}
-function setSessionToken(t) {
-  try { if (t) localStorage.setItem(SESSION_KEY, t); else localStorage.removeItem(SESSION_KEY); } catch {}
-}
-// 認証付きPOST。CP1では既存APIへの強制はまだ行わないが、
-// これから追加するAPIはすべてこれを通す
-async function authedPost(action, body = {}) {
-  const token = getSessionToken();
-  if (!token) return { ok:false, error:"AUTH_REQUIRED" };
-  try {
-    const r = await fetch(GAS_URL, {
-      method: "POST",
-      headers: { "Content-Type": "text/plain" },
-      body: JSON.stringify({ action, token, ...body })
-    });
-    return await r.json();
-  } catch { return { ok:false, error:"NETWORK" }; }
 }
 
 // ── Googleカレンダー（各ユーザー本人の権限でブラウザから直接読む） ──
@@ -4580,81 +4544,27 @@ function LoginScreen({onLogin}) {
   useEffect(()=>{
     const hash=new URLSearchParams(location.hash.slice(1));
     const idToken=hash.get("id_token");
-    const st=hash.get("state")||"";
     if(idToken){
-      history.replaceState(null,"",location.pathname+location.search);
-      handleGoogleLogin({credential:idToken, state:st});
+      history.replaceState(null,"",location.pathname);
+      handleGoogleLogin({credential:idToken});
     }
   },[]);
 
-  const handleGoogleSignIn=async()=>{
-    // state と nonce はサーバーが発行する。戻ってきた時に必ず突き合わせる
-    // （以前はnonceを自分で作って照合していなかったため、リプレイを防げなかった）
-    // サーバーが認証基盤に対応しているかを覚えておく。
-    // ・未対応と分かっている間は短い待ち時間で打ち切り、従来ログインへ縮退する
-    // ・対応済みと分かったら十分に待つ。ここで早々に諦めると、
-    //   「サーバーは認証を求めているのに黙って未認証ログインになる」という
-    //   一番まずい状態を作ってしまうため
-    const CAP_KEY="auth_backend_ok";
-    let known=null;
-    try{ known=localStorage.getItem(CAP_KEY); }catch{}
-    let ch=null;
-    try{
-      const u=new URL(GAS_URL); u.searchParams.set("action","authChallenge");
-      const ctl=new AbortController();
-      const timer=setTimeout(()=>ctl.abort(), known==="1" ? 15000 : 2500);
-      ch=await (await fetch(u.toString(),{signal:ctl.signal})).json();
-      clearTimeout(timer);
-    }catch{}
-    try{
-      if(ch&&ch.ok) localStorage.setItem(CAP_KEY,"1");
-      else if(ch&&ch.error) localStorage.removeItem(CAP_KEY);   // 明確に未対応
-      // 通信失敗（chがnull）の時は判定を変えない
-    }catch{}
-    // サーバー側にまだ認証基盤が無い（段階導入中）場合でも、ログインは従来どおり通す。
-    // ここで止めると全利用者が締め出されるため、必ず縮退させる
-    // challenge_id を state に埋め込んで往復させる。
-    // 以前は sessionStorage に置いていたが、LINE内ブラウザなどでは
-    // Googleから戻る際に別のコンテキストになり保存値が消えるため、
-    // challengeを一度も消費できずログインが成立しなかった（実測で確認）。
-    // stateはGoogleがそのまま返してくるので、保存に頼る必要がない。
-    const useCh = !!(ch && ch.ok && ch.challenge_id);
-    const stateParam = useCh ? (ch.challenge_id + "~" + ch.state) : "";
+  const handleGoogleSignIn=()=>{
+    const nonce=Math.random().toString(36).slice(2);
     const params=new URLSearchParams({
       client_id: GOOGLE_CLIENT_ID,
       redirect_uri: "https://kaisunagawa.github.io/edventure-app/",
       response_type: "id_token",
       scope: "openid email profile",
-      nonce: useCh ? ch.nonce : Math.random().toString(36).slice(2),
+      nonce,
     });
-    if(useCh) params.set("state", stateParam);
     window.location.href="https://accounts.google.com/o/oauth2/v2/auth?"+params;
   };
 
   const handleGoogleLogin=async(res)=>{
     const payload=parseJwt(res.credential);
     if(!payload) { setError("ログインに失敗しました"); return; }
-
-    // ★IDトークンをサーバーへ送り、検証してもらってセッションを受け取る。
-    //   ここで初めて「本人であること」がサーバー側で確定する。
-    //   受け取ったらIDトークンは即座に捨てる（長期保存しない）。
-    // stateは "challenge_id~state" の形でGoogleが返してくる
-    const raw=String(res.state||"");
-    const sep=raw.indexOf("~");
-    if(sep>0){
-      const chId=raw.slice(0,sep), chState=raw.slice(sep+1);
-      try{
-        const r=await fetch(GAS_URL,{ method:"POST", headers:{"Content-Type":"text/plain"},
-          body: JSON.stringify({ action:"login", idToken:res.credential,
-                                 challenge_id:chId, state:chState }) });
-        const j=await r.json();
-        if(j&&j.ok&&j.token) setSessionToken(j.token);
-        // 失敗しても従来ログインは継続する（締め出さない）が、原因を追えるよう控える
-        else { try{ localStorage.setItem("auth_last_error", String((j&&j.error)||"UNKNOWN")); }catch{} }
-      }catch(err){ try{ localStorage.setItem("auth_last_error","NETWORK"); }catch{} }
-    } else { try{ localStorage.setItem("auth_last_error","NO_STATE"); }catch{} }
-    res.credential=null;   // IDトークンを保持し続けない
-
     const email=payload.email;
     const name=payload.name||payload.given_name||"";
     setLoading(true); setError("");
@@ -5691,21 +5601,13 @@ try {
     React.createElement(ErrorBoundary,null,html`<${App}/>`)
   );
 } catch(e) {
-  // エラー文面をHTMLとして解釈させない（textContentで入れる）。
-  // 例外メッセージにサーバー由来の文字列が混ざる可能性があるため
-  const _d=document.createElement("div"); _d.setAttribute("style",ERR_STYLE);
-  _d.textContent = "ERROR:\n"+e.message+"\n\n"+e.stack;
-  const _r=document.getElementById("root"); _r.textContent=""; _r.appendChild(_d);
+  document.getElementById("root").innerHTML = '<div style="'+ERR_STYLE+'">ERROR:\n'+e.message+'\n\n'+e.stack+'</div>';
 }
 window.onerror = (msg,src,line,col,err) => {
   console.error("JS ERROR:", msg, "Line:"+line, err);
   // アプリが描画済みなら画面は壊さない。起動前のエラーのみ全画面表示
   const rendered = document.querySelector("#root .nav") || document.querySelector("#root .login-wrap");
-  if(!rendered){
-    const _d2=document.createElement("div"); _d2.setAttribute("style",ERR_STYLE);
-    _d2.textContent = "JS ERROR:\n"+msg+"\nLine:"+line+" Col:"+col;
-    const _r2=document.getElementById("root"); _r2.textContent=""; _r2.appendChild(_d2);
-  }
+  if(!rendered) document.getElementById("root").innerHTML = '<div style="'+ERR_STYLE+'">JS ERROR:\n'+msg+'\nLine:'+line+' Col:'+col+'</div>';
 };
 window.addEventListener("unhandledrejection", e => {
   console.error("Unhandled promise rejection:", e.reason);
