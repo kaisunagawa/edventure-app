@@ -64,13 +64,16 @@ function doGet(e) {
       case "getUser":      result = getUser(studentEmail); break;
       // ── Phase 1: 自己経営OS の基盤（管理者のみ実行可能なセットアップ）──
       case "adminSetupPhase1": {
-        if (studentEmail !== adminEmail()) { result = { ok: false, error: "not owner" }; break; }
+        // シート構造を変える操作。共有シークレットを必須にする
+        var _a1 = verifyP1Admin(studentEmail, e.parameter.secret);
+        if (!_a1.ok) { result = _a1; break; }
         result = setupPhase1();
         break;
       }
       case "p1Status": {
-        // 基盤が正しく入っているかの確認用（オーナーのみ）
-        if (studentEmail !== adminEmail()) { result = { ok: false, error: "not owner" }; break; }
+        // 基盤の状態確認。件数のみを返すが、全体情報なので同様に保護する
+        var _a2 = verifyP1Admin(studentEmail, e.parameter.secret);
+        if (!_a2.ok) { result = _a2; break; }
         var _st = {};
         Object.keys(P1_SHEETS).forEach(function (n) { var s = getSheet(n); _st[n] = s ? { rows: s.getLastRow() - 1, cols: s.getLastColumn() } : null; });
         var _cols = {};
@@ -592,10 +595,31 @@ function getReport(studentEmail, body) {
 }
 
 // レポート行を保存（breakdown列は後付けのため動的にヘッダーを確保する）
-function appendReportRow(targetDate, studentEmail, report) {
+// 第4引数 logCount: そのレポートが「何件の記録をもとに採点したか」を残す。
+// 夜22時のレポート生成後に独り言などで記録を足した場合、この件数が実際とズレるので、
+// 翌晩に作り直すべきだと判断できる（[[レポート再生成]]）。
+function appendReportRow(targetDate, studentEmail, report, logCount) {
   const sheet = getSheet("Reports");
-  const newRow = sheet.getLastRow() + 1;
-  sheet.appendRow([targetDate, studentEmail, report.score, report.feedback, report.action, report.highlights, report.improvement, new Date().toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" })]);
+
+  // 同じ日付・同じ人のレポートが既にあれば、その行を上書きする。
+  // 以前は常にappendRowで、作り直すと同じ日のレポートが二重に並んでしまっていた
+  const data = sheet.getDataRange().getValues();
+  const hdr = data[0];
+  const dIdx = hdr.indexOf("date"), eIdx = hdr.indexOf("student_email");
+  let newRow = -1;
+  for (let i = 1; i < data.length; i++) {
+    const rawD = data[i][dIdx];
+    const rowD = rawD instanceof Date ? Utilities.formatDate(rawD, "Asia/Tokyo", "yyyy-MM-dd") : String(rawD);
+    if (rowD === String(targetDate) && String(data[i][eIdx]) === studentEmail) { newRow = i + 1; break; }
+  }
+  const values = [targetDate, studentEmail, report.score, report.feedback, report.action, report.highlights, report.improvement, new Date().toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" })];
+  if (newRow === -1) {
+    newRow = sheet.getLastRow() + 1;
+    sheet.appendRow(values);
+  } else {
+    sheet.getRange(newRow, 1, 1, values.length).setValues([values]);
+  }
+
   if (report.breakdown) {
     const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
     let bIdx = headers.indexOf("breakdown");
@@ -607,6 +631,12 @@ function appendReportRow(targetDate, studentEmail, report) {
     let rIdx = headers2.indexOf("breakdown_reasons");
     if (rIdx === -1) { rIdx = headers2.length; sheet.getRange(1, rIdx + 1).setValue("breakdown_reasons"); }
     sheet.getRange(newRow, rIdx + 1).setValue(JSON.stringify(report.breakdown_reasons));
+  }
+  if (logCount != null) {
+    const headers3 = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+    let cIdx = headers3.indexOf("log_count");
+    if (cIdx === -1) { cIdx = headers3.length; sheet.getRange(1, cIdx + 1).setValue("log_count"); }
+    sheet.getRange(newRow, cIdx + 1).setValue(Number(logCount));
   }
   try {
     // ランキングキャッシュはcohortごとに分かれているため、書き込んだ本人のcohortのキーを消す
@@ -4254,13 +4284,35 @@ function nightlyReport() {
   const haveReport = new Set(
     sheetToObjects(getSheet("Reports")).map(r => r.student_email + "|" + r.date)
   );
+  // そのレポートが何件の記録をもとに採点したか。夜22時のレポート生成より後に
+  // 独り言などで記録を足すと、点数に反映されないまま固定されてしまっていたので、
+  // 件数が変わっていたら翌晩に作り直す。log_count列が無い古い行はnullになり、
+  // 「作り直しの対象にしない」（過去分を一斉に再生成してAI費用が跳ねるのを防ぐ）
+  const reportLogCount = new Map();
+  sheetToObjects(getSheet("Reports")).forEach(r => {
+    const v = String(r.log_count == null ? "" : r.log_count).trim();
+    if (v !== "") reportLogCount.set(r.student_email + "|" + r.date, Number(v));
+  });
   // メール別に「記録がある日付」の集合を作る（当日判定と穴埋め判定の両方に使う）
   const logDatesByEmail = new Map();
+  const logCountByKey = new Map(); // "email|date" → 記録件数（レポートの作り直し判定に使う）
   allLogs.forEach(l => {
     const em = String(l.student_email || "");
     if (!em) return;
     (logDatesByEmail.get(em) || logDatesByEmail.set(em, new Set()).get(em)).add(l.date);
+    const k = em + "|" + l.date;
+    logCountByKey.set(k, (logCountByKey.get(k) || 0) + 1);
   });
+
+  // レポートを作る/作り直す必要があるか。
+  // ①まだ無い → 作る ②既にあり、採点に使った件数と今の件数が違う → 作り直す
+  // （log_count列が無い古いレポートは対象外＝作り直さない）
+  const needsReport = (email, date) => {
+    const k = email + "|" + date;
+    if (!haveReport.has(k)) return true;
+    const prev = reportLogCount.get(k);
+    return prev != null && prev !== (logCountByKey.get(k) || 0);
+  };
   const logsFor = (email, date) => allLogs
     .filter(r => r.student_email === email && r.date === date)
     .sort((a, b) => a.time_block > b.time_block ? 1 : -1)
@@ -4274,7 +4326,7 @@ function nightlyReport() {
   const jobs = [];
   users.forEach(u => {
     const dset = logDatesByEmail.get(u.student_email);
-    if (dset && dset.has(today) && !haveReport.has(u.student_email + "|" + today)) {
+    if (dset && dset.has(today) && needsReport(u.student_email, today)) {
       jobs.push({ user: u, date: today, backfill: false });
     }
   });
@@ -4283,8 +4335,10 @@ function nightlyReport() {
     const bd = formatDate(d);
     users.forEach(u => {
       const dset = logDatesByEmail.get(u.student_email);
-      if (dset && dset.has(bd) && !haveReport.has(u.student_email + "|" + bd)) {
-        jobs.push({ user: u, date: bd, backfill: true });
+      if (dset && dset.has(bd) && needsReport(u.student_email, bd)) {
+        // 既にレポートがある＝「欠落の穴埋め」ではなく「記録が増えたので採点し直し」。
+        // 作り直しではLINE通知を送らない（同じ日のレポートが二度届くのを防ぐ）
+        jobs.push({ user: u, date: bd, backfill: true, regenerate: haveReport.has(u.student_email + "|" + bd) });
       }
     });
   }
@@ -4327,8 +4381,10 @@ function nightlyReport() {
       if (!job.backfill && isSameDay) updateStreak(user.student_email);
       const report = generateReportWithClaude(user.student_email, user.name, logs);
       if (!report) { Logger.log("nightlyReport: 生成失敗 " + user.student_email + " " + job.date + "（翌晩の穴埋めで再試行）"); continue; }
-      appendReportRow(job.date, user.student_email, report);
+      if (job.regenerate) Logger.log("nightlyReport: 記録が増えたため採点し直し " + user.student_email + " " + job.date + "（" + logs.length + "件）");
+      appendReportRow(job.date, user.student_email, report, logs.length);
       haveReport.add(user.student_email + "|" + job.date);
+      reportLogCount.set(user.student_email + "|" + job.date, logs.length);
       // 穴埋め分は当日の文脈で送ると混乱するため、LINE/コーチ通知は当日分のみ
       if (!job.backfill) {
         sendReportLineMessage(user, report);
@@ -4378,7 +4434,7 @@ function adminRunNightlyReport(email) {
       if (existing) { results.push({ email: user.student_email, status: "already-exists" }); return; }
       const report = generateReportWithClaude(user.student_email, user.name, logs);
       if (!report) { results.push({ email: user.student_email, status: "ai-failed", reason: REPORT_GEN_LAST_ERROR }); return; }
-      appendReportRow(targetDate, user.student_email, report);
+      appendReportRow(targetDate, user.student_email, report, logs.length);
       if (user.line_user_id) sendReportLineMessage(user, report);
       notifyCoachOnReport(user, report);
       results.push({ email: user.student_email, status: "sent", score: report.score });
@@ -4404,7 +4460,7 @@ function adminBackfillReportsForDate(email, date) {
       if (existing) { results.push({ email: user.student_email, status: "already-exists" }); return; }
       const report = generateReportWithClaude(user.student_email, user.name, logs);
       if (!report) { results.push({ email: user.student_email, status: "ai-failed", reason: REPORT_GEN_LAST_ERROR }); return; }
-      appendReportRow(date, user.student_email, report);
+      appendReportRow(date, user.student_email, report, logs.length);
       // 補完実行なので、過去分のLINE通知は本人に再送しない（コーチ通知もしない）。
       // レポート自体（ランキング・レポート画面）だけを埋める
       results.push({ email: user.student_email, status: "sent", score: report.score });
@@ -7471,6 +7527,21 @@ function p1Upsert(sheetName, idColumn, record) {
   } finally { lock.releaseLock(); }
 }
 
+// ── 管理操作の保護 ──
+// 【重要な前提】このWeb appは「リクエストに書かれたメールアドレス」をそのまま信用している。
+// つまり adminEmail() との比較だけでは、他人が管理者のメールを書けば通ってしまう。
+// 全APIへの本格的なトークン認証は別途必要（[[project_jiroku_security_roadmap]]）だが、
+// 少なくとも「シート構造を変える」「全体を覗く」管理操作は、本人しか知らない共有シークレット
+// (スクリプトプロパティ P1_ADMIN_SECRET) を必須にして保護する。
+// 未設定の場合は管理操作を一切通さない（誤って開いたままにしないため）。
+function verifyP1Admin(email, secret) {
+  const expected = PropertiesService.getScriptProperties().getProperty("P1_ADMIN_SECRET");
+  if (!expected) return { ok: false, error: "P1_ADMIN_SECRET が未設定です（スクリプトプロパティに設定してください）" };
+  if (!verifyAdmin(email)) return { ok: false, error: "not owner" };
+  if (String(secret || "") !== expected) return { ok: false, error: "invalid secret" };
+  return { ok: true };
+}
+
 // ── 段階公開（features）──
 // 新機能は features に該当キーを持つ人にだけ出す。cohortで分岐すると全画面に条件が
 // 散らばるため、1つの列で制御する（学生の除外も自動的に達成される）
@@ -7487,13 +7558,27 @@ function hasFeature(user, key) {
 // 既存のサーバーデータは絶対に上書きしない。再試行しても同じIDになるので重複しない。
 // body.items = [{date, title, estimated_minutes, status, memo, completed}] の配列
 function migrateLocalTasks(studentEmail, body) {
+  // ── 認可 ──
+  // 書き込み先は常に「リクエストのstudentEmail本人のTasks」に限定される（後述のp1Upsertで
+  // student_email を studentEmail で固定しているため、他人の行は作れない）。
+  // 加えて、実在する有効ユーザーであること・新機能の対象者であることを確認する。
+  // ※このWeb appはリクエストのメールを信用する構造のため、これは「なりすまし防止」ではなく
+  //   「無効な宛先への書き込みと、対象外ユーザーによる実行を防ぐ」ためのチェック。
+  //   本格的なトークン認証は全API共通の課題として別途対応する
+  const user = getFilteredRows("Users", "student_email", studentEmail)[0];
+  if (!user || String(user.is_active).toUpperCase() !== "TRUE") return { ok: false, error: "invalid user" };
+  if (!hasFeature(user, P1_FEATURE_KEY)) return { ok: false, error: "feature not enabled" };
+
+  // ── 入力の検証 ──
+  const raw = String(body.items || "");
+  if (raw.length > 200000) return { ok: false, error: "items too large" }; // 巨大送信で行を量産させない
   let items;
-  try { items = JSON.parse(body.items || "[]"); } catch (e) { return { ok: false, error: "invalid items" }; }
+  try { items = JSON.parse(raw || "[]"); } catch (e) { return { ok: false, error: "invalid items" }; }
   if (!Array.isArray(items)) return { ok: false, error: "invalid items" };
+  if (items.length > 300) return { ok: false, error: "too many items" };   // 1日10件×30日を上限の目安に
 
   // 古い端末を後から開いた時の上書きを防ぐ最重要の防御
-  const user = getFilteredRows("Users", "student_email", studentEmail)[0];
-  if (user && String(user.task_migrated_at || "").trim()) {
+  if (String(user.task_migrated_at || "").trim()) {
     return { ok: true, skipped: true, reason: "already_migrated", migrated_at: String(user.task_migrated_at) };
   }
 
@@ -7702,7 +7787,7 @@ function adminBackfillReports(coachEmail, days, limit, dryRun) {
         .map(r => ({ time_block: r.time_block, task: r.task, focus_level: r.focus_level, memo: r.memo }));
       const report = generateReportWithClaude(email, user.name, logs);
       if (!report) { failList.push(key); continue; }
-      appendReportRow(date, email, report);
+      appendReportRow(date, email, report, logs.length);
       doneList.push(key + " score=" + report.score);
     } catch (err) { failList.push(key + " " + err); }
   }
@@ -7795,7 +7880,7 @@ function generateReportForDate(targetDate) {
 
       const report = generateReportWithClaude(user.student_email, user.name, logs);
       if (!report) { Logger.log("レポート生成失敗"); return; }
-      appendReportRow(targetDate, user.student_email, report);
+      appendReportRow(targetDate, user.student_email, report, logs.length);
       Logger.log(user.student_email + ": " + targetDate + " レポート生成完了 スコア=" + report.score);
     } catch(err) { Logger.log(err); }
   });
