@@ -4589,10 +4589,15 @@ function LoginScreen({onLogin}) {
   const handleGoogleSignIn=async()=>{
     // state と nonce はサーバーが発行する。戻ってきた時に必ず突き合わせる
     // （以前はnonceを自分で作って照合していなかったため、リプレイを防げなかった）
+    // サーバーがまだ対応していない間、ここで待たされるとログインが遅くなる。
+    // 2.5秒で打ち切り、取れなければ従来のログインへ進む
     let ch=null;
     try{
       const u=new URL(GAS_URL); u.searchParams.set("action","authChallenge");
-      ch=await (await fetch(u.toString())).json();
+      const ctl=new AbortController();
+      const timer=setTimeout(()=>ctl.abort(), 2500);
+      ch=await (await fetch(u.toString(),{signal:ctl.signal})).json();
+      clearTimeout(timer);
     }catch{}
     // サーバー側にまだ認証基盤が無い（段階導入中）場合でも、ログインは従来どおり通す。
     // ここで止めると全利用者が締め出されるため、必ず縮退させる
