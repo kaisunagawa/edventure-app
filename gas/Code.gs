@@ -67,7 +67,8 @@ function doGet(e) {
     // ACTION_POLICIES に載っていないものは、この段階では素通り（CP3以降で広げる）
     var _az = authorizeAction(action, e.parameter.token,
                               e.parameter.targetEmail || e.parameter.target || "",
-                              e.parameter.studentEmail || e.parameter.coachEmail, e.parameter.secret);
+                              e.parameter.studentEmail || e.parameter.coachEmail, e.parameter.secret,
+                              e.parameter);
     if (!_az.ok) return jsonResponse(_az, callback);
     // ★scope=SELF は、クライアントが送ったメールを無視して本人で上書きする★
     // これをしないと、認証を通していても他人のメールを書けばその人のデータを
@@ -78,7 +79,7 @@ function doGet(e) {
       // ── Phase 1: 自己経営OS の基盤（管理者のみ実行可能なセットアップ）──
       case "adminSetupPhase1": {
         // シート構造を変える操作。共有シークレットを必須にする
-        var _a1 = verifyP1Admin(studentEmail, e.parameter.secret);
+        var _a1 = verifyP1Admin(studentEmail, e.parameter.secret, e.parameter);
         if (!_a1.ok) { result = _a1; break; }
         result = setupPhase1();
         break;
@@ -89,7 +90,7 @@ function doGet(e) {
       case "authRevokeAll": {
         // 全端末ログアウト。token_version を1つ上げると既存セッションは
         // すべて検証に失敗する（verifySessionが版ずれを検出する）
-        var _ra = verifyP1Admin(studentEmail, e.parameter.secret);
+        var _ra = verifyP1Admin(studentEmail, e.parameter.secret, e.parameter);
         if (!_ra.ok) { result = _ra; break; }
         var _sh = getSheet("Users");
         var _dt = _sh.getDataRange().getValues(), _hd = _dt[0];
@@ -107,32 +108,32 @@ function doGet(e) {
         break;
       }
       case "authCleanupTestData": {
-        var _ac = verifyP1Admin(studentEmail, e.parameter.secret);
+        var _ac = verifyP1Admin(studentEmail, e.parameter.secret, e.parameter);
         if (!_ac.ok) { result = _ac; break; }
         result = authCleanupTestData();
         break;
       }
       case "authRoleApply": {
-        var _rp = verifyP1Admin(studentEmail, e.parameter.secret);
+        var _rp = verifyP1Admin(studentEmail, e.parameter.secret, e.parameter);
         if (!_rp.ok) { result = _rp; break; }
         result = authRoleApply();
         break;
       }
       case "authRoleDryRun": {
-        var _ar = verifyP1Admin(studentEmail, e.parameter.secret);
+        var _ar = verifyP1Admin(studentEmail, e.parameter.secret, e.parameter);
         if (!_ar.ok) { result = _ar; break; }
         result = authRoleDryRun();
         break;
       }
       case "authBreakerReset": {
-        var _br = verifyP1Admin(studentEmail, e.parameter.secret);
+        var _br = verifyP1Admin(studentEmail, e.parameter.secret, e.parameter);
         if (!_br.ok) { result = _br; break; }
         result = breakerReset();
         break;
       }
       case "authSetEnforce": {
         // CP3/CP4の強制スイッチ。鍵必須。kind=WRITE|READ, on=1|0
-        var _ae = verifyP1Admin(studentEmail, e.parameter.secret);
+        var _ae = verifyP1Admin(studentEmail, e.parameter.secret, e.parameter);
         if (!_ae.ok) { result = _ae; break; }
         var _kind = String(e.parameter.kind || "").toUpperCase();
         if (["WRITE","READ"].indexOf(_kind) === -1) { result = { ok:false, error:"invalid kind" }; break; }
@@ -147,7 +148,7 @@ function doGet(e) {
         break;
       }
       case "authSetMode": {
-        var _am = verifyP1Admin(studentEmail, e.parameter.secret);
+        var _am = verifyP1Admin(studentEmail, e.parameter.secret, e.parameter);
         if (!_am.ok) { result = _am; break; }
         var _mv = String(e.parameter.mode || "").toUpperCase();
         if (["LEGACY","SESSION_OPTIONAL","SESSION_REQUIRED"].indexOf(_mv) === -1) { result = { ok:false, error:"invalid mode" }; break; }
@@ -158,7 +159,7 @@ function doGet(e) {
       }
       case "lineLinkAudit": {
         // LINE連携の現状監査。個人情報は返さず、件数と例外だけを返す
-        var _la = verifyP1Admin(studentEmail, e.parameter.secret);
+        var _la = verifyP1Admin(studentEmail, e.parameter.secret, e.parameter);
         if (!_la.ok) { result = _la; break; }
         var _us = sheetToObjects(getSheet("Users"));
         var _linked = _us.filter(function(u){ return String(u.line_user_id||"").trim(); });
@@ -183,7 +184,7 @@ function doGet(e) {
         break;
       }
       case "authInspect": {
-        var _ai = verifyP1Admin(studentEmail, e.parameter.secret);
+        var _ai = verifyP1Admin(studentEmail, e.parameter.secret, e.parameter);
         if (!_ai.ok) { result = _ai; break; }
         var chs = sheetToObjects(getAuthSheet("AuthChallenges"));
         var ses = sheetToObjects(getAuthSheet("Sessions"));
@@ -199,13 +200,13 @@ function doGet(e) {
         break;
       }
       case "rotateSessionSecret": {
-        var _rs = verifyP1Admin(studentEmail, e.parameter.secret);
+        var _rs = verifyP1Admin(studentEmail, e.parameter.secret, e.parameter);
         if (!_rs.ok) { result = _rs; break; }
         result = rotateSessionSecret(String(e.parameter.force || "") === "1");
         break;
       }
       case "authAuditTail": {
-        var _aa = verifyP1Admin(studentEmail, e.parameter.secret);
+        var _aa = verifyP1Admin(studentEmail, e.parameter.secret, e.parameter);
         if (!_aa.ok) { result = _aa; break; }
         var _rows = sheetToObjects(getAuthSheet("AuthAudit"));
         result = { ok: true, total: _rows.length, recent: _rows.slice(-12) };
@@ -214,40 +215,40 @@ function doGet(e) {
       case "healthCheck":   result = authConfig(); break;
       case "authConfig":    result = authConfig(); break;
       case "adminSetupAuth": {
-        var _sa = verifyP1Admin(studentEmail, e.parameter.secret);
+        var _sa = verifyP1Admin(studentEmail, e.parameter.secret, e.parameter);
         if (!_sa.ok) { result = _sa; break; }
         result = setupAuthPhase1();
         break;
       }
       case "p1Backup": {
         // バックアップ（複製）作成。鍵が必須
-        var _ab = verifyP1Admin(studentEmail, e.parameter.secret);
+        var _ab = verifyP1Admin(studentEmail, e.parameter.secret, e.parameter);
         if (!_ab.ok) { result = _ab; break; }
         result = p1BackupViaSheets();
         break;
       }
       case "p1BackupInfo": {
-        var _abi = verifyP1Admin(studentEmail, e.parameter.secret);
+        var _abi = verifyP1Admin(studentEmail, e.parameter.secret, e.parameter);
         if (!_abi.ok) { result = _abi; break; }
         result = p1BackupInfo(e.parameter.id);
         break;
       }
       case "lineQuota": {
-        var _lq = verifyP1Admin(studentEmail, e.parameter.secret);
+        var _lq = verifyP1Admin(studentEmail, e.parameter.secret, e.parameter);
         if (!_lq.ok) { result = _lq; break; }
         result = lineQuotaStatus();
         break;
       }
       case "p1PurgeArchived": {
         // 検証データの後始末。鍵が必須。dryRun=1 なら数えるだけ
-        var _ap = verifyP1Admin(studentEmail, e.parameter.secret);
+        var _ap = verifyP1Admin(studentEmail, e.parameter.secret, e.parameter);
         if (!_ap.ok) { result = _ap; break; }
         result = p1PurgeArchived(studentEmail, String(e.parameter.dryRun || "") === "1");
         break;
       }
       case "p1Status": {
         // 基盤の状態確認。件数のみを返すが、全体情報なので同様に保護する
-        var _a2 = verifyP1Admin(studentEmail, e.parameter.secret);
+        var _a2 = verifyP1Admin(studentEmail, e.parameter.secret, e.parameter);
         if (!_a2.ok) { result = _a2; break; }
         var _st = {};
         Object.keys(P1_SHEETS).forEach(function (n) { var s = getSheet(n); _st[n] = s ? { rows: s.getLastRow() - 1, cols: s.getLastColumn() } : null; });
@@ -450,7 +451,7 @@ function doPost(e) {
     let studentEmail = body.studentEmail;
     // ── Auth CP2 ──（doGetと同じ判定）
     var _azp = authorizeAction(action, body.token, body.targetEmail || body.target || "",
-                               body.studentEmail || body.coachEmail, body.secret);
+                               body.studentEmail || body.coachEmail, body.secret, body);
     if (!_azp.ok) return jsonResponse(_azp);
     // ★doGetと同じ。本人で上書きする★
     if (_azp.forceSelfEmail) { studentEmail = _azp.forceSelfEmail; body.studentEmail = _azp.forceSelfEmail; }
@@ -9176,6 +9177,52 @@ const ADMIN_SECRET_ALLOWLIST = {
   p1Backup:1, p1BackupInfo:1, p1PurgeArchived:1
 };
 
+// ── 署名付きの運用リクエスト ──
+// 静的な鍵をそのまま送る方式には、有効期限もリプレイ対策も無く、
+// GETだとURLに残る（履歴や中間ログに載る）という弱点があった。
+// 鍵そのものは送らず、鍵で作った署名だけを送る形にする。
+//
+//   署名対象 = 「sig を除く全パラメータを key=value で並べ、キー順に & で連結したもの」
+//   sig      = HMAC-SHA256(P1_ADMIN_SECRET, 署名対象)
+//   ts       = 発行時刻（秒）。5分より古い/未来すぎるものは拒否
+//   nonce    = 一度きり。使用済みは拒否
+//
+// 全パラメータを署名対象に含めるので、途中で1文字でも書き換えられたら通らない。
+const OPS_SIG_WINDOW_SEC = 300;
+
+function canonicalizeParams(params) {
+  const keys = Object.keys(params).filter(function (k) { return k !== "sig"; }).sort();
+  return keys.map(function (k) { return k + "=" + String(params[k]); }).join("&");
+}
+function computeOpsSignature(canonical) {
+  const secret = PropertiesService.getScriptProperties().getProperty("P1_ADMIN_SECRET");
+  if (!secret) return null;
+  return Utilities.base64EncodeWebSafe(
+    Utilities.computeHmacSha256Signature(canonical, secret)).replace(/=+$/, "");
+}
+// 署名が正しければ管理者として扱う。鍵そのものは受け取らない
+function verifyOpsSignature(params) {
+  const sig = String(params.sig || "");
+  const ts = Number(params.ts || 0);
+  const nonce = String(params.nonce || "");
+  if (!sig || !ts || !nonce) return { ok: false, reason: "MISSING_SIG_FIELDS" };
+
+  const now = Math.floor(Date.now() / 1000);
+  if (Math.abs(now - ts) > OPS_SIG_WINDOW_SEC) return { ok: false, reason: "SIG_EXPIRED" };
+
+  const cache = CacheService.getScriptCache();
+  const nk = "opsn_" + sha256Hex(nonce).slice(0, 24);
+  if (cache.get(nk)) return { ok: false, reason: "NONCE_REUSED" };
+
+  const expected = computeOpsSignature(canonicalizeParams(params));
+  if (!expected) return { ok: false, reason: "SECRET_NOT_SET" };
+  if (!safeEquals(sig, expected)) return { ok: false, reason: "SIG_MISMATCH" };
+
+  // 検証を通ったnonceだけを使用済みにする（総当たりで枠を潰されないように）
+  cache.put(nk, "1", OPS_SIG_WINDOW_SEC * 2);
+  return { ok: true };
+}
+
 function adminSecretActor(email, secret, action) {
   const chk = verifyP1Admin(email, secret);
   if (!chk.ok) return null;
@@ -9186,16 +9233,36 @@ function adminSecretActor(email, secret, action) {
            email: String(email), role: "JIROKU_ADMIN", organization_id: "", viaSecret: true };
 }
 
-function authorizeAction(action, token, targetEmail, secretEmail, secret) {
+function authorizeAction(action, token, targetEmail, secretEmail, secret, sigParams) {
   const policy = policyFor(action);
   if (!policy) return { ok: true, skipped: true };   // この段階では対象外
 
-  // 鍵つきの管理者アクセスを先に見る（セッションが無くても運用できるように）
+  // ① 署名付きの運用リクエスト（推奨）。鍵そのものは送られてこない
+  if (sigParams && sigParams.sig) {
+    const v = verifyOpsSignature(sigParams);
+    if (!v.ok) {
+      authAudit("AUTHZ", { result: "DENY", failureReason: "OPS_SIG_" + v.reason, action: action });
+      return { ok: false, error: "AUTH_REQUIRED" };
+    }
+    if (!ADMIN_SECRET_ALLOWLIST[String(action || "")]) {
+      authAudit("AUTHZ", { result: "DENY", failureReason: "OPS_SIG_NOT_ALLOWED", action: action });
+      return { ok: false, error: "AUTH_REQUIRED" };
+    }
+    const admin = String(adminEmail());
+    const u = sheetToObjects(getSheet("Users")).find(function (x) { return x.student_email === admin; }) || {};
+    const sa = { actor_user_id: String(u.user_id || "admin"), google_sub: String(u.google_sub || ""),
+                 email: admin, role: "JIROKU_ADMIN", organization_id: "", viaSignature: true };
+    authAudit("AUTHZ", { result: "ALLOW", action: action, actorUserId: sa.actor_user_id,
+                         targetUserId: targetEmail || "", failureReason: "via_signature" });
+    return { ok: true, actor: sa, forceSelfEmail: null };
+  }
+
+  // ② 旧方式（鍵をそのまま送る）。移行のため当面は受け付けるが、監査に印を残す
   if (secret) {
     const sa = adminSecretActor(secretEmail, secret, action);
     if (sa) {
       authAudit("AUTHZ", { result: "ALLOW", action: action, actorUserId: sa.actor_user_id,
-                           targetUserId: targetEmail || "", failureReason: "via_admin_secret" });
+                           targetUserId: targetEmail || "", failureReason: "via_admin_secret_LEGACY" });
       return { ok: true, actor: sa, forceSelfEmail: null };
     }
     authAudit("AUTHZ", { result: "DENY", failureReason: "SECRET_NOT_ALLOWED_OR_BAD", action: action });
@@ -9236,9 +9303,17 @@ function authorizeAction(action, token, targetEmail, secretEmail, secret) {
 // 少なくとも「シート構造を変える」「全体を覗く」管理操作は、本人しか知らない共有シークレット
 // (スクリプトプロパティ P1_ADMIN_SECRET) を必須にして保護する。
 // 未設定の場合は管理操作を一切通さない（誤って開いたままにしないため）。
-function verifyP1Admin(email, secret) {
+function verifyP1Admin(email, secret, params) {
   const expected = PropertiesService.getScriptProperties().getProperty("P1_ADMIN_SECRET");
   if (!expected) return { ok: false, error: "P1_ADMIN_SECRET が未設定です（スクリプトプロパティに設定してください）" };
+  // ① 署名付き（推奨）。鍵そのものは送られてこない
+  if (params && params.sig) {
+    const v = verifyOpsSignature(params);
+    if (!v.ok) return { ok: false, error: "invalid signature" };
+    if (!verifyAdmin(String(params.studentEmail || params.coachEmail || ""))) return { ok: false, error: "not owner" };
+    return { ok: true, viaSignature: true };
+  }
+  // ② 旧方式（鍵をそのまま送る）。移行のため当面は受け付ける
   if (!verifyAdmin(email)) return { ok: false, error: "not owner" };
   if (String(secret || "") !== expected) return { ok: false, error: "invalid secret" };
   return { ok: true };
