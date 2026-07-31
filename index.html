@@ -4589,15 +4589,26 @@ function LoginScreen({onLogin}) {
   const handleGoogleSignIn=async()=>{
     // state と nonce はサーバーが発行する。戻ってきた時に必ず突き合わせる
     // （以前はnonceを自分で作って照合していなかったため、リプレイを防げなかった）
-    // サーバーがまだ対応していない間、ここで待たされるとログインが遅くなる。
-    // 2.5秒で打ち切り、取れなければ従来のログインへ進む
+    // サーバーが認証基盤に対応しているかを覚えておく。
+    // ・未対応と分かっている間は短い待ち時間で打ち切り、従来ログインへ縮退する
+    // ・対応済みと分かったら十分に待つ。ここで早々に諦めると、
+    //   「サーバーは認証を求めているのに黙って未認証ログインになる」という
+    //   一番まずい状態を作ってしまうため
+    const CAP_KEY="auth_backend_ok";
+    let known=null;
+    try{ known=localStorage.getItem(CAP_KEY); }catch{}
     let ch=null;
     try{
       const u=new URL(GAS_URL); u.searchParams.set("action","authChallenge");
       const ctl=new AbortController();
-      const timer=setTimeout(()=>ctl.abort(), 2500);
+      const timer=setTimeout(()=>ctl.abort(), known==="1" ? 15000 : 2500);
       ch=await (await fetch(u.toString(),{signal:ctl.signal})).json();
       clearTimeout(timer);
+    }catch{}
+    try{
+      if(ch&&ch.ok) localStorage.setItem(CAP_KEY,"1");
+      else if(ch&&ch.error) localStorage.removeItem(CAP_KEY);   // 明確に未対応
+      // 通信失敗（chがnull）の時は判定を変えない
     }catch{}
     // サーバー側にまだ認証基盤が無い（段階導入中）場合でも、ログインは従来どおり通す。
     // ここで止めると全利用者が締め出されるため、必ず縮退させる
