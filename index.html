@@ -4569,7 +4569,10 @@ function LoginScreen({onLogin}) {
   const [goals,setGoals]=useState([{goal:"",deadline:""}]);
   const addGoal=()=>{ if(goals.length<3) setGoals([...goals,{goal:"",deadline:""}]); };
   const updateGoal=(i,field,val)=>{ const g=[...goals]; g[i]={...g[i],[field]:val}; setGoals(g); };
-  const [loading,setLoading]=useState(false);
+  // Googleから戻ってきた直後（URLにid_tokenがある）は、最初の描画から待機表示にする。
+  // React起動までの1〜3秒もログインボタンが見えており、
+  // 「サインイン画面に戻った」ように見えていたため
+  const [loading,setLoading]=useState(()=>{ try{ return /(^|&)id_token=/.test(location.hash.slice(1)); }catch{ return false; } });
   const [error,setError]=useState("");
   const [pendingUser,setPendingUser]=useState(null);
   const [nickname,setNickname]=useState("");
@@ -4641,30 +4644,31 @@ function LoginScreen({onLogin}) {
     // ★IDトークンをサーバーへ送り、検証してもらってセッションを受け取る。
     //   ここで初めて「本人であること」がサーバー側で確定する。
     //   受け取ったらIDトークンは即座に捨てる（長期保存しない）。
-    // stateは "challenge_id~state" の形でGoogleが返してくる
+    // stateは "challenge_id~state" の形でGoogleが返してくる。
+    // 本人確認は「後で待つ」形にして、下のユーザー情報取得と並行して走らせる
+    // （直列にすると2つのGAS呼び出しで合計6〜8秒かかり、待ち時間が長すぎた）
     const raw=String(res.state||"");
     const sep=raw.indexOf("~");
-    if(sep>0){
-      const chId=raw.slice(0,sep), chState=raw.slice(sep+1);
-      try{
-        const r=await fetch(GAS_URL,{ method:"POST", headers:{"Content-Type":"text/plain"},
+    const sessionPromise = (sep>0)
+      ? fetch(GAS_URL,{ method:"POST", headers:{"Content-Type":"text/plain"},
           body: JSON.stringify({ action:"login", idToken:res.credential,
-                                 challenge_id:chId, state:chState }) });
-        const j=await r.json();
-        if(j&&j.ok&&j.token) setSessionToken(j.token);
-        // 失敗しても従来ログインは継続する（締め出さない）が、原因を追えるよう控える
-        else { try{ localStorage.setItem("auth_last_error", String((j&&j.error)||"UNKNOWN")); }catch{} }
-      }catch(err){ try{ localStorage.setItem("auth_last_error","NETWORK"); }catch{} }
-    } else { try{ localStorage.setItem("auth_last_error","NO_STATE"); }catch{} }
+                                 challenge_id:raw.slice(0,sep), state:raw.slice(sep+1) }) })
+          .then(r=>r.json())
+          .then(j=>{
+            if(j&&j.ok&&j.token) setSessionToken(j.token);
+            else { try{ localStorage.setItem("auth_last_error", String((j&&j.error)||"UNKNOWN")); }catch{} }
+          })
+          .catch(()=>{ try{ localStorage.setItem("auth_last_error","NETWORK"); }catch{} })
+      : Promise.resolve().then(()=>{ try{ localStorage.setItem("auth_last_error","NO_STATE"); }catch{} });
     res.credential=null;   // IDトークンを保持し続けない
 
     const email=payload.email;
     const name=payload.name||payload.given_name||"";
-    setLoading(true); setError("");
     try{
       // 既存ユーザー確認
       const url=new URL(GAS_URL); url.searchParams.set("action","getUser"); url.searchParams.set("studentEmail",email);
       const r=await fetch(url).then(res=>res.json());
+      await sessionPromise;   // 並行で走らせていた本人確認の完了をここで待つ
       if(r.ok&&r.data){
         // 既存ユーザー → ログイン
         const u={email,name:r.data.name||name,nickname:r.data.nickname||r.data.name||name,avatar:r.data.avatar||"🦊",coachName:r.data.coachName||"コーチ",coachEmail:r.data.coach_email||""};
