@@ -136,6 +136,32 @@ function doGet(e) {
         result = authConfig();
         break;
       }
+      case "lineLinkAudit": {
+        // LINE連携の現状監査。個人情報は返さず、件数と例外だけを返す
+        var _la = verifyP1Admin(studentEmail, e.parameter.secret);
+        if (!_la.ok) { result = _la; break; }
+        var _us = sheetToObjects(getSheet("Users"));
+        var _linked = _us.filter(function(u){ return String(u.line_user_id||"").trim(); });
+        var _byId = {};
+        _linked.forEach(function(u){
+          var k = String(u.line_user_id).trim();
+          (_byId[k] = _byId[k] || []).push(String(u.student_email||""));
+        });
+        var _dupes = Object.keys(_byId).filter(function(k){ return _byId[k].length > 1; });
+        // 検証で使った値が残っていないか
+        var _testish = _linked.filter(function(u){
+          return /^U(forged|attacker|test)/i.test(String(u.line_user_id).trim()); }).length;
+        result = { ok: true,
+          totalUsers: _us.length,
+          linked: _linked.length,
+          unlinked: _us.length - _linked.length,
+          duplicateLineIds: _dupes.length,
+          duplicateGroups: _dupes.map(function(k){ return _byId[k].length; }),
+          testValuesRemaining: _testish,
+          changeHistoryAvailable: false,
+          note: "line_user_id の変更履歴を残す仕組みは存在しない。過去の書き換えは検出できない" };
+        break;
+      }
       case "authInspect": {
         var _ai = verifyP1Admin(studentEmail, e.parameter.secret);
         if (!_ai.ok) { result = _ai; break; }
@@ -365,43 +391,23 @@ function doPost(e) {
           const alreadyLinked = sheetToObjects(getSheet("Users")).find(u => u.line_user_id === lineUserId);
           if (alreadyLinked) return;
 
-          // メールアドレス形式なら連携処理
-          if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(text)) {
-            const sheet = getSheet("Users");
-            const data = sheet.getDataRange().getValues();
-            const headers = data[0];
-            const emailIdx = headers.indexOf("student_email");
-            const lineIdx = headers.indexOf("line_user_id");
-            const nameIdx = headers.indexOf("name");
-            for (let i = 1; i < data.length; i++) {
-              if (String(data[i][emailIdx]).toLowerCase() !== text) continue;
-
-              // ★緊急封じ込め（2026-08-01）★
-              // LINEのWebhookは署名を検証できない（GASはリクエストヘッダーを
-              // 取得できないことを実測済み）。したがってこのPOSTは誰でも偽造できる。
-              // 以前はここで無条件に line_user_id を上書きしていたため、
-              // 他人のメールを送るだけで「その人の通知の宛先」を奪えた。
-              // 夜のAIレポート（本人の内省・点数・コーチ所見）が攻撃者へ届く。
-              // → 既に連携済みの人の宛先は、絶対に上書きしない。
-              const existing = String(data[i][lineIdx] || "").trim();
-              if (existing && existing !== lineUserId) {
-                sendLineMessage(lineUserId, "このメールアドレスは、すでに別のLINEアカウントと連携済みです。\n\nご本人で連携をやり直したい場合は、運営までご連絡ください。");
-                try {
-                  authAudit("LINE_LINK_BLOCKED", { result: "DENY", targetUserId: text,
-                            action: "lineWebhookLink", failureReason: "already_linked_to_other" });
-                } catch (e2) {}
-                try { notifyAdminAuthAnomaly("LINEの連携先を書き換えようとする要求を拒否しました（対象: " + text + "）"); } catch (e3) {}
-                return;
-              }
-
-              sheet.getRange(i + 1, lineIdx + 1).setValue(lineUserId);
-              sendLineMessage(lineUserId, "✅ 連携完了！\n" + String(data[i][nameIdx]) + "さんのアカウントと連携しました。\n\n毎時間の記録リマインダーと毎晩のAIレポートをお届けします！");
-              return;
-            }
-            sendLineMessage(lineUserId, "❌ このメールアドレスは見つかりませんでした。\nアプリで登録したGmailアドレスを確認して、もう一度送ってください。");
+          // ★メールアドレスによる連携は停止（2026-08-01）★
+          // LINEのWebhookは署名を検証できない（GASはヘッダーを取得できない）。
+          // メールアドレスは誰でも知りうる情報なので、それを本人確認の根拠にすると
+          // 「他人になりすまして通知の宛先を奪う」ことができてしまう。
+          // 連携はアプリ（認証済み）で発行したワンタイムトークンでのみ行う。
+          if (/^LINK\s+\S+/i.test(event.message.text.trim())) {
+            const tok = event.message.text.trim().replace(/^LINK\s+/i, "");
+            const r = consumeLineLinkToken(tok, lineUserId);
+            sendLineMessage(lineUserId, r.message);
+          } else if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(text)) {
+            // 従来どおりメールを送ってきた人への案内（連携はしない）
+            sendLineMessage(lineUserId, "連携のやり方が新しくなりました🙏\n\nJIROKUアプリを開き、設定 →「LINE連携」で連携用のことばを発行してください。\nそれをこのトークにそのまま送ると連携できます。\n\n" + APP_URL);
+            try { authAudit("LINE_LINK_BLOCKED", { result: "DENY", action: "lineWebhookLink",
+                        failureReason: "email_link_disabled" }); } catch (e4) {}
           } else {
             // メール以外のメッセージ（雑談等）が送られた場合、無反応にせず連携方法を再案内する
-            sendLineMessage(lineUserId, "まだ連携が完了していません🙏\nJIROKUアプリに登録した「Gmailアドレス」だけをこのトークに送ってください。それだけで連携が完了します！\n\n（例：yourname@gmail.com）");
+            sendLineMessage(lineUserId, "JIROKUと連携するには🙏\n\nアプリを開き、設定 →「LINE連携」で連携用のことばを発行してください。\nそれをこのトークにそのまま送ると連携できます。\n\n" + APP_URL);
           }
         }
       });
@@ -437,6 +443,8 @@ function doPost(e) {
       // ── Auth CP1 ──
       case "login":  return jsonResponse(authLogin(body));
       case "loginAccess": return jsonResponse(authLoginAccess(body));
+      // LINE連携用のワンタイムトークン発行（認証済みセッション必須）
+      case "issueLineLinkToken": return jsonResponse(issueLineLinkToken(body.token));
       case "logout": {
         // セッション必須。トークンが無い/無効なら拒否する
         var _vs = verifySession(body.token, false);
@@ -8297,6 +8305,123 @@ function rotateSessionSecret(force) {
   // 鍵を変えると既存セッションはすべて検証できなくなる＝全端末ログアウトと同じ
   return { ok: true, rotated: true, fingerprint: sha256Hex(secret).slice(0, 12),
            note: "既存のセッションはすべて無効になりました" };
+}
+
+// ══════════════════════════════════════════════════════════════════
+// LINE連携のワンタイムトークン
+//
+// LINEのWebhookは署名を検証できない（GASはリクエストヘッダーを取得できない）。
+// そのため「メールアドレスを送れば連携できる」方式では、誰でも他人になりすまして
+// 通知の宛先を奪えた。認証済みのアプリからしか発行できないトークンを介することで、
+// 署名検証が無くても「本人が発行したものである」ことを担保する。
+//
+// 短い数字コードは使わない。公開Webhookへ総当たりできるため、
+// 十分に予測困難な長さにする。
+// ══════════════════════════════════════════════════════════════════
+const LINE_LINK_TOKEN_TTL_MS = 5 * 60 * 1000;
+const LINE_LINK_MAX_ATTEMPTS = 5;
+const LINE_LINK_SHEET = "LineLinkTokens";
+const LINE_LINK_COLUMNS = ["token_hash","user_id","student_email","created_at","expires_at","used_at","attempt_count","result"];
+
+function getLineLinkSheet() {
+  let sh = getSheet(LINE_LINK_SHEET);
+  if (!sh) { sh = getSpreadsheet().insertSheet(LINE_LINK_SHEET); sh.appendRow(LINE_LINK_COLUMNS); }
+  return sh;
+}
+
+// 認証済みセッションからのみ発行する。対象はセッションから確定し、
+// クライアントが送るメールは一切見ない。
+function issueLineLinkToken(token) {
+  const v = verifySession(token, false);
+  if (!v.ok) return { ok: false, error: "AUTH_REQUIRED" };
+  const actor = v.actor;
+
+  // 128bit以上の予測困難性。セッショントークンと同じ作り方（HMAC-SHA256の出力）
+  const secret = PropertiesService.getScriptProperties().getProperty("SESSION_TOKEN_SECRET");
+  if (!secret) return { ok: false, error: "設定が未完了です" };
+  const material = [Utilities.getUuid(), Utilities.getUuid(), actor.actor_user_id,
+                    String(new Date().getTime()), String(Math.random())].join("|");
+  const plain = Utilities.base64EncodeWebSafe(
+    Utilities.computeHmacSha256Signature(material, secret)).replace(/=+$/, "").slice(0, 24);
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    const sh = getLineLinkSheet();
+    const data = sh.getDataRange().getValues(), h = data[0];
+    const iUid = h.indexOf("user_id"), iUsed = h.indexOf("used_at"), iRes = h.indexOf("result");
+    const now = new Date();
+    // 同じ人の未使用トークンは失効させる（発行し直したら前のは使えない）
+    for (let i = 1; i < data.length; i++) {
+      if (String(data[i][iUid]) !== String(actor.actor_user_id)) continue;
+      if (String(data[i][iUsed] || "").trim()) continue;
+      sh.getRange(i + 1, iUsed + 1).setValue(now.toISOString());
+      sh.getRange(i + 1, iRes + 1).setValue("SUPERSEDED");
+    }
+    sh.appendRow([sha256Hex(plain), actor.actor_user_id, actor.email, now.toISOString(),
+                  new Date(now.getTime() + LINE_LINK_TOKEN_TTL_MS).toISOString(), "", 0, "ISSUED"]);
+  } finally { lock.releaseLock(); }
+
+  authAudit("LINE_LINK_TOKEN_ISSUED", { result: "SUCCESS", actorUserId: actor.actor_user_id, action: "issueLineLinkToken" });
+  // 平文はこの応答でのみ返す。シートにもログにも残さない
+  return { ok: true, linkWord: plain, expiresInSec: Math.floor(LINE_LINK_TOKEN_TTL_MS / 1000) };
+}
+
+// LINEから送られてきたトークンを消費して連携する。
+// 応答文は成否で内容を大きく変えない（有効なトークンかどうかを推測させない）。
+function consumeLineLinkToken(plain, lineUserId) {
+  const ng = { ok: false, message: "連携できませんでした。アプリで連携用のことばを発行し直して、もう一度お試しください。" };
+  if (!plain || !lineUserId) return ng;
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    const sh = getLineLinkSheet();
+    const data = sh.getDataRange().getValues(), h = data[0];
+    const iHash = h.indexOf("token_hash"), iUid = h.indexOf("user_id"), iEmail = h.indexOf("student_email");
+    const iExp = h.indexOf("expires_at"), iUsed = h.indexOf("used_at"),
+          iAtt = h.indexOf("attempt_count"), iRes = h.indexOf("result");
+    const want = sha256Hex(plain);
+
+    for (let i = 1; i < data.length; i++) {
+      if (!safeEquals(String(data[i][iHash]), want)) continue;
+      const row = i + 1;
+      const attempts = Number(data[i][iAtt] || 0) + 1;
+      sh.getRange(row, iAtt + 1).setValue(attempts);
+      const deny = function (why) {
+        sh.getRange(row, iRes + 1).setValue(why);
+        authAudit("LINE_LINK", { result: "DENY", failureReason: why, action: "consumeLineLinkToken" });
+        return ng;
+      };
+      if (String(data[i][iUsed] || "").trim()) return deny("ALREADY_USED");
+      if (attempts > LINE_LINK_MAX_ATTEMPTS) return deny("TOO_MANY_ATTEMPTS");
+      if (new Date(String(data[i][iExp])).getTime() < Date.now()) return deny("EXPIRED");
+
+      // 対象ユーザーの状態を確認する
+      const ush = getSheet("Users");
+      const ud = ush.getDataRange().getValues(), uh = ud[0];
+      const uUid = uh.indexOf("user_id"), uLine = uh.indexOf("line_user_id"), uName = uh.indexOf("name");
+      let target = -1;
+      for (let k = 1; k < ud.length; k++) {
+        if (String(ud[k][uUid]) === String(data[i][iUid])) { target = k; break; }
+      }
+      if (target === -1) return deny("USER_NOT_FOUND");
+      if (String(ud[target][uLine] || "").trim()) return deny("ALREADY_LINKED");
+      // 同じLINEアカウントが別の人に使われていないか
+      for (let k = 1; k < ud.length; k++) {
+        if (k !== target && String(ud[k][uLine] || "").trim() === String(lineUserId)) return deny("LINE_ID_IN_USE");
+      }
+
+      ush.getRange(target + 1, uLine + 1).setValue(lineUserId);
+      sh.getRange(row, iUsed + 1).setValue(new Date().toISOString());
+      sh.getRange(row, iRes + 1).setValue("CONSUMED");
+      authAudit("LINE_LINK", { result: "SUCCESS", actorUserId: String(data[i][iUid]), action: "consumeLineLinkToken" });
+      return { ok: true, message: "✅ 連携できました！\n" + String(ud[target][uName]) +
+        "さんのアカウントとつながりました。\n\n毎時間の記録リマインダーと毎晩のAIレポートをお届けします。" };
+    }
+  } finally { lock.releaseLock(); }
+  authAudit("LINE_LINK", { result: "DENY", failureReason: "NOT_FOUND", action: "consumeLineLinkToken" });
+  return ng;
 }
 
 // ── 監査ログ ──

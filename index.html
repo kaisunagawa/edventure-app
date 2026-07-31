@@ -4092,6 +4092,52 @@ function ReauthGate() {
     </div>`;
 }
 
+// LINE連携の設定セクション。認証済みの本人だけが「連携用のことば」を発行できる。
+// 発行したことばをLINEへ送ると連携が完了する（5分間・1回限り）。
+function LineLinkSection({onToast}) {
+  const [word,setWord]=useState("");
+  const [left,setLeft]=useState(0);
+  const [busy,setBusy]=useState(false);
+  useEffect(()=>{
+    if(left<=0) return;
+    const t=setTimeout(()=>setLeft(left-1),1000);
+    return ()=>clearTimeout(t);
+  },[left]);
+  const issue=async()=>{
+    setBusy(true);
+    const r=await authedPost("issueLineLinkToken");
+    setBusy(false);
+    if(r&&r.ok&&r.linkWord){ setWord(r.linkWord); setLeft(r.expiresInSec||300); }
+    else onToast&&onToast(r&&r.error==="AUTH_REQUIRED" ? "もう一度ログインしてください" : "発行できませんでした");
+  };
+  const copy=()=>{ navigator.clipboard.writeText("LINK "+word).then(()=>onToast&&onToast("コピーしました")); };
+  const mm=String(Math.floor(left/60)), ss=String(left%60).padStart(2,"0");
+  return html`
+    <div style=${{fontSize:12.5,color:"var(--sub)",lineHeight:1.8,marginBottom:14}}>
+      LINEで毎時間のリマインダーと毎晩のAIレポートを受け取れます。<br/>
+      下のボタンで「連携のことば」を出して、JIROKUのLINEにそのまま送ってください。
+    </div>
+    ${!word ? html`
+      <button class="btn" onClick=${issue} disabled=${busy}>${busy?"発行中…":"連携のことばを出す"}</button>
+    ` : html`
+      <div style=${{background:"var(--bg)",border:"1px solid var(--border)",borderRadius:12,padding:14,marginBottom:10}}>
+        <div style=${{fontSize:11,color:"var(--sub)",marginBottom:6}}>これをLINEに送ってください</div>
+        <div style=${{fontFamily:"monospace",fontSize:14,fontWeight:700,color:"var(--text)",wordBreak:"break-all",lineHeight:1.6}}>LINK ${word}</div>
+        <div style=${{fontSize:11,color:left<60?"var(--red,#e57373)":"var(--sub)",marginTop:8}}>
+          ${left>0 ? "あと "+mm+":"+ss+" で使えなくなります" : "期限切れです。もう一度出してください"}
+        </div>
+      </div>
+      <div style=${{display:"flex",gap:8}}>
+        <button class="btn" onClick=${copy} style=${{flex:1}}>コピーする</button>
+        <button onClick=${issue} disabled=${busy} style=${{background:"none",border:"1px solid var(--border)",borderRadius:10,padding:"0 16px",color:"var(--sub)",fontSize:13,fontWeight:600,cursor:"pointer"}}>出し直す</button>
+      </div>
+    `}
+    <div style=${{fontSize:11,color:"var(--sub)",marginTop:12,lineHeight:1.7}}>
+      すでに連携している場合は、この操作は不要です。<br/>
+      連携先を変えたいときは運営までご連絡ください。
+    </div>`;
+}
+
 // ── Settings ──
 // 設定の折りたたみセクション。安定した識別子を保つためコンポーネント外に定義する
 // （以前はSettingsScreen内で毎回定義しており、入力のたびに中身が作り直されて
@@ -4382,6 +4428,13 @@ function SettingsScreen({onToast,onLogout,onGoalSaved,profile,onProfileSaved,onC
         `}
         <button class="btn" onClick=${saveGoal}>保存する</button>
       <//>`}
+
+      <!-- LINE連携（ワンタイムのことば方式）。
+           以前はメールアドレスを送るだけで連携できたが、それだと他人になりすまして
+           通知の宛先を奪えたため、アプリで発行したことばでのみ連携する -->
+      <${SettingsSec} k="linelink" icon="💬" title="LINE連携" open=${openSec==="linelink"} onToggle=${()=>setOpenSec(openSec==="linelink"?"":"linelink")}>
+        <${LineLinkSection} onToast=${onToast}/>
+      <//>
 
       <!-- 新・目標。3か月目標→週間目標の階層。goals_v1 が有効な人はこちらが本体 -->
       ${CURRENT_USER&&CURRENT_USER.goalsV1&&html`
