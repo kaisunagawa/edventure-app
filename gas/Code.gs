@@ -59,7 +59,7 @@ function jsonResponse(data, callback) {
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 function doGet(e) {
   const action = e.parameter.action;
-  const studentEmail = e.parameter.studentEmail;
+  let studentEmail = e.parameter.studentEmail;
   const callback = e.parameter.callback;
   try {
     let result;
@@ -69,6 +69,10 @@ function doGet(e) {
                               e.parameter.targetEmail || e.parameter.target || "",
                               e.parameter.studentEmail || e.parameter.coachEmail, e.parameter.secret);
     if (!_az.ok) return jsonResponse(_az, callback);
+    // ★scope=SELF は、クライアントが送ったメールを無視して本人で上書きする★
+    // これをしないと、認証を通していても他人のメールを書けばその人のデータを
+    // 読み書きできてしまう（絞り込みは studentEmail を基準にしているため）
+    if (_az.forceSelfEmail) { studentEmail = _az.forceSelfEmail; e.parameter.studentEmail = _az.forceSelfEmail; }
     switch (action) {
       case "getUser":      result = getUser(studentEmail); break;
       // ── Phase 1: 自己経営OS の基盤（管理者のみ実行可能なセットアップ）──
@@ -124,6 +128,22 @@ function doGet(e) {
         var _br = verifyP1Admin(studentEmail, e.parameter.secret);
         if (!_br.ok) { result = _br; break; }
         result = breakerReset();
+        break;
+      }
+      case "authSetEnforce": {
+        // CP3/CP4の強制スイッチ。鍵必須。kind=WRITE|READ, on=1|0
+        var _ae = verifyP1Admin(studentEmail, e.parameter.secret);
+        if (!_ae.ok) { result = _ae; break; }
+        var _kind = String(e.parameter.kind || "").toUpperCase();
+        if (["WRITE","READ"].indexOf(_kind) === -1) { result = { ok:false, error:"invalid kind" }; break; }
+        var _key = "AUTH_ENFORCE_" + _kind + (isTestDeployment() ? "_TEST" : "_PROD");
+        var _on = String(e.parameter.on || "") === "1";
+        if (_on) PropertiesService.getScriptProperties().setProperty(_key, "ON");
+        else PropertiesService.getScriptProperties().deleteProperty(_key);
+        authAudit("ENFORCE_CHANGE", { result:"SUCCESS", actorUserId: studentEmail,
+                  action:"authSetEnforce", failureReason: _kind + "=" + (_on ? "ON" : "OFF") });
+        result = { ok:true, key:_key, value:_on ? "ON" : "OFF",
+                   effective: { write: enforceFlag("WRITE"), read: enforceFlag("READ") } };
         break;
       }
       case "authSetMode": {
@@ -427,11 +447,13 @@ function doPost(e) {
 
     // アプリからのPOST
     const action = body.action;
-    const studentEmail = body.studentEmail;
+    let studentEmail = body.studentEmail;
     // ── Auth CP2 ──（doGetと同じ判定）
     var _azp = authorizeAction(action, body.token, body.targetEmail || body.target || "",
                                body.studentEmail || body.coachEmail, body.secret);
     if (!_azp.ok) return jsonResponse(_azp);
+    // ★doGetと同じ。本人で上書きする★
+    if (_azp.forceSelfEmail) { studentEmail = _azp.forceSelfEmail; body.studentEmail = _azp.forceSelfEmail; }
     switch (action) {
       case "saveLog":      return jsonResponse(saveLog(studentEmail, body));
       case "deleteLog":    return jsonResponse(deleteLog(studentEmail, body));
@@ -9149,7 +9171,7 @@ const ADMIN_SECRET_ALLOWLIST = {
   adminBroadcastLine:1, adminSendStudentCampaign:1,
   // セットアップ・保守
   adminSetupTriggers:1, adminInstallTrigger:1, adminSetupPhase1:1, adminSetupAuth:1,
-  authSetMode:1, authRoleApply:1, authRoleDryRun:1, authRevokeAll:1,
+  authSetMode:1, authSetEnforce:1, authRoleApply:1, authRoleDryRun:1, authRevokeAll:1,
   authCleanupTestData:1, authBreakerReset:1, rotateSessionSecret:1,
   p1Backup:1, p1BackupInfo:1, p1PurgeArchived:1
 };
