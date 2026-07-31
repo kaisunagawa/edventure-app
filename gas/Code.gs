@@ -1390,6 +1390,9 @@ function computeWeekLogDays(logs, nWeeks) {
 // 抜け落ちる（＝全員分反映されない）。そこで、最新日から windowDays 日以内の
 // 「各生徒の最新レポート」を採用し、少しの生成ずれでは取りこぼさないようにする。
 // （数週間前の古いスコアは除外され、公平性は保たれる）
+// レポートランキングの対象期間（日）。最新レポート日から7日以内に自分のレポートが
+// ある人だけがランキングに載る（止まっている人が分母に残り続けないように）
+const RANKING_WINDOW_DAYS = 7;
 function buildReportRankingSet(emailSet, allReports, windowDays) {
   const has = (emailSet && typeof emailSet.has === "function")
     ? function (e) { return emailSet.has(e); }
@@ -1421,7 +1424,7 @@ function getRanking(studentEmail) {
   const allUsersForCohort = sheetToObjects(getSheet("Users"));
   const meU = allUsersForCohort.find(u => u.student_email === studentEmail);
   const myCohort = String((meU && meU.cohort) || "").trim();
-  const CACHE_KEY = "ranking_scores_v5_" + (myCohort || "main");
+  const CACHE_KEY = "ranking_scores_v6_" + (myCohort || "main");
   let payload;
   const cached = CacheService.getScriptCache().get(CACHE_KEY);
   if (cached) {
@@ -1434,8 +1437,10 @@ function getRanking(studentEmail) {
     const active = new Set(users.map(u => u.student_email));
     const allReports = sheetToObjects(getSheet("Reports")).filter(r => active.has(r.student_email));
 
-    // 期間しばり無し（windowDays=0）＝レポートを書いて点数が出ている人を“全員”対象にする
-    const cur = buildReportRankingSet(active, allReports, 0);
+    // 直近7日以内にレポートが出ている人だけを対象にする（＝いま続いている人同士で競う）。
+    // 一度書いたきり止まっている人がいつまでも分母に残らないようにするための期間しばり。
+    // 一度も記録がない人はそもそもレポートが無いので、これまで通り対象外
+    const cur = buildReportRankingSet(active, allReports, RANKING_WINDOW_DAYS);
     payload = { date: cur.latestDate, scores: cur.scores };
     try { CacheService.getScriptCache().put(CACHE_KEY, JSON.stringify(payload), 300); } catch (e) { /* サイズ超過時は無視 */ }
   }
@@ -1515,10 +1520,10 @@ function getCommunity(studentEmail) {
   }).sort((a, b) => b.score - a.score);
 
   // レポートランキングは「その人の最新レポートの点数」で競う場（合計/継続はステータス側が担う）。
-  // 期間しばり無し（windowDays=0）＝レポートを書いて点数が出ている人を全員、最新スコアで反映する。
-  // 数日前にレポートを書いた人が消えないよう、ホームの getRanking と基準を統一している。
+  // 直近7日以内にレポートがある人だけを対象にし、ホームの getRanking と基準を統一している
+  // （止まっている人が分母に残り続けないように）。
   const commEmails = new Set(users.map(u => u.student_email));
-  const rankSet = buildReportRankingSet(commEmails, allReports, 0);
+  const rankSet = buildReportRankingSet(commEmails, allReports, RANKING_WINDOW_DAYS);
   const userByEmail = new Map(users.map(u => [u.student_email, u]));
   const reportRanking = rankSet.scores.map(s => {
     const u = userByEmail.get(s.email);
