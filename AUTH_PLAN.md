@@ -265,3 +265,261 @@ UI側で、COUNT の週間目標に紐づけた時は**数量入力を必須に�
 4. 段階的な切り替え
 5. 自動バックアップ
 6. 集計仕様を直して Checkpoint 3 を再開
+
+---
+---
+
+# 最終実装計画（2026-07-31 追記）
+
+レビュー指摘を反映。**実装は未着手。**
+
+## Auth Checkpoint 0：現状確認 ─ 完了
+
+| 項目 | 実測結果 |
+|---|---|
+| 読み込んでいるライブラリ | `https://accounts.google.com/gsi/client`（**Google Identity Services＝現行版**） |
+| 非推奨ライブラリ | `gapi.auth2` / `platform.js` / `g-signin2` は**1件も無い。移行不要** |
+| OAuthクライアントID | `476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com` |
+| ログイン方式 | `accounts.google.com/o/oauth2/v2/auth` へリダイレクト（implicit flow） |
+| response_type | `id_token` |
+| scope | `openid email profile` |
+| redirect_uri | `https://kaisunagawa.github.io/edventure-app/` |
+| コールバック | `location.hash` から `id_token` を取り出し `handleGoogleLogin()` へ |
+| 許可済みJavaScript生成元 | **未確認**（GCPコンソールを見る必要がありKai本人の操作が必要） |
+
+### ここで見つかった問題
+
+1. **`parseJwt()` は署名を検証していない。** base64デコードしてJSONにするだけ。
+2. **nonce を生成しているが、戻ってきた時に検証していない。** リプレイを防げない。
+3. トークンはメールアドレスを取り出したら**捨てられ、サーバーへは送られない**。
+
+つまりクライアント側ですら本人確認になっていない。
+ただし**サーバーが検証すれば全部解決する**問題でもある（1と2はサーバー側検証で無意味になる）。
+
+### デプロイ棚卸し ─ 完了
+
+9個 → 3個。旧6個は認証なしで応答することを実測後に削除。詳細は [DEPLOYMENTS.md](DEPLOYMENTS.md)。
+
+---
+
+## tokeninfo（A案）vs 専用検証サービス（B案）
+
+| 比較項目 | A案: tokeninfo | B案: Cloud Run 等 |
+|---|---|---|
+| セキュリティ | Googleが検証。ただし公式は「開発・デバッグ用」 | 公式ライブラリで本番想定 |
+| 実装日数 | 0.5日 | 2〜3日（インフラ・デプロイ・監視込み） |
+| 月額費用 | 0円 | Cloud Run で概ね0〜数百円（無料枠内の見込み） |
+| 運用負担 | なし | サービス1つ増える。デプロイ・鍵・監視の管理 |
+| GASとの接続 | UrlFetchApp で1回叩くだけ | UrlFetchApp＋共有鍵で署名検証 |
+| 障害時の影響 | Google側障害＝ログイン不可（既存も同じ） | 自前サービス障害＝ログイン不可。**障害点が増える** |
+| 法人提供へそのまま使えるか | **使えない。移行が必要** | そのまま使える |
+
+**推奨: A案で即座に穴を塞ぎ、法人提供の開始前にB案へ移行する。**
+
+理由は、現在**無認証で個人情報が露出している**ことが最大のリスクであり、
+B案の2〜3日を待つ間もその状態が続くため。A案は0.5日で塞げる。
+
+**移行期限**: 法人向け（JIROKU for Business）の最初の商談前、
+または2026年内のいずれか早い方。`AUTH_VERIFIER_MODE` を持たせ、
+現在どちらで動いているかをコードと管理画面から分かるようにする。
+
+**A案の必須条件**:
+- `aud` が自分のクライアントIDと一致すること
+- `iss` が `accounts.google.com` または `https://accounts.google.com`
+- `exp` が未来
+- `email_verified` が true
+- **tokeninfo が失敗したらログインを拒否する。メール文字列へフォールバックしない**
+
+---
+
+## 本人IDは google_sub
+
+メールアドレスは変更されうるので主キーにしない。Users に以下を追加する。
+
+| 列 | 内容 |
+|---|---|
+| `user_id` | 内部の不変ID |
+| `google_sub` | Googleの `sub`。**これが本人の実体** |
+| `email` | 表示・連絡用。変わりうる |
+| `token_version` | 上げると全端末を一括失効 |
+| `role` | USER / COACH / MANAGER / ORG_ADMIN / JIROKU_ADMIN |
+| `organization_id` | 法人向け |
+| `auth_linked_at` | 初回に sub を紐づけた日時 |
+
+### 既存24人の紐づけ（初回ログイン時に1回だけ）
+
+```
+1. IDトークンを検証する
+2. 検証済みの sub と email を取り出す（クライアントが送った値は使わない）
+3. その sub が既にどれかのユーザーに登録されている
+   → そのユーザーとして扱う（メールが変わっていても同一人物）
+4. sub が未登録
+   → 検証済み email と一致する既存ユーザーを探す
+     ・見つかった、かつその行に sub が未設定 → sub を書き込む（1回だけ）
+     ・見つかった、かつ別の sub が設定済み   → 拒否（別人の可能性）
+     ・見つからない                          → 新規登録の導線へ
+```
+
+---
+
+## セッション設計
+
+### 保存先の比較
+
+| 保存先 | 速度 | 複数端末 | 一覧・失効の管理 | 判定 |
+|---|---|---|---|---|
+| ScriptProperties | 速い | 可 | キーが増え続け、一覧性が悪い | 単独では不可 |
+| Sessions シート | 遅い（読取1回） | 可 | **管理しやすい。監査にも使える** | 台帳として採用 |
+| CacheService | **非常に速い** | 可 | 揮発する（最大6時間） | 前段のキャッシュとして採用 |
+
+**推奨: Sessions シートを台帳とし、CacheService を前段に置く二段構え。**
+
+毎リクエストでシートを読むと現状7秒台のAPIがさらに遅くなる。
+検証結果（`token_hash → user_id / role / expires_at`）をCacheServiceに
+短時間だけ載せ、失効やロール変更のときはキャッシュを消す。
+書き込みは `LockService` で保護する（既存の `p1Upsert` と同じ方式）。
+
+### スキーマ
+
+```
+Sessions:
+  session_token_hash   sha256。平文は保存しない
+  user_id
+  google_sub
+  role
+  organization_id
+  expires_at
+  created_at
+  last_seen_at
+  revoked_at
+  token_version
+```
+
+要件（すべて満たす）:
+- 平文トークンはシート・ログ・ScriptProperties のどこにも保存しない
+- 32バイトの暗号学的乱数（`Utilities.getUuid()` は乱数として弱いので使わない）
+- ハッシュで突き合わせる
+- ログアウトで `revoked_at` を立てる
+- `token_version` を上げれば全端末を一括失効
+- ロール変更時に既存セッションを無効化
+- 期限切れは fail-closed
+- **トークンが無い時に studentEmail 認証へ戻さない**
+
+---
+
+## 入口を fail-closed にする
+
+「保護するAPIを列挙する」のではなく、**原則すべて認証必須にして公開だけ例外**にする。
+そうしないと、新しいAPIを足したときに認証を忘れて自動的に公開される。
+
+```javascript
+const PUBLIC_ACTIONS = { login: 1, healthCheck: 1 };  // ここに書いたものだけ素通り
+
+function doGet(e) {
+  const action = e.parameter.action;
+  if (!PUBLIC_ACTIONS[action]) {
+    const auth = verifySession(e.parameter.token);
+    if (!auth.ok) return jsonResponse({ ok: false, error: "AUTH_REQUIRED" });
+    e.__auth = auth;   // 以降、本人はここからしか取らない
+  }
+  ...
+}
+```
+
+**`e.parameter.studentEmail` は読まない。** `e.__auth.email` を使う。
+既存のアクションは `studentEmail` を引数で受け取る形になっているので、
+入口で差し替えれば143個を個別に直す必要はない。
+
+---
+
+## ロールと対象範囲
+
+ロールだけで通さず、**誰のデータかまで確認する**。
+
+| ロール | 見られる範囲 |
+|---|---|
+| USER | 自分だけ |
+| COACH | CoachingNotes や担当関係で紐づく利用者の COACH_REVIEW のみ |
+| MANAGER | 許可された MANAGER_REPORT のみ |
+| ORG_ADMIN | 自組織の ORG_AGGREGATE と組織設定のみ |
+| JIROKU_ADMIN | 運営に必要な範囲 |
+
+各APIに「必要ロール／対象ユーザー／organization_id／担当関係／公開レベル」を定義する。
+**MANAGER と ORG_ADMIN に PRIVATE の生ログは返さない。**
+
+---
+
+## 段階移行の日程
+
+観測期間中も偽装可能な状態が続くという指摘は妥当。
+**高リスクAPIは観測を待たずに即日必須化する。**
+
+| 段階 | 内容 | 目安 |
+|---|---|---|
+| Auth CP1 | IDトークン検証・セッション基盤・共通検証関数 | 1日目 |
+| Auth CP2 | **admin/coach 系を認証必須**（一括送信・削除・個人情報一覧） | 1日目中に即日 |
+| Auth CP3 | 本人の書き込みAPI（saveLog / saveGoal 等）を必須化 | 2日目 |
+| Auth CP4 | 本人データの読み取りAPI（getLogs 等）を必須化 | 3日目 |
+| Auth CP5 | 互換モード終了・旧経路ゼロの確認 | **4日目に打ち切り** |
+
+**未認証互換モードの期限: 開始から4日。** 無期限には残さない。
+互換モードは CP3・CP4 の対象APIにのみ適用し、CP2 の高リスクAPIには最初から適用しない。
+未認証の古いクライアントには `AUTH_REQUIRED` を返し、アプリ側でログイン画面へ誘導する。
+
+各Checkpoint完了後に停止し、Kaiの確認を受けてから次へ進む。
+
+---
+
+## 受け入れテスト
+
+`gas/smoke_test.sh` に追加する（すべて自動化する）。
+
+- [ ] トークンなしで個人情報を取得できない
+- [ ] 他人の studentEmail を付けても本人は変わらない
+- [ ] 他人の goal_id / task_id / log_id を操作できない
+- [ ] USER が coach/admin API を実行できない
+- [ ] COACH が担当外の利用者を取得できない
+- [ ] MANAGER が PRIVATE ログを取得できない
+- [ ] 期限切れ・失効済み・改ざんトークンを拒否する
+- [ ] email だけを送っても認証されない
+- [ ] body で role を admin にしても権限が上がらない
+- [ ] 旧デプロイURLから回避できない（**削除済みだが再発防止として毎回確認**）
+- [ ] セッショントークンがログに出ない
+- [ ] 一括送信・削除が監査ログに残る
+
+---
+
+## 見積もり
+
+| 作業 | 目安 |
+|---|---|
+| Auth CP1 セッション基盤 | 1日 |
+| Auth CP2 高リスクAPI保護 | 0.5日 |
+| Auth CP3 書き込みAPI | 0.5日 |
+| Auth CP4 読み取りAPI | 0.5日 |
+| Auth CP5 互換モード終了・確認 | 0.5日 |
+| 受け入れテストの自動化 | 0.5日 |
+| **合計** | **約3.5日**（＋各段階の確認待ち） |
+
+### リスク
+
+| リスク | 対策 |
+|---|---|
+| 全員ログイン不可 | テスト用デプロイで先に検証。revert手順は整備済み |
+| セッションシートで遅くなる | CacheService を前段に置く。CP1完了時に速度を計測して判断 |
+| LINE内ブラウザでリダイレクトが戻らない | 現在も同じ方式で動作しているため同条件。CP1で実機確認する |
+| 24人が同時にログアウトされる | 事前にLINEで告知してから CP5 を実施 |
+
+---
+
+## Checkpoint 3 の再開手順（認証完了後）
+
+1. 集計仕様を修正する
+   - `COUNT` / `DURATION` / `DAYS` / `BOOLEAN` へ命名統一
+   - COUNT・DURATION は**正の quantity を必須**とし、空欄・0は加算しない
+   - DURATION は ①タイマー実測の actual_minutes ②入力された quantity
+     ③time_block を**候補値として初期表示**し、本人が確認して保存した時だけ加算
+   - **紐づけただけでは自動加算しない**
+2. フロント: 記録画面に「この目標に使った時間 [ 60 ] 分」を追加
+3. 週間進捗の表示
+4. 回帰テスト23項目
