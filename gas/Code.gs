@@ -183,6 +183,16 @@ function doGet(e) {
           note: "line_user_id の変更履歴を残す仕組みは存在しない。過去の書き換えは検出できない" };
         break;
       }
+      // CP3/CP4の切り替え判断に使う「実際に使っている人」の集計。
+      // 固定人数（8名など）では、利用者が増減したときに意味が変わってしまうので、
+      // 「直近N日に記録した人」を母数にして、そのうち何人がセッションを持ったかで見る。
+      // 記録していない人を待つ必要はない（次にアプリを開いたときに再ログインさせる）。
+      case "authCohort": {
+        var _ac = verifyP1Admin(studentEmail, e.parameter.secret, e.parameter);
+        if (!_ac.ok) { result = _ac; break; }
+        result = authCohort(Number(e.parameter.days || 7));
+        break;
+      }
       case "authInspect": {
         var _ai = verifyP1Admin(studentEmail, e.parameter.secret, e.parameter);
         if (!_ai.ok) { result = _ai; break; }
@@ -8785,6 +8795,183 @@ function authConfig() {
            verifier_mode: AUTH_VERIFIER_MODE, deployment_id: currentDeploymentId(),
            environment: currentEnvironment() };
 }
+// ★CP3/CP4の切り替え判断の土台★
+// 「38名中◯名」では判断できない。38名のうち30名は元々記録していないので、
+// 全員がセッションを持つのを待つと永久に切り替わらない。
+// 逆に「8名を超えたら」という固定人数も、利用者が増えると意味が変わる。
+// そこで「直近N日に実際に記録した人（active cohort）」を母数にする。
+//
+// 数え方は authInspect の usable と同一条件にすること。revoked_at が空なだけの
+// セッションを数えると、token_version のずれで実際には使えないものが混ざり、
+// 「普及した」と誤判断して記録できない人を出す。
+function authCohort(days) {
+  const nDays = (days > 0 && days <= 90) ? days : 7;
+  const now = Date.now();
+  const since = now - nDays * 86400000;
+
+  // --- active cohort: 直近nDays日にDailyLogへ1件以上記録した人 ---
+  const log = getSheet("DailyLog").getDataRange().getValues();
+  const lh = log[0];
+  const lEmail = lh.indexOf("student_email"), lDate = lh.indexOf("date");
+  const lastRecord = {};   // email -> 最後に記録した日(yyyy-MM-dd)
+  const recordCount = {};
+  for (let i = 1; i < log.length; i++) {
+    const em = String(log[i][lEmail] || "").trim();
+    if (!em) continue;
+    const raw = log[i][lDate];
+    const d = raw instanceof Date ? Utilities.formatDate(raw, "Asia/Tokyo", "yyyy-MM-dd") : String(raw);
+    if (!d) continue;
+    if (!lastRecord[em] || d > lastRecord[em]) lastRecord[em] = d;
+    if (new Date(d + "T00:00:00+09:00").getTime() >= since) {
+      recordCount[em] = (recordCount[em] || 0) + 1;
+    }
+  }
+
+  // --- 利用者台帳とセッション ---
+  const users = sheetToObjects(getSheet("Users"));
+  const byEmail = {};
+  const tvByUser = {};
+  users.forEach(function (u) {
+    if (u.student_email) byEmail[String(u.student_email).trim()] = u;
+    if (u.user_id) tvByUser[String(u.user_id)] = Number(u.token_version || 0);
+  });
+  const ses = sheetToObjects(getAuthSheet("Sessions"));
+  const hasUsable = {};   // user_id -> true
+  ses.forEach(function (x) {
+    if (String(x.revoked_at || "").trim()) return;
+    if (new Date(String(x.expires_at)).getTime() <= now) return;
+    const cur = tvByUser[String(x.user_id)];
+    if (cur === undefined) return;
+    if (Number(x.token_version || 0) !== cur) return;
+    hasUsable[String(x.user_id)] = true;
+  });
+
+  const cohort = [];
+  Object.keys(recordCount).forEach(function (em) {
+    const u = byEmail[em];
+    cohort.push({
+      emailHash: sha256Hex(em).slice(0, 10),   // 本文へメールを出さない
+      records: recordCount[em],
+      lastRecord: lastRecord[em] || "",
+      inUsers: !!u,
+      isActive: u ? String(u.is_active).toUpperCase() === "TRUE" : false,
+      hasSession: !!(u && u.user_id && hasUsable[String(u.user_id)]),
+      linked: !!(u && String(u.google_sub || "").trim())
+    });
+  });
+  cohort.sort(function (a, b) { return b.records - a.records; });
+
+  const withSession = cohort.filter(function (c) { return c.hasSession; }).length;
+
+  // --- 直近24時間のログイン失敗（未解決＝その後に成功していない指紋）---
+  // ★検証環境の分を混ぜてはいけない★
+  // スモークテストは毎回わざと壊れたトークンでログインを試みる。監査シートは
+  // 本番と検証で共通なので、素直に数えると「未解決のログイン失敗57件」に見える。
+  // 実体はテスト自身で、しかも同じ指紋を使い続けるので FP_RATE_LIMIT が積み上がる。
+  // このままだと「直近24時間に未解決の失敗がない」という切り替え条件が永久に満たせない。
+  const audit = sheetToObjects(getAuthSheet("AuthAudit"));
+  const dayAgo = now - 86400000;
+  const envAll = audit.filter(function (r) {
+    const t = new Date(String(r.timestamp)).getTime();
+    return t >= dayAgo && String(r.event_type || "").indexOf("LOGIN") === 0;
+  });
+  const recent = envAll.filter(function (r) {
+    return String(r.environment || "").toUpperCase() !== "TEST";
+  });
+  const failures = recent.filter(function (r) { return String(r.result) !== "SUCCESS"; });
+  const succeededFp = {};
+  recent.forEach(function (r) {
+    if (String(r.result) === "SUCCESS") succeededFp[String(r.credential_fingerprint || "")] = 1;
+  });
+  // 「その後ログインできた」失敗は未解決ではない。再試行で成功した人を
+  // 障害として数えると、いつまでも切り替えられなくなる。
+  //
+  // ★指紋の一致だけでは足りない★
+  // チャレンジが切れてやり直すと、Googleは新しいIDトークンを返すので指紋が変わる。
+  // つまり「同じ指紋で成功したか」だけを見ると、実際には数十秒後にログインできた人まで
+  // 未解決として数えてしまう。実測でも 01:28 の失敗3件の直後（01:29〜01:32）に
+  // 成功セッションが発行されていた。
+  // そこで時間的な近さも併用する。これは推定であって断定ではないため、
+  // nearbySuccess として別に数え、判断材料として明示する。
+  const successTimes = recent.filter(function (r) { return String(r.result) === "SUCCESS"; })
+    .map(function (r) { return new Date(String(r.timestamp)).getTime(); });
+  const RESOLVE_WINDOW_MS = 15 * 60 * 1000;
+  function hasNearbySuccess(ts) {
+    for (let i = 0; i < successTimes.length; i++) {
+      const d = successTimes[i] - ts;
+      if (d >= 0 && d <= RESOLVE_WINDOW_MS) return true;
+    }
+    return false;
+  }
+  const unresolved = failures.filter(function (r) {
+    if (succeededFp[String(r.credential_fingerprint || "")]) return false;
+    if (hasNearbySuccess(new Date(String(r.timestamp)).getTime())) return false;
+    return true;
+  });
+  const reasons = {};
+  unresolved.forEach(function (r) {
+    const k = String(r.failure_reason || r.result || "UNKNOWN");
+    reasons[k] = (reasons[k] || 0) + 1;
+  });
+  // ★件数だけでは「何人が困っているか」が分からない★
+  // 1人が47回やり直した場合と、47人が1回ずつ失敗した場合では意味がまるで違う。
+  // 前者は自分の検証の可能性が高く、後者は全員がログインできない障害。
+  // 指紋の種類数と、指紋ごとの最終時刻で切り分ける。
+  const fpAgg = {};
+  unresolved.forEach(function (r) {
+    const fp = String(r.credential_fingerprint || "(none)").slice(0, 10);
+    if (!fpAgg[fp]) fpAgg[fp] = { fp: fp, count: 0, first: "", last: "", reasons: {} };
+    const a = fpAgg[fp];
+    a.count++;
+    const t = String(r.timestamp);
+    if (!a.first || t < a.first) a.first = t;
+    if (!a.last || t > a.last) a.last = t;
+    const k = String(r.failure_reason || r.result || "UNKNOWN");
+    a.reasons[k] = (a.reasons[k] || 0) + 1;
+  });
+  const fpList = Object.keys(fpAgg).map(function (k) { return fpAgg[k]; })
+    .sort(function (a, b) { return b.count - a.count; });
+
+  // ★「探査由来」と「実フロー由来」を分ける★
+  // 本番のスモークテストも同じ監査シートへ書く（environment=PROD）ので、
+  // 環境だけでは切り分けられない。かといって「テストだ」と自己申告できる印を
+  // 付けると、攻撃者が同じ印を付けて失敗を隠せてしまう。
+  // そこで申告ではなく失敗理由で分類する。
+  //   実フロー = チャレンジが実在した上での失敗（利用者が本当に困っている）
+  //   探査     = 実在しないチャレンジ／その連打（正規の画面からは起きない）
+  // どちらも捨てずに両方report する。判断は人間が行う。
+  const REAL_FLOW_REASONS = { CHALLENGE_EXPIRED:1, CHALLENGE_ALREADY_USED:1,
+                              STATE_MISMATCH:1, NONCE_MISMATCH:1, TOKEN_EXPIRED:1,
+                              EMAIL_NOT_VERIFIED:1, USER_NOT_FOUND:1,
+                              TOKENINFO_UNREACHABLE:1, AUD_MISMATCH:1 };
+  const realFlow = unresolved.filter(function (r) {
+    return REAL_FLOW_REASONS[String(r.failure_reason || "")];
+  });
+  const realFlowFp = {};
+  realFlow.forEach(function (r) { realFlowFp[String(r.credential_fingerprint || "")] = 1; });
+
+  return {
+    ok: true,
+    definition: "直近" + nDays + "日にDailyLogへ1件以上記録した利用者",
+    windowDays: nDays,
+    asOf: Utilities.formatDate(new Date(), "Asia/Tokyo", "yyyy-MM-dd HH:mm"),
+    cohortSize: cohort.length,
+    cohortWithSession: withSession,
+    cohortAdoptionPct: cohort.length ? Math.round(withSession / cohort.length * 100) : 0,
+    notInUsers: cohort.filter(function (c) { return !c.inUsers; }).length,
+    registeredUsers: users.length,
+    activeFlagUsers: users.filter(function (u) { return String(u.is_active).toUpperCase() === "TRUE"; }).length,
+    login24h: { scope: "本番のみ（検証環境の行は除外）",
+                excludedTestRows: envAll.length - recent.length,
+                total: recent.length, failures: failures.length,
+                unresolved: unresolved.length, reasons: reasons,
+                // 切り替え判断に使うのはこちら（実フロー由来の未解決）
+                realFlowUnresolved: realFlow.length,
+                realFlowPeople: Object.keys(realFlowFp).length,
+                distinctFingerprints: fpList.length, byFingerprint: fpList },
+    cohort: cohort
+  };
+}
 function verifyIdToken(idToken, expectedNonceHash) {
   if (!idToken) return { ok: false, reason: "NO_ID_TOKEN" };
   let res;
@@ -9198,7 +9385,7 @@ function isAssignedTo(actorEmail, targetEmail) {
 // Kaiの有効なセッションを必須とし、鍵では通さない。
 const ADMIN_SECRET_ALLOWLIST = {
   // 状態の確認
-  authConfig:1, p1Status:1, authInspect:1, authAuditTail:1, lineLinkAudit:1, adminSystemHealth:1,
+  authConfig:1, p1Status:1, authInspect:1, authCohort:1, authAuditTail:1, lineLinkAudit:1, adminSystemHealth:1,
   // 定期処理の手動実行・補完
   adminOpsHealthCheck:1, adminRunNightlyReport:1, adminRunNightlyCoachMessage:1,
   adminBackfillReports:1, adminBackfillReportsForDate:1, adminBackfillReportReasons:1,

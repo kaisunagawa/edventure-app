@@ -185,7 +185,11 @@ PYEOF
 
   # 認証まわりの拒否（いずれも書き込みは発生しない）
   post() { curl -sL --max-time 120 -H "Content-Type: text/plain;charset=utf-8" --data-binary "$1" "$URL"; }
-  r=$(post '{"action":"login","challenge_id":"ch_nope","state":"x","idToken":"dummy"}')
+  # ★毎回ちがうダミーを使う★
+  # 固定文字列だと指紋が毎回同じになり、レート制限のカウンタが積み上がって
+  # 監査ログが FP_RATE_LIMIT で埋まる。「直近24時間に未解決のログイン失敗が無いこと」を
+  # 切り替え条件にしているので、テスト自身がその条件を壊してしまう。
+  r=$(post "{\"action\":\"login\",\"challenge_id\":\"ch_nope\",\"state\":\"x\",\"idToken\":\"smoke-$(date +%s)-$$\"}")
   echo "$r" | grep -q '"ok":false' && ok "存在しないchallengeを拒否" || ng "challenge拒否が異常: $(echo "$r"|head -c 100)"
   echo "$r" | grep -qi "STATE_MISMATCH\|CHALLENGE\|reason" && ng "失敗理由が利用者へ漏れている" || ok "失敗理由を利用者へ返していない"
 
