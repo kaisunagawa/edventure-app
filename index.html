@@ -456,6 +456,8 @@ async function gasApi(action, params = {}) {
   const url = new URL(GAS_URL);
   url.searchParams.set("action", action);
   url.searchParams.set("studentEmail", CURRENT_USER.email);
+  // セッションを添える。サーバーはこれで本人を確定する（studentEmailは互換のため残す）
+  const _t1 = getSessionToken(); if (_t1) url.searchParams.set("token", _t1);
   Object.entries(params).forEach(([k,v]) => url.searchParams.set(k,v));
   try { const r = await fetch(url.toString(), { redirect:"follow" }); return await r.json(); }
   catch { return { ok:false, data:[] }; }
@@ -465,6 +467,7 @@ async function gasPost(action, body = {}) {
   const url = new URL(GAS_URL);
   url.searchParams.set("action", action);
   url.searchParams.set("studentEmail", CURRENT_USER.email);
+  const _t2 = getSessionToken(); if (_t2) url.searchParams.set("token", _t2);
   Object.entries(body).forEach(([k,v]) => { if (v != null) url.searchParams.set(k, String(v)); });
   try { await fetch(url.toString(), { mode:"no-cors" }); } catch {}
   return { ok:true };
@@ -479,7 +482,7 @@ async function gasPostJson(action, body = {}) {
     const r = await fetch(GAS_URL, {
       method: "POST",
       headers: { "Content-Type": "text/plain" },
-      body: JSON.stringify({ action, studentEmail: CURRENT_USER.email, ...body })
+      body: JSON.stringify({ action, studentEmail: CURRENT_USER.email, token: getSessionToken(), ...body })
     });
     return await r.json();
   } catch { return { ok:false }; }
@@ -4061,6 +4064,34 @@ function GoalTreeSheet({onClose, onToast}) {
     </div>`;
 }
 
+// セキュリティ強化にともなう一度きりの再ログイン案内。
+// 既にログイン済みの人はログイン画面を通らないため、そのままではセッションを
+// 取得できない。ここで一度だけ入り直してもらう。データや設定は消えない。
+function ReauthGate() {
+  const relogin = () => {
+    try {
+      // 記録・設定は消さない。ログイン状態だけを解除する
+      localStorage.removeItem("edventure_user");
+      localStorage.removeItem(SESSION_KEY);
+    } catch {}
+    location.reload();
+  };
+  return html`
+    <div class="login-wrap">
+      <div class="login-logo"><svg width="72" height="72" viewBox="0 0 72 72" xmlns="http://www.w3.org/2000/svg"><circle cx="36" cy="36" r="36" fill="#0891B2"/><circle cx="36" cy="36" r="25" fill="none" stroke="rgba(255,255,255,0.2)" stroke-width="4.5"/><path d="M36 11 A25 25 0 1 1 14.5 50" fill="none" stroke="#fff" stroke-width="4.5" stroke-linecap="round"/></svg></div>
+      <div class="login-title">JIROKU</div>
+      <div class="login-sub">安全のため、一度ログインし直してください</div>
+      <div class="login-box" style=${{alignItems:"center",textAlign:"center"}}>
+        <div style=${{fontSize:13,color:"var(--sub)",lineHeight:1.9,marginBottom:18}}>
+          ログインの仕組みを新しくしました。<br/>
+          お手数ですが、もう一度Googleでログインしてください。<br/>
+          <b style=${{color:"var(--text)"}}>記録・目標・設定はそのまま残ります。</b>
+        </div>
+        <button class="btn" onClick=${relogin} style=${{width:280}}>ログイン画面へ</button>
+      </div>
+    </div>`;
+}
+
 // ── Settings ──
 // 設定の折りたたみセクション。安定した識別子を保つためコンポーネント外に定義する
 // （以前はSettingsScreen内で毎回定義しており、入力のたびに中身が作り直されて
@@ -5546,6 +5577,21 @@ function App() {
   // アカウントの存在確認はバックグラウンドで行い、消えていた場合だけログアウトさせる
   const [user,setUser]=useState(CURRENT_USER);
   const [tab,setTab]=useState("home");
+  // セッションを持っていない既存ログイン者に、一度だけ入り直してもらう。
+  // サーバーがまだ認証段階に入っていない(LEGACY)なら何もしない
+  const [needsReauth,setNeedsReauth]=useState(false);
+  useEffect(()=>{
+    if(getSessionToken()) return;
+    (async()=>{
+      let mode=rememberedAuthMode();
+      try{
+        const u=new URL(GAS_URL); u.searchParams.set("action","authConfig");
+        const cfg=await (await fetch(u.toString())).json();
+        if(cfg&&cfg.ok&&cfg.auth_mode) mode=noteAuthMode(cfg.auth_mode);
+      }catch{ return; }   // 通信できない時は促さない（オフラインで締め出さない）
+      if((AUTH_RANK[mode]||0)>=1) setNeedsReauth(true);
+    })();
+  },[]);
   const [toast,setToast]=useState(null);
   const [bannerDismissed,setBannerDismissed]=useState(false);
   // 学生向け必須セットアップ（ホーム画面追加＋LINE連携）。PC等でどうしてもできない人用に
@@ -5662,6 +5708,7 @@ function App() {
   },[]);
 
   if(!user) return html`<${LoginScreen} onLogin=${setUser}/>`;
+  if(needsReauth) return html`<${ReauthGate}/>`;
   if(showOnboarding) return html`<${OnboardingQuiz} onDone=${()=>setShowOnboarding(false)}/>`;
   if(showTutorial) return html`<${TutorialOverlay} onDone=${dismissTutorial}/>`;
   // 学生（cohort付き）は、ホーム画面追加＋LINE連携が両方済むまで必須セットアップ画面を出す
