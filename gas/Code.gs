@@ -231,7 +231,14 @@ function doGet(e) {
         var _aa = verifyP1Admin(studentEmail, e.parameter.secret, e.parameter);
         if (!_aa.ok) { result = _aa; break; }
         var _rows = sheetToObjects(getAuthSheet("AuthAudit"));
-        result = { ok: true, total: _rows.length, recent: _rows.slice(-12) };
+        // 旧方式（鍵をそのまま送る）がまだ使われていないかを全件で数える。
+        // これがゼロになったら旧方式を廃止する、という判断に使う
+        var _legacy = _rows.filter(function (r) { return String(r.failure_reason || "").indexOf("LEGACY") !== -1; });
+        var _signed = _rows.filter(function (r) { return String(r.failure_reason || "") === "via_signature"; });
+        result = { ok: true, total: _rows.length, recent: _rows.slice(-12),
+                   legacyCount: _legacy.length,
+                   legacyLast: _legacy.length ? String(_legacy[_legacy.length - 1].timestamp) : "",
+                   signedCount: _signed.length };
         break;
       }
       case "healthCheck":   result = authConfig(); break;
@@ -9279,15 +9286,12 @@ function authorizeAction(action, token, targetEmail, secretEmail, secret, sigPar
     return { ok: true, actor: sa, forceSelfEmail: null };
   }
 
-  // ② 旧方式（鍵をそのまま送る）。移行のため当面は受け付けるが、監査に印を残す
+  // ② 旧方式（鍵をそのまま送る）は廃止した（2026-08-01）。
+  //    鍵がURLに残る・有効期限が無い・リプレイできる・他パラメータを改ざんできる、
+  //    という弱点があり、署名方式へ全て移行したうえで受付を止めた。
+  //    監査ログ230件で旧方式の使用が0件であることを確認済み。
   if (secret) {
-    const sa = adminSecretActor(secretEmail, secret, action);
-    if (sa) {
-      authAudit("AUTHZ", { result: "ALLOW", action: action, actorUserId: sa.actor_user_id,
-                           targetUserId: targetEmail || "", failureReason: "via_admin_secret_LEGACY" });
-      return { ok: true, actor: sa, forceSelfEmail: null };
-    }
-    authAudit("AUTHZ", { result: "DENY", failureReason: "SECRET_NOT_ALLOWED_OR_BAD", action: action });
+    authAudit("AUTHZ", { result: "DENY", failureReason: "LEGACY_SECRET_DISABLED", action: action });
     return { ok: false, error: "AUTH_REQUIRED" };
   }
 
@@ -9335,9 +9339,11 @@ function verifyP1Admin(email, secret, params) {
     if (!verifyAdmin(String(params.studentEmail || params.coachEmail || ""))) return { ok: false, error: "not owner" };
     return { ok: true, viaSignature: true };
   }
-  // ② 旧方式（鍵をそのまま送る）。移行のため当面は受け付ける
+  // ② 旧方式（鍵をそのまま送る）は廃止した（2026-08-01）。
+  //    運用コマンドは gas/ops.sh を使うこと（署名付きで叩く）。
+  if (secret) return { ok: false, error: "この方式は廃止されました。gas/ops.sh を使ってください" };
   if (!verifyAdmin(email)) return { ok: false, error: "not owner" };
-  if (String(secret || "") !== expected) return { ok: false, error: "invalid secret" };
+  return { ok: false, error: "signature required" };
   return { ok: true };
 }
 
