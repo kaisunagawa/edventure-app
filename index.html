@@ -3783,7 +3783,7 @@ const FAQ_CATEGORIES = [
   ]},
   { cat:"通知・LINE", icon:"🔔", items:[
     { q:"LINE通知を受け取りたい",
-      a:"公式LINEを友だち追加して、アプリに登録したGmailアドレスをトークで送るだけで連携完了です。\nリマインダー・毎晩のAIレポート・コーチからのメッセージが届くようになります。" },
+      a:"公式LINEを友だち追加し、設定 →「LINE連携」で連携コードを出して送るだけで連携完了です。\nリマインダー・毎晩のAIレポート・コーチからのメッセージが届くようになります。" },
     { q:"通知の時間や回数を変えたい",
       a:"設定の「時間帯と通知」で開始・終了時間と通知間隔を変えて保存してください。\n記録画面に表示される時間帯も同じ設定に連動します。\nなお22時以降はリマインダーの代わりにレポートとコーチメッセージが届きます。" },
     { q:"休みの日はどうすればいい？",
@@ -4953,7 +4953,7 @@ function LoginScreen({onLogin}) {
           <button class="btn" style=${{background:"#06C755",fontSize:15}} onClick=${openLine}>LINEを友だち追加</button>
           <div style=${{fontSize:12,color:"var(--sub)",marginTop:10,lineHeight:1.7}}>
             ① 上のボタンでJIROKUのLINEを友だち追加<br/>
-            ② アプリの <b>設定 →「LINE連携」</b>で「連携のことば」を出す<br/>
+            ② アプリの <b>設定 →「LINE連携」</b>で「連携コード」を出す<br/>
             ③ それをLINEにそのまま送ると連携完了
           </div>
         </div>
@@ -5086,7 +5086,7 @@ function LineLinkBanner({email, onDismiss, onGoToSettings}) {
       <div style=${{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
         <div style=${{lineHeight:1.6}}>
           LINE連携が未完了です。連携するとリマインダー・AIレポートが届くようになります。<br/>
-          <b>設定 →「LINE連携」</b>から「連携のことば」を出して、LINEに送ってください。
+          <b>設定 →「LINE連携」</b>から「連携コード」を出して、LINEに送ってください。
         </div>
         <button onClick=${onDismiss} style=${{background:"none",border:"none",color:"#8a6d1f",fontSize:16,cursor:"pointer",flexShrink:0}}>×</button>
       </div>
@@ -5338,9 +5338,11 @@ function StudentSetupGate({email, lineLinked, onRecheck, onSkip}){
             リマインダー・毎晩のAIレポート・先生からのメッセージがLINEに届きます。
             <div style=${{display:"flex",flexDirection:"column",gap:8,marginTop:10}}>
               <button onClick=${()=>window.open("https://lin.ee/5pElLYY","_blank")} style=${{padding:"11px",borderRadius:9,border:"none",background:"#06C755",color:"#fff",fontSize:13.5,fontWeight:700,cursor:"pointer"}}>① 公式LINEを友だち追加</button>
-              <button onClick=${copyEmail} style=${{padding:"11px",borderRadius:9,border:"1.5px solid var(--border)",background:"var(--card)",color:"var(--text)",fontSize:13,fontWeight:600,cursor:"pointer"}}>${copied?"✓ コピーしました":"② 登録メールをコピー"}</button>
-              <div style=${{fontSize:11.5,color:"var(--faint)",lineHeight:1.6}}>コピーした <b>${email}</b> を、追加したLINEのトークにそのまま送ると連携完了です。</div>
-              <button onClick=${recheck} disabled=${checking} style=${{padding:"10px",borderRadius:9,border:"1.5px solid var(--accent)",background:"none",color:"var(--accent)",fontSize:12.5,fontWeight:700,cursor:"pointer"}}>${checking?"確認中…":"③ 連携できたか確認する"}</button>
+              <div style=${{fontSize:11.5,color:"var(--faint)",lineHeight:1.7,padding:"2px 2px 0"}}>
+                ② アプリの <b>設定 →「LINE連携」</b>で <b>連携コード</b>を出す<br/>
+                ③ そのコードを、追加したLINEのトークにそのまま送ると連携完了です
+              </div>
+              <button onClick=${recheck} disabled=${checking} style=${{padding:"10px",borderRadius:9,border:"1.5px solid var(--accent)",background:"none",color:"var(--accent)",fontSize:12.5,fontWeight:700,cursor:"pointer"}}>${checking?"確認中…":"④ 連携できたか確認する"}</button>
               ${checkMsg&&html`<div style=${{fontSize:11.5,color:"var(--amber,#B45309)"}}>${checkMsg}</div>`}
             </div>
           </div>
@@ -5360,7 +5362,7 @@ const TUTORIAL_STEPS = [
   { mock:TutorialMiniMulti, title:"まとめて記録も可能", body:"会議や移動など、同じ内容が続いた時は「まとめて記録」で複数の時間帯に一括保存できます。" },
   { mock:TutorialMiniCalendar, title:"カレンダー連携で自動入力", body:"設定でGoogleカレンダーと連携すると、予定が記録に自動で入るので、選んで保存するだけになります。" },
   { mock:TutorialMiniReport, title:"AIレポートとステータス", body:"毎晩、その日の記録をもとにAIがスコアとフィードバックを届けます。ホーム画面の「ステータス」は、続けるほど伸びる指標です。" },
-  { mock:TutorialMiniLine, title:"LINE連携でリマインダーを受け取る", body:"LINE公式アカウントを友だち追加し、登録したGmailアドレスを送ると連携完了。リマインダーやレポートが届くようになります。" },
+  { mock:TutorialMiniLine, title:"LINE連携でリマインダーを受け取る", body:"LINE公式アカウントを友だち追加し、設定 →「LINE連携」で出した連携コードを送ると連携完了。リマインダーやレポートが届くようになります。" },
   { mock:TutorialMiniAddHome, title:"ホーム画面に追加しよう", body:"次のプッシュ通知を使うには、まずJIROKUをホーム画面に追加する必要があります。\niPhoneの場合：共有ボタン（□に↑）→「ホーム画面に追加」\nAndroidの場合：メニュー（⋮）→「ホーム画面に追加」またはインストール\n追加できたら、一度そのアイコンからこのページを開き直してください。",
     skipIf: isStandaloneDisplay },
   { mock:TutorialMiniPush, title:"プッシュ通知を有効にしよう", body:"タイマー終了・記録リマインダーなどの通知を、アプリを閉じていても受け取れるようにします。習慣化に欠かせない機能なので、必ず有効にしてください。", pushStep:true },

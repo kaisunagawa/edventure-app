@@ -381,7 +381,7 @@ function doPost(e) {
           const rows = sheetToObjects(getSheet("Users"));
           // すでに連携済みなら何もしない
           if (rows.find(r => r.line_user_id === lineUserId)) return;
-          sendLineMessage(lineUserId, "🎉 追加ありがとうございます！\n\nまず、下のリンクからJIROKUアプリに登録してください👇\n" + APP_URL + "\n\n登録が完了したら、このLINEに登録したGmailアドレスを送ってください。それだけで連携完了です！\n\n✅ 毎時間の記録リマインダー\n✅ 毎晩のAIレポート\nがこのLINEに届くようになります。");
+          sendLineMessage(lineUserId, "🎉 追加ありがとうございます！\n\nまず、下のリンクからJIROKUアプリに登録してください👇\n" + APP_URL + "\n\n登録が完了したら、アプリの 設定 →「LINE連携」で連携コードを出して、このトークに送ってください。\n\n✅ 毎時間の記録リマインダー\n✅ 毎晩のAIレポート\nがこのLINEに届くようになります。");
         }
 
         if (event.type === "message" && event.message.type === "text") {
@@ -413,12 +413,12 @@ function doPost(e) {
           // 連携はアプリ（認証済み）で発行したワンタイムトークンでのみ行う。
           if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(text)) {
             // 従来どおりメールを送ってきた人への案内（連携はしない）
-            sendLineMessage(lineUserId, "連携のやり方が新しくなりました🙏\n\nJIROKUアプリを開き、設定 →「LINE連携」で連携用のことばを発行してください。\nそれをこのトークにそのまま送ると連携できます。\n\n" + APP_URL);
+            sendLineMessage(lineUserId, "連携のやり方が新しくなりました🙏\n\nJIROKUアプリを開き、設定 →「LINE連携」で連携コードを出して、このトークに送ってください。\n\n" + APP_URL);
             try { authAudit("LINE_LINK_BLOCKED", { result: "DENY", action: "lineWebhookLink",
                         failureReason: "email_link_disabled" }); } catch (e4) {}
           } else {
             // メール以外のメッセージ（雑談等）が送られた場合、無反応にせず連携方法を再案内する
-            sendLineMessage(lineUserId, "JIROKUと連携するには🙏\n\nアプリを開き、設定 →「LINE連携」で連携用のことばを発行してください。\nそれをこのトークにそのまま送ると連携できます。\n\n" + APP_URL);
+            sendLineMessage(lineUserId, "JIROKUと連携するには🙏\n\nアプリを開き、設定 →「LINE連携」で連携コードを出して、このトークに送ってください。\n\n" + APP_URL);
           }
         }
       });
@@ -908,21 +908,31 @@ function logAiUsage(result, feature) {
 // 今日・今月のAI費用と内訳（機能別・モデル別）を集計して返す
 function getAiUsageSummary() {
   var sheet = getSheet("AiUsage");
-  if (!sheet) return { today: 0, month: 0, byFeature: {}, byModel: {}, count: 0 };
+  var empty = { today: 0, month: 0, lastMonth: 0, byFeature: {}, byModel: {}, count: 0, lastMonthCount: 0, lastMonthLabel: "" };
+  if (!sheet) return empty;
   var rows = sheetToObjects(sheet);
   var today = formatDate(new Date()), month = today.slice(0, 7);
-  var t = 0, m = 0, byF = {}, byM = {}, cnt = 0;
+  // 先月分も集計する。月初は今月のデータがまだ無く、費用が丸ごと
+  // 見えなくなっていた（一番知りたいタイミングで消えていた）
+  var pd = new Date(today + "T00:00:00Z"); pd.setUTCDate(0);
+  var lastMonth = pd.toISOString().slice(0, 7);
+
+  var t = 0, m = 0, lm = 0, byF = {}, byM = {}, cnt = 0, lmCnt = 0;
+  var lmF = {};
   rows.forEach(function (r) {
     var d = String(r.date), c = Number(r.cost_usd) || 0;
-    if (d.slice(0, 7) !== month) return;
-    m += c; cnt++;
+    var ym = d.slice(0, 7);
     var f = String(r.feature || "その他") || "その他";
+    if (ym === lastMonth) { lm += c; lmCnt++; lmF[f] = (lmF[f] || 0) + c; return; }
+    if (ym !== month) return;
+    m += c; cnt++;
     byF[f] = (byF[f] || 0) + c;
     var mo = String(r.model || "").replace("claude-", "").replace("-20251001", "");
     byM[mo] = (byM[mo] || 0) + c;
     if (d === today) t += c;
   });
-  return { today: t, month: m, byFeature: byF, byModel: byM, count: cnt };
+  return { today: t, month: m, lastMonth: lm, byFeature: byF, byModel: byM,
+           count: cnt, lastMonthCount: lmCnt, lastMonthByFeature: lmF, lastMonthLabel: lastMonth };
 }
 
 // ユーザー起点のAI機能の回数制限（クレジットの暴走消費を防ぐ安全弁）。
@@ -2397,7 +2407,7 @@ objectionsは、ヒアリング内容から予想されるものを2〜3個。`;
     payload: JSON.stringify({ model: "claude-opus-4-8", max_tokens: 2500, messages: [{ role: "user", content: prompt }] }),
     muteHttpExceptions: true
   });
-  const result = JSON.parse(res.getContentText()); logAiUsage(result);
+  const result = JSON.parse(res.getContentText()); logAiUsage(result, "営業トーク生成");
   if (!result.content || !result.content[0]) return { ok: false, error: friendlyClaudeError(res.getContentText()) };
 
   try {
@@ -2788,7 +2798,7 @@ records: ${breakdown.records}, memo: ${breakdown.memo}, focus: ${breakdown.focus
         payload: JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: 400, messages: [{ role: "user", content: prompt }] }),
         muteHttpExceptions: true
       });
-      const result = JSON.parse(res.getContentText()); logAiUsage(result);
+      const result = JSON.parse(res.getContentText()); logAiUsage(result, "レポート理由の補完");
       if (!result.content || !result.content[0]) { skippedError++; continue; }
       const m = result.content[0].text.match(/\{[\s\S]*\}/);
       if (!m) { skippedError++; continue; }
@@ -3117,7 +3127,7 @@ ${draftSection}
     payload: JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: 500, messages: [{ role: "user", content: prompt }] }),
     muteHttpExceptions: true
   });
-  const result = JSON.parse(res.getContentText()); logAiUsage(result);
+  const result = JSON.parse(res.getContentText()); logAiUsage(result, "コーチング提案");
   if (!result.content || !result.content[0]) return { ok: false, error: "ai error" };
   const lines = result.content[0].text.split("\n")
     .map(l => l.replace(/^[#\-・*0-9.\s]+/, "").trim())
@@ -3156,7 +3166,7 @@ ${transcript.slice(0, 12000)}
       payload: JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: 800, messages: [{ role: "user", content: prompt }] }),
       muteHttpExceptions: true
     });
-    const result = JSON.parse(res.getContentText()); logAiUsage(result);
+    const result = JSON.parse(res.getContentText()); logAiUsage(result, "面談の要約");
     if (!result.content || !result.content[0]) return { ok: false, error: "AI応答が空でした" };
     const m = result.content[0].text.match(/\{[\s\S]*\}/);
     if (!m) return { ok: false, error: "AI応答の解析に失敗しました" };
@@ -3206,7 +3216,7 @@ ${lastNoteText}
     payload: JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: 800, messages: [{ role: "user", content: prompt }] }),
     muteHttpExceptions: true
   });
-  const result = JSON.parse(res.getContentText()); logAiUsage(result);
+  const result = JSON.parse(res.getContentText()); logAiUsage(result, "コーチング準備");
   if (!result.content || !result.content[0]) return { ok: false, error: "ai error" };
   return { ok: true, data: { summary: result.content[0].text.trim(), lastCoachingDate: lastNote ? lastNote.date : null } };
 }
@@ -3254,7 +3264,7 @@ function coachGenerateStudentMessage(coachEmail, body) {
     payload: JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: 600, messages: [{ role: "user", content: prompt }] }),
     muteHttpExceptions: true
   });
-  const result = JSON.parse(res.getContentText()); logAiUsage(result);
+  const result = JSON.parse(res.getContentText()); logAiUsage(result, "生徒へのメッセージ");
   if (!result.content || !result.content[0]) return { ok: false, error: "生成に失敗しました" };
   return { ok: true, data: { message: stripSalutation(result.content[0].text.trim()), lineLinked: !!user.line_user_id } };
 }
@@ -3317,7 +3327,7 @@ function coachGenerateNudgeMessage(coachEmail, body) {
     payload: JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: 600, messages: [{ role: "user", content: prompt }] }),
     muteHttpExceptions: true
   });
-  const result = JSON.parse(res.getContentText()); logAiUsage(result);
+  const result = JSON.parse(res.getContentText()); logAiUsage(result, "復帰の声かけ");
   if (!result.content || !result.content[0]) return { ok: false, error: "生成に失敗しました" };
   return { ok: true, data: { message: stripSalutation(result.content[0].text.trim()), daysSince: daysSince, lastLogDate: lastLogDate, lineLinked: !!user.line_user_id } };
 }
@@ -4036,7 +4046,7 @@ ${EMOJI_STYLE}`;
         payload: JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: 300, messages: [{ role: "user", content: prompt }] }),
         muteHttpExceptions: true
       });
-      const result = JSON.parse(res.getContentText()); logAiUsage(result);
+      const result = JSON.parse(res.getContentText()); logAiUsage(result, "朝の予定通知");
       if (!result.content || !result.content[0]) return;
       const bodyText = stripSalutation(result.content[0].text);
       logCoachMessage(user.student_email, bodyText);
@@ -4159,7 +4169,7 @@ ${EMOJI_STYLE}
             payload: JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: 100, messages: [{ role: "user", content: prompt }] }),
             muteHttpExceptions: true
           });
-          const result = JSON.parse(res.getContentText()); logAiUsage(result);
+          const result = JSON.parse(res.getContentText()); logAiUsage(result, "毎時間リマインダー");
           if (result.content && result.content[0]) {
             const bodyText = stripSalutation(result.content[0].text).trim();
             logCoachMessage(user.student_email, bodyText);
@@ -4307,7 +4317,7 @@ function generateWinbackText(user, days, recentLogs, apiKey) {
     payload: JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: 300, messages: [{ role: "user", content: prompt }] }),
     muteHttpExceptions: true
   });
-  const result = JSON.parse(res.getContentText()); logAiUsage(result);
+  const result = JSON.parse(res.getContentText()); logAiUsage(result, "復帰メッセージ");
   if (!result || !result.content || !result.content[0]) return null;
   const text = String(result.content[0].text || "").trim();
   return text || null;
@@ -4725,7 +4735,7 @@ ${EMOJI_STYLE}`;
         payload: JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: 400, messages: [{ role: "user", content: coachPrompt }] }),
         muteHttpExceptions: true
       });
-      const result = JSON.parse(res.getContentText()); logAiUsage(result);
+      const result = JSON.parse(res.getContentText()); logAiUsage(result, "夜のコーチメッセージ");
       if (result.content && result.content[0]) {
         const bodyText = stripSalutation(result.content[0].text);
         logCoachMessage(user.student_email, bodyText);
@@ -5821,7 +5831,7 @@ ${logsText}
         payload: JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: 400, messages: [{ role: "user", content: prompt }] }),
         muteHttpExceptions: true
       });
-      const result = JSON.parse(res.getContentText()); logAiUsage(result);
+      const result = JSON.parse(res.getContentText()); logAiUsage(result, "月次サマリー");
       if (!result.content || !result.content[0]) return;
 
       summarySheet.appendRow([monthStr, user.student_email, result.content[0].text, new Date().toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" })]);
@@ -6067,7 +6077,7 @@ ${logsText}
         payload: JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: 400, messages: [{ role: "user", content: prompt }] }),
         muteHttpExceptions: true
       });
-      const result = JSON.parse(res.getContentText()); logAiUsage(result);
+      const result = JSON.parse(res.getContentText()); logAiUsage(result, "週次サマリー");
       if (!result.content || !result.content[0]) return;
 
       summarySheet.appendRow([
@@ -6214,7 +6224,7 @@ ${monthLogs.slice(-50).map(l => l.date + " " + l.time_block + " " + l.task + "�
         payload: JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: 500, messages: [{ role: "user", content: prompt }] }),
         muteHttpExceptions: true
       });
-      const result = JSON.parse(res.getContentText()); logAiUsage(result);
+      const result = JSON.parse(res.getContentText()); logAiUsage(result, "月次レビュー");
       if (!result.content || !result.content[0]) return;
 
       reviewSheet.appendRow([monthStr, user.student_email, result.content[0].text,
@@ -6457,7 +6467,7 @@ ${taskList}
     payload: JSON.stringify({ model: "claude-opus-4-8", max_tokens: 2000, messages: [{ role: "user", content: prompt }] }),
     muteHttpExceptions: true
   });
-  const result = JSON.parse(res.getContentText()); logAiUsage(result);
+  const result = JSON.parse(res.getContentText()); logAiUsage(result, "時間テーマ");
   const textBlock = result.content && Array.isArray(result.content)
     ? result.content.find(function(b){ return b && typeof b.text === "string"; }) : null;
   if (!textBlock) return { ok: false, error: friendlyClaudeError(res.getContentText()) };
@@ -9533,7 +9543,7 @@ function adminSendStudentCampaign(email, body) {
       "・ガクチカ素材集 … 面接でそのまま話せるエピソードの素材が、日々の記録から自動で貯まります。\n\n" +
       "始め方は2ステップ、合計2分です。\n" +
       "① アプリを開いて、今日やったことを1つ記録する（1分でOK）\n   " + APP_URL + "\n" +
-      "② LINE連携する … 下のリンクを友だち追加して、登録したメールアドレスを送るだけ。\n   " + LINE_URL + "\n   → 毎晩、AIコーチがあなたの1日を採点したレポートを届けます。\n\n" +
+      "② LINE連携する … 下のリンクを友だち追加し、アプリの 設定 →「LINE連携」で出した連携コードを送るだけ。\n   " + LINE_URL + "\n   → 毎晩、AIコーチがあなたの1日を採点したレポートを届けます。\n\n" +
       "記録は完璧じゃなくていい。「バイトだった」「ゲームしてた」でも、それが全部データになります。\n" +
       "わからないことがあれば授業で声をかけてください。\n\n砂川";
   } else if (segment === "started") {
@@ -9545,7 +9555,7 @@ function adminSendStudentCampaign(email, body) {
       "実は今、あなたに毎晩届くはずの「AIコーチのレポート」が届いていません。LINE連携がまだだからです。\n\n" +
       "JIROKUは毎晩、あなたのその日の記録をAIコーチが読んで、点数と「明日はこうするといい」を返します。\n" +
       "アプリを開かなくてもLINEに届くので、続けるのが一気にラクになります。\n\n" +
-      "連携は1分：\n下のリンクを友だち追加 → 登録したメールアドレスをトークで送る、これだけです。\n   " + LINE_URL + "\n\n" +
+      "連携は1分：\n下のリンクを友だち追加 → アプリの 設定 →「LINE連携」で連携コードを出してトークで送る、これだけです。\n   " + LINE_URL + "\n\n" +
       "このまま30日続くと、就活で使える「行動アセスメント帳票」と「ガクチカ素材集」が作れます。\n" +
       "いいペースなので、もったいないところで止まらないように。\n\n砂川";
   } else {
@@ -9823,7 +9833,7 @@ function dailyOpsHealthCheck(dryRun) {
   // ⑤ AI費用（アプリ内のAPI消費。昨日と今月の累計、内訳の上位）
   try {
     const au = getAiUsageSummary();
-    if (au.count > 0) {
+    if (au.count > 0 || au.lastMonthCount > 0) {
       const yen = function (usd) { return "$" + usd.toFixed(2); };
       const topF = Object.keys(au.byFeature).sort(function (a, b) { return au.byFeature[b] - au.byFeature[a]; }).slice(0, 4)
         .map(function (f) { return f + " " + yen(au.byFeature[f]); }).join(" / ");
@@ -9831,6 +9841,12 @@ function dailyOpsHealthCheck(dryRun) {
         .map(function (m2) { return m2 + " " + yen(au.byModel[m2]); }).join(" / ");
       lines.push("");
       lines.push("💰 AI費用（アプリ内）: 今日 " + yen(au.today) + " / 今月 " + yen(au.month));
+      if (au.lastMonthCount > 0) {
+        const lmTop = Object.keys(au.lastMonthByFeature || {})
+          .sort(function (a, b) { return au.lastMonthByFeature[b] - au.lastMonthByFeature[a]; }).slice(0, 3)
+          .map(function (f) { return f + " " + yen(au.lastMonthByFeature[f]); }).join(" / ");
+        lines.push("先月(" + au.lastMonthLabel + "): " + yen(au.lastMonth) + (lmTop ? "（" + lmTop + "）" : ""));
+      }
       if (topF) lines.push("内訳: " + topF);
       if (topM) lines.push("モデル: " + topM);
     }
