@@ -63,6 +63,9 @@ function doGet(e) {
   const callback = e.parameter.callback;
   try {
     let result;
+    // ★トークンを送ってきたのに無効なら、ここで止める（従来経路へ落とさない）★
+    var _st = strictTokenCheck(action, e.parameter.token);
+    if (!_st.ok) return jsonResponse(_st, callback);
     // ── Auth CP2 ── 高リスクなアクションはセッションとロールを確認する。
     // ACTION_POLICIES に載っていないものは、この段階では素通り（CP3以降で広げる）
     var _az = authorizeAction(action, e.parameter.token,
@@ -136,7 +139,9 @@ function doGet(e) {
         var _ae = verifyP1Admin(studentEmail, e.parameter.secret, e.parameter);
         if (!_ae.ok) { result = _ae; break; }
         var _kind = String(e.parameter.kind || "").toUpperCase();
-        if (["WRITE","READ"].indexOf(_kind) === -1) { result = { ok:false, error:"invalid kind" }; break; }
+        // STRICTTOKEN は CP3/CP4 とは別軸のスイッチ。
+        // 「トークンが付いているのに無効なら拒否する」だけを制御する。
+        if (["WRITE","READ","STRICTTOKEN"].indexOf(_kind) === -1) { result = { ok:false, error:"invalid kind" }; break; }
         var _key = "AUTH_ENFORCE_" + _kind + (isTestDeployment() ? "_TEST" : "_PROD");
         var _on = String(e.parameter.on || "") === "1";
         if (_on) PropertiesService.getScriptProperties().setProperty(_key, "ON");
@@ -144,7 +149,8 @@ function doGet(e) {
         authAudit("ENFORCE_CHANGE", { result:"SUCCESS", actorUserId: studentEmail,
                   action:"authSetEnforce", failureReason: _kind + "=" + (_on ? "ON" : "OFF") });
         result = { ok:true, key:_key, value:_on ? "ON" : "OFF",
-                   effective: { write: enforceFlag("WRITE"), read: enforceFlag("READ") } };
+                   effective: { write: enforceFlag("WRITE"), read: enforceFlag("READ"),
+                                strictToken: enforceFlag("STRICTTOKEN") } };
         break;
       }
       case "authSetMode": {
@@ -494,6 +500,9 @@ function doPost(e) {
     // アプリからのPOST
     const action = body.action;
     let studentEmail = body.studentEmail;
+    // ★doGetと同じ。無効なトークンを従来経路へ落とさない★
+    var _stp = strictTokenCheck(action, body.token);
+    if (!_stp.ok) return jsonResponse(_stp);
     // ── Auth CP2 ──（doGetと同じ判定）
     var _azp = authorizeAction(action, body.token, body.targetEmail || body.target || "",
                                body.studentEmail || body.coachEmail, body.secret, body);
@@ -8856,7 +8865,8 @@ function authCohort(days) {
       inUsers: !!u,
       isActive: u ? String(u.is_active).toUpperCase() === "TRUE" : false,
       hasSession: !!(u && u.user_id && hasUsable[String(u.user_id)]),
-      linked: !!(u && String(u.google_sub || "").trim())
+      linked: !!(u && String(u.google_sub || "").trim()),
+      line: !!(u && String(u.line_user_id || "").trim())
     });
   });
   cohort.sort(function (a, b) { return b.records - a.records; });
@@ -8959,6 +8969,27 @@ function authCohort(days) {
     cohortWithSession: withSession,
     cohortAdoptionPct: cohort.length ? Math.round(withSession / cohort.length * 100) : 0,
     notInUsers: cohort.filter(function (c) { return !c.inUsers; }).length,
+    // ★到達経路の内訳★ 案内をどのチャネルで送れば誰に届くかを出す。
+    // メールアドレスはログインに使っているものなので原則到達するが、
+    // 形式が壊れている行は「連絡できない」として別に数える。
+    reach: (function () {
+      const validEmail = function (u) { return /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(String(u.student_email || "").trim()); };
+      const line = users.filter(function (u) { return String(u.line_user_id || "").trim(); });
+      const noLine = users.filter(function (u) { return !String(u.line_user_id || "").trim(); });
+      return {
+        total: users.length,
+        lineReachable: line.length,
+        lineUnlinked: noLine.length,
+        emailReachable: users.filter(validEmail).length,
+        unreachable: users.filter(function (u) { return !validEmail(u) && !String(u.line_user_id || "").trim(); }).length,
+        cohortWithLine: cohort.filter(function (c) { return c.line; }).length,
+        cohortWithoutLine: cohort.filter(function (c) { return !c.line; }).length,
+        // アプリ内表示の対象＝セッションを持っていない人
+        inAppTargets: users.filter(function (u) {
+          return !(u.user_id && hasUsable[String(u.user_id)]);
+        }).length
+      };
+    })(),
     registeredUsers: users.length,
     activeFlagUsers: users.filter(function (u) { return String(u.is_active).toUpperCase() === "TRUE"; }).length,
     login24h: { scope: "本番のみ（検証環境の行は除外）",
@@ -9330,6 +9361,42 @@ function enforceFlag(kind) {
   //   検証だけ先に厳しくすることはできる（先行検証のため）。
   return prod || on("AUTH_ENFORCE_" + kind + "_TEST");
 }
+// ★トークンが付いているのに無効なら、必ず拒否する★
+//
+// なぜ必要か:
+//   強制スイッチがOFFの間、ポリシー対象外のアクション（getUser等）は
+//   トークンを一切見ていなかった。壊れたトークンを付けても素通りする。
+//   仕様としては「まだ強制していない」だけなのだが、実害がある:
+//     セッションが失効しても従来経路で動き続ける
+//     → 利用者は気づかない／普及率も健全に見える
+//     → スイッチを入れた瞬間に全員が一斉に止まる
+//   つまり「静かに壊れている」状態を作る。だから、
+//   トークンを送ってきたのに無効なら、段階に関係なく拒否する。
+//
+// トークンが無い場合は SESSION_OPTIONAL の間だけ従来経路を許す。
+// ★無効なトークンで従来経路へ縮退させてはいけない★（それが一番危ない）
+
+// トークンの有無に関係なく通してよいもの。ログインの入口そのもの。
+// ここを拒否すると、失効した人が再ログインできなくなって詰む。
+const PUBLIC_ACTIONS = {
+  authChallenge: 1, login: 1, loginAccess: 1, authConfig: 1, healthCheck: 1
+};
+
+function strictTokenCheck(action, token) {
+  if (!token) return { ok: true };                       // 未提示は従来どおり
+  if (PUBLIC_ACTIONS[String(action || "")]) return { ok: true };
+  if (!enforceFlag("STRICTTOKEN")) return { ok: true };  // スイッチOFFの間は従来どおり
+
+  const v = verifySession(token, false);   // 失効を即座に反映するためキャッシュを使わない
+  if (v.ok) return { ok: true, actor: v.actor };
+
+  authAudit("SESSION_INVALID", { result: "DENY", failureReason: v.reason || "UNKNOWN", action: action });
+  // ★理由を細かく返さない★ ただしクライアントが「再ログインすれば直る」と
+  // 判断できる必要があるので、SESSION_INVALID という一種類だけは返す。
+  // FORBIDDEN（権限不足）と混ぜると、再ログインの無限ループになる。
+  return { ok: false, error: "SESSION_INVALID" };
+}
+
 // 段階に応じて、そのアクションに適用するポリシーを返す
 function policyFor(action) {
   if (ACTION_POLICIES[action]) return ACTION_POLICIES[action];
