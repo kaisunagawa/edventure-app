@@ -131,7 +131,61 @@ function getFollowupReason(s) {
   return null;
 }
 
-function loginWithGoogle(onEmail, onError) {
+// ── ログイン ──
+// 本人確認は「IDトークン」で行う。アクセストークンはGoogle APIを叩くための
+// 認可用であって、本人を証明するものではない（用途が違う）。
+// このCRMがアクセストークンでやっていた唯一のことは userinfo でメールを
+// 取得することだけだったので、丸ごとIDトークン方式へ置き換えられる。
+//
+// メインアプリと同じ仕組み（challenge → nonce → サーバー検証 → セッション）に載せる。
+// CRMはリダイレクトを伴わないので、challenge_id と state はこの場で保持できる。
+async function loginWithGoogle(onEmail, onError) {
+  if (!window.google?.accounts?.id) {
+    // 古い環境などで読み込めていない場合は、従来方式へ縮退する（締め出さない）
+    return loginWithAccessToken(onEmail, onError);
+  }
+  // サーバーからワンタイムの state / nonce を受け取る
+  let ch = null;
+  try {
+    const u = new URL(GAS_URL); u.searchParams.set("action", "authChallenge");
+    ch = await (await fetch(u.toString())).json();
+  } catch {}
+  if (!ch || !ch.ok) { onError("ログインの準備に失敗しました。通信環境を確認してもう一度お試しください"); return; }
+
+  try {
+    google.accounts.id.initialize({
+      client_id: GOOGLE_CLIENT_ID,
+      nonce: ch.nonce,                 // サーバーが照合する
+      auto_select: false,
+      cancel_on_tap_outside: true,
+      callback: async (res) => {
+        if (!res || !res.credential) { onError("ログインに失敗しました"); return; }
+        try {
+          const sr = await fetch(GAS_URL, {
+            method: "POST", headers: { "Content-Type": "text/plain" },
+            body: JSON.stringify({ action: "login", idToken: res.credential,
+                                   challenge_id: ch.challenge_id, state: ch.state })
+          }).then(r => r.json());
+          res.credential = null;       // IDトークンは持ち続けない
+          if (sr && sr.ok && sr.token) {
+            setCoachSession(sr.token);
+            onEmail((sr.user && sr.user.email) || "");
+          } else {
+            onError((sr && sr.error) || "ログインできませんでした。管理者へ確認してください");
+          }
+        } catch { onError("ログインに失敗しました"); }
+      }
+    });
+    google.accounts.id.prompt((n) => {
+      // ワンタップが出せない環境（Cookie制限など）では従来方式へ縮退する
+      if (n && (n.isNotDisplayed?.() || n.isSkippedMoment?.())) loginWithAccessToken(onEmail, onError);
+    });
+  } catch { loginWithAccessToken(onEmail, onError); }
+}
+
+// 従来のアクセストークン方式。IDトークン方式が使えない場合の逃げ道としてのみ残す。
+// 移行が安定したら削除する（サーバー側の loginAccess も同時に無効化する）
+function loginWithAccessToken(onEmail, onError) {
   if (!window.google?.accounts?.oauth2) { onError("Googleログインの読み込み中です。少し待ってからもう一度お試しください"); return; }
   try {
     const client = google.accounts.oauth2.initTokenClient({
@@ -140,22 +194,11 @@ function loginWithGoogle(onEmail, onError) {
       callback: async (t) => {
         if (t.error || !t.access_token) { onError("ログインに失敗しました"); return; }
         try {
-          // アクセストークンをサーバーへ渡し、サーバー側で発行元(aud)と有効期限を
-          // 確かめてもらってセッションを受け取る。ここで初めて本人が確定する
-          let email = null;
-          try {
-            const sr = await fetch(GAS_URL, {
-              method: "POST", headers: { "Content-Type": "text/plain" },
-              body: JSON.stringify({ action: "loginAccess", accessToken: t.access_token })
-            }).then(r => r.json());
-            if (sr && sr.ok && sr.token) { setCoachSession(sr.token); email = (sr.user && sr.user.email) || null; }
-          } catch {}
-          if (!email) {
-            // サーバーがまだ対応していない場合のみ、従来どおりクライアント側で取得する
-            const info = await fetch("https://www.googleapis.com/oauth2/v3/userinfo", { headers: { Authorization: "Bearer " + t.access_token } }).then(r => r.json());
-            email = info.email || null;
-          }
-          if (email) onEmail(email);
+          const sr = await fetch(GAS_URL, {
+            method: "POST", headers: { "Content-Type": "text/plain" },
+            body: JSON.stringify({ action: "loginAccess", accessToken: t.access_token })
+          }).then(r => r.json());
+          if (sr && sr.ok && sr.token) { setCoachSession(sr.token); onEmail((sr.user && sr.user.email) || ""); }
           else onError("ログインできませんでした。管理者へ確認してください");
         } catch { onError("ログインに失敗しました"); }
       },
