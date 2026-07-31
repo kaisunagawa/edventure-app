@@ -66,7 +66,8 @@ function doGet(e) {
     // ── Auth CP2 ── 高リスクなアクションはセッションとロールを確認する。
     // ACTION_POLICIES に載っていないものは、この段階では素通り（CP3以降で広げる）
     var _az = authorizeAction(action, e.parameter.token,
-                              e.parameter.targetEmail || e.parameter.target || "");
+                              e.parameter.targetEmail || e.parameter.target || "",
+                              e.parameter.studentEmail || e.parameter.coachEmail, e.parameter.secret);
     if (!_az.ok) return jsonResponse(_az, callback);
     switch (action) {
       case "getUser":      result = getUser(studentEmail); break;
@@ -393,7 +394,8 @@ function doPost(e) {
     const action = body.action;
     const studentEmail = body.studentEmail;
     // ── Auth CP2 ──（doGetと同じ判定）
-    var _azp = authorizeAction(action, body.token, body.targetEmail || body.target || "");
+    var _azp = authorizeAction(action, body.token, body.targetEmail || body.target || "",
+                               body.studentEmail || body.coachEmail, body.secret);
     if (!_azp.ok) return jsonResponse(_azp);
     switch (action) {
       case "saveLog":      return jsonResponse(saveLog(studentEmail, body));
@@ -8875,6 +8877,43 @@ const ACTION_POLICIES = {
   adminSystemHealth:        { roles: ["JIROKU_ADMIN"], scope: "GLOBAL" }
 };
 
+// ── CP3: 本人の書き込みAPI ──
+// いずれも scope="SELF"。セッションから確定した本人の行だけを書き換えられる。
+// クライアントが送る studentEmail は無視して、必ず本人で上書きする。
+const ACTION_POLICIES_WRITE = {
+  saveLog:{}, saveLogMulti:{}, quickLog:{}, deleteLog:{}, saveSettings:{}, saveOnboarding:{},
+  saveTodayActions:{}, saveGoal:{}, saveWeeklyGoal:{}, archiveGoalItem:{}, migrateLocalTasks:{},
+  submitSurvey:{}, syncCalendar:{}, sendMessage:{}, saveWeeklyReflection:{}, saveContentProfile:{},
+  generateWorkReport:{}, snsSaveAccount:{}, snsSaveMetrics:{}, snsSavePost:{}
+};
+// ── CP4: 本人データの読み取りAPI ──
+// ランキングや「みんなの頑張り」は共有情報なのでここには入れない
+const ACTION_POLICIES_READ = {
+  getUser:{}, getLogs:{}, getReport:{}, getReportList:{}, getHomeData:{}, getGoalTree:{},
+  getGameStatus:{}, getJournal:{}, getInsights:{}, getWeeklySummary:{}, getMonthlyReview:{},
+  getTimeUse:{}, getAchievements:{}, getMessages:{}, p1Status2:{}
+};
+
+// 段階的に有効化するためのスイッチ。スクリプトプロパティで切り替えるので、
+// 有効化・巻き戻しにデプロイが要らない（本番と検証で別々に設定できる）。
+//   AUTH_ENFORCE_WRITE_PROD / AUTH_ENFORCE_WRITE_TEST
+//   AUTH_ENFORCE_READ_PROD  / AUTH_ENFORCE_READ_TEST
+function enforceFlag(kind) {
+  const key = "AUTH_ENFORCE_" + kind + (isTestDeployment() ? "_TEST" : "_PROD");
+  return String(PropertiesService.getScriptProperties().getProperty(key) || "").toUpperCase() === "ON";
+}
+// 段階に応じて、そのアクションに適用するポリシーを返す
+function policyFor(action) {
+  if (ACTION_POLICIES[action]) return ACTION_POLICIES[action];
+  if (enforceFlag("WRITE") && ACTION_POLICIES_WRITE[action]) {
+    return { roles: ["USER","COACH","JIROKU_ADMIN"], scope: "SELF" };
+  }
+  if (enforceFlag("READ") && ACTION_POLICIES_READ[action]) {
+    return { roles: ["USER","COACH","JIROKU_ADMIN"], scope: "SELF" };
+  }
+  return null;
+}
+
 // COACHが相手を見てよいか。担当関係は CoachingNotes / Users.coach_email で判断する
 function isAssignedTo(actorEmail, targetEmail) {
   if (!targetEmail) return true;              // 相手を指定しない操作（一覧など）は scope 側で判断
@@ -8898,9 +8937,34 @@ function isAssignedTo(actorEmail, targetEmail) {
 
 // 認可の判定。actor（操作する人）と target（操作される人）を必ず分ける。
 // クライアントが送ってくる target は「候補」に過ぎず、ここで必ず検査する。
-function authorizeAction(action, token, targetEmail) {
-  const policy = ACTION_POLICIES[action];
-  if (!policy) return { ok: true, skipped: true };   // 未登録＝この段階では対象外
+// 運用・自動化のための「鍵による管理者アクセス」。
+// ブラウザのセッションを持てない場面（コマンドラインからの運用作業、
+// 定期処理の手動実行、LINEの一斉送信など）のために残す抜け道。
+// ★メールだけでは通らない。本人しか知らない共有シークレットが必須★
+// index.html にも coach/index.html にも埋め込まない（埋めた時点で秘密でなくなる）。
+function adminSecretActor(email, secret) {
+  const chk = verifyP1Admin(email, secret);
+  if (!chk.ok) return null;
+  const u = sheetToObjects(getSheet("Users")).find(function (x) { return x.student_email === email; }) || {};
+  return { actor_user_id: String(u.user_id || "admin"), google_sub: String(u.google_sub || ""),
+           email: String(email), role: "JIROKU_ADMIN", organization_id: "", viaSecret: true };
+}
+
+function authorizeAction(action, token, targetEmail, secretEmail, secret) {
+  const policy = policyFor(action);
+  if (!policy) return { ok: true, skipped: true };   // この段階では対象外
+
+  // 鍵つきの管理者アクセスを先に見る（セッションが無くても運用できるように）
+  if (secret) {
+    const sa = adminSecretActor(secretEmail, secret);
+    if (sa) {
+      authAudit("AUTHZ", { result: "ALLOW", action: action, actorUserId: sa.actor_user_id,
+                           targetUserId: targetEmail || "", failureReason: "via_admin_secret" });
+      return { ok: true, actor: sa, forceSelfEmail: null };
+    }
+    authAudit("AUTHZ", { result: "DENY", failureReason: "BAD_ADMIN_SECRET", action: action });
+    return { ok: false, error: "AUTH_REQUIRED" };
+  }
 
   const v = verifySession(token, policy.noCache ? false : true);
   if (!v.ok) {
@@ -8925,7 +8989,8 @@ function authorizeAction(action, token, targetEmail) {
     authAudit("AUTHZ", { result: "ALLOW", action: action,
                          actorUserId: actor.actor_user_id, targetUserId: targetEmail || "" });
   }
-  return { ok: true, actor: actor };
+  // scope=SELF は「本人の分だけ」。呼び出し側で studentEmail をこの値に差し替える
+  return { ok: true, actor: actor, forceSelfEmail: policy.scope === "SELF" ? actor.email : null };
 }
 
 // ── 管理操作の保護 ──
