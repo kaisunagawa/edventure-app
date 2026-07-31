@@ -76,6 +76,22 @@ function doGet(e) {
       case "getGoalTree": result = getGoalTree(studentEmail); break;
       // ── Auth CP1: 公開アクション（認証不要）──
       case "authChallenge": result = authChallenge(); break;
+      case "authInspect": {
+        var _ai = verifyP1Admin(studentEmail, e.parameter.secret);
+        if (!_ai.ok) { result = _ai; break; }
+        var chs = sheetToObjects(getAuthSheet("AuthChallenges"));
+        var ses = sheetToObjects(getAuthSheet("Sessions"));
+        var us  = sheetToObjects(getSheet("Users")).filter(function(u){ return String(u.google_sub||"").trim(); });
+        result = { ok: true,
+          challenges: { total: chs.length, recent: chs.slice(-5).map(function(c){
+            return { id:String(c.challenge_id).slice(0,16), created:c.created_at, used:c.used_at||"", result:c.result, attempts:c.attempt_count }; }) },
+          sessions: { total: ses.length, rows: ses.map(function(x){
+            return { hashHead:String(x.session_token_hash).slice(0,12), user:x.user_id, created:x.created_at,
+                     lastSeen:x.last_seen_at, revoked:x.revoked_at||"", exp:x.expires_at }; }) },
+          linkedUsers: us.map(function(u){ return { email:u.student_email, subHead:String(u.google_sub).slice(0,8)+"…",
+                     userId:u.user_id, role:u.role||"", linkedAt:u.auth_linked_at||"" }; }) };
+        break;
+      }
       case "rotateSessionSecret": {
         var _rs = verifyP1Admin(studentEmail, e.parameter.secret);
         if (!_rs.ok) { result = _rs; break; }

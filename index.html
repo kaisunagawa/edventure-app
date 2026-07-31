@@ -364,9 +364,9 @@ const GAS_PROD = "https://script.google.com/macros/s/AKfycbzJ-QEpPVnmp-LFU5Jxww4
 const GAS_TEST = "https://script.google.com/macros/s/AKfycbw-MhcAhOaqd_JJTlN4LltE-liM-WriznSgcDGIBR0uUMMB-rnYI74GUoXkmyNgTsx5/exec";
 const GAS_URL = (()=>{ try{
   const q=new URLSearchParams(location.search).get("gas");
-  if(q==="test"){ sessionStorage.setItem("gas_mode","test"); return GAS_TEST; }
-  if(q==="prod"){ sessionStorage.removeItem("gas_mode"); return GAS_PROD; }
-  return sessionStorage.getItem("gas_mode")==="test" ? GAS_TEST : GAS_PROD;
+  if(q==="test"){ localStorage.setItem("gas_mode","test"); return GAS_TEST; }
+  if(q==="prod"){ localStorage.removeItem("gas_mode"); return GAS_PROD; }
+  return localStorage.getItem("gas_mode")==="test" ? GAS_TEST : GAS_PROD;
 }catch{ return GAS_PROD; } })();
 let CURRENT_USER = JSON.parse(localStorage.getItem("edventure_user") || "null");
 
@@ -4580,9 +4580,10 @@ function LoginScreen({onLogin}) {
   useEffect(()=>{
     const hash=new URLSearchParams(location.hash.slice(1));
     const idToken=hash.get("id_token");
+    const st=hash.get("state")||"";
     if(idToken){
-      history.replaceState(null,"",location.pathname);
-      handleGoogleLogin({credential:idToken});
+      history.replaceState(null,"",location.pathname+location.search);
+      handleGoogleLogin({credential:idToken, state:st});
     }
   },[]);
 
@@ -4612,9 +4613,13 @@ function LoginScreen({onLogin}) {
     }catch{}
     // サーバー側にまだ認証基盤が無い（段階導入中）場合でも、ログインは従来どおり通す。
     // ここで止めると全利用者が締め出されるため、必ず縮退させる
+    // challenge_id を state に埋め込んで往復させる。
+    // 以前は sessionStorage に置いていたが、LINE内ブラウザなどでは
+    // Googleから戻る際に別のコンテキストになり保存値が消えるため、
+    // challengeを一度も消費できずログインが成立しなかった（実測で確認）。
+    // stateはGoogleがそのまま返してくるので、保存に頼る必要がない。
     const useCh = !!(ch && ch.ok && ch.challenge_id);
-    if(useCh){ try{ sessionStorage.setItem("auth_ch", JSON.stringify({id:ch.challenge_id, state:ch.state})); }catch{} }
-    else { try{ sessionStorage.removeItem("auth_ch"); }catch{} }
+    const stateParam = useCh ? (ch.challenge_id + "~" + ch.state) : "";
     const params=new URLSearchParams({
       client_id: GOOGLE_CLIENT_ID,
       redirect_uri: "https://kaisunagawa.github.io/edventure-app/",
@@ -4622,7 +4627,7 @@ function LoginScreen({onLogin}) {
       scope: "openid email profile",
       nonce: useCh ? ch.nonce : Math.random().toString(36).slice(2),
     });
-    if(useCh) params.set("state", ch.state);
+    if(useCh) params.set("state", stateParam);
     window.location.href="https://accounts.google.com/o/oauth2/v2/auth?"+params;
   };
 
@@ -4633,17 +4638,21 @@ function LoginScreen({onLogin}) {
     // ★IDトークンをサーバーへ送り、検証してもらってセッションを受け取る。
     //   ここで初めて「本人であること」がサーバー側で確定する。
     //   受け取ったらIDトークンは即座に捨てる（長期保存しない）。
-    try{
-      const saved=JSON.parse(sessionStorage.getItem("auth_ch")||"null");
-      if(saved){
+    // stateは "challenge_id~state" の形でGoogleが返してくる
+    const raw=String(res.state||"");
+    const sep=raw.indexOf("~");
+    if(sep>0){
+      const chId=raw.slice(0,sep), chState=raw.slice(sep+1);
+      try{
         const r=await fetch(GAS_URL,{ method:"POST", headers:{"Content-Type":"text/plain"},
           body: JSON.stringify({ action:"login", idToken:res.credential,
-                                 challenge_id:saved.id, state:saved.state }) });
+                                 challenge_id:chId, state:chState }) });
         const j=await r.json();
         if(j&&j.ok&&j.token) setSessionToken(j.token);
-      }
-    }catch{}
-    try{ sessionStorage.removeItem("auth_ch"); }catch{}
+        // 失敗しても従来ログインは継続する（締め出さない）が、原因を追えるよう控える
+        else { try{ localStorage.setItem("auth_last_error", String((j&&j.error)||"UNKNOWN")); }catch{} }
+      }catch(err){ try{ localStorage.setItem("auth_last_error","NETWORK"); }catch{} }
+    } else { try{ localStorage.setItem("auth_last_error","NO_STATE"); }catch{} }
     res.credential=null;   // IDトークンを保持し続けない
 
     const email=payload.email;
