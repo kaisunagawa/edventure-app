@@ -15,9 +15,9 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
   <script src="https://accounts.google.com/gsi/client" async defer></script>
-  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-  <script crossorigin src="https://unpkg.com/htm/dist/htm.js"></script>
+  <script crossorigin="anonymous" integrity="sha384-DGyLxAyjq0f9SPpVevD6IgztCFlnMF6oW/XQGmfe+IsZ8TqEiDrcHkMLKI6fiB/Z" src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"></script>
+  <script crossorigin="anonymous" integrity="sha384-gTGxhz21lVGYNMcdJOyq01Edg0jhn/c22nsx0kyqP0TxaV5WVdsSH1fSDUf5YJj1" src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
+  <script crossorigin="anonymous" integrity="sha384-iPOMe3E8jVgp/PepuDy7lJvw7L/QP97X5POfi+X1EVyDVQi8Kuv/MooNVB5OFXVN" src="https://unpkg.com/htm@3.1.1/dist/htm.js"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -5682,13 +5682,21 @@ try {
     React.createElement(ErrorBoundary,null,html`<${App}/>`)
   );
 } catch(e) {
-  document.getElementById("root").innerHTML = '<div style="'+ERR_STYLE+'">ERROR:\n'+e.message+'\n\n'+e.stack+'</div>';
+  // エラー文面をHTMLとして解釈させない（textContentで入れる）。
+  // 例外メッセージにサーバー由来の文字列が混ざる可能性があるため
+  const _d=document.createElement("div"); _d.setAttribute("style",ERR_STYLE);
+  _d.textContent = "ERROR:\n"+e.message+"\n\n"+e.stack;
+  const _r=document.getElementById("root"); _r.textContent=""; _r.appendChild(_d);
 }
 window.onerror = (msg,src,line,col,err) => {
   console.error("JS ERROR:", msg, "Line:"+line, err);
   // アプリが描画済みなら画面は壊さない。起動前のエラーのみ全画面表示
   const rendered = document.querySelector("#root .nav") || document.querySelector("#root .login-wrap");
-  if(!rendered) document.getElementById("root").innerHTML = '<div style="'+ERR_STYLE+'">JS ERROR:\n'+msg+'\nLine:'+line+' Col:'+col+'</div>';
+  if(!rendered){
+    const _d2=document.createElement("div"); _d2.setAttribute("style",ERR_STYLE);
+    _d2.textContent = "JS ERROR:\n"+msg+"\nLine:"+line+" Col:"+col;
+    const _r2=document.getElementById("root"); _r2.textContent=""; _r2.appendChild(_d2);
+  }
 };
 window.addEventListener("unhandledrejection", e => {
   console.error("Unhandled promise rejection:", e.reason);
