@@ -71,6 +71,13 @@ function doGet(e) {
         break;
       }
       case "getGoalTree": result = getGoalTree(studentEmail); break;
+      case "p1PurgeArchived": {
+        // 検証データの後始末。鍵が必須。dryRun=1 なら数えるだけ
+        var _ap = verifyP1Admin(studentEmail, e.parameter.secret);
+        if (!_ap.ok) { result = _ap; break; }
+        result = p1PurgeArchived(studentEmail, String(e.parameter.dryRun || "") === "1");
+        break;
+      }
       case "p1Status": {
         // 基盤の状態確認。件数のみを返すが、全体情報なので同様に保護する
         var _a2 = verifyP1Admin(studentEmail, e.parameter.secret);
@@ -7755,6 +7762,57 @@ function effectiveGoals(studentEmail, user) {
 }
 function effectiveGoalsText(studentEmail, user) {
   return effectiveGoals(studentEmail, user).map(g => g.goal).join(" / ");
+}
+
+// ARCHIVED の目標・週間目標を物理削除する（検証データの後始末用）。
+// ARCHIVED は本来「実ユーザーの履歴」を残すための状態なので、消す前に必ず
+// 参照件数を確認する。dryRun=true なら数えるだけで消さない。
+// 消せるのは「自分が持ち主」かつ「ARCHIVED」の行だけ。ACTIVE は絶対に消さない。
+function p1PurgeArchived(studentEmail, dryRun) {
+  const goals = p1List("Goals", studentEmail).filter(g => String(g.status).toUpperCase() === "ARCHIVED");
+  const weeklies = p1List("WeeklyGoals", studentEmail).filter(w => String(w.status).toUpperCase() === "ARCHIVED");
+  const allWeeklies = p1List("WeeklyGoals", studentEmail);
+  const logs = sheetToObjects(getSheet("DailyLog")).filter(l => l.student_email === studentEmail);
+  const tasks = p1List("Tasks", studentEmail);
+
+  // 各目標が他から参照されていないか数える。1件でもあれば消さない
+  const report = goals.map(g => {
+    const id = String(g.quarterly_goal_id);
+    const wgRefs = allWeeklies.filter(w => String(w.link_quarterly_goal_id) === id && String(w.status).toUpperCase() !== "ARCHIVED").length;
+    return { kind: "goal", id: id, title: g.title, owner: g.student_email, refs: wgRefs };
+  }).concat(weeklies.map(w => {
+    const id = String(w.weekly_goal_id);
+    const logRefs = logs.filter(l => String(l.primary_weekly_goal_id) === id || String(l.related_goal_ids || "").indexOf(id) !== -1).length;
+    const taskRefs = tasks.filter(t => String(t.link_weekly_goal_id) === id).length;
+    return { kind: "weekly", id: id, title: w.title, owner: w.student_email, refs: logRefs + taskRefs };
+  }));
+
+  if (dryRun) return { ok: true, dryRun: true, candidates: report };
+
+  const deletable = report.filter(r => r.refs === 0);
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  let deleted = 0;
+  try {
+    [["Goals", "quarterly_goal_id"], ["WeeklyGoals", "weekly_goal_id"]].forEach(pair => {
+      const sheet = getP1Sheet(pair[0]);
+      const data = sheet.getDataRange().getValues();
+      const headers = data[0];
+      const idIdx = headers.indexOf(pair[1]);
+      const emIdx = headers.indexOf("student_email");
+      const stIdx = headers.indexOf("status");
+      const ids = deletable.filter(r => (pair[0] === "Goals") === (r.kind === "goal")).map(r => r.id);
+      // 下から消す（上から消すと行番号がずれる）
+      for (let i = data.length - 1; i >= 1; i--) {
+        if (ids.indexOf(String(data[i][idIdx])) === -1) continue;
+        if (String(data[i][emIdx]) !== studentEmail) continue;              // 持ち主が違う行は触らない
+        if (String(data[i][stIdx]).toUpperCase() !== "ARCHIVED") continue;  // ACTIVEは絶対に消さない
+        sheet.deleteRow(i + 1);
+        deleted++;
+      }
+    });
+  } finally { lock.releaseLock(); }
+  return { ok: true, deleted: deleted, skipped: report.filter(r => r.refs > 0) };
 }
 
 // ── 管理操作の保護 ──
