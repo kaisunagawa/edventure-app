@@ -62,6 +62,26 @@ function doGet(e) {
     let result;
     switch (action) {
       case "getUser":      result = getUser(studentEmail); break;
+      // ── Phase 1: 自己経営OS の基盤（管理者のみ実行可能なセットアップ）──
+      case "adminSetupPhase1": {
+        if (studentEmail !== adminEmail()) { result = { ok: false, error: "not owner" }; break; }
+        result = setupPhase1();
+        break;
+      }
+      case "p1Status": {
+        // 基盤が正しく入っているかの確認用（オーナーのみ）
+        if (studentEmail !== adminEmail()) { result = { ok: false, error: "not owner" }; break; }
+        var _st = {};
+        Object.keys(P1_SHEETS).forEach(function (n) { var s = getSheet(n); _st[n] = s ? { rows: s.getLastRow() - 1, cols: s.getLastColumn() } : null; });
+        var _cols = {};
+        Object.keys(P1_ADDED_COLUMNS).forEach(function (n) {
+          var s = getSheet(n); if (!s) { _cols[n] = null; return; }
+          var h = s.getRange(1, 1, 1, s.getLastColumn()).getValues()[0];
+          _cols[n] = P1_ADDED_COLUMNS[n].filter(function (c) { return h.indexOf(c) !== -1; });
+        });
+        result = { ok: true, sheets: _st, presentColumns: _cols };
+        break;
+      }
       case "getHomeData":  result = getHomeData(studentEmail); break;
       case "adminAiUsage": {
         if (studentEmail !== adminEmail()) { result = { ok: false, error: "not owner" }; break; }
@@ -259,6 +279,7 @@ function doPost(e) {
       case "snsSavePost":    return jsonResponse(snsSavePost(studentEmail, body));
       case "saveTodayActions": return jsonResponse(saveTodayActions(studentEmail, body));
       case "generateWorkReport": return jsonResponse(generateWorkReport(studentEmail, body));
+      case "migrateLocalTasks": return jsonResponse(migrateLocalTasks(studentEmail, body));
       case "submitSurvey": return jsonResponse(submitSurvey(studentEmail, body));
       case "syncCalendar": return jsonResponse(syncCalendar(studentEmail, body));
       case "coachSaveProfile":     return jsonResponse(coachSaveProfile(body.coachEmail, body));
@@ -405,7 +426,10 @@ function getUser(studentEmail) {
     trialDaysLeft: accessState.trialDaysLeft,
     // サーバー(Kai権限)から直接カレンダーに書ける本人（=オーナー）は、クライアント側の
     // カレンダー書き込みを止めて二重登録を防ぐ。それ以外は従来通りクライアントで書く
-    serverCalendar: (studentEmail === adminEmail() && !!user.google_calendar_id)
+    serverCalendar: (studentEmail === adminEmail() && !!user.google_calendar_id),
+    // Phase 1: 自己経営OS の段階公開。この人に新機能を出すかどうか
+    goalsV1: hasFeature(user, P1_FEATURE_KEY),
+    taskMigratedAt: String(user.task_migrated_at || "")
   } };
 }
 
@@ -7336,6 +7360,215 @@ function formatDate(date) {
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // セットアップ（初回のみ実行）
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Phase 1: 自己経営OS のデータ基盤
+// 3か月目標 → 2週間スプリント → 週間目標 → 今日のフォーカス → タスク → 毎時間ログ
+// を親子関係でつなぐための土台。既存シートは列を追加するだけで、削除・改名はしない。
+// 設計の詳細と決定の経緯は PHASE1_BASELINE.md を参照。
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+// 新規4シートの列定義。ここを唯一の定義元とし、取得関数が無ければ自動生成する
+const P1_SHEETS = {
+  Goals: ["quarterly_goal_id","student_email","title","category","current_value","target_value","unit",
+    "start_date","end_date","why","success_condition","evidence","guardrails","priority","status",
+    "created_at","updated_at"],
+  Sprints: ["sprint_id","link_quarterly_goal_id","student_email","name","start_date","end_date",
+    "bottleneck","target_state","hypothesis","action_metric","result_metric","try_actions","stop_actions",
+    "if_then","success_condition","coaching_note","confirmed_at","status","created_at","updated_at"],
+  WeeklyGoals: ["weekly_goal_id","link_sprint_id","link_quarterly_goal_id","student_email","title",
+    "metric_type","unit","target_total","min_line","std_line","stretch_line","planned_days",
+    "actual_value","actual_calculated_at","status","created_at","updated_at"],
+  Tasks: ["task_id","student_email","date","title","priority","link_weekly_goal_id","link_daily_focus_id",
+    "estimated_minutes","actual_minutes","status","completed_at","completion_condition","memo",
+    "created_at","updated_at"]
+};
+// 既存シートへ追加する列（削除・改名は一切しない）
+const P1_ADDED_COLUMNS = {
+  DailyLog: ["action_execution_id","quantity","unit","primary_weekly_goal_id","related_goal_ids",
+    "link_task_id","deleted_at"],
+  Journal: ["daily_focus_id","focus_completion_condition","focus_min_line","focus_planned_time",
+    "focus_if_then","link_weekly_goal_id","focus_achievement_state","focus_miss_reason"],
+  Users: ["features","task_migrated_at"]
+};
+
+// 新規シートを取得（無ければ列付きで作る）。既存のgetXxxSheet()と同じ流儀
+function getP1Sheet(name) {
+  let sheet = getSheet(name);
+  if (!sheet) {
+    sheet = getSpreadsheet().insertSheet(name);
+    sheet.appendRow(P1_SHEETS[name]);
+  }
+  return sheet;
+}
+// 既存シートに不足している列を追加する（1回のsetValuesでまとめて書く）
+function ensureP1Columns(sheetName) {
+  const sheet = getSheet(sheetName);
+  if (!sheet) return [];
+  const want = P1_ADDED_COLUMNS[sheetName] || [];
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  const missing = want.filter(c => headers.indexOf(c) === -1);
+  if (missing.length) sheet.getRange(1, headers.length + 1, 1, missing.length).setValues([missing]);
+  return missing;
+}
+
+// ── ID生成 ──
+// メールをそのままIDに埋めない（長い・個人情報）ため、安定した短縮ハッシュを使う。
+// 同じメールからは常に同じ8文字が出る（DB移行後もそのまま使える）
+function makeUserKey(email) {
+  const bytes = Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, String(email || "").toLowerCase());
+  return bytes.slice(0, 4).map(b => ((b & 0xFF) + 0x100).toString(16).slice(1)).join("");
+}
+// 実行イベントの冪等キー。saveLogのUpsertキー(email+date+time_block)と一対一で対応するため、
+// 同じ入力からは必ず同じIDになり、再送・連打でも重複しない
+function makeExecutionId(email, dateStr, timeBlock) {
+  return "exec_" + makeUserKey(email) + "_" + String(dateStr) + "_" + String(timeBlock).replace(/[^0-9]/g, "");
+}
+// タスクIDも決定的に作る。移行が途中で失敗して再試行されても同じIDになるよう、
+// 連番ではなくタイトル由来のハッシュ＋同名の出現順で構成する
+function makeTaskId(email, dateStr, title, occurrenceIndex) {
+  const h = Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, String(title || ""))
+    .slice(0, 3).map(b => ((b & 0xFF) + 0x100).toString(16).slice(1)).join("");
+  return "task_" + makeUserKey(email) + "_" + String(dateStr) + "_" + h + "_" + (occurrenceIndex || 0);
+}
+// 新規レコード用の一意ID（目標・スプリント・週間目標・フォーカス）
+function makeP1Id(prefix) {
+  return prefix + "_" + Date.now() + "_" + Math.random().toString(36).slice(2, 6);
+}
+
+// ── 汎用アクセス層 ──
+// UIやAI処理からSpreadsheetAppへ直接依存させないための入口。
+// 将来Supabase等へ移行する際は、この2関数の中身だけを差し替えればよい
+function p1List(sheetName, studentEmail) {
+  const rows = sheetToObjects(getP1Sheet(sheetName));
+  return studentEmail ? rows.filter(r => r.student_email === studentEmail) : rows;
+}
+// idColumn の値が一致する行を更新、無ければ追加する（行番号は外部キーにしない）
+function p1Upsert(sheetName, idColumn, record) {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    const sheet = getP1Sheet(sheetName);
+    const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+    const now = new Date().toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" });
+    const idIdx = headers.indexOf(idColumn);
+    const data = sheet.getDataRange().getValues();
+    for (let i = 1; i < data.length; i++) {
+      if (String(data[i][idIdx]) !== String(record[idColumn])) continue;
+      const row = data[i].slice();
+      headers.forEach((h, c) => { if (record[h] !== undefined) row[c] = record[h]; });
+      if (headers.indexOf("updated_at") !== -1) row[headers.indexOf("updated_at")] = now;
+      sheet.getRange(i + 1, 1, 1, headers.length).setValues([row]);
+      return { id: record[idColumn], created: false };
+    }
+    const row = headers.map(h => {
+      if (record[h] !== undefined) return record[h];
+      if (h === "created_at" || h === "updated_at") return now;
+      return "";
+    });
+    sheet.appendRow(row);
+    return { id: record[idColumn], created: true };
+  } finally { lock.releaseLock(); }
+}
+
+// ── 段階公開（features）──
+// 新機能は features に該当キーを持つ人にだけ出す。cohortで分岐すると全画面に条件が
+// 散らばるため、1つの列で制御する（学生の除外も自動的に達成される）
+const P1_FEATURE_KEY = "goals_v1";
+function hasFeature(user, key) {
+  if (!user) return false;
+  if (user.student_email === adminEmail()) return true; // オーナーは常に有効
+  return String(user.features || "").split(",").map(s => s.trim()).indexOf(key) !== -1;
+}
+
+// ── localStorage にしかなかったタスク情報のサーバー移行 ──
+// 想定時間・状態・メモは端末のlocalStorageにのみ存在し、機種変更で失われる状態だった。
+// これを Tasks シートへ移す。日単位で全スキップすると取りこぼすため、タスク単位でマージする。
+// 既存のサーバーデータは絶対に上書きしない。再試行しても同じIDになるので重複しない。
+// body.items = [{date, title, estimated_minutes, status, memo, completed}] の配列
+function migrateLocalTasks(studentEmail, body) {
+  let items;
+  try { items = JSON.parse(body.items || "[]"); } catch (e) { return { ok: false, error: "invalid items" }; }
+  if (!Array.isArray(items)) return { ok: false, error: "invalid items" };
+
+  // 古い端末を後から開いた時の上書きを防ぐ最重要の防御
+  const user = getFilteredRows("Users", "student_email", studentEmail)[0];
+  if (user && String(user.task_migrated_at || "").trim()) {
+    return { ok: true, skipped: true, reason: "already_migrated", migrated_at: String(user.task_migrated_at) };
+  }
+
+  const existing = p1List("Tasks", studentEmail);
+  const byId = {};
+  const byDateTitle = {};
+  existing.forEach(t => {
+    byId[String(t.task_id)] = true;
+    byDateTitle[String(t.date) + "|" + String(t.title).trim()] = true;
+  });
+
+  // 同名タスクの出現順を数える（決定的なIDにするため）
+  const seenCount = {};
+  let created = 0, skipped = 0;
+  items.forEach(it => {
+    const date = String(it.date || "").slice(0, 10);
+    const title = String(it.title || "").trim();
+    if (!date || !title) return;
+    const key = date + "|" + title;
+    const idx = seenCount[key] = (seenCount[key] === undefined ? 0 : seenCount[key] + 1);
+    const taskId = makeTaskId(studentEmail, date, title, idx);
+
+    if (byId[taskId]) { skipped++; return; }               // 同じIDが既にある
+    if (idx === 0 && byDateTitle[key]) { skipped++; return; } // 同日同名が既にある（既存を優先）
+
+    // 同名の2件目以降は、どの補助情報がどれのものか判別できないため付けない（推測しない）
+    const isFirst = idx === 0;
+    p1Upsert("Tasks", "task_id", {
+      task_id: taskId,
+      student_email: studentEmail,
+      date: date,
+      title: title,
+      priority: "NORMAL",
+      link_weekly_goal_id: "",
+      link_daily_focus_id: "",
+      estimated_minutes: isFirst ? (Number(it.estimated_minutes) > 0 ? Number(it.estimated_minutes) : "") : "",
+      actual_minutes: "",
+      status: isFirst ? (it.completed ? "COMPLETED" : String(it.status || "TODO")) : "TODO",
+      completed_at: "",
+      completion_condition: "",
+      memo: isFirst ? String(it.memo || "") : ""
+    });
+    byId[taskId] = true;
+    byDateTitle[key] = true;
+    created++;
+  });
+
+  // 成功した時だけ記録する（失敗時はフラグを立てず、次回起動で自動再試行される）
+  const sheet = getSheet("Users");
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  let colIdx = headers.indexOf("task_migrated_at");
+  if (colIdx === -1) { colIdx = headers.length; sheet.getRange(1, colIdx + 1).setValue("task_migrated_at"); }
+  const data = sheet.getDataRange().getValues();
+  const emailIdx = headers.indexOf("student_email");
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][emailIdx]) !== studentEmail) continue;
+    sheet.getRange(i + 1, colIdx + 1).setValue(new Date().toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" }));
+    break;
+  }
+  return { ok: true, created: created, skipped: skipped, total: items.length };
+}
+
+// ── Phase 1 のセットアップ（新規シート作成＋既存シートへの列追加）──
+// 何度実行しても同じ結果になる（既にあるものは触らない）
+function setupPhase1() {
+  const created = [], addedCols = {};
+  Object.keys(P1_SHEETS).forEach(name => {
+    if (!getSheet(name)) { getP1Sheet(name); created.push(name); }
+  });
+  Object.keys(P1_ADDED_COLUMNS).forEach(name => {
+    const added = ensureP1Columns(name);
+    if (added.length) addedCols[name] = added;
+  });
+  return { ok: true, createdSheets: created, addedColumns: addedCols };
+}
 
 function setupSheets() {
   const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
