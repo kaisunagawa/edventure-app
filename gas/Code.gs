@@ -188,11 +188,33 @@ function doGet(e) {
         if (!_ai.ok) { result = _ai; break; }
         var chs = sheetToObjects(getAuthSheet("AuthChallenges"));
         var ses = sheetToObjects(getAuthSheet("Sessions"));
-        var us  = sheetToObjects(getSheet("Users")).filter(function(u){ return String(u.google_sub||"").trim(); });
+        var allUsers = sheetToObjects(getSheet("Users"));
+        var us  = allUsers.filter(function(u){ return String(u.google_sub||"").trim(); });
+        // ★「本当に使えるセッション」を数える★
+        // revoked_at が空でも、期限切れや token_version のずれで検証に失敗するものがある。
+        // ロール付与などで token_version を上げた際、古い行には印が付かないため、
+        // 単純に revoked_at だけで数えると実態より多く見えてしまう。
+        // CP3/CP4の切り替え判断に使う数字なので、検証と同じ条件で数える。
+        var _tvByUser = {};
+        allUsers.forEach(function(u){ if (u.user_id) _tvByUser[String(u.user_id)] = Number(u.token_version || 0); });
+        var _now = Date.now();
+        var usable = ses.filter(function(x){
+          if (String(x.revoked_at || "").trim()) return false;
+          if (new Date(String(x.expires_at)).getTime() <= _now) return false;
+          var cur = _tvByUser[String(x.user_id)];
+          if (cur === undefined) return false;
+          return Number(x.token_version || 0) === cur;
+        });
+        var usableUsers = {};
+        usable.forEach(function(x){ usableUsers[String(x.user_id)] = 1; });
         result = { ok: true,
           challenges: { total: chs.length, recent: chs.slice(-5).map(function(c){
             return { id:String(c.challenge_id).slice(0,16), created:c.created_at, used:c.used_at||"", result:c.result, attempts:c.attempt_count }; }) },
-          sessions: { total: ses.length, rows: ses.map(function(x){
+          sessions: { total: ses.length,
+            usable: usable.length,
+            usableUsers: Object.keys(usableUsers).length,
+            activeUsers: allUsers.filter(function(u){ return String(u.is_active).toUpperCase()==="TRUE"; }).length,
+            rows: ses.map(function(x){
             return { hashHead:String(x.session_token_hash).slice(0,12), user:x.user_id, created:x.created_at,
                      lastSeen:x.last_seen_at, revoked:x.revoked_at||"", exp:x.expires_at }; }) },
           linkedUsers: us.map(function(u){ return { email:u.student_email, subHead:String(u.google_sub).slice(0,8)+"…",
