@@ -71,6 +71,19 @@ function doGet(e) {
         break;
       }
       case "getGoalTree": result = getGoalTree(studentEmail); break;
+      case "p1Backup": {
+        // バックアップ（複製）作成。鍵が必須
+        var _ab = verifyP1Admin(studentEmail, e.parameter.secret);
+        if (!_ab.ok) { result = _ab; break; }
+        result = p1BackupViaSheets();
+        break;
+      }
+      case "p1BackupInfo": {
+        var _abi = verifyP1Admin(studentEmail, e.parameter.secret);
+        if (!_abi.ok) { result = _abi; break; }
+        result = p1BackupInfo(e.parameter.id);
+        break;
+      }
       case "p1PurgeArchived": {
         // 検証データの後始末。鍵が必須。dryRun=1 なら数えるだけ
         var _ap = verifyP1Admin(studentEmail, e.parameter.secret);
@@ -7813,6 +7826,48 @@ function p1PurgeArchived(studentEmail, dryRun) {
     });
   } finally { lock.releaseLock(); }
   return { ok: true, deleted: deleted, skipped: report.filter(r => r.refs > 0) };
+}
+
+// バックアップ（複製）を作る。DriveApp を使うと Drive 権限の承認ダイアログが必要になり、
+// 本人が画面を操作しないと進めないが、SpreadsheetApp.copy() なら既に許可済みの
+// スプレッドシート権限だけで複製できるため、Webアプリ経由でも実行できる。
+// コピー先は所有者（Kai）のマイドライブ直下。外部には一切出さない。
+function p1BackupViaSheets() {
+  const src = getSpreadsheet();
+  const stamp = Utilities.formatDate(new Date(), "Asia/Tokyo", "yyyyMMdd_HHmm");
+  const copy = src.copy("JIROKU_backup_" + stamp);
+  const counts = {};
+  src.getSheets().forEach(s => { counts[s.getName()] = Math.max(0, s.getLastRow() - 1); });
+  const copyCounts = {};
+  copy.getSheets().forEach(s => { copyCounts[s.getName()] = Math.max(0, s.getLastRow() - 1); });
+  // 元とコピーで件数がズレていないかをその場で突き合わせる
+  const mismatch = Object.keys(counts).filter(k => counts[k] !== copyCounts[k]);
+  return {
+    ok: true,
+    name: copy.getName(),
+    newSpreadsheetId: copy.getId(),
+    sourceSpreadsheetId: src.getId(),
+    url: copy.getUrl(),
+    sheetCount: copy.getSheets().length,
+    counts: copyCounts,
+    mismatch: mismatch
+  };
+}
+
+// バックアップの共有範囲を確認する。意図せず他人に見える状態になっていないかを見る。
+// getEditors/getViewers は SpreadsheetApp の権限だけで取得できる（Drive権限は不要）。
+function p1BackupInfo(id) {
+  const ss = SpreadsheetApp.openById(String(id || ""));
+  const owner = ss.getOwner ? ss.getOwner() : null;
+  return {
+    ok: true,
+    name: ss.getName(),
+    id: ss.getId(),
+    owner: owner ? owner.getEmail() : "(取得不可)",
+    editors: ss.getEditors().map(u => u.getEmail()),
+    viewers: ss.getViewers().map(u => u.getEmail()),
+    sheetCount: ss.getSheets().length
+  };
 }
 
 // ── 管理操作の保護 ──
