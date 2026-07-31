@@ -327,7 +327,17 @@
       .t-a { background: var(--amber-l); color: #FCD34D; }
       input[type="date"].inp, input[type="date"].login-inp, select { color-scheme: dark; }
     }
-  </style>
+  
+/* ログイン待ちのくるくる。待っている間に何も動かないと不安なので必ず出す */
+@keyframes jrk-spin { to { transform: rotate(360deg); } }
+.jrk-spinner {
+  width: 34px; height: 34px; border-radius: 50%;
+  border: 3px solid rgba(255,255,255,0.18);
+  border-top-color: var(--accent, #0891B2);
+  animation: jrk-spin .8s linear infinite;
+  margin: 0 auto 14px;
+}
+</style>
 </head>
 <body>
 <div id="root">
@@ -4062,6 +4072,25 @@ function GoalTreeSheet({onClose, onToast}) {
 // セキュリティ強化にともなう一度きりの再ログイン案内。
 // 既にログイン済みの人はログイン画面を通らないため、そのままではセッションを
 // 取得できない。ここで一度だけ入り直してもらう。データや設定は消えない。
+// ログイン待ちの表示。回るマークに加えて、経過に応じて文言を変える。
+// 同じ画面のまま止まって見えると「固まった」と感じてしまうため。
+function LoginWaiting() {
+  const [sec,setSec]=useState(0);
+  useEffect(()=>{ const t=setInterval(()=>setSec(x=>x+1),1000); return ()=>clearInterval(t); },[]);
+  const msg = sec<4 ? "ログインしています…"
+            : sec<9 ? "あなたの記録を読み込んでいます…"
+            : sec<16 ? "もう少しで完了します…"
+            : "時間がかかっています。そのままお待ちください";
+  return html`
+    <div style=${{textAlign:"center",padding:"6px 0"}}>
+      <div class="jrk-spinner"></div>
+      <div style=${{color:"var(--text)",fontSize:14,fontWeight:600,marginBottom:6}}>${msg}</div>
+      <div style=${{color:"var(--sub)",fontSize:12,opacity:.8}}>
+        ${sec<16 ? "回線状況により10秒ほどかかることがあります" : "30秒たっても変わらない場合は、アプリを開き直してください"}
+      </div>
+    </div>`;
+}
+
 function ReauthGate() {
   const relogin = () => {
     try {
@@ -4769,9 +4798,13 @@ function LoginScreen({onLogin}) {
     const name=payload.name||payload.given_name||"";
     try{
       // 既存ユーザー確認
+      // ★必ずタイムアウトを付ける★
+      // 以前は待ち時間の上限が無く、サーバーの応答が返らないと
+      // 「ログインしています…」から永久に動かなくなっていた（2026-08-01に発生）
+      const withTimeout=(pr,ms)=>Promise.race([pr,new Promise((_,rej)=>setTimeout(()=>rej(new Error("timeout")),ms))]);
       const url=new URL(GAS_URL); url.searchParams.set("action","getUser"); url.searchParams.set("studentEmail",email);
-      const r=await fetch(url).then(res=>res.json());
-      await sessionPromise;   // 並行で走らせていた本人確認の完了をここで待つ
+      const r=await withTimeout(fetch(url).then(res=>res.json()), 25000);
+      try{ await withTimeout(sessionPromise, 25000); }catch{}   // 本人確認は待つが、詰まらせない
       // 認証段階が SESSION_OPTIONAL 以上なら、セッションを取れていない状態で
       // 従来のメール方式のまま中へ入れてはいけない
       if(strictNow && !getSessionToken()){
@@ -4791,7 +4824,11 @@ function LoginScreen({onLogin}) {
         setNickname(name);
         setStep("profile");
       }
-    }catch{ setError("接続エラーが発生しました"); }
+    }catch(err){
+      setError(String(err&&err.message)==="timeout"
+        ? "サーバーの応答がありませんでした。通信環境を確認して、もう一度お試しください"
+        : "接続エラーが発生しました");
+    }
     setLoading(false);
   };
 
@@ -4993,10 +5030,7 @@ function LoginScreen({onLogin}) {
       <div class="login-sub">時間を記録し、目標を達成する</div>
       <div class="login-box" style=${{alignItems:"center"}}>
         ${loading
-          ? html`<div style=${{color:"var(--sub)",fontSize:14,textAlign:"center",lineHeight:1.8}}>
-              ログインしています…<br/>
-              <span style=${{fontSize:12,opacity:.75}}>数秒かかります。そのままお待ちください</span>
-            </div>`
+          ? html`<${LoginWaiting}/>`
           : html`<button onClick=${handleGoogleSignIn} style=${{display:"flex",alignItems:"center",gap:10,padding:"10px 20px",borderRadius:8,border:"1px solid #dadce0",background:"#fff",cursor:"pointer",fontSize:15,fontWeight:500,color:"#3c4043",width:280,justifyContent:"center"}}>
               <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" width="18" height="18"/>
               Googleでサインイン

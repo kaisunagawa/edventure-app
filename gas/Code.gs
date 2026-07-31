@@ -8567,13 +8567,21 @@ const BREAKER_MIN_SAMPLES = 8;
 const BREAKER_FAIL_RATIO = 0.8;        // tokeninfo障害がこの割合を超えたら一時停止
 const BREAKER_COOLDOWN_MIN = 5;
 
-function rateHit(key, maxPerHour) {
+// ★数えるのは「失敗」だけ★
+// 当初は試行のたびに数えていたが、Googleは同じログインセッション中は
+// 同じIDトークンを返すため、正規の利用者が何度かやり直すだけで
+// 同じ指紋が積み上がり、自分自身を締め出してしまった（2026-08-01に発生）。
+// 総当たりを止めるのが目的なので、失敗回数だけを見る。
+function rateCheck(key, maxPerHour) {
+  const n = Number(CacheService.getScriptCache().get("rl_" + key) || 0);
+  return { count: n, exceeded: n >= maxPerHour };
+}
+function rateFail(key) {
   const cache = CacheService.getScriptCache();
   const k = "rl_" + key;
-  const n = Number(cache.get(k) || 0) + 1;
-  cache.put(k, String(n), 3600);
-  return { count: n, exceeded: n > maxPerHour };
+  cache.put(k, String(Number(cache.get(k) || 0) + 1), 3600);
 }
+function rateClear(key) { try { CacheService.getScriptCache().remove("rl_" + key); } catch (e) {} }
 
 // tokeninfo が連続して落ちている時だけ短時間止める。
 // ★止まっている間も既存セッションは使える（verifySessionには影響しない）★
@@ -8754,17 +8762,18 @@ function authLoginAccess(body) {
   const generic = { ok: false, error: "ログインできませんでした。管理者へ確認してください" };
   const fp = body.accessToken ? sha256Hex(body.accessToken).slice(0, 16) : "";
   const fail = function (reason) {
+    if (fp) rateFail("fpa_" + fp);
     authAudit("LOGIN_ACCESS", { result: "FAIL", failureReason: reason, action: "loginAccess", credentialFingerprint: fp });
     return generic;
   };
   const brk = breakerState();
   if (brk.open) return { ok: false, error: "ただいまログインが混み合っています。数分後にもう一度お試しください" };
-  if (fp && rateHit("fpa_" + fp, LOGIN_FP_MAX_PER_HOUR).exceeded) return fail("FP_RATE_LIMIT");
+  if (fp && rateCheck("fpa_" + fp, LOGIN_FP_MAX_PER_HOUR).exceeded) return fail("FP_RATE_LIMIT");
 
   const v = verifyAccessToken(body.accessToken);
   breakerRecord(!v.ok && String(v.reason).indexOf("TOKENINFO_") === 0);
   if (!v.ok) return fail(v.reason);
-  if (rateHit("sub_" + v.sub, LOGIN_SUB_MAX_PER_HOUR).exceeded) return fail("SUB_RATE_LIMIT");
+  if (rateCheck("sub_" + v.sub, LOGIN_SUB_MAX_PER_HOUR).exceeded) return fail("SUB_RATE_LIMIT");
   if (isTestDeployment() && v.email !== String(adminEmail()).toLowerCase()) return fail("TEST_ENV_ADMIN_ONLY");
 
   const u = resolveUserByIdentity(v.sub, v.email, v.hd);
@@ -8933,6 +8942,7 @@ function authLogin(body) {
   const generic = { ok: false, error: "ログインできませんでした。管理者へ確認してください" };
   const fp = body.idToken ? sha256Hex(body.idToken).slice(0, 16) : "";
   const fail = function (reason) {
+    if (fp) rateFail("fp_" + fp);
     authAudit("LOGIN", { result: "FAIL", failureReason: reason, action: "login", credentialFingerprint: fp });
     return generic;
   };
@@ -8941,7 +8951,7 @@ function authLogin(body) {
   if (brk.open) return { ok: false, error: "ただいまログインが混み合っています。数分後にもう一度お試しください" };
 
   // 同じIDトークンを何度も投げ込むのを止める（IPが使えないための代替）
-  if (fp && rateHit("fp_" + fp, LOGIN_FP_MAX_PER_HOUR).exceeded) return fail("FP_RATE_LIMIT");
+  if (fp && rateCheck("fp_" + fp, LOGIN_FP_MAX_PER_HOUR).exceeded) return fail("FP_RATE_LIMIT");
 
   const ch = consumeChallenge(body.challenge_id, body.state);
   if (!ch.ok) return fail(ch.reason);
@@ -8950,7 +8960,7 @@ function authLogin(body) {
   breakerRecord(!v.ok && String(v.reason).indexOf("TOKENINFO_") === 0);
   if (!v.ok) return fail(v.reason);
 
-  if (rateHit("sub_" + v.sub, LOGIN_SUB_MAX_PER_HOUR).exceeded) return fail("SUB_RATE_LIMIT");
+  if (rateCheck("sub_" + v.sub, LOGIN_SUB_MAX_PER_HOUR).exceeded) return fail("SUB_RATE_LIMIT");
 
   // 検証環境は本番と同じスプレッドシートを見ている。
   // 一般利用者が ?gas=test を付けて別の認証状態に入れないよう、管理者だけに限定する
@@ -8962,6 +8972,8 @@ function authLogin(body) {
   const userRow = sheetToObjects(getSheet("Users")).find(x => String(x.user_id) === String(u.userId)) || {};
   const sess = issueSession({ userId: u.userId, sub: v.sub, role: userRow.role || "USER",
                               organizationId: userRow.organization_id || "", tokenVersion: userRow.token_version || 0 });
+  if (fp) rateClear("fp_" + fp);
+  rateClear("sub_" + v.sub);
   authAudit("LOGIN", { result: "SUCCESS", actorUserId: u.userId, action: "login",
                        credentialFingerprint: fp, failureReason: u.linked ? "sub_linked" : "" });
   return { ok: true, token: sess.token, expiresAt: sess.expiresAt,
