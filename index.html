@@ -4182,6 +4182,12 @@ function shouldShowWeeklyReview(weekly) {
   return days >= 0 && days <= 9;                              // 直近に終わった週のものだけ
 }
 
+// サーバー側がこの人のカレンダーへ直接書き込む設定になっているか。
+// その場合、端末ごとの連携は不要なので「連携がまだです」を出さない
+function isServerCalendar() {
+  try { return localStorage.getItem("server_calendar") === "1"; } catch { return false; }
+}
+
 // ── Settings ──
 // 設定の折りたたみセクション。安定した識別子を保つためコンポーネント外に定義する
 // （以前はSettingsScreen内で毎回定義しており、入力のたびに中身が作り直されて
@@ -4590,7 +4596,7 @@ function SettingsScreen({onToast,onLogout,onGoalSaved,profile,onProfileSaved,onC
       ${GroupLabel("連携")}
 
       <!-- カレンダー -->
-      <${SettingsSec} k="calendar" icon="📅" title="Googleカレンダー連携" sub=${calLinked?"連携済み":""} open=${openSec==="calendar"} onToggle=${()=>setOpenSec(openSec==="calendar"?"":"calendar")}>
+      <${SettingsSec} k="calendar" icon="📅" title="Googleカレンダー連携" sub=${(calLinked||isServerCalendar())?"連携済み":""} open=${openSec==="calendar"} onToggle=${()=>setOpenSec(openSec==="calendar"?"":"calendar")}>
         <p style=${{fontSize:13,color:"var(--sub)",lineHeight:1.7,marginBottom:14}}>${calLinked?"連携済みです。ホームに今日の予定が表示され、記録の「何をしましたか？」に予定が自動入力されます。":"連携すると、ホームに今日の予定が表示され、記録の「何をしましたか？」にカレンダーの予定が自動で入ります。記録の手間が大幅に減ります。"}</p>
         ${calLinked
           ? html`<div>
@@ -5782,7 +5788,9 @@ function App() {
   const logout=()=>{
     localStorage.removeItem("edventure_user");
     localStorage.removeItem("line_prompted");
-    localStorage.removeItem("cal_linked");
+    // cal_linked は消さない。これは「この端末でカレンダーを連携済み」という
+    // 端末側の状態で、ログインし直しても連携は生きている。
+    // 消していたため、再ログインのたびに「連携がまだです」と誤表示していた
     CURRENT_USER=null; setUser(null);
   };
 
@@ -5822,7 +5830,7 @@ function App() {
       ${showAnnounce && html`<${FeatureAnnounce} onClose=${dismissAnnounce} onGo=${()=>{dismissAnnounce();setTab("brain");}}/>`}
       ${showSurvey && !showAnnounce && html`<${SurveyModal} onDone=${answerSurvey} onLater=${snoozeSurvey}/>`}
       ${user.lineLinked===false && !bannerDismissed && html`<${LineLinkBanner} email=${user.email} onDismiss=${()=>setBannerDismissed(true)}/>`}
-      ${!calLinked && !calBannerDismissed && html`<${CalendarLinkBanner} onGoToSettings=${()=>setTab("settings")} onDismiss=${()=>setCalBannerDismissed(true)}/>`}
+      ${!calLinked && !calBannerDismissed && !isServerCalendar() && html`<${CalendarLinkBanner} onGoToSettings=${()=>setTab("settings")} onDismiss=${()=>setCalBannerDismissed(true)}/>`}
       <div style=${{position:"relative",flex:1,minHeight:0}}>
         <div class="screen">
           <div style=${{display:tab==="home"?"block":"none"}}><${HomeScreen} goalData=${goalData} onGoalSaved=${setGoalData} profile=${profile} isActive=${tab==="home"} showInCommunity=${user.showInCommunity!==false} studentCohort=${user.cohort||""} recordDays=${user.recordDays} onGoTimer=${()=>setTab("timer")}/></div>
