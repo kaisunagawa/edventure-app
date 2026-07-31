@@ -357,17 +357,12 @@
 const { useState, useEffect, useRef, useCallback } = React;
 const html = htm.bind(React.createElement);
 
-const GAS_PROD = "https://script.google.com/macros/s/AKfycbzJ-QEpPVnmp-LFU5Jxww4VFP1qaseMtwCrzKxAA6ZULr1y3h_UeKzVdhHnl5ze57U/exec";
-// 認証の段階導入中だけ使う検証用の切り替え。?gas=test を付けた時だけテスト用バックエンドを見る。
-// Googleログインのリダイレクト先は本番ドメインに固定されているため、
-// 実機（スマホ・LINE内ブラウザ）でログインを検証するにはこの仕組みが要る。
-const GAS_TEST = "https://script.google.com/macros/s/AKfycbw-MhcAhOaqd_JJTlN4LltE-liM-WriznSgcDGIBR0uUMMB-rnYI74GUoXkmyNgTsx5/exec";
-const GAS_URL = (()=>{ try{
-  const q=new URLSearchParams(location.search).get("gas");
-  if(q==="test"){ localStorage.setItem("gas_mode","test"); return GAS_TEST; }
-  if(q==="prod"){ localStorage.removeItem("gas_mode"); return GAS_PROD; }
-  return localStorage.getItem("gas_mode")==="test" ? GAS_TEST : GAS_PROD;
-}catch{ return GAS_PROD; } })();
+const GAS_URL = "https://script.google.com/macros/s/AKfycbzJ-QEpPVnmp-LFU5Jxww4VFP1qaseMtwCrzKxAA6ZULr1y3h_UeKzVdhHnl5ze57U/exec";
+// 以前あった ?gas=test の切り替えは削除した。
+// 端末に保存する作りだったため、一度検証環境を見た端末がそのまま固定され、
+// 検証環境の再デプロイ中にログインできなくなる事故につながった。
+// 念のため、過去に保存された設定をここで消しておく
+try { localStorage.removeItem("gas_mode"); sessionStorage.removeItem("gas_mode"); } catch {}
 let CURRENT_USER = JSON.parse(localStorage.getItem("edventure_user") || "null");
 
 // タイマー終了などをバックグラウンド（アプリを閉じている間）でも通知するためのFirebase Cloud Messaging設定。

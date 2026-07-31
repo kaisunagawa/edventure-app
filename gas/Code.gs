@@ -9042,8 +9042,15 @@ const ACTION_POLICIES_READ = {
 //   AUTH_ENFORCE_WRITE_PROD / AUTH_ENFORCE_WRITE_TEST
 //   AUTH_ENFORCE_READ_PROD  / AUTH_ENFORCE_READ_TEST
 function enforceFlag(kind) {
-  const key = "AUTH_ENFORCE_" + kind + (isTestDeployment() ? "_TEST" : "_PROD");
-  return String(PropertiesService.getScriptProperties().getProperty(key) || "").toUpperCase() === "ON";
+  const props = PropertiesService.getScriptProperties();
+  const on = function (k) { return String(props.getProperty(k) || "").toUpperCase() === "ON"; };
+  const prod = on("AUTH_ENFORCE_" + kind + "_PROD");
+  if (!isTestDeployment()) return prod;
+  // ★検証環境は本番と同じスプレッドシート（本番データ）を見ている。
+  //   本番だけ強制を有効にすると、検証環境が認証の抜け道になってしまう。
+  //   そこで「本番で有効なら検証でも必ず有効」を下限にする。
+  //   検証だけ先に厳しくすることはできる（先行検証のため）。
+  return prod || on("AUTH_ENFORCE_" + kind + "_TEST");
 }
 // 段階に応じて、そのアクションに適用するポリシーを返す
 function policyFor(action) {
@@ -9093,9 +9100,32 @@ function isAssignedTo(actorEmail, targetEmail) {
 // 定期処理の手動実行、LINEの一斉送信など）のために残す抜け道。
 // ★メールだけでは通らない。本人しか知らない共有シークレットが必須★
 // index.html にも coach/index.html にも埋め込まない（埋めた時点で秘密でなくなる）。
-function adminSecretActor(email, secret) {
+// 鍵で実行してよい操作を明示的に列挙する。
+// 静的な鍵ひとつで55件すべてにJIROKU_ADMINとして到達できる状態は広すぎるため、
+// 「ブラウザを持たない運用作業」に必要なものだけに限定する。
+// 画面から行う管理操作（顧客情報の閲覧・編集・ファイル操作など）は
+// Kaiの有効なセッションを必須とし、鍵では通さない。
+const ADMIN_SECRET_ALLOWLIST = {
+  // 状態の確認
+  authConfig:1, p1Status:1, authInspect:1, authAuditTail:1, lineLinkAudit:1, adminSystemHealth:1,
+  // 定期処理の手動実行・補完
+  adminOpsHealthCheck:1, adminRunNightlyReport:1, adminRunNightlyCoachMessage:1,
+  adminBackfillReports:1, adminBackfillReportsForDate:1, adminBackfillReportReasons:1,
+  adminBackfillCalendar:1, adminDedupeCalendar:1, adminRepairStreaksFreeze:1,
+  // 一斉送信（Kaiの明示的な要望により残す）
+  adminBroadcastLine:1, adminSendStudentCampaign:1,
+  // セットアップ・保守
+  adminSetupTriggers:1, adminInstallTrigger:1, adminSetupPhase1:1, adminSetupAuth:1,
+  authSetMode:1, authRoleApply:1, authRoleDryRun:1, authRevokeAll:1,
+  authCleanupTestData:1, authBreakerReset:1, rotateSessionSecret:1,
+  p1Backup:1, p1BackupInfo:1, p1PurgeArchived:1
+};
+
+function adminSecretActor(email, secret, action) {
   const chk = verifyP1Admin(email, secret);
   if (!chk.ok) return null;
+  // 許可リストに無い操作は、鍵を持っていても通さない
+  if (!ADMIN_SECRET_ALLOWLIST[String(action || "")]) return null;
   const u = sheetToObjects(getSheet("Users")).find(function (x) { return x.student_email === email; }) || {};
   return { actor_user_id: String(u.user_id || "admin"), google_sub: String(u.google_sub || ""),
            email: String(email), role: "JIROKU_ADMIN", organization_id: "", viaSecret: true };
@@ -9107,13 +9137,13 @@ function authorizeAction(action, token, targetEmail, secretEmail, secret) {
 
   // 鍵つきの管理者アクセスを先に見る（セッションが無くても運用できるように）
   if (secret) {
-    const sa = adminSecretActor(secretEmail, secret);
+    const sa = adminSecretActor(secretEmail, secret, action);
     if (sa) {
       authAudit("AUTHZ", { result: "ALLOW", action: action, actorUserId: sa.actor_user_id,
                            targetUserId: targetEmail || "", failureReason: "via_admin_secret" });
       return { ok: true, actor: sa, forceSelfEmail: null };
     }
-    authAudit("AUTHZ", { result: "DENY", failureReason: "BAD_ADMIN_SECRET", action: action });
+    authAudit("AUTHZ", { result: "DENY", failureReason: "SECRET_NOT_ALLOWED_OR_BAD", action: action });
     return { ok: false, error: "AUTH_REQUIRED" };
   }
 
