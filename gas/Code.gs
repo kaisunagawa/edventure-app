@@ -4625,12 +4625,15 @@ ${tasksText}
       const res = UrlFetchApp.fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
-        payload: JSON.stringify({ model: MODELS[mi], max_tokens: 2500, messages: [{ role: "user", content: prompt }] }),
+        // 記録が多い日でも途中で切れないよう出力上限を大きく取る（以前2500で切れていた）
+        payload: JSON.stringify({ model: MODELS[mi], max_tokens: 8000, messages: [{ role: "user", content: prompt }] }),
         muteHttpExceptions: true
       });
       const code = res.getResponseCode();
       const bodyText = res.getContentText();
       const result = JSON.parse(bodyText); logAiUsage(result, "業務報告書");
+      // 出力上限で途切れた場合はログに残す（さらに増やす判断材料に）
+      if (result && result.stop_reason === "max_tokens") Logger.log("generateWorkReport: max_tokensで切れた可能性 " + studentEmail);
       // thinkingブロックが先頭に入るモデルもあるため、textブロックを探して取り出す
       const textBlock = (result.content || []).find(c => c && c.type === "text" && typeof c.text === "string");
       if (textBlock) return { ok: true, data: { text: textBlock.text.trim() } };
