@@ -9654,13 +9654,20 @@ function adminSetupTriggers(email) {
 function adminInstallTrigger(email, handler) {
   if (!verifyAdmin(email)) return { ok: false, error: "not admin" };
   const name = String(handler || "").trim();
-  const allowed = { dailyOpsHealthCheck: 1 };
+  // 追加してよいハンドラと、その時刻をここで決める。
+  // ★setupTriggers は冒頭で全トリガーを削除して張り直すため、
+  //   稼働中に使うと夜間レポート等を巻き込む。1本だけ足したい時はこちらを使う★
+  const allowed = {
+    dailyOpsHealthCheck: function (b) { return b.timeBased().everyDays(1).atHour(7).nearMinute(30); },
+    weeklyBackup:        function (b) { return b.timeBased().everyWeeks(1).onWeekDay(ScriptApp.WeekDay.SUNDAY).atHour(3); }
+  };
   if (!allowed[name]) return { ok: false, error: "許可されていないハンドラ: " + name };
   const exists = ScriptApp.getProjectTriggers().some(t => t.getHandlerFunction() === name);
   if (exists) return { ok: true, data: { added: false, note: "既に登録済み" } };
   if (ScriptApp.getProjectTriggers().length >= 20) return { ok: false, error: "トリガー上限(20)に達しています" };
-  ScriptApp.newTrigger(name).timeBased().everyDays(1).atHour(7).nearMinute(30).create();
-  return { ok: true, data: { added: true } };
+  allowed[name](ScriptApp.newTrigger(name)).create();
+  return { ok: true, data: { added: true, handler: name,
+           triggerCount: ScriptApp.getProjectTriggers().length } };
 }
 
 function setupTriggers() {
