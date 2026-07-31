@@ -63,6 +63,11 @@ function doGet(e) {
   const callback = e.parameter.callback;
   try {
     let result;
+    // ── Auth CP2 ── 高リスクなアクションはセッションとロールを確認する。
+    // ACTION_POLICIES に載っていないものは、この段階では素通り（CP3以降で広げる）
+    var _az = authorizeAction(action, e.parameter.token,
+                              e.parameter.targetEmail || e.parameter.target || "");
+    if (!_az.ok) return jsonResponse(_az, callback);
     switch (action) {
       case "getUser":      result = getUser(studentEmail); break;
       // ── Phase 1: 自己経営OS の基盤（管理者のみ実行可能なセットアップ）──
@@ -100,6 +105,12 @@ function doGet(e) {
         var _ac = verifyP1Admin(studentEmail, e.parameter.secret);
         if (!_ac.ok) { result = _ac; break; }
         result = authCleanupTestData();
+        break;
+      }
+      case "authRoleApply": {
+        var _rp = verifyP1Admin(studentEmail, e.parameter.secret);
+        if (!_rp.ok) { result = _rp; break; }
+        result = authRoleApply();
         break;
       }
       case "authRoleDryRun": {
@@ -381,6 +392,9 @@ function doPost(e) {
     // アプリからのPOST
     const action = body.action;
     const studentEmail = body.studentEmail;
+    // ── Auth CP2 ──（doGetと同じ判定）
+    var _azp = authorizeAction(action, body.token, body.targetEmail || body.target || "");
+    if (!_azp.ok) return jsonResponse(_azp);
     switch (action) {
       case "saveLog":      return jsonResponse(saveLog(studentEmail, body));
       case "deleteLog":    return jsonResponse(deleteLog(studentEmail, body));
@@ -402,6 +416,7 @@ function doPost(e) {
       case "migrateLocalTasks": return jsonResponse(migrateLocalTasks(studentEmail, body));
       // ── Auth CP1 ──
       case "login":  return jsonResponse(authLogin(body));
+      case "loginAccess": return jsonResponse(authLoginAccess(body));
       case "logout": {
         // セッション必須。トークンが無い/無効なら拒否する
         var _vs = verifySession(body.token, false);
@@ -8355,6 +8370,45 @@ function authRoleDryRun() {
            note: "書き込みは行っていない。MANAGER/ORG_ADMINは法人機能まで割り当てない" };
 }
 
+// 下見（authRoleDryRun）と同じ規則で role を実際に書き込む。
+// 既に値が入っている行は上書きしない（手で設定したものを壊さないため）。
+// role を変えた人は既存セッションを失効させる（古い権限で動き続けさせない）。
+function authRoleApply() {
+  const dry = authRoleDryRun();
+  const admin = String(adminEmail()).toLowerCase();
+  const coachEmails = {};
+  try {
+    sheetToObjects(getSheet("Coaches")).forEach(function (c) {
+      const e = String(c.coach_email || c.email || "").trim().toLowerCase();
+      if (e) coachEmails[e] = true;
+    });
+  } catch (e) {}
+
+  const sh = getSheet("Users");
+  const data = sh.getDataRange().getValues(), h = data[0];
+  const iEmail = h.indexOf("student_email"), iRole = h.indexOf("role"), iTv = h.indexOf("token_version");
+  if (iRole === -1) return { ok: false, error: "role列がありません" };
+
+  const applied = [];
+  for (let i = 1; i < data.length; i++) {
+    const em = String(data[i][iEmail] || "").trim().toLowerCase();
+    if (!em) continue;
+    const cur = String(data[i][iRole] || "").trim();
+    if (cur) continue;                                  // 既に設定済みは触らない
+    const role = (em === admin) ? "JIROKU_ADMIN" : (coachEmails[em] ? "COACH" : "USER");
+    sh.getRange(i + 1, iRole + 1).setValue(role);
+    // 権限が変わったので、その人の既存セッションを無効化する
+    if (iTv !== -1) sh.getRange(i + 1, iTv + 1).setValue(Number(data[i][iTv] || 0) + 1);
+    applied.push({ email: em, role: role });
+    authAudit("ROLE_ASSIGN", { result: "SUCCESS", targetUserId: em, action: "authRoleApply", failureReason: role });
+  }
+  const counts = {};
+  applied.forEach(function (a2) { counts[a2.role] = (counts[a2.role] || 0) + 1; });
+  return { ok: true, appliedCount: applied.length, byRole: counts,
+           skippedExisting: dry.totalUsers - applied.length,
+           note: "既に設定済みの行は変更していない。role付与時にtoken_versionを上げ既存セッションを失効させた" };
+}
+
 // ── ログインの濫用対策 ──
 // GASでは送信元IPを取得できない（リクエストヘッダー自体が取れないことを実測で確認済み）。
 // そのためIPベースの制限は実装できない。代わりに
@@ -8522,6 +8576,62 @@ function verifyIdToken(idToken, expectedNonceHash) {
   if (!p.nonce || !safeEquals(sha256Hex(p.nonce), expectedNonceHash)) return { ok: false, reason: "NONCE_MISMATCH" };
 
   return { ok: true, sub: String(p.sub), email: String(p.email || "").trim().toLowerCase(), hd: String(p.hd || "") };
+}
+
+// アクセストークンによる本人確認（コーチCRM用）。
+// コーチCRMはポップアップ方式(initTokenClient)でアクセストークンを取るため、
+// IDトークンの往復ができない。tokeninfo でトークンの発行先(aud/azp)が
+// JIROKU自身であることを確かめてから本人を確定する。
+// ★aud/azpの確認が要（これを省くと、別アプリ向けに発行されたトークンを
+//   持ち込まれてログインできてしまう）★
+function verifyAccessToken(accessToken) {
+  if (!accessToken) return { ok: false, reason: "NO_ACCESS_TOKEN" };
+  let res;
+  try {
+    res = UrlFetchApp.fetch("https://oauth2.googleapis.com/tokeninfo?access_token=" + encodeURIComponent(accessToken),
+      { muteHttpExceptions: true });
+  } catch (e) { return { ok: false, reason: "TOKENINFO_UNREACHABLE" }; }
+  if (res.getResponseCode() !== 200) return { ok: false, reason: "TOKENINFO_HTTP_" + res.getResponseCode() };
+  let p;
+  try { p = JSON.parse(res.getContentText()); } catch (e) { return { ok: false, reason: "TOKENINFO_BAD_JSON" }; }
+
+  const issuedTo = String(p.azp || p.aud || "");
+  if (!safeEquals(issuedTo, GOOGLE_CLIENT_ID_SERVER)) return { ok: false, reason: "AUD_MISMATCH" };
+  if (!p.exp || Number(p.exp) <= Math.floor(Date.now() / 1000)) return { ok: false, reason: "TOKEN_EXPIRED" };
+  if (String(p.email_verified) !== "true" && p.email_verified !== true) return { ok: false, reason: "EMAIL_NOT_VERIFIED" };
+  if (!p.sub) return { ok: false, reason: "NO_SUB" };
+  return { ok: true, sub: String(p.sub), email: String(p.email || "").trim().toLowerCase(), hd: String(p.hd || "") };
+}
+
+// コーチCRMからのログイン。challengeは使わない（リダイレクトを伴わないため
+// state/nonceの往復ができない）。代わりにaud確認と有効期限で担保する。
+function authLoginAccess(body) {
+  const generic = { ok: false, error: "ログインできませんでした。管理者へ確認してください" };
+  const fp = body.accessToken ? sha256Hex(body.accessToken).slice(0, 16) : "";
+  const fail = function (reason) {
+    authAudit("LOGIN_ACCESS", { result: "FAIL", failureReason: reason, action: "loginAccess", credentialFingerprint: fp });
+    return generic;
+  };
+  const brk = breakerState();
+  if (brk.open) return { ok: false, error: "ただいまログインが混み合っています。数分後にもう一度お試しください" };
+  if (fp && rateHit("fpa_" + fp, LOGIN_FP_MAX_PER_HOUR).exceeded) return fail("FP_RATE_LIMIT");
+
+  const v = verifyAccessToken(body.accessToken);
+  breakerRecord(!v.ok && String(v.reason).indexOf("TOKENINFO_") === 0);
+  if (!v.ok) return fail(v.reason);
+  if (rateHit("sub_" + v.sub, LOGIN_SUB_MAX_PER_HOUR).exceeded) return fail("SUB_RATE_LIMIT");
+  if (isTestDeployment() && v.email !== String(adminEmail()).toLowerCase()) return fail("TEST_ENV_ADMIN_ONLY");
+
+  const u = resolveUserByIdentity(v.sub, v.email, v.hd);
+  if (!u.ok) return fail(u.reason);
+
+  const userRow = sheetToObjects(getSheet("Users")).find(function (x) { return String(x.user_id) === String(u.userId); }) || {};
+  const sess = issueSession({ userId: u.userId, sub: v.sub, role: userRow.role || "USER",
+                              organizationId: userRow.organization_id || "", tokenVersion: userRow.token_version || 0 });
+  authAudit("LOGIN_ACCESS", { result: "SUCCESS", actorUserId: u.userId, action: "loginAccess",
+                              credentialFingerprint: fp, failureReason: u.linked ? "sub_linked" : "" });
+  return { ok: true, token: sess.token, expiresAt: sess.expiresAt,
+           user: { email: u.email, role: userRow.role || "USER" } };
 }
 
 // ── google_sub と既存ユーザーの紐づけ ──
@@ -8711,6 +8821,111 @@ function authLogin(body) {
                        credentialFingerprint: fp, failureReason: u.linked ? "sub_linked" : "" });
   return { ok: true, token: sess.token, expiresAt: sess.expiresAt,
            user: { email: u.email, role: userRow.role || "USER" } };
+}
+
+// ══════════════════════════════════════════════════════════════════
+// Auth CP2: 高リスクAPIの認可
+//
+// 【原則】ここに登録されていないアクションは、この仕組みの対象外（従来どおり）。
+// CP3・CP4で対象を広げ、最終的に「登録が無ければ拒否」へ寄せる。
+// 今は「一斉送信・削除・個人情報の一覧」といった被害の大きい操作から先に閉じる。
+//
+// roles      … このアクションを実行できるロール
+// scope      … SELF=自分だけ / ASSIGNED=担当関係のある相手 / GLOBAL=全体
+// audit      … 監査ログに必ず残す
+// noCache    … セッション検証でキャッシュを使わない（権限剥奪の直後を許さない）
+// ══════════════════════════════════════════════════════════════════
+const ACTION_POLICIES = {
+  // 一斉送信・キャンペーン（最も被害が大きい）
+  adminBroadcastLine:       { roles: ["JIROKU_ADMIN"], scope: "GLOBAL",   audit: true, noCache: true },
+  adminSendStudentCampaign: { roles: ["JIROKU_ADMIN"], scope: "GLOBAL",   audit: true, noCache: true },
+  // 個別送信
+  coachSendStudentMessage:  { roles: ["COACH","JIROKU_ADMIN"], scope: "ASSIGNED", audit: true, noCache: true },
+  coachGenerateStudentMessage: { roles: ["COACH","JIROKU_ADMIN"], scope: "ASSIGNED", audit: true },
+  coachGenerateNudgeMessage:{ roles: ["COACH","JIROKU_ADMIN"], scope: "ASSIGNED", audit: true },
+  // 削除
+  coachDeleteFile:          { roles: ["COACH","JIROKU_ADMIN"], scope: "ASSIGNED", audit: true, noCache: true },
+  coachDeleteNote:          { roles: ["COACH","JIROKU_ADMIN"], scope: "ASSIGNED", audit: true, noCache: true },
+  coachDeleteLead:          { roles: ["COACH","JIROKU_ADMIN"], scope: "ASSIGNED", audit: true, noCache: true },
+  // 個人情報の取得
+  coachGetStudents:         { roles: ["COACH","JIROKU_ADMIN"], scope: "GLOBAL" },
+  coachGetStudentDetail:    { roles: ["COACH","JIROKU_ADMIN"], scope: "ASSIGNED" },
+  coachPrepSummary:         { roles: ["COACH","JIROKU_ADMIN"], scope: "ASSIGNED" },
+  generateTalentReport:     { roles: ["COACH","JIROKU_ADMIN"], scope: "ASSIGNED", audit: true },
+  adminGetOverview:         { roles: ["JIROKU_ADMIN"], scope: "GLOBAL" },
+  adminListRecentRegistrations: { roles: ["JIROKU_ADMIN"], scope: "GLOBAL" },
+  adminAiUsage:             { roles: ["JIROKU_ADMIN"], scope: "GLOBAL" },
+  // 利用者データの一括書き換え
+  coachSetCohort:           { roles: ["JIROKU_ADMIN"], scope: "GLOBAL", audit: true, noCache: true },
+  coachSetPlanStatus:       { roles: ["COACH","JIROKU_ADMIN"], scope: "ASSIGNED", audit: true, noCache: true },
+  coachSetShowInCommunity:  { roles: ["COACH","JIROKU_ADMIN"], scope: "ASSIGNED", audit: true },
+  adminTagCohortByEmails:   { roles: ["JIROKU_ADMIN"], scope: "GLOBAL", audit: true, noCache: true },
+  adminTagCohortByJoinDate: { roles: ["JIROKU_ADMIN"], scope: "GLOBAL", audit: true, noCache: true },
+  // 運用操作
+  adminSetupTriggers:       { roles: ["JIROKU_ADMIN"], scope: "GLOBAL", audit: true, noCache: true },
+  adminInstallTrigger:      { roles: ["JIROKU_ADMIN"], scope: "GLOBAL", audit: true, noCache: true },
+  adminRunNightlyReport:    { roles: ["JIROKU_ADMIN"], scope: "GLOBAL", audit: true },
+  adminRunNightlyCoachMessage: { roles: ["JIROKU_ADMIN"], scope: "GLOBAL", audit: true },
+  adminBackfillReports:     { roles: ["JIROKU_ADMIN"], scope: "GLOBAL", audit: true },
+  adminBackfillReportsForDate: { roles: ["JIROKU_ADMIN"], scope: "GLOBAL", audit: true },
+  adminBackfillCalendar:    { roles: ["JIROKU_ADMIN"], scope: "GLOBAL", audit: true },
+  adminDedupeCalendar:      { roles: ["JIROKU_ADMIN"], scope: "GLOBAL", audit: true },
+  adminRepairStreaksFreeze: { roles: ["JIROKU_ADMIN"], scope: "GLOBAL", audit: true },
+  adminOpsHealthCheck:      { roles: ["JIROKU_ADMIN"], scope: "GLOBAL" },
+  adminSystemHealth:        { roles: ["JIROKU_ADMIN"], scope: "GLOBAL" }
+};
+
+// COACHが相手を見てよいか。担当関係は CoachingNotes / Users.coach_email で判断する
+function isAssignedTo(actorEmail, targetEmail) {
+  if (!targetEmail) return true;              // 相手を指定しない操作（一覧など）は scope 側で判断
+  const t = String(targetEmail).trim().toLowerCase();
+  const a = String(actorEmail).trim().toLowerCase();
+  if (t === a) return true;                   // 自分自身は常に可
+  try {
+    const u = sheetToObjects(getSheet("Users"))
+      .find(function (x) { return String(x.student_email || "").trim().toLowerCase() === t; });
+    if (u && String(u.coach_email || "").trim().toLowerCase() === a) return true;
+  } catch (e) {}
+  try {
+    const hit = sheetToObjects(getSheet("CoachingNotes")).some(function (n) {
+      return String(n.coach_email || "").trim().toLowerCase() === a &&
+             String(n.student_email || "").trim().toLowerCase() === t;
+    });
+    if (hit) return true;
+  } catch (e) {}
+  return false;
+}
+
+// 認可の判定。actor（操作する人）と target（操作される人）を必ず分ける。
+// クライアントが送ってくる target は「候補」に過ぎず、ここで必ず検査する。
+function authorizeAction(action, token, targetEmail) {
+  const policy = ACTION_POLICIES[action];
+  if (!policy) return { ok: true, skipped: true };   // 未登録＝この段階では対象外
+
+  const v = verifySession(token, policy.noCache ? false : true);
+  if (!v.ok) {
+    authAudit("AUTHZ", { result: "DENY", failureReason: v.reason || "NO_SESSION", action: action });
+    return { ok: false, error: "AUTH_REQUIRED" };
+  }
+  const actor = v.actor;
+  const role = String(actor.role || "USER").toUpperCase();
+
+  if (policy.roles.indexOf(role) === -1) {
+    authAudit("AUTHZ", { result: "DENY", failureReason: "ROLE_" + role, action: action,
+                         actorUserId: actor.actor_user_id, targetUserId: targetEmail || "" });
+    return { ok: false, error: "FORBIDDEN" };
+  }
+  // JIROKU_ADMIN 以外は、担当している相手しか触れない
+  if (policy.scope === "ASSIGNED" && role !== "JIROKU_ADMIN" && !isAssignedTo(actor.email, targetEmail)) {
+    authAudit("AUTHZ", { result: "DENY", failureReason: "NOT_ASSIGNED", action: action,
+                         actorUserId: actor.actor_user_id, targetUserId: targetEmail || "" });
+    return { ok: false, error: "FORBIDDEN" };
+  }
+  if (policy.audit) {
+    authAudit("AUTHZ", { result: "ALLOW", action: action,
+                         actorUserId: actor.actor_user_id, targetUserId: targetEmail || "" });
+  }
+  return { ok: true, actor: actor };
 }
 
 // ── 管理操作の保護 ──

@@ -60,12 +60,32 @@ const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.goo
 
 let COACH_EMAIL = localStorage.getItem("jiroku_coach_email") || null;
 
+// セッション（Auth CP1/CP2）。サーバーはこのトークンから本人とロールを確定する。
+// coachEmail は互換のため送り続けるが、認可の根拠にはならない
+const COACH_SESSION_KEY = "jiroku_coach_session";
+function getCoachSession() { try { return localStorage.getItem(COACH_SESSION_KEY) || ""; } catch { return ""; } }
+function setCoachSession(t) { try { if (t) localStorage.setItem(COACH_SESSION_KEY, t); else localStorage.removeItem(COACH_SESSION_KEY); } catch {} }
+
+// 認証が必要なAPIで弾かれたら、再ログインを促す
+function handleAuthError(r) {
+  if (r && (r.error === "AUTH_REQUIRED" || r.error === "FORBIDDEN")) {
+    setCoachSession("");
+    alert(r.error === "FORBIDDEN"
+      ? "この操作を行う権限がありません。"
+      : "ログインの有効期限が切れました。もう一度ログインしてください。");
+    try { localStorage.removeItem("jiroku_coach_email"); location.reload(); } catch {}
+  }
+  return r;
+}
+
 async function api(action, params = {}) {
   const url = new URL(GAS_URL);
   url.searchParams.set("action", action);
   url.searchParams.set("coachEmail", COACH_EMAIL || "");
+  const tk = getCoachSession();
+  if (tk) url.searchParams.set("token", tk);
   Object.entries(params).forEach(([k, v]) => { if (v != null) url.searchParams.set(k, String(v)); });
-  try { const r = await fetch(url.toString(), { redirect: "follow" }); return await r.json(); }
+  try { const r = await fetch(url.toString(), { redirect: "follow" }); return handleAuthError(await r.json()); }
   catch { return { ok: false, error: "network" }; }
 }
 // POSTはボディが大きくなり得る操作（ファイルアップロード等）用。
@@ -75,9 +95,9 @@ async function apiPost(action, body = {}) {
     const r = await fetch(GAS_URL, {
       method: "POST",
       headers: { "Content-Type": "text/plain" },
-      body: JSON.stringify({ action, coachEmail: COACH_EMAIL, ...body })
+      body: JSON.stringify({ action, coachEmail: COACH_EMAIL, token: getCoachSession(), ...body })
     });
-    return await r.json();
+    return handleAuthError(await r.json());
   } catch { return { ok: false, error: "network" }; }
 }
 const fileToBase64 = file => new Promise((resolve, reject) => {
@@ -120,9 +140,23 @@ function loginWithGoogle(onEmail, onError) {
       callback: async (t) => {
         if (t.error || !t.access_token) { onError("ログインに失敗しました"); return; }
         try {
-          const info = await fetch("https://www.googleapis.com/oauth2/v3/userinfo", { headers: { Authorization: "Bearer " + t.access_token } }).then(r => r.json());
-          if (info.email) onEmail(info.email);
-          else onError("メールアドレスを取得できませんでした");
+          // アクセストークンをサーバーへ渡し、サーバー側で発行元(aud)と有効期限を
+          // 確かめてもらってセッションを受け取る。ここで初めて本人が確定する
+          let email = null;
+          try {
+            const sr = await fetch(GAS_URL, {
+              method: "POST", headers: { "Content-Type": "text/plain" },
+              body: JSON.stringify({ action: "loginAccess", accessToken: t.access_token })
+            }).then(r => r.json());
+            if (sr && sr.ok && sr.token) { setCoachSession(sr.token); email = (sr.user && sr.user.email) || null; }
+          } catch {}
+          if (!email) {
+            // サーバーがまだ対応していない場合のみ、従来どおりクライアント側で取得する
+            const info = await fetch("https://www.googleapis.com/oauth2/v3/userinfo", { headers: { Authorization: "Bearer " + t.access_token } }).then(r => r.json());
+            email = info.email || null;
+          }
+          if (email) onEmail(email);
+          else onError("ログインできませんでした。管理者へ確認してください");
         } catch { onError("ログインに失敗しました"); }
       },
       error_callback: () => onError("ログインがキャンセルされました"),
