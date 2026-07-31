@@ -489,8 +489,61 @@ async function gasPostJson(action, body = {}) {
       headers: { "Content-Type": "text/plain" },
       body: JSON.stringify({ action, studentEmail: CURRENT_USER.email, token: getSessionToken(), ...body })
     });
-    return await r.json();
+    const j = await r.json();
+    // セッション切れで弾かれた保存操作は、捨てずに預かっておく。
+    // 再ログイン後に自動でやり直す（記録が消えるのが一番困るため）
+    if (j && j.ok === false && (j.error === "AUTH_REQUIRED" || j.error === "FORBIDDEN")) {
+      stashPendingOp(action, body);
+    }
+    return j;
   } catch { return { ok:false }; }
+}
+
+// ── 認証が切れた時の預かりと再試行 ──
+// 「記録しようとしたらログインが切れていて、入力が消えた」を防ぐ。
+// 保存系の操作だけを預かる（読み取りはやり直せばよいので預からない）。
+const PENDING_KEY = "jiroku_pending_ops";
+const RETRYABLE_ACTIONS = {
+  saveLog:1, saveLogMulti:1, quickLog:1, saveSettings:1, saveTodayActions:1,
+  saveGoal:1, saveWeeklyGoal:1, archiveGoalItem:1, saveWeeklyReflection:1,
+  saveIntent:1, submitSurvey:1, deleteLog:1
+};
+function stashPendingOp(action, body) {
+  if (!RETRYABLE_ACTIONS[action]) return;
+  try {
+    const list = JSON.parse(localStorage.getItem(PENDING_KEY) || "[]");
+    // 同じ操作が積み上がらないよう、直近10件まで
+    list.push({ action, body, at: Date.now() });
+    localStorage.setItem(PENDING_KEY, JSON.stringify(list.slice(-10)));
+  } catch {}
+}
+function pendingOpCount() {
+  try { return JSON.parse(localStorage.getItem(PENDING_KEY) || "[]").length; } catch { return 0; }
+}
+// ログイン成功後に呼ぶ。預かっていた操作を順にやり直す
+async function flushPendingOps() {
+  let list = [];
+  try { list = JSON.parse(localStorage.getItem(PENDING_KEY) || "[]"); } catch { return { done:0, failed:0 }; }
+  if (!list.length || !getSessionToken()) return { done:0, failed:0 };
+  const rest = [];
+  let done = 0;
+  for (const op of list) {
+    // 古すぎるものは捨てる（3日以上前の記録を勝手に復活させない）
+    if (Date.now() - (op.at || 0) > 3 * 86400000) continue;
+    try {
+      const r = await fetch(GAS_URL, {
+        method: "POST", headers: { "Content-Type": "text/plain" },
+        body: JSON.stringify({ action: op.action, studentEmail: CURRENT_USER.email,
+                               token: getSessionToken(), ...op.body })
+      }).then(x => x.json());
+      if (r && r.ok) done++; else rest.push(op);
+    } catch { rest.push(op); }
+  }
+  try {
+    if (rest.length) localStorage.setItem(PENDING_KEY, JSON.stringify(rest));
+    else localStorage.removeItem(PENDING_KEY);
+  } catch {}
+  return { done, failed: rest.length };
 }
 
 // ── セッション（Auth CP1）──
@@ -4110,6 +4163,8 @@ function ReauthGate() {
           ログインの仕組みを新しくしました。<br/>
           お手数ですが、もう一度Googleでログインしてください。<br/>
           <b style=${{color:"var(--text)"}}>記録・目標・設定はそのまま残ります。</b>
+          ${pendingOpCount()>0 ? html`<br/><br/><b style=${{color:"var(--accent)"}}>
+            保存できていない記録が${pendingOpCount()}件あります。<br/>ログインすると自動で反映されます。</b>` : ""}
         </div>
         <button class="btn" onClick=${relogin} style=${{width:280}}>ログイン画面へ</button>
       </div>
@@ -4843,6 +4898,10 @@ function LoginScreen({onLogin}) {
       const url=new URL(GAS_URL); url.searchParams.set("action","getUser"); url.searchParams.set("studentEmail",email);
       const r=await withTimeout(fetch(url).then(res=>res.json()), 25000);
       try{ await withTimeout(sessionPromise, 25000); }catch{}   // 本人確認は待つが、詰まらせない
+      // セッション切れで預かっていた操作を、ログインできたらやり直す
+      if(getSessionToken() && pendingOpCount()>0){
+        try{ await flushPendingOps(); }catch{}
+      }
       // 認証段階が SESSION_OPTIONAL 以上なら、セッションを取れていない状態で
       // 従来のメール方式のまま中へ入れてはいけない
       if(strictNow && !getSessionToken()){
@@ -5695,6 +5754,14 @@ function App() {
   // セッションを持っていない既存ログイン者に、一度だけ入り直してもらう。
   // サーバーがまだ認証段階に入っていない(LEGACY)なら何もしない
   const [needsReauth,setNeedsReauth]=useState(false);
+  // セッションを持っている状態で預かり分が残っていれば、起動時にやり直す
+  useEffect(()=>{
+    if(!getSessionToken() || pendingOpCount()===0) return;
+    (async()=>{
+      const r=await flushPendingOps();
+      if(r.done>0) setToast("保存できていなかった記録を"+r.done+"件、反映しました");
+    })();
+  },[]);
   useEffect(()=>{
     if(getSessionToken()) return;
     (async()=>{
