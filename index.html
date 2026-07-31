@@ -1451,7 +1451,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
     ${showCommunity&&html`<${CommunityOverlay} onClose=${()=>setShowCommunity(false)}/>`}
 
     <!-- 週次ふりかえり（今週のまとめ＋振り返り記入＋来週の一言）。週末（土日）に、未記入かつ未閉じの時だけ大きく出す -->
-    ${weekly && !weekly.reflected && !weekDismissed && [0,6].includes(new Date().getDay()) && html`
+    ${weekly && !weekly.reflected && !weekDismissed && shouldShowWeeklyReview(weekly) && html`
       <div style=${{margin:"16px 16px 0",background:"var(--card)",borderRadius:16,border:"1.5px solid var(--accent)",overflow:"hidden"}}>
         <div style=${{background:"linear-gradient(135deg, var(--hero1) 0%, var(--hero2) 100%)",padding:"16px 18px"}}>
           <div style=${{fontSize:11,fontWeight:700,color:"rgba(255,255,255,0.75)",letterSpacing:"0.08em",marginBottom:3}}>WEEKLY REVIEW</div>
@@ -4160,6 +4160,26 @@ function LineLinkSection({onToast}) {
       すでに連携している場合は、この操作は不要です。<br/>
       連携先を変えたいときは運営までご連絡ください。
     </div>`;
+}
+
+// 週次ふりかえりを出してよいかの判定。
+// 以前は「土日なら出す」だけだったため、次の2つの問題があった。
+//  ① 記入していないまとめが、何週間前のものでも週末のたびに出続けた
+//     （実際に8日以上前に終わった週のまとめが表示されていた）
+//  ② 深夜1時でも暦上は土曜なので、金曜の夜に「今週をふりかえろう」が出た
+// そこで「日曜の朝7時〜夜23時」「直近に終わった週のものだけ」に限定する。
+// 深夜0〜4時は本人の感覚ではまだ前日なので、土曜の深夜に出さないよう日付をずらす。
+function shouldShowWeeklyReview(weekly) {
+  if (!weekly || !weekly.weekEnd) return false;
+  const now = new Date();
+  // 深夜0〜4時は、本人の感覚ではまだ前日。日付をずらして判定する
+  const eff = new Date(now.getTime() - (now.getHours() < 4 ? 4 * 3600 * 1000 : 0));
+  if (eff.getDay() !== 0) return false;                       // 日曜だけ
+  const h = eff.getHours();
+  if (h < 7 || h >= 23) return false;                         // 朝7時〜夜23時のあいだ
+  const end = new Date(String(weekly.weekEnd) + "T00:00:00");
+  const days = Math.floor((eff - end) / 86400000);
+  return days >= 0 && days <= 9;                              // 直近に終わった週のものだけ
 }
 
 // ── Settings ──
