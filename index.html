@@ -1165,8 +1165,12 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
       return migrateMapKeysToId(raw, customActions);
     } catch(e){ return {}; }
   });
+  // ★id をキーにする（Phase 2）★ 重要度と同じ理由
   const [taskDue, setTaskDue] = useState(()=>{
-    try { return JSON.parse(localStorage.getItem("jiroku_task_due_"+formatDateStr(new Date()))||"{}"); } catch(e){ return {}; }
+    try {
+      const raw = JSON.parse(localStorage.getItem("jiroku_task_due_"+formatDateStr(new Date()))||"{}");
+      return migrateMapKeysToId(raw, customActions);
+    } catch(e){ return {}; }
   });
   // タスクの進捗状態（ボード用）。"todo"=予定 / "doing"=実行中 / "done"=完了。
   // 未設定なら既存のchecked（完了フラグ）から導出する（後方互換）
@@ -1489,7 +1493,8 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
     const est={...taskEstimates}; delete est[task]; setTaskEstimates(est); localStorage.setItem("jiroku_task_estimates_"+todayKey, JSON.stringify(est));
     const impKey=idOfTitle(task); const imp={...taskImportance}; delete imp[impKey]; delete imp[task];
     setTaskImportance(imp); localStorage.setItem("jiroku_task_importance_"+todayKey, JSON.stringify(imp));
-    const du={...taskDue}; delete du[task]; setTaskDue(du); localStorage.setItem("jiroku_task_due_"+todayKey, JSON.stringify(du));
+    const duKey=idOfTitle(task); const du={...taskDue}; delete du[duKey]; delete du[task];
+    setTaskDue(du); localStorage.setItem("jiroku_task_due_"+todayKey, JSON.stringify(du));
     const stt={...taskStatus}; delete stt[task]; setTaskStatus(stt); localStorage.setItem("jiroku_task_status_"+todayKey, JSON.stringify(stt));
     const nt={...taskNotes}; delete nt[task]; setTaskNotes(nt); localStorage.setItem("jiroku_task_memo_"+todayKey, JSON.stringify(nt));
     const nc={...checked}; delete nc[task]; setChecked(nc); localStorage.setItem("today_actions", JSON.stringify(nc));
@@ -1508,9 +1513,14 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
     setTaskImportance(next);
     localStorage.setItem("jiroku_task_importance_"+todayKey, JSON.stringify(next));
   };
+  // ★読み出しは必ずここを通す★
+  //   「idで引き、無ければ名前で引く」を11箇所に散らすと必ず書き漏らす。
+  const dueOf = (task) => taskDue[idOfTitle(task)] || taskDue[task] || "";
   const setTaskDueAt = (task, v) => {
+    const key = idOfTitle(task) || task;
     const next = {...taskDue};
-    if (v) next[task] = v; else delete next[task];
+    if (v) next[key] = v; else delete next[key];
+    delete next[task];   // 旧形式（名前キー）の掃除
     setTaskDue(next);
     localStorage.setItem("jiroku_task_due_"+todayKey, JSON.stringify(next));
   };
@@ -1520,7 +1530,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
   const quadrantOf = (task) => {
     const impKey = idOfTitle(task);
     const imp = (impKey && taskImportance[impKey]) || taskImportance[task] || "MEDIUM";
-    const due = taskDue[task] || "";
+    const due = dueOf(task);
     let urg = "NONE", overdue = false;
     if (due) {
       const p = String(due).substring(0,10).split("-");
@@ -1550,7 +1560,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
     text:t,
     min:(taskEstimates[t]!=null?String(taskEstimates[t]):""),
     imp:(taskImportance[idOfTitle(t)]||taskImportance[t]||""),
-    due:(taskDue[t]||"")
+    due:dueOf(t)
   }));
   // 編集モーダルには「未完了のタスクだけ」を出す。完了済みは編集対象にしない
   // （完了フォルダにそのまま残す）。保存時に完了タスクは保持してマージする
@@ -1598,7 +1608,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
     editItems.forEach(r=>{ const t=String(r.text||"").trim(); if(!t) return;
       if(r.imp) impMap[t]=r.imp; if(r.due) dueMap[t]=r.due; });
     completed.forEach(c=>{ const ck=idOfTitle(c)||c; if(taskImportance[ck]) impMap[ck]=taskImportance[ck];
-                           if(taskDue[c]) dueMap[c]=taskDue[c]; });
+                           const dk=idOfTitle(c)||c; if(taskDue[dk]) dueMap[dk]=taskDue[dk]; });
     setTaskImportance(impMap); setTaskDue(dueMap);
     try {
       localStorage.setItem("jiroku_task_importance_"+todayKey, JSON.stringify(impMap));
@@ -2040,9 +2050,9 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
                 ${checked[item]&&html`<svg width="11" height="11" viewBox="0 0 10 10" fill="none"><path d="M2 5l2.5 2.5L8 3" stroke="white" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`}
               </div>
               <span style=${{flex:1,minWidth:0,fontSize:14,color:checked[item]?"var(--sub)":"var(--text)",textDecoration:checked[item]?"line-through":"none",lineHeight:1.6}}>${item}</span>
-              ${(()=>{ const q=quadrantOf(item); if(q.quadrant==="DEFER_OR_DELETE"&&!taskDue[item]) return ""; const L=QUADRANT_LABEL[q.quadrant];
+              ${(()=>{ const q=quadrantOf(item); if(q.quadrant==="DEFER_OR_DELETE"&&!dueOf(item)) return ""; const L=QUADRANT_LABEL[q.quadrant];
                 return html`<span style=${{flexShrink:0,fontSize:10.5,fontWeight:700,color:L.color,border:"1px solid "+L.color,borderRadius:20,padding:"1px 7px"}} title=${L.hint}>${L.icon}${L.label}</span>`; })()}
-              ${taskDue[item]&&html`<span style=${{flexShrink:0,fontSize:10.5,color:quadrantOf(item).overdue?"#dc2626":"var(--sub)",fontWeight:quadrantOf(item).overdue?700:400}}>${dueLabel(taskDue[item], quadrantOf(item).overdue)}</span>`}
+              ${dueOf(item)&&html`<span style=${{flexShrink:0,fontSize:10.5,color:quadrantOf(item).overdue?"#dc2626":"var(--sub)",fontWeight:quadrantOf(item).overdue?700:400}}>${dueLabel(dueOf(item), quadrantOf(item).overdue)}</span>`}
               ${taskEstimates[item]>0&&html`<span style=${{flexShrink:0,fontSize:11,fontWeight:600,color:checked[item]?"var(--sub)":"var(--accent)",background:checked[item]?"var(--bg)":"var(--accent-l)",borderRadius:20,padding:"2px 8px",marginTop:1}}>⏱${taskEstimates[item]}分</span>`}
 
             </button>`;
@@ -2073,9 +2083,9 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
               onClick=${()=>setDetailTask(item)}
               style=${{background:"var(--card)",border:`1px solid ${st==="doing"?"var(--accent)":"var(--border)"}`,borderRadius:10,padding:"10px 11px",marginBottom:8,cursor:"pointer",boxShadow:dragTask===item?"0 4px 14px rgba(0,0,0,0.15)":"none",opacity:dragTask===item?0.5:1,transition:"box-shadow .15s",display:"flex",alignItems:"center",gap:8}}>
               <span style=${{flex:1,minWidth:0,fontSize:13.5,color:st==="done"?"var(--sub)":"var(--text)",textDecoration:st==="done"?"line-through":"none",lineHeight:1.5,overflowWrap:"anywhere"}}>${item}</span>
-              ${(()=>{ const q=quadrantOf(item); if(q.quadrant==="DEFER_OR_DELETE"&&!taskDue[item]) return ""; const L=QUADRANT_LABEL[q.quadrant];
+              ${(()=>{ const q=quadrantOf(item); if(q.quadrant==="DEFER_OR_DELETE"&&!dueOf(item)) return ""; const L=QUADRANT_LABEL[q.quadrant];
                 return html`<span style=${{flexShrink:0,fontSize:10.5,fontWeight:700,color:L.color,border:"1px solid "+L.color,borderRadius:20,padding:"1px 7px"}} title=${L.hint}>${L.icon}${L.label}</span>`; })()}
-              ${taskDue[item]&&html`<span style=${{flexShrink:0,fontSize:10.5,color:quadrantOf(item).overdue?"#dc2626":"var(--sub)",fontWeight:quadrantOf(item).overdue?700:400}}>${dueLabel(taskDue[item], quadrantOf(item).overdue)}</span>`}
+              ${dueOf(item)&&html`<span style=${{flexShrink:0,fontSize:10.5,color:quadrantOf(item).overdue?"#dc2626":"var(--sub)",fontWeight:quadrantOf(item).overdue?700:400}}>${dueLabel(dueOf(item), quadrantOf(item).overdue)}</span>`}
               ${taskEstimates[item]>0&&html`<span style=${{flexShrink:0,fontSize:10.5,fontWeight:600,color:"var(--accent)",background:"var(--accent-l)",borderRadius:20,padding:"2px 7px"}}>⏱${taskEstimates[item]}分</span>`}
 
               ${st!=="done"&&html`<button title="タイマーで計測" aria-label="計測" onClick=${stop(()=>goToTimerWith(item))}
@@ -2152,9 +2162,9 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
 
           <label class="form-lbl">期限</label>
           <div style=${{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
-            <input class="inp" type="date" value=${taskDue[t]||""}
+            <input class="inp" type="date" value=${dueOf(t)}
               onInput=${e=>setTaskDueAt(t, e.target.value)} style=${{width:170,margin:0}}/>
-            ${taskDue[t] && html`<button onClick=${()=>setTaskDueAt(t,"")}
+            ${dueOf(t) && html`<button onClick=${()=>setTaskDueAt(t,"")}
               style=${{background:"none",border:"none",color:"var(--sub)",fontSize:12.5,cursor:"pointer",fontFamily:"inherit"}}>期限なしに戻す</button>`}
           </div>
           <div style=${{fontSize:11.5,color:"var(--sub)",marginBottom:16,lineHeight:1.8}}>

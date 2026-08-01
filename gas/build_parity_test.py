@@ -44,7 +44,13 @@ process.exit(0);
 # quadrantOf は idOfTitle を使う（Phase 2 で id キーへ移行したため）。
 # 検査では「id が引けない＝名前キーのまま」の状態を再現する。
 # 判定の中身そのものを比べたいので、id の解決は関与させない。
-stub = "\nconst taskImportance={}, taskDue={};\nfunction idOfTitle(){ return \"\"; }\n"
+# quadrantOf は id 経由の読み出し（idOfTitle / dueOf）を使う。
+# 検査では「名前キーのまま」の状態を再現して、判定の中身だけを比べる。
+# ★Phase 2 が進むたびにここへ足すことになる★
+#   足し忘れると ReferenceError で落ちるので、黙って通ることはない。
+stub = ("\nconst taskImportance={}, taskDue={};\n"
+        "function idOfTitle(){ return \"\"; }\n"
+        "function dueOf(t){ return taskDue[t] || \"\"; }\n")
 code = server + stub + client.replace("const quadrantOf", "var quadrantOf") + harness
 tmp = "/tmp/_parity.js"
 open(tmp, "w").write(code)
