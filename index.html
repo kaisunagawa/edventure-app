@@ -6306,8 +6306,12 @@ function App() {
         <div class="screen">
           <div style=${{display:tab==="home"?"block":"none"}}><${HomeScreen} goalData=${goalData} onGoalSaved=${setGoalData} profile=${profile} isActive=${tab==="home"} showInCommunity=${user.showInCommunity!==false} studentCohort=${user.cohort||""} recordDays=${user.recordDays} onGoTimer=${()=>setTab("timer")}/></div>
           <div style=${{display:tab==="log"?"block":"none"}}>
-            <${LogScreen} onToast=${setToast} isActive=${tab==="log"}/>
+            <!-- ★やることを先に出す★
+                 記録の入力欄は縦に長く、その下に置くと下端まで
+                 スクロールしないと気づけない（実際に見つけてもらえなかった）。
+                 やることは「これから何をするか」なので、記録より先に見るもの。 -->
             <${TaskSection} isActive=${tab==="log"} onToast=${setToast}/>
+            <${LogScreen} onToast=${setToast} isActive=${tab==="log"}/>
           </div>
           <div style=${{display:tab==="report"?"block":"none"}}><${ReportScreen}/></div>
           <div style=${{display:tab==="brain"?"block":"none"}}><${SecondBrainScreen} isActive=${tab==="brain"}/></div>
