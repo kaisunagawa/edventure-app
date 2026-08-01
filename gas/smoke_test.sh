@@ -179,11 +179,17 @@ PY
   # 呼ばれており AUTH_REQUIRED になった。アプリはそれを「利用者が存在しない」と
   # 解釈し、既存利用者へ「はじめまして」の新規登録画面を出した（2026-08-01）。
   # 認証前に呼んでよいのは registerUser だけ。
-  bad=$(grep -o 'publicApiRaw("[a-zA-Z]*"' ../index.html | sed 's/publicApiRaw("//;s/"//' | grep -v '^registerUser$' | sort -u | tr '\n' ' ')
-  if [ -z "$bad" ]; then
-    ok "ログイン後の取得はトークン付き（publicApiRawはregisterUserのみ）"
-  else
+  # ★認証前に呼べる道具は残さない★（2026-08-01 招待制に合わせて厳格化）
+  #   当初は registerUser だけ例外にしていたが、招待制では
+  #   「登録で行を作る」必要が無く、registerUser もセッション必須にした。
+  #   よって認証前に呼ぶものは1つも無い。関数ごと削除してある。
+  bad=$(grep -o 'publicApiRaw("[a-zA-Z]*"' ../index.html | sed 's/publicApiRaw("//;s/"//' | sort -u | tr '\n' ' ')
+  if [ -z "$bad" ] && ! grep -q 'function publicApiRaw' ../index.html; then
+    ok "認証前に呼べる通信の道具が無い"
+  elif [ -n "$bad" ]; then
     ng "認証前の取得が残っている: ${bad}─ 既存利用者が新規扱いになる"
+  else
+    ng "publicApiRaw が未使用のまま残っている ─ 認証なしで呼べる道具を残さない"
   fi
 
   # task_id への変換（同名タスクの区別・改名時の情報保持）

@@ -484,18 +484,10 @@ async function publicApi(action, params = {}) {
   } catch { return { ok:false }; }
 }
 
-// ログイン成立前に呼ぶもの（まだセッションが無い段階の getUser など）。
-// トークンを付けないだけで、経路はPOSTに揃える。
-// ★GETを残すと、そこだけURLにパラメータが載り続けて取り残しになる★
-async function publicApiRaw(action, params = {}) {
-  try {
-    const r = await fetch(GAS_URL, {
-      method: "POST", headers: { "Content-Type": "text/plain" },
-      body: JSON.stringify({ action, ...params })
-    });
-    return await r.json();
-  } catch { return { ok:false }; }
-}
+// publicApiRaw（認証前に呼ぶ通信）は 2026-08-01 に削除した。
+// 招待制に合わせて registerUser もセッション必須にしたため、
+// 認証前に呼ぶものが1つも無くなった。
+// 「いつか使うかも」で残すと、認証なしで呼べる道具として再利用される。
 
 async function authedApi(action, params = {}) {
   if (!GAS_URL) return mockApi(action, params);
