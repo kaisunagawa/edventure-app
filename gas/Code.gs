@@ -8789,6 +8789,21 @@ function adminPurgeTestUsers(confirm) {
   return { ok: true, dryRun: false, removed: hits.length };
 }
 
+// ── 2026-08-01 実施済みのデータ修復（記録として残す）──
+// XPの誤加算10を是正した（before 5512 → after 5502 / streak・バッジ・レベルは不変）。
+// ロールバック検証でわたしが作った記録が原因。記録自体は削除済みだった。
+//
+// ★修復用のコードは実行後に削除した★
+//   XPを書き換えられる口を残すと、点数の意味がなくなる。
+//   実行の痕跡は監査ログ（DATA_REPAIR）とスクリプトプロパティ
+//   REPAIR_DONE_xp-2026-08-01-rollback-test に残っている。
+//
+// このとき、ChatGPTから指示された固定値（5482→5472）は既に古くなっており、
+// 実行時点では5512だった。Kaiがその後も記録して正当にXPを得ていたため。
+// 固定値をそのまま書き込んでいたら、正当に稼いだ30ポイントを消していた。
+// 「期待値と一致したときだけ書く」というガードが実際に事故を止めた。
+// 次に同種の修復を行うときも、必ず実行直前に現在値を取り直すこと。
+
 function authCleanupTestData() {
   const now = new Date().toISOString();
   const sh = getAuthSheet("Sessions");
@@ -10084,6 +10099,17 @@ function hasFeature(user, key) {
 //   表示のたびに算出する。上書きしたいときだけ urgency_override を持つ。
 // ══════════════════════════════════════════════════════════════════
 
+// タスクの状態。既存データと新しいコードで表記が違っていた。
+//   移行で入ったもの … COMPLETED
+//   新しく作るもの   … DONE
+// 揃えないと「完了したのに未完了として並び続ける」。
+// 既存データは書き換えず、読むときに正規化する。
+function normalizeTaskStatus(v) {
+  const s = String(v || "").trim().toUpperCase();
+  if (s === "COMPLETED" || s === "DONE") return "DONE";
+  if (s === "DOING" || s === "IN_PROGRESS") return "DOING";
+  return "TODO";
+}
 const IMPORTANCE_LEVELS = ["HIGH", "MEDIUM", "LOW"];
 const URGENCY_LEVELS = ["HIGH", "MEDIUM", "LOW", "NONE"];
 
@@ -10180,7 +10206,7 @@ function decorateTask(t, nowMs) {
   const u = computeUrgency(t.due_at, t.urgency_override, nowMs);
   const effectiveImportance = imp || suggestImportance(t);
   return {
-    task_id: t.task_id, title: t.title, date: t.date, status: t.status,
+    task_id: t.task_id, title: t.title, date: t.date, status: normalizeTaskStatus(t.status),
     link_weekly_goal_id: t.link_weekly_goal_id || "",
     link_daily_focus_id: t.link_daily_focus_id || "",
     estimated_minutes: t.estimated_minutes || "", actual_minutes: t.actual_minutes || "",
@@ -10209,7 +10235,7 @@ function getTasks(studentEmail, body) {
 
   let rows = p1List("Tasks", studentEmail).filter(function (t) {
     if (String(t.deleted_at || "").trim()) return false;
-    if (!includeDone && String(t.status || "").toUpperCase() === "DONE") return false;
+    if (!includeDone && normalizeTaskStatus(t.status) === "DONE") return false;
     return true;
   }).map(function (t) { return decorateTask(t, now); });
 
@@ -10286,6 +10312,8 @@ function saveTask(studentEmail, body) {
     }
     if (st === "DONE") rec.completed_at = new Date().toISOString();
     if (st !== "DONE" && cur && String(cur.completed_at || "").trim()) rec.completed_at = "";
+    // 既存の COMPLETED 表記を DONE へ寄せる（読み替えではなく保存時に揃える）
+    if (normalizeTaskStatus(cur && cur.status) === "DONE" && st === "DONE") rec.status = "DONE";
   }
 
   const r = p1Upsert("Tasks", "task_id", rec);
