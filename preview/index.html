@@ -1496,7 +1496,18 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
              isSuggestion: !taskImportance[task] };
   };
 
-  const toEditRows = (arr) => arr.map(t=>({text:t, min:(taskEstimates[t]!=null?String(taskEstimates[t]):"")}));
+  // ★重要度と期限も一緒に持ち運ぶ★
+  // タスク名がそのまま識別子になっているため、名前を変えると
+  // 名前をキーにした情報（想定時間・重要度・期限）が古い名前に取り残される。
+  // 想定時間は編集フォームを経由するので生き残っていたが、
+  // 重要度と期限はフォームに無いため、改名すると消えていた（実装直後の不具合）。
+  // 行に載せて一緒に運ぶ。
+  const toEditRows = (arr) => arr.map(t=>({
+    text:t,
+    min:(taskEstimates[t]!=null?String(taskEstimates[t]):""),
+    imp:(taskImportance[t]||""),
+    due:(taskDue[t]||"")
+  }));
   // 編集モーダルには「未完了のタスクだけ」を出す。完了済みは編集対象にしない
   // （完了フォルダにそのまま残す）。保存時に完了タスクは保持してマージする
   const openEdit = () => {
@@ -1521,6 +1532,17 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
     completed.forEach(c=>{ if(taskEstimates[c]>0) est[c]=taskEstimates[c]; });
     setTaskEstimates(est);
     try { localStorage.setItem("jiroku_task_estimates_"+todayKey, JSON.stringify(est)); }catch(e){}
+    // 重要度・期限も新しい名前で作り直す（改名で失わないため）
+    const impMap = {}, dueMap = {};
+    editItems.forEach(r=>{ const t=String(r.text||"").trim(); if(!t) return;
+      if(r.imp) impMap[t]=r.imp; if(r.due) dueMap[t]=r.due; });
+    completed.forEach(c=>{ if(taskImportance[c]) impMap[c]=taskImportance[c];
+                           if(taskDue[c]) dueMap[c]=taskDue[c]; });
+    setTaskImportance(impMap); setTaskDue(dueMap);
+    try {
+      localStorage.setItem("jiroku_task_importance_"+todayKey, JSON.stringify(impMap));
+      localStorage.setItem("jiroku_task_due_"+todayKey, JSON.stringify(dueMap));
+    }catch(e){}
     // 完了タスクのチェック状態は保持する
     const newChecked = {};
     completed.forEach(c=>{ newChecked[c]=true; });
