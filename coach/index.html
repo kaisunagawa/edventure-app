@@ -246,7 +246,6 @@ function LoginScreen({ onLogin }) {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [fallback, setFallback] = useState(false);   // 公式ボタンを出せなかったとき
-  const btnRef = useRef(null);
 
   const afterEmail = async (email) => {
     COACH_EMAIL = email;
@@ -267,7 +266,10 @@ function LoginScreen({ onLogin }) {
   useEffect(() => {
     let alive = true, timer = null;
     const mount = async () => {
-      const okBtn = await mountGoogleButton(btnRef.current, afterEmail, onErr, setLoading);
+      // ★ref ではなく id で取る★
+      // htm + React の組み合わせでは ref が DOM 要素へ渡らず、
+      // 常に null になっていた（実測。公式ボタンが出ず逃げ道の自前ボタンに落ちていた）
+      const okBtn = await mountGoogleButton(document.getElementById("gsi-btn"), afterEmail, onErr, setLoading);
       if (!alive) return;
       setFallback(!okBtn);
       // challengeの期限切れを避けるため、定期的に張り直す
@@ -289,7 +291,7 @@ function LoginScreen({ onLogin }) {
       <div style=${{fontSize:13,color:"var(--sub)"}}>コーチ専用の管理画面です</div>
       ${loading ? html`<div class="spin"/>` : ""}
       <!-- Googleの公式ボタンをここへ描画する。自前ボタンではポップアップが塞がれる -->
-      <div ref=${btnRef} style=${{minHeight:44, display: loading ? "none" : "block"}}></div>
+      <div id="gsi-btn" style=${{minHeight:44, display: loading ? "none" : "block"}}></div>
       ${!loading && fallback
         ? html`<button onClick=${signIn} style=${{display:"flex",alignItems:"center",gap:10,padding:"10px 20px",borderRadius:8,border:"1px solid #dadce0",background:"#fff",cursor:"pointer",fontSize:15,fontWeight:500,color:"#3c4043",width:280,justifyContent:"center"}}>
             <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" width="18" height="18"/>
