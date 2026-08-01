@@ -4996,6 +4996,23 @@ function SettingsScreen({onToast,onLogout,onGoalSaved,profile,onProfileSaved,onC
 const TABS=[{id:"home",l:"ホーム",n:"home"},{id:"timer",l:"タイマー",n:"timer"},{id:"log",l:"記録",n:"clock"},{id:"report",l:"レポート",n:"chart"},{id:"brain",l:"気づき",n:"bulb"},{id:"settings",l:"設定",n:"gear"}];
 const AVATAR_OPTIONS=["🦊","🐱","🐶","🐻","🐼","🦉","🐧","🦁","🐢","🐰","🐹","🐨","🐵","🐺","🦄","🐴","🐥","🐻‍❄️","🦋","🦭"];
 
+// ログインした環境と方式の短いラベル。
+// ★UAそのものは保存しない★ 個人の特定につながる情報を残さないため、
+// 「iPhone/gsi」のような粗い分類だけにする。
+// これが無いと「スマホで通ったのか」「公式ボタンだったのか」を
+// 毎回口頭で確認するしかない。
+function deviceLabel(method){
+  const ua = navigator.userAgent || "";
+  let env = "PC";
+  if (/Line\//i.test(ua)) env = "LINE";
+  else if (/iPhone|iPod/i.test(ua)) env = "iPhone";
+  else if (/iPad/i.test(ua)) env = "iPad";
+  else if (/Android/i.test(ua)) env = "Android";
+  let disp = "";
+  try { if (window.matchMedia("(display-mode: standalone)").matches || navigator.standalone) disp = "/pwa"; } catch {}
+  return env + disp + "/" + (method || "unknown");
+}
+
 // ══════════════════════════════════════════════════════════════════
 // タスクの識別子（task_id）への一本化 ─ 第1段
 //
@@ -5115,7 +5132,7 @@ function LoginScreen({onLogin}) {
     const st=hash.get("state")||"";
     if(idToken){
       history.replaceState(null,"",location.pathname+location.search);
-      handleGoogleLogin({credential:idToken, state:st});
+      handleGoogleLogin({credential:idToken, state:st, method:"redirect"});
       return;
     }
     // ★Googleがエラーで返してきた場合★
@@ -5171,7 +5188,7 @@ function LoginScreen({onLogin}) {
           cancel_on_tap_outside: true,
           callback: (res)=>{
             if(!res||!res.credential){ setError("ログインに失敗しました"); return; }
-            handleGoogleLogin({credential:res.credential, state: ch.challenge_id+"~"+ch.state});
+            handleGoogleLogin({credential:res.credential, state: ch.challenge_id+"~"+ch.state, method:"gsi"});
           }
         });
         el.innerHTML="";
@@ -5257,7 +5274,8 @@ function LoginScreen({onLogin}) {
     const sessionPromise = (sep>0)
       ? fetch(GAS_URL,{ method:"POST", headers:{"Content-Type":"text/plain"},
           body: JSON.stringify({ action:"login", idToken:res.credential,
-                                 challenge_id:raw.slice(0,sep), state:raw.slice(sep+1) }) })
+                                 challenge_id:raw.slice(0,sep), state:raw.slice(sep+1),
+                                 device: deviceLabel(res.method) }) })
           .then(r=>r.json())
           .then(j=>{
             if(j&&j.ok&&j.token) setSessionToken(j.token);

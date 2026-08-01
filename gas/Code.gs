@@ -256,7 +256,8 @@ function doGet(e) {
             activeUsers: allUsers.filter(function(u){ return String(u.is_active).toUpperCase()==="TRUE"; }).length,
             rows: ses.map(function(x){
             return { hashHead:String(x.session_token_hash).slice(0,12), user:x.user_id, created:x.created_at,
-                     lastSeen:x.last_seen_at, revoked:x.revoked_at||"", exp:x.expires_at }; }) },
+                     lastSeen:x.last_seen_at, revoked:x.revoked_at||"", exp:x.expires_at,
+                     device:x.device_label||"" }; }) },
           linkedUsers: us.map(function(u){ return { email:u.student_email, subHead:String(u.google_sub).slice(0,8)+"…",
                      userId:u.user_id, role:u.role||"", linkedAt:u.auth_linked_at||"" }; }) };
         break;
@@ -9416,7 +9417,7 @@ function authLoginAccess(body) {
 
   const userRow = sheetToObjects(getSheet("Users")).find(function (x) { return String(x.user_id) === String(u.userId); }) || {};
   const sess = issueSession({ userId: u.userId, sub: v.sub, role: userRow.role || "USER",
-                              organizationId: userRow.organization_id || "", tokenVersion: userRow.token_version || 0 });
+                              organizationId: userRow.organization_id || "", tokenVersion: userRow.token_version || 0 }, String((body && body.device) || ""));
   authAudit("LOGIN_ACCESS", { result: "SUCCESS", actorUserId: u.userId, action: "loginAccess",
                               credentialFingerprint: fp, failureReason: u.linked ? "sub_linked" : "" });
   return { ok: true, token: sess.token, expiresAt: sess.expiresAt,
@@ -9470,7 +9471,12 @@ function ensureUserId(sheet, rowNum, colIdx, current) {
 }
 
 // ── セッションの発行 ──
-function issueSession(user) {
+// device: 「どの環境から・どの方式でログインしたか」の短いラベル。
+// ★ここを記録していなかった★ 列はあったのに常に空だった。
+// そのため「スマホで通ったのか」「公式ボタンだったのかリダイレクトだったのか」を
+// 毎回Kaiに口頭で聞くしかなかった。聞かなくても分かるようにする。
+// 個人を特定する情報は入れない（UAそのものは保存しない）。
+function issueSession(user, device) {
   const sh = getAuthSheet("Sessions");
   const token = newSessionToken(user.userId);
   const now = new Date();
@@ -9494,7 +9500,8 @@ function issueSession(user) {
 
   sh.appendRow([
     sha256Hex(token), user.userId, user.sub, user.role || "USER", user.organizationId || "",
-    exp.toISOString(), now.toISOString(), now.toISOString(), "", Number(user.tokenVersion || 0), ""
+    exp.toISOString(), now.toISOString(), now.toISOString(), "", Number(user.tokenVersion || 0),
+    String(device || "").slice(0, 40)
   ]);
   return { token: token, expiresAt: exp.toISOString() };
 }
@@ -9606,7 +9613,7 @@ function authLogin(body) {
 
   const userRow = sheetToObjects(getSheet("Users")).find(x => String(x.user_id) === String(u.userId)) || {};
   const sess = issueSession({ userId: u.userId, sub: v.sub, role: userRow.role || "USER",
-                              organizationId: userRow.organization_id || "", tokenVersion: userRow.token_version || 0 });
+                              organizationId: userRow.organization_id || "", tokenVersion: userRow.token_version || 0 }, String((body && body.device) || ""));
   if (fp) rateClear("fp_" + fp);
   rateClear("sub_" + v.sub);
   authAudit("LOGIN", { result: "SUCCESS", actorUserId: u.userId, action: "login",
