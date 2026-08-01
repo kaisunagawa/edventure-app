@@ -143,6 +143,17 @@ PY
     if [ "$n" -eq 1 ]; then ok "function ${fn}"; else ng "function ${fn} が ${n} 個"; fi
   done
 
+  # ★本番のコピーを作らない★
+  # 2026-08-01、preview/index.html へコピーしてから push する手順を続け、
+  # 「検証用にだけ出した」と報告していたが、コピー元の index.html が本番であり、
+  # git add -A で両方が公開されていた。preview は検証の場ではなく本番のコピーで、
+  # 報告の前提が崩れていた。コピー方式そのものをやめる（DEPLOY.md 参照）。
+  if [ -d ../preview ]; then
+    ng "preview/ が復活している ─ 本番のコピーになる。ブランチで分けること"
+  else
+    ok "本番のコピー置き場が無い"
+  fi
+
   # ★registerUser で新規のUsers行を作れないこと★
   # 2026-08-01の監査で、curl 1本で任意のメールの有効な利用者を作れた。
   # 招待制なので「登録で行を作る」経路は存在してはいけない。
