@@ -7830,8 +7830,11 @@ const P1_SHEETS = {
 };
 // 既存シートへ追加する列（削除・改名は一切しない）
 const P1_ADDED_COLUMNS = {
+  // actual_minutes … タイマー等で実際に測った分数。DURATIONの第1優先
+  // duration_confirmed … time_block から出した候補を本人が確認して確定したか
+  //   （確定していない候補を勝手に足さないための印）
   DailyLog: ["action_execution_id","quantity","unit","primary_weekly_goal_id","related_goal_ids",
-    "link_task_id","deleted_at"],
+    "link_task_id","deleted_at","actual_minutes","duration_confirmed"],
   Journal: ["daily_focus_id","focus_completion_condition","focus_min_line","focus_planned_time",
     "focus_if_then","link_weekly_goal_id","focus_achievement_state","focus_miss_reason"],
   Users: ["features","task_migrated_at"]
@@ -7843,7 +7846,23 @@ function getP1Sheet(name) {
   if (!sheet) {
     sheet = getSpreadsheet().insertSheet(name);
     sheet.appendRow(P1_SHEETS[name]);
+    return sheet;
   }
+  // ★既存シートにも、あとから増えた列を追加する★
+  // P1_SHEETS はシートを新規作成するときにしか使われていなかったため、
+  // 定義に列を足しても既存シートには反映されず、
+  // 「コードは新しい列を書こうとするのに、シートにその列が無い」
+  // という食い違いが起きる（書いたつもりで消えるので気づきにくい）。
+  // 末尾へ足すだけ。並べ替えも改名も削除も一切しない。
+  try {
+    const want = P1_SHEETS[name] || [];
+    if (want.length) {
+      const last = sheet.getLastColumn();
+      const headers = last ? sheet.getRange(1, 1, 1, last).getValues()[0] : [];
+      const missing = want.filter(c => headers.indexOf(c) === -1);
+      if (missing.length) sheet.getRange(1, headers.length + 1, 1, missing.length).setValues([missing]);
+    }
+  } catch (e) { Logger.log("getP1Sheet 列追加に失敗: " + name + " / " + e); }
   return sheet;
 }
 // 既存シートに不足している列を追加する（1回のsetValuesでまとめて書く）
@@ -8094,10 +8113,13 @@ function saveWeeklyGoal(studentEmail, body) {
     return { ok: false, error: "週間目標は30件までです" };
   }
 
-  // metric_type: count(回数) / minutes(時間) / boolean(やったか) の3種。
-  // boolean は「関連ログがあるだけ」では達成にせず、本人が完了にした時だけ達成扱いにする
-  const mt = ["count", "minutes", "boolean"].indexOf(String(body.metric_type || "").trim()) !== -1
-    ? String(body.metric_type).trim() : "count";
+  // metric_type は大文字4種に統一（2026-08-01）。
+  //   COUNT    回数。正の quantity があるときだけ加算する
+  //   DURATION 分数。actual_minutes → quantity の順。time_block は自動加算しない
+  //   DAYS     やった日数。同じ日に何件記録しても1日
+  //   BOOLEAN  やったか。本人が完了にした時だけ達成
+  // 小文字の旧表記（count/minutes/boolean）も受け取って変換する。
+  const mt = normalizeMetricType(body.metric_type);
 
   const rec = {
     weekly_goal_id: id || makeP1Id("wg"),
@@ -8311,6 +8333,8 @@ function writeP1LogFields(sheet, rowNum, studentEmail, targetDate, timeBlock, bo
     };
     set("action_execution_id", makeExecutionId(studentEmail, targetDate, timeBlock));
     if (body.quantity !== undefined) set("quantity", p1Num_(body.quantity));
+    if (body.actual_minutes !== undefined) set("actual_minutes", p1Num_(body.actual_minutes));
+    if (body.duration_confirmed !== undefined) set("duration_confirmed", String(body.duration_confirmed) === "true" ? "TRUE" : "FALSE");
     if (body.unit !== undefined) set("unit", p1Text_(body.unit, 20));
     if (body.primary_weekly_goal_id !== undefined) {
       set("primary_weekly_goal_id", resolvePrimaryWeeklyGoal(studentEmail, body.primary_weekly_goal_id));
@@ -8349,22 +8373,73 @@ function aggregateWeeklyActual(studentEmail, weekStart) {
   const out = {};
   weeklies.forEach(w => {
     const id = String(w.weekly_goal_id);
-    const mt = String(w.metric_type || "count");
+    const mt = normalizeMetricType(w.metric_type);
+
+    // ★数えるのは primary_weekly_goal_id が一致する記録だけ★
+    // related_goal_ids は「関連あり」の目印であって、集計には使わない。
+    // 使うと、1件の記録が複数の週間目標に加算されて数字が水増しされる。
+    const mine = logs.filter(l => String(l.primary_weekly_goal_id || "") === id);
+
     let actual = 0;
-    if (mt === "boolean") {
+    let pending = 0;   // 未確定で数えなかったぶん（画面で「確認しますか」と出すため）
+
+    if (mt === "BOOLEAN") {
+      // ★記録があるだけでは達成にしない★
+      // 本人が明示的に「達成」へ変えたときだけ1。
       actual = String(w.status || "").toUpperCase() === "COMPLETED" ? 1 : 0;
-    } else {
-      // primary_weekly_goal_id が一致する記録だけを数える＝二重加点しない
-      const mine = logs.filter(l => String(l.primary_weekly_goal_id || "") === id);
-      actual = mine.reduce((sum, l) => {
-        if (mt === "minutes") return sum + timeBlockMinutes(l.time_block);
+
+    } else if (mt === "DAYS") {
+      // 何日やったか。同じ日に何件記録しても1日。
+      const days = {};
+      mine.forEach(l => { const d = String(l.date).substring(0, 10); if (d) days[d] = 1; });
+      actual = Object.keys(days).length;
+
+    } else if (mt === "DURATION") {
+      // 分数。優先順位は actual_minutes → quantity。
+      // ★time_block の長さを自動で足さない★
+      //   「10時〜12時に勉強」と記録しても、その2時間まるごとが
+      //   目標の時間とは限らない。自動加算すると、目標に紐づけただけで
+      //   数字が伸びてしまい、達成感だけが先に来る。
+      //   time_block は候補として画面に出し、本人が確認して保存したぶんだけ数える。
+      mine.forEach(l => {
+        const am = Number(l.actual_minutes);
+        if (!isNaN(am) && am > 0) { actual += am; return; }
         const q = Number(l.quantity);
-        return sum + (isNaN(q) || String(l.quantity).trim() === "" ? 1 : q);
-      }, 0);
+        if (!isNaN(q) && q > 0) { actual += q; return; }
+        const cand = timeBlockMinutes(l.time_block);
+        if (cand > 0) pending += cand;   // 候補として持つだけ。加算しない
+      });
+
+    } else {
+      // COUNT。★正の quantity があるときだけ加算する★
+      //   未入力を1として数えると、「紐づけただけ」で回数が増える。
+      //   数えていないものを数えたことにしない。
+      mine.forEach(l => {
+        const q = Number(l.quantity);
+        if (!isNaN(q) && q > 0) actual += q;
+        else pending += 1;
+      });
     }
-    out[id] = { actual: actual, metric_type: mt, logCount: logs.filter(l => String(l.primary_weekly_goal_id || "") === id).length };
+
+    out[id] = { actual: actual, metric_type: mt, logCount: mine.length,
+                pendingUnconfirmed: pending };
   });
   return out;
+}
+
+// ★内部コードを大文字4種へ統一する★
+// 以前は count / minutes / boolean（小文字）だった。
+// 既存データを書き換えずに済むよう、読むときに変換する。
+// 変換表に無いものは COUNT にする（勝手に時間として数えないため。
+// 取り違えるなら、数字が小さく出るほうへ倒す）。
+const METRIC_TYPES = ["COUNT", "DURATION", "DAYS", "BOOLEAN"];
+function normalizeMetricType(v) {
+  const s = String(v || "").trim().toUpperCase();
+  if (METRIC_TYPES.indexOf(s) !== -1) return s;
+  if (s === "MINUTES" || s === "TIME") return "DURATION";
+  if (s === "DAY") return "DAYS";
+  if (s === "BOOL") return "BOOLEAN";
+  return "COUNT";
 }
 
 // 集計結果を WeeklyGoals に書き戻す（画面が毎回集計し直さなくて済むように）
@@ -9679,6 +9754,9 @@ function computeOpsSignature(canonical) {
     Utilities.computeHmacSha256Signature(canonical, secret)).replace(/=+$/, "");
 }
 // 署名が正しければ管理者として扱う。鍵そのものは受け取らない
+// 1回のリクエストの中で「もう検証済みの署名」を覚えておく入れ物。
+// GASは実行ごとにスクリプトを読み直すので、リクエストをまたいで残らない。
+var _opsSigVerifiedThisRequest = "";
 function verifyOpsSignature(params) {
   const sig = String(params.sig || "");
   const ts = Number(params.ts || 0);
@@ -9687,6 +9765,15 @@ function verifyOpsSignature(params) {
 
   const now = Math.floor(Date.now() / 1000);
   if (Math.abs(now - ts) > OPS_SIG_WINDOW_SEC) return { ok: false, reason: "SIG_EXPIRED" };
+
+  // ★同じリクエストの中では、何度検証しても通るようにする★
+  //   1回のリクエストで署名を2回検証する経路がある。
+  //   入口（authorizeAction）で1回、各アクションの中で verifyP1Admin が
+  //   もう1回。nonceは使い捨てなので、2回目が NONCE_REUSED になり
+  //   「認可は通ったのに処理が invalid signature で落ちる」という
+  //   分かりにくい失敗になっていた（adminSetupPhase1 で実際に発生）。
+  //   同一リクエスト内かどうかは、同じ署名文字列かどうかで判定する。
+  if (_opsSigVerifiedThisRequest === sig) return { ok: true, cached: true };
 
   const cache = CacheService.getScriptCache();
   const nk = "opsn_" + sha256Hex(nonce).slice(0, 24);
@@ -9698,6 +9785,7 @@ function verifyOpsSignature(params) {
 
   // 検証を通ったnonceだけを使用済みにする（総当たりで枠を潰されないように）
   cache.put(nk, "1", OPS_SIG_WINDOW_SEC * 2);
+  _opsSigVerifiedThisRequest = sig;   // 同一リクエスト内の2回目のために覚えておく
   return { ok: true };
 }
 
@@ -10000,7 +10088,16 @@ function migrateLocalTasks(studentEmail, body) {
 function setupPhase1() {
   const created = [], addedCols = {};
   Object.keys(P1_SHEETS).forEach(name => {
-    if (!getSheet(name)) { getP1Sheet(name); created.push(name); }
+    const existed = !!getSheet(name);
+    // ★既存シートでも必ず getP1Sheet を通す★
+    // 以前は「シートが無いときだけ」呼んでいたため、P1_SHEETS の定義に
+    // 列を足しても既存シートには永久に反映されなかった。
+    // getP1Sheet は不足している列を末尾へ足すだけ（削除も改名もしない）。
+    const before = existed ? getSheet(name).getLastColumn() : 0;
+    getP1Sheet(name);
+    if (!existed) { created.push(name); return; }
+    const after = getSheet(name).getLastColumn();
+    if (after > before) addedCols[name] = P1_SHEETS[name].slice(before, after);
   });
   Object.keys(P1_ADDED_COLUMNS).forEach(name => {
     const added = ensureP1Columns(name);
