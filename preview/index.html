@@ -1141,6 +1141,18 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
   const [taskEstimates, setTaskEstimates] = useState(()=>{
     try { return JSON.parse(localStorage.getItem("jiroku_task_estimates_"+formatDateStr(new Date()))||"{}"); } catch(e){ return {}; }
   });
+  // ★重要度と期限★（2026-08-01追加）
+  // 既存の taskEstimates と同じ流儀で、タスク名をキーにした別マップで持つ。
+  // 新しい入れ物を作らないのは、既に「今日のタスク」が文字列の配列で
+  // できあがっており、そこへ構造体を混ぜると全ての参照を直すことになるため。
+  //   重要度 … 本人が決める（未設定なら「中」扱い。勝手に決めない）
+  //   期限   … 日付。緊急度はここから自動で決まる（保存しない）
+  const [taskImportance, setTaskImportance] = useState(()=>{
+    try { return JSON.parse(localStorage.getItem("jiroku_task_importance_"+formatDateStr(new Date()))||"{}"); } catch(e){ return {}; }
+  });
+  const [taskDue, setTaskDue] = useState(()=>{
+    try { return JSON.parse(localStorage.getItem("jiroku_task_due_"+formatDateStr(new Date()))||"{}"); } catch(e){ return {}; }
+  });
   // タスクの進捗状態（ボード用）。"todo"=予定 / "doing"=実行中 / "done"=完了。
   // 未設定なら既存のchecked（完了フラグ）から導出する（後方互換）
   const [taskStatus, setTaskStatus] = useState(()=>{
@@ -1436,6 +1448,8 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
     if(list.length===0){ setCustomActions(null); localStorage.removeItem("jiroku_custom_actions_"+todayKey); }
     else { setCustomActions(list); localStorage.setItem("jiroku_custom_actions_"+todayKey, JSON.stringify(list)); }
     const est={...taskEstimates}; delete est[task]; setTaskEstimates(est); localStorage.setItem("jiroku_task_estimates_"+todayKey, JSON.stringify(est));
+    const imp={...taskImportance}; delete imp[task]; setTaskImportance(imp); localStorage.setItem("jiroku_task_importance_"+todayKey, JSON.stringify(imp));
+    const du={...taskDue}; delete du[task]; setTaskDue(du); localStorage.setItem("jiroku_task_due_"+todayKey, JSON.stringify(du));
     const stt={...taskStatus}; delete stt[task]; setTaskStatus(stt); localStorage.setItem("jiroku_task_status_"+todayKey, JSON.stringify(stt));
     const nt={...taskNotes}; delete nt[task]; setTaskNotes(nt); localStorage.setItem("jiroku_task_memo_"+todayKey, JSON.stringify(nt));
     const nc={...checked}; delete nc[task]; setChecked(nc); localStorage.setItem("today_actions", JSON.stringify(nc));
@@ -1444,6 +1458,44 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
   };
 
   // 現在のタスク(文字列配列)＋想定時間マップから、編集用の {text,min} 配列を作る
+  // 重要度・期限の設定。既存の setTaskTime と同じ形にそろえる
+  const setTaskImp = (task, v) => {
+    const next = {...taskImportance};
+    if (v) next[task] = v; else delete next[task];
+    setTaskImportance(next);
+    localStorage.setItem("jiroku_task_importance_"+todayKey, JSON.stringify(next));
+  };
+  const setTaskDueAt = (task, v) => {
+    const next = {...taskDue};
+    if (v) next[task] = v; else delete next[task];
+    setTaskDue(next);
+    localStorage.setItem("jiroku_task_due_"+todayKey, JSON.stringify(next));
+  };
+  // ★緊急度と4分類は保存しない★
+  // 期限から都度出す。保存すると日付が変わっても古い判定が残る。
+  // 判定の中身はサーバー（computeUrgency / classifyTask）と同じ規則。
+  const quadrantOf = (task) => {
+    const imp = taskImportance[task] || "MEDIUM";
+    const due = taskDue[task] || "";
+    let urg = "NONE", overdue = false;
+    if (due) {
+      const p = String(due).substring(0,10).split("-");
+      const d = new Date(Number(p[0]), Number(p[1])-1, Number(p[2]));
+      const n = new Date(); const t0 = new Date(n.getFullYear(), n.getMonth(), n.getDate());
+      const days = Math.round((d - t0) / 86400000);
+      if (days < 0) { urg = "HIGH"; overdue = true; }
+      else if (days <= 1) urg = "HIGH";
+      else if (days <= 3) urg = "MEDIUM";
+      else urg = "LOW";
+    }
+    const important = imp === "HIGH", urgent = urg === "HIGH";
+    const q = important && urgent ? "DO_NOW"
+            : important ? "SCHEDULE"
+            : urgent ? "DELEGATE_OR_LIMIT" : "DEFER_OR_DELETE";
+    return { importance: imp, urgency: urg, overdue: overdue, quadrant: q,
+             isSuggestion: !taskImportance[task] };
+  };
+
   const toEditRows = (arr) => arr.map(t=>({text:t, min:(taskEstimates[t]!=null?String(taskEstimates[t]):"")}));
   // 編集モーダルには「未完了のタスクだけ」を出す。完了済みは編集対象にしない
   // （完了フォルダにそのまま残す）。保存時に完了タスクは保持してマージする
@@ -1904,7 +1956,11 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
                 ${checked[item]&&html`<svg width="11" height="11" viewBox="0 0 10 10" fill="none"><path d="M2 5l2.5 2.5L8 3" stroke="white" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`}
               </div>
               <span style=${{flex:1,minWidth:0,fontSize:14,color:checked[item]?"var(--sub)":"var(--text)",textDecoration:checked[item]?"line-through":"none",lineHeight:1.6}}>${item}</span>
+              ${(()=>{ const q=quadrantOf(item); if(q.quadrant==="DEFER_OR_DELETE"&&!taskDue[item]) return ""; const L=QUADRANT_LABEL[q.quadrant];
+                return html`<span style=${{flexShrink:0,fontSize:10.5,fontWeight:700,color:L.color,border:"1px solid "+L.color,borderRadius:20,padding:"1px 7px"}} title=${L.hint}>${L.icon}${L.label}</span>`; })()}
+              ${taskDue[item]&&html`<span style=${{flexShrink:0,fontSize:10.5,color:quadrantOf(item).overdue?"#dc2626":"var(--sub)",fontWeight:quadrantOf(item).overdue?700:400}}>${dueLabel(taskDue[item], quadrantOf(item).overdue)}</span>`}
               ${taskEstimates[item]>0&&html`<span style=${{flexShrink:0,fontSize:11,fontWeight:600,color:checked[item]?"var(--sub)":"var(--accent)",background:checked[item]?"var(--bg)":"var(--accent-l)",borderRadius:20,padding:"2px 8px",marginTop:1}}>⏱${taskEstimates[item]}分</span>`}
+
             </button>`;
           return html`
             ${incompleteItems.length>0
@@ -1933,7 +1989,11 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
               onClick=${()=>setDetailTask(item)}
               style=${{background:"var(--card)",border:`1px solid ${st==="doing"?"var(--accent)":"var(--border)"}`,borderRadius:10,padding:"10px 11px",marginBottom:8,cursor:"pointer",boxShadow:dragTask===item?"0 4px 14px rgba(0,0,0,0.15)":"none",opacity:dragTask===item?0.5:1,transition:"box-shadow .15s",display:"flex",alignItems:"center",gap:8}}>
               <span style=${{flex:1,minWidth:0,fontSize:13.5,color:st==="done"?"var(--sub)":"var(--text)",textDecoration:st==="done"?"line-through":"none",lineHeight:1.5,overflowWrap:"anywhere"}}>${item}</span>
+              ${(()=>{ const q=quadrantOf(item); if(q.quadrant==="DEFER_OR_DELETE"&&!taskDue[item]) return ""; const L=QUADRANT_LABEL[q.quadrant];
+                return html`<span style=${{flexShrink:0,fontSize:10.5,fontWeight:700,color:L.color,border:"1px solid "+L.color,borderRadius:20,padding:"1px 7px"}} title=${L.hint}>${L.icon}${L.label}</span>`; })()}
+              ${taskDue[item]&&html`<span style=${{flexShrink:0,fontSize:10.5,color:quadrantOf(item).overdue?"#dc2626":"var(--sub)",fontWeight:quadrantOf(item).overdue?700:400}}>${dueLabel(taskDue[item], quadrantOf(item).overdue)}</span>`}
               ${taskEstimates[item]>0&&html`<span style=${{flexShrink:0,fontSize:10.5,fontWeight:600,color:"var(--accent)",background:"var(--accent-l)",borderRadius:20,padding:"2px 7px"}}>⏱${taskEstimates[item]}分</span>`}
+
               ${st!=="done"&&html`<button title="タイマーで計測" aria-label="計測" onClick=${stop(()=>goToTimerWith(item))}
                 style=${{...chip,color:"#fff",background:"var(--accent)",border:"none",fontSize:13}}>⏱</button>`}
               ${st!=="todo"&&html`<button title="左の列へ" onClick=${stop(()=>moveStatus(item,-1))} style=${chip}>‹</button>`}
@@ -1986,6 +2046,35 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
               return html`<button key=${k} onClick=${()=>setStatus(t,k)}
                 style=${{flex:1,padding:"10px 4px",borderRadius:10,border:`1.5px solid ${on?"var(--accent)":"var(--border)"}`,background:on?"var(--accent-l)":"transparent",color:on?"var(--accent)":"var(--sub)",fontSize:12.5,fontWeight:on?700:500,cursor:"pointer",fontFamily:"inherit"}}>${em} ${lb}</button>`;
             })}
+          </div>
+
+          <label class="form-lbl">重要度</label>
+          <div style=${{display:"flex",gap:6,marginBottom:16}}>
+            ${[["HIGH","高"],["MEDIUM","中"],["LOW","低"]].map(([v,lb])=>{
+              const on = (taskImportance[t]||"MEDIUM")===v;
+              const set = !!taskImportance[t];
+              return html`<button key=${v} onClick=${()=>setTaskImp(t, v)}
+                style=${{flex:1,padding:"10px 4px",borderRadius:10,fontSize:12.5,cursor:"pointer",fontFamily:"inherit",
+                         border:`1.5px solid ${on?"var(--accent)":"var(--border)"}`,
+                         background:on?"var(--accent-l)":"transparent",
+                         color:on?"var(--accent)":"var(--sub)",fontWeight:on?700:500,
+                         opacity:(on&&!set)?0.65:1}}>${lb}</button>`;
+            })}
+          </div>
+          ${!taskImportance[t] && html`<div style=${{fontSize:11.5,color:"var(--sub)",marginTop:-12,marginBottom:14}}>
+            まだ決めていないので「中」として扱っています。押すと確定します。</div>`}
+
+          <label class="form-lbl">期限</label>
+          <div style=${{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
+            <input class="inp" type="date" value=${taskDue[t]||""}
+              onInput=${e=>setTaskDueAt(t, e.target.value)} style=${{width:170,margin:0}}/>
+            ${taskDue[t] && html`<button onClick=${()=>setTaskDueAt(t,"")}
+              style=${{background:"none",border:"none",color:"var(--sub)",fontSize:12.5,cursor:"pointer",fontFamily:"inherit"}}>期限なしに戻す</button>`}
+          </div>
+          <div style=${{fontSize:11.5,color:"var(--sub)",marginBottom:16,lineHeight:1.8}}>
+            ${(()=>{ const q=quadrantOf(t); const L=QUADRANT_LABEL[q.quadrant];
+              return html`いまの分類：<b style=${{color:L.color}}>${L.icon} ${L.label}</b>（${L.hint}）<br/>
+                緊急度は期限から自動で決まります。`; })()}
           </div>
 
           <label class="form-lbl">想定時間（分）</label>
