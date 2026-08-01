@@ -8022,9 +8022,15 @@ function getGoalTree(studentEmail) {
   let agg = {};
   try { agg = aggregateWeeklyActual(studentEmail, weekStart); } catch (e) { agg = {}; }
 
+  const today = formatDate(new Date());
   const goals = p1List("Goals", studentEmail)
     .filter(g => p1Status_(g.status, "ACTIVE") !== "ARCHIVED")
-    .sort((a, b) => (Number(a.priority) || 99) - (Number(b.priority) || 99));
+    .sort((a, b) => (Number(a.priority) || 99) - (Number(b.priority) || 99))
+    .map(g => {
+      // 進捗とペースを添える。判定できないときは数字を出さず理由を返す
+      const pace = computePace(g.start_date, g.end_date, g.current_value, g.target_value, g.unit, today);
+      return Object.assign({}, g, { pace: pace, paceLabel: PACE_STATUS_LABEL[pace.status] || "不明" });
+    });
   const weeklies = p1List("WeeklyGoals", studentEmail)
     .filter(w => p1Status_(w.status, "ACTIVE") !== "ARCHIVED");
 
@@ -10225,6 +10231,107 @@ function decorateTask(t, nowMs) {
     quadrant: classifyTask(effectiveImportance, u.level)
   };
 }
+
+// ══════════════════════════════════════════════════════════════════
+// 進捗とペース
+//
+// 「残り280万円」だけでは、間に合うのかが分からない。
+// 必要ペースと実績ペースを並べて初めて「足りていない」が見える。
+//
+// ★守ること★
+//   ・未入力を0として扱わない（0は「やっていない」、未入力は「分からない」）
+//   ・データが足りないときは数字を出さず「不明」と言う
+//   ・偽の精密さを出さない（週32.7万円まで。32.6666…は書かない）
+//   ・集計した期間を必ず添える（いつからいつまでの話かが分からないと判断できない）
+// ══════════════════════════════════════════════════════════════════
+
+// 小数を落とす。大きい数字ほど桁を減らす（精密に見せない）
+function paceRound(v) {
+  if (v === null || v === undefined || isNaN(v)) return null;
+  const a = Math.abs(v);
+  if (a >= 100) return Math.round(v);
+  if (a >= 10) return Math.round(v * 10) / 10;
+  return Math.round(v * 100) / 100;
+}
+
+// 開始日・終了日・現在値・目標値から、ペースを出す。
+// startDate/endDate は "YYYY-MM-DD"。current/target は数値または未入力。
+function computePace(startDate, endDate, current, target, unit, todayStr) {
+  const out = { unit: unit || "", confidence: "LOW", note: "" };
+  const sd = String(startDate || "").slice(0, 10);
+  const ed = String(endDate || "").slice(0, 10);
+  const today = todayStr || Utilities.formatDate(new Date(), "Asia/Tokyo", "yyyy-MM-dd");
+  out.period = (sd && ed) ? (sd + " 〜 " + ed) : "";
+
+  // ★未入力と0を区別する★
+  const hasCurrent = !(current === "" || current === null || current === undefined || isNaN(Number(current)));
+  const hasTarget  = !(target  === "" || target  === null || target  === undefined || isNaN(Number(target)));
+  out.current = hasCurrent ? Number(current) : null;
+  out.target  = hasTarget  ? Number(target)  : null;
+
+  if (!hasTarget || !sd || !ed) {
+    out.status = "UNKNOWN";
+    out.note = !hasTarget ? "目標値が未入力のため判定できません" : "期間が未設定のため判定できません";
+    return out;
+  }
+  const d1 = new Date(sd + "T00:00:00+09:00").getTime();
+  const d2 = new Date(ed + "T00:00:00+09:00").getTime();
+  const t  = new Date(today + "T00:00:00+09:00").getTime();
+  if (isNaN(d1) || isNaN(d2) || d2 < d1) {
+    out.status = "UNKNOWN"; out.note = "期間の指定が正しくありません"; return out;
+  }
+  const totalDays = Math.round((d2 - d1) / 86400000) + 1;
+  const elapsedDays = Math.min(Math.max(Math.round((t - d1) / 86400000) + 1, 0), totalDays);
+  const remainingDays = Math.max(Math.round((d2 - t) / 86400000), 0);
+  out.totalDays = totalDays; out.elapsedDays = elapsedDays; out.remainingDays = remainingDays;
+
+  if (!hasCurrent) {
+    out.status = "UNKNOWN";
+    out.note = "現在値が未入力のため判定できません（0ではなく、記録がないという意味です）";
+    return out;
+  }
+
+  const cur = Number(current), tgt = Number(target);
+  out.remaining = paceRound(Math.max(tgt - cur, 0));
+  out.progressPct = tgt > 0 ? paceRound(cur / tgt * 100) : null;
+
+  // 実績ペース。経過が短すぎるとブレるので、日数が足りないときは出さない。
+  // 「1日で全体の1%進んだから週7%」は、判断材料として危ない。
+  if (elapsedDays >= 3) {
+    out.actualPerWeek = paceRound(cur / elapsedDays * 7);
+    out.confidence = elapsedDays >= 14 ? "HIGH" : "MEDIUM";
+  } else {
+    out.actualPerWeek = null;
+    out.note = "経過日数が少ないため、実績ペースはまだ出せません";
+  }
+  // 必要ペース
+  out.requiredPerWeek = remainingDays > 0
+    ? paceRound((tgt - cur) / remainingDays * 7)
+    : null;
+
+  // このままのペースで行った場合の予測
+  if (out.actualPerWeek !== null) {
+    out.forecast = paceRound(cur + (cur / elapsedDays) * remainingDays);
+    // ★「やや遅れ」の幅を狭くする★
+    //   最初は8割を境にしていたが、それだと目標を2割落としても
+    //   「やや遅れ」と表示される。手遅れになるまで「まあ大丈夫」と
+    //   思わせてしまう。あと一息（95%以上）だけを「やや遅れ」にする。
+    if (out.forecast >= tgt) out.status = "ON_TRACK";
+    else if (out.forecast >= tgt * 0.95) out.status = "SLIGHTLY_BEHIND";
+    else out.status = "BEHIND";
+  } else {
+    out.forecast = null;
+    out.status = "UNKNOWN";
+  }
+  if (cur >= tgt) { out.status = "ACHIEVED"; out.forecast = paceRound(cur); }
+  if (remainingDays === 0 && cur < tgt) out.status = "ENDED_SHORT";
+  return out;
+}
+
+const PACE_STATUS_LABEL = {
+  ACHIEVED: "達成", ON_TRACK: "順調", SLIGHTLY_BEHIND: "やや遅れ",
+  BEHIND: "ペース不足", ENDED_SHORT: "期間終了・未達", UNKNOWN: "不明"
+};
 
 // ══════════════════════════════════════════════════════════════════
 // 2週間Sprint（Checkpoint 3）
