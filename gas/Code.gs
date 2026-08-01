@@ -390,7 +390,19 @@ function doGet(e) {
       case "adminRepairStreaksFreeze": result = adminRepairStreaksFreeze(e.parameter.coachEmail, e.parameter.confirm); break;
       case "adminBackfillReportsForDate": result = adminBackfillReportsForDate(e.parameter.coachEmail, e.parameter.date); break;
       case "adminRunNightlyCoachMessage": result = adminRunNightlyCoachMessage(e.parameter.coachEmail); break;
-      case "adminBroadcastLine": result = adminBroadcastLine(e.parameter.coachEmail, e.parameter.message, e.parameter.confirm); break;
+      // ★本文は base64 で受け取れるようにしてある★
+      // 署名対象に日本語をそのまま入れると署名が一致しない
+      // （GASの署名計算がマルチバイトを取り違える。実測で確認）。
+      // base64 なら署名対象がASCIIのままなので、この問題を踏まない。
+      case "adminBroadcastLine": {
+        var _bmsg = e.parameter.message;
+        if (e.parameter.messageB64) {
+          try { _bmsg = Utilities.newBlob(Utilities.base64DecodeWebSafe(e.parameter.messageB64)).getDataAsString("UTF-8"); }
+          catch (err) { result = { ok: false, error: "messageB64 を読めませんでした" }; break; }
+        }
+        result = adminBroadcastLine(e.parameter.coachEmail, _bmsg, e.parameter.confirm);
+        break;
+      }
       case "adminDiagnosePush": result = adminDiagnosePush(e.parameter.coachEmail, e.parameter.targetEmail); break;
       case "adminDebugStripeSearch": result = adminDebugStripeSearch(e.parameter.coachEmail, e.parameter.email); break;
       case "adminDebugCalendarColors": result = adminDebugCalendarColors(e.parameter.coachEmail); break;

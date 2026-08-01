@@ -261,8 +261,14 @@ PYEOF
   echo "$r" | grep -q '"ok":false' && ok "存在しないchallengeを拒否" || ng "challenge拒否が異常: $(echo "$r"|head -c 100)"
   echo "$r" | grep -qi "STATE_MISMATCH\|CHALLENGE\|reason" && ng "失敗理由が利用者へ漏れている" || ok "失敗理由を利用者へ返していない"
 
+  # 拒否の返し方は2種類ある。どちらも「拒否」であり、どちらでも合格。
+  #   AUTH_REQUIRED  … 認可の段階で弾いた
+  #   SESSION_INVALID … トークンが付いているのに無効だったので入口で弾いた
+  # ★空応答は合格にしない★（拒否と区別がつかなくなる）
   r=$(post '{"action":"authWhoAmI","token":"tampered-session-token-xxxx"}')
-  echo "$r" | grep -q "AUTH_REQUIRED" && ok "改ざんセッションを拒否" || ng "改ざんセッションの拒否が異常"
+  if [ -z "$r" ]; then ng "改ざんセッション ─ 応答が空。拒否と断定できない"
+  elif echo "$r" | grep -qE "AUTH_REQUIRED|SESSION_INVALID"; then ok "改ざんセッションを拒否"
+  else ng "改ざんセッションの拒否が異常: $(echo "$r" | head -c 100)"; fi
 
   r=$(post '{"action":"authWhoAmI"}')
   echo "$r" | grep -q "AUTH_REQUIRED" && ok "トークン無しを拒否" || ng "トークン無しの拒否が異常"

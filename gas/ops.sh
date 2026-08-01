@@ -36,6 +36,9 @@ fi
 shift
 
 # パラメータを組み立てて署名する（Pythonに任せる。鍵は環境変数で渡し、引数には出さない）
+# 改行や空白を含む値（一斉送信の本文など）は key=value 形式では渡せない。
+# その場合は OPS_MESSAGE_FILE にファイルパスを入れて呼ぶ。
+#   OPS_MESSAGE_FILE=/tmp/msg.txt bash gas/ops.sh adminBroadcastLine
 QS=$(ACTION="$ACTION" ADMIN="$ADMIN" EXTRA="$*" python3 - <<'PY'
 import os, hmac, hashlib, base64, secrets, time, urllib.parse
 params = {
@@ -45,6 +48,13 @@ params = {
     "ts": str(int(time.time())),
     "nonce": secrets.token_urlsafe(12),
 }
+mf = os.environ.get("OPS_MESSAGE_FILE", "")
+if mf:
+    # ★base64で送る★
+    # 日本語をそのまま署名対象に入れると署名が一致しない（GAS側の取り違え）。
+    # base64ならASCIIのままなので確実に通る。サーバーが messageB64 を復号する。
+    body = open(mf, encoding="utf-8").read().rstrip("\n").encode("utf-8")
+    params["messageB64"] = base64.urlsafe_b64encode(body).decode().rstrip("=")
 for kv in os.environ.get("EXTRA", "").split():
     if "=" in kv:
         k, v = kv.split("=", 1)
