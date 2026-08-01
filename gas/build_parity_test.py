@@ -41,7 +41,11 @@ let ng=0, n=0;
 if(ng>0){ console.log("  "+ng+"/"+n+" 不一致"); process.exit(1); }
 process.exit(0);
 """
-code = server + "\nconst taskImportance={}, taskDue={};\n" + client.replace("const quadrantOf", "var quadrantOf") + harness
+# quadrantOf は idOfTitle を使う（Phase 2 で id キーへ移行したため）。
+# 検査では「id が引けない＝名前キーのまま」の状態を再現する。
+# 判定の中身そのものを比べたいので、id の解決は関与させない。
+stub = "\nconst taskImportance={}, taskDue={};\nfunction idOfTitle(){ return \"\"; }\n"
+code = server + stub + client.replace("const quadrantOf", "var quadrantOf") + harness
 tmp = "/tmp/_parity.js"
 open(tmp, "w").write(code)
 # node は PATH に無いことがある（このMacはbrew未導入で自前配置）

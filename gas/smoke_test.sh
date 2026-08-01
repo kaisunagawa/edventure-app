@@ -192,6 +192,13 @@ PY
     ng "publicApiRaw が未使用のまま残っている ─ 認証なしで呼べる道具を残さない"
   fi
 
+  # マップのキーを id へ付け替える（改名しても設定が残るか・消さないか）
+  if python3 build_keymigration_test.py >/dev/null 2>&1 || python3 ../gas/build_keymigration_test.py >/dev/null 2>&1; then
+    ok "マップのキー付け替え（改名しても設定が残る）"
+  else
+    ng "マップのキー付け替えが壊れている ─ 重要度や期限が消える恐れ"
+  fi
+
   # タスクの保存形式の往復（★いちばん困るのはタスクが消えること★）
   if python3 build_roundtrip_test.py >/dev/null 2>&1 || python3 ../gas/build_roundtrip_test.py >/dev/null 2>&1; then
     ok "タスクの保存形式の往復（件数・順番・idが保たれる）"

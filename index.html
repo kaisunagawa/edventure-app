@@ -1156,8 +1156,14 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
   // できあがっており、そこへ構造体を混ぜると全ての参照を直すことになるため。
   //   重要度 … 本人が決める（未設定なら「中」扱い。勝手に決めない）
   //   期限   … 日付。緊急度はここから自動で決まる（保存しない）
+  // ★id をキーにする（Phase 2）★
+  //   名前をキーにしていると、改名した瞬間に重要度が外れる。
+  //   保存済みのデータは読むときに付け替える（消さない）。
   const [taskImportance, setTaskImportance] = useState(()=>{
-    try { return JSON.parse(localStorage.getItem("jiroku_task_importance_"+formatDateStr(new Date()))||"{}"); } catch(e){ return {}; }
+    try {
+      const raw = JSON.parse(localStorage.getItem("jiroku_task_importance_"+formatDateStr(new Date()))||"{}");
+      return migrateMapKeysToId(raw, customActions);
+    } catch(e){ return {}; }
   });
   const [taskDue, setTaskDue] = useState(()=>{
     try { return JSON.parse(localStorage.getItem("jiroku_task_due_"+formatDateStr(new Date()))||"{}"); } catch(e){ return {}; }
@@ -1481,7 +1487,8 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
     if(list.length===0){ setCustomActions(null); localStorage.removeItem("jiroku_custom_actions_"+todayKey); }
     else { const st=toStored(list); setCustomActions(st); localStorage.setItem("jiroku_custom_actions_"+todayKey, JSON.stringify(st)); }
     const est={...taskEstimates}; delete est[task]; setTaskEstimates(est); localStorage.setItem("jiroku_task_estimates_"+todayKey, JSON.stringify(est));
-    const imp={...taskImportance}; delete imp[task]; setTaskImportance(imp); localStorage.setItem("jiroku_task_importance_"+todayKey, JSON.stringify(imp));
+    const impKey=idOfTitle(task); const imp={...taskImportance}; delete imp[impKey]; delete imp[task];
+    setTaskImportance(imp); localStorage.setItem("jiroku_task_importance_"+todayKey, JSON.stringify(imp));
     const du={...taskDue}; delete du[task]; setTaskDue(du); localStorage.setItem("jiroku_task_due_"+todayKey, JSON.stringify(du));
     const stt={...taskStatus}; delete stt[task]; setTaskStatus(stt); localStorage.setItem("jiroku_task_status_"+todayKey, JSON.stringify(stt));
     const nt={...taskNotes}; delete nt[task]; setTaskNotes(nt); localStorage.setItem("jiroku_task_memo_"+todayKey, JSON.stringify(nt));
@@ -1493,8 +1500,11 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
   // 現在のタスク(文字列配列)＋想定時間マップから、編集用の {text,min} 配列を作る
   // 重要度・期限の設定。既存の setTaskTime と同じ形にそろえる
   const setTaskImp = (task, v) => {
+    // ★id をキーに書く★ 名前で書くと改名で外れる
+    const key = idOfTitle(task) || task;
     const next = {...taskImportance};
-    if (v) next[task] = v; else delete next[task];
+    if (v) next[key] = v; else delete next[key];
+    delete next[task];   // 旧形式（名前キー）が残っていたら掃除する
     setTaskImportance(next);
     localStorage.setItem("jiroku_task_importance_"+todayKey, JSON.stringify(next));
   };
@@ -1508,7 +1518,8 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
   // 期限から都度出す。保存すると日付が変わっても古い判定が残る。
   // 判定の中身はサーバー（computeUrgency / classifyTask）と同じ規則。
   const quadrantOf = (task) => {
-    const imp = taskImportance[task] || "MEDIUM";
+    const impKey = idOfTitle(task);
+    const imp = (impKey && taskImportance[impKey]) || taskImportance[task] || "MEDIUM";
     const due = taskDue[task] || "";
     let urg = "NONE", overdue = false;
     if (due) {
@@ -1526,7 +1537,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
             : important ? "SCHEDULE"
             : urgent ? "DELEGATE_OR_LIMIT" : "DEFER_OR_DELETE";
     return { importance: imp, urgency: urg, overdue: overdue, quadrant: q,
-             isSuggestion: !taskImportance[task] };
+             isSuggestion: !((impKey && taskImportance[impKey]) || taskImportance[task]) };
   };
 
   // ★重要度と期限も一緒に持ち運ぶ★
@@ -1538,7 +1549,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
   const toEditRows = (arr) => arr.map(t=>({
     text:t,
     min:(taskEstimates[t]!=null?String(taskEstimates[t]):""),
-    imp:(taskImportance[t]||""),
+    imp:(taskImportance[idOfTitle(t)]||taskImportance[t]||""),
     due:(taskDue[t]||"")
   }));
   // 編集モーダルには「未完了のタスクだけ」を出す。完了済みは編集対象にしない
@@ -1586,7 +1597,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
     const impMap = {}, dueMap = {};
     editItems.forEach(r=>{ const t=String(r.text||"").trim(); if(!t) return;
       if(r.imp) impMap[t]=r.imp; if(r.due) dueMap[t]=r.due; });
-    completed.forEach(c=>{ if(taskImportance[c]) impMap[c]=taskImportance[c];
+    completed.forEach(c=>{ const ck=idOfTitle(c)||c; if(taskImportance[ck]) impMap[ck]=taskImportance[ck];
                            if(taskDue[c]) dueMap[c]=taskDue[c]; });
     setTaskImportance(impMap); setTaskDue(dueMap);
     try {
@@ -2124,8 +2135,10 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
           <label class="form-lbl">重要度</label>
           <div style=${{display:"flex",gap:6,marginBottom:16}}>
             ${[["HIGH","高"],["MEDIUM","中"],["LOW","低"]].map(([v,lb])=>{
-              const on = (taskImportance[t]||"MEDIUM")===v;
-              const set = !!taskImportance[t];
+              const ik = idOfTitle(t);
+              const cur = (ik && taskImportance[ik]) || taskImportance[t];
+              const on = (cur||"MEDIUM")===v;
+              const set = !!cur;
               return html`<button key=${v} onClick=${()=>setTaskImp(t, v)}
                 style=${{flex:1,padding:"10px 4px",borderRadius:10,fontSize:12.5,cursor:"pointer",fontFamily:"inherit",
                          border:`1.5px solid ${on?"var(--accent)":"var(--border)"}`,
@@ -2134,7 +2147,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
                          opacity:(on&&!set)?0.65:1}}>${lb}</button>`;
             })}
           </div>
-          ${!taskImportance[t] && html`<div style=${{fontSize:11.5,color:"var(--sub)",marginTop:-12,marginBottom:14}}>
+          ${!((idOfTitle(t)&&taskImportance[idOfTitle(t)])||taskImportance[t]) && html`<div style=${{fontSize:11.5,color:"var(--sub)",marginTop:-12,marginBottom:14}}>
             まだ決めていないので「中」として扱っています。押すと確定します。</div>`}
 
           <label class="form-lbl">期限</label>
@@ -5085,6 +5098,25 @@ function makeLocalTaskId(title, i) {
   const src = String(title) + "|" + i;
   for (let k = 0; k < src.length; k++) { h = ((h << 5) - h + src.charCodeAt(k)) | 0; }
   return "lt_" + (h >>> 0).toString(36);
+}
+
+// 保存済みのマップを id キーへ付け替える（Phase 2 の移行）。
+// ★取りこぼしても消さない★
+//   キーが既に id ならそのまま。名前なら id へ移す。
+//   どちらでもない（今日のタスクから消えた等）ものは、触らずに残す。
+//   消すと「昨日つけた重要度が無くなった」になる。判断がつかないものは残す。
+function migrateMapKeysToId(map, list) {
+  if (!map || typeof map !== "object") return {};
+  const byId = {}, byTitle = {};
+  (list || []).forEach(function (t) { byId[t.id] = 1; if (!byTitle[t.title]) byTitle[t.title] = t.id; });
+  const out = {};
+  Object.keys(map).forEach(function (k) {
+    if (byId[k]) { out[k] = map[k]; return; }          // 既に id
+    const id = byTitle[k];
+    if (id && out[id] === undefined) { out[id] = map[k]; return; }  // 名前 → id
+    out[k] = map[k];                                   // 判断がつかないものは残す
+  });
+  return out;
 }
 
 // 名前をキーにした古いマップを、id をキーに付け替える。
