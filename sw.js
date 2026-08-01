@@ -2,7 +2,10 @@
 // skipWaiting + clients.claim で即座に新しい版へ切り替わる。
 // index.html はネットワーク優先(2.5秒でキャッシュ)のため、認証前のフロントが
 // 残り続けることはない
-const CACHE = "jiroku-v9-auth";
+// ★v10★ 2026-08-01: 通信をPOSTのJSON本文へ統一（URLにトークンを載せない）。
+// 古いフロントがキャッシュに残っていると、URLへトークンを載せる旧コードが
+// 動き続けてしまう。版を上げて確実に入れ替える。
+const CACHE = "jiroku-v10-post-auth";
 
 // タイマー終了などをバックグラウンドでも通知するためのFirebase Cloud Messaging。
 // 別ファイル（firebase-messaging-sw.js）として登録すると、同じスコープ('/')の

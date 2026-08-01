@@ -456,31 +456,75 @@ async function enablePushNotifications() {
   }
 }
 
-async function gasApi(action, params = {}) {
+// ── 通信の入口はこの2つだけ ──
+//
+// ★セッショントークンをURLへ載せない★
+//   GETで呼ぶ限り、トークンはクエリ文字列に置くしかない（GASはヘッダーを
+//   読めないため）。クエリに載ったトークンはブラウザ履歴・中間のログ・
+//   Googleのアクセスログに残る。すぐ下のコメントで「URLへ入れない」と
+//   決めていたのに、コードがそれを守っていなかった。
+//   → 認証が要る通信はすべてPOSTのJSON本文にする。
+//
+//   publicApi … ログインの入口だけ。トークンを付けない
+//   authedApi … それ以外すべて。トークンを本文へ自動で入れる
+//
+// 個別の機能がそれぞれURLへtokenを付ける構造は廃止した。
+
+// サーバーの PUBLIC_ACTIONS と同じ顔ぶれにすること（片方だけ変えない）
+const PUBLIC_ACTIONS = { authChallenge:1, login:1, loginAccess:1, authConfig:1, healthCheck:1 };
+
+async function publicApi(action, params = {}) {
   if (!GAS_URL) return mockApi(action, params);
-  const url = new URL(GAS_URL);
-  url.searchParams.set("action", action);
-  url.searchParams.set("studentEmail", CURRENT_USER.email);
-  // セッションを添える。サーバーはこれで本人を確定する（studentEmailは互換のため残す）
-  const _t1 = getSessionToken(); if (_t1) url.searchParams.set("token", _t1);
-  Object.entries(params).forEach(([k,v]) => url.searchParams.set(k,v));
   try {
-    const r = await fetch(url.toString(), { redirect:"follow" });
+    const r = await fetch(GAS_URL, {
+      method: "POST", headers: { "Content-Type": "text/plain" },
+      body: JSON.stringify({ action, ...params })
+    });
+    return await r.json();
+  } catch { return { ok:false }; }
+}
+
+// ログイン成立前に呼ぶもの（まだセッションが無い段階の getUser など）。
+// トークンを付けないだけで、経路はPOSTに揃える。
+// ★GETを残すと、そこだけURLにパラメータが載り続けて取り残しになる★
+async function publicApiRaw(action, params = {}) {
+  try {
+    const r = await fetch(GAS_URL, {
+      method: "POST", headers: { "Content-Type": "text/plain" },
+      body: JSON.stringify({ action, ...params })
+    });
+    return await r.json();
+  } catch { return { ok:false }; }
+}
+
+async function authedApi(action, params = {}) {
+  if (!GAS_URL) return mockApi(action, params);
+  try {
+    const r = await fetch(GAS_URL, {
+      method: "POST", headers: { "Content-Type": "text/plain" },
+      body: JSON.stringify({
+        action,
+        studentEmail: CURRENT_USER.email,
+        token: getSessionToken() || undefined,   // 無ければ入れない（互換段階のため）
+        ...params
+      })
+    });
     const j = await r.json();
     handleSessionInvalid(j, action, params);
     return j;
-  }
-  catch { return { ok:false, data:[] }; }
+  } catch { return { ok:false, data:[] }; }
 }
+
+// 既存の呼び出し名は残す（34箇所を一度に書き換えると事故るため）。
+// 中身はすべて authedApi / publicApi へ寄せてある。
+async function gasApi(action, params = {}) {
+  return PUBLIC_ACTIONS[action] ? publicApi(action, params) : authedApi(action, params);
+}
+// 以前は no-cors の投げっぱなしだったが、POSTへ統一したので応答を読める。
+// 応答を読めるということは、セッション切れを検出して預かれるということ。
 async function gasPost(action, body = {}) {
   if (!GAS_URL) return mockPost(action, body);
-  const url = new URL(GAS_URL);
-  url.searchParams.set("action", action);
-  url.searchParams.set("studentEmail", CURRENT_USER.email);
-  const _t2 = getSessionToken(); if (_t2) url.searchParams.set("token", _t2);
-  Object.entries(body).forEach(([k,v]) => { if (v != null) url.searchParams.set(k, String(v)); });
-  try { await fetch(url.toString(), { mode:"no-cors" }); } catch {}
-  return { ok:true };
+  return authedApi(action, body);
 }
 // gasPostと違い、レスポンス（xp_gained等）を読み取れる本物のPOST。
 // メモが長くなるとURLの長さ制限に引っかかる可能性がある保存系の操作
@@ -4996,8 +5040,9 @@ function LoginScreen({onLogin}) {
       // 以前は待ち時間の上限が無く、サーバーの応答が返らないと
       // 「ログインしています…」から永久に動かなくなっていた（2026-08-01に発生）
       const withTimeout=(pr,ms)=>Promise.race([pr,new Promise((_,rej)=>setTimeout(()=>rej(new Error("timeout")),ms))]);
-      const url=new URL(GAS_URL); url.searchParams.set("action","getUser"); url.searchParams.set("studentEmail",email);
-      const r=await withTimeout(fetch(url).then(res=>res.json()), 25000);
+      // ★POSTで取得する（URLにトークンを載せないため。ここは未ログインなので
+      //   トークンは無いが、経路を1本にしておかないと後で必ず取り残す）
+      const r=await withTimeout(publicApiRaw("getUser",{studentEmail:email}), 25000);
       try{ await withTimeout(sessionPromise, 25000); }catch{}   // 本人確認は待つが、詰まらせない
       // セッション切れで預かっていた操作を、ログインできたらやり直す
       if(getSessionToken() && pendingOpCount()>0){
@@ -5040,19 +5085,14 @@ function LoginScreen({onLogin}) {
     setLoading(true); setError("");
     try{
       const {email,name}=pendingUser;
-      const url=new URL(GAS_URL);
-      url.searchParams.set("action","registerUser");
-      url.searchParams.set("studentEmail",email);
-      url.searchParams.set("name",name);
-      url.searchParams.set("nickname",nickname.trim());
-      url.searchParams.set("avatar",avatar);
-      url.searchParams.set("goal",goals[0]?.goal.trim()||"");
-      url.searchParams.set("goal_deadline",goals[0]?.deadline||"");
-      url.searchParams.set("goal2",goals[1]?.goal.trim()||"");
-      url.searchParams.set("goal_deadline2",goals[1]?.deadline||"");
-      url.searchParams.set("goal3",goals[2]?.goal.trim()||"");
-      url.searchParams.set("goal_deadline3",goals[2]?.deadline||"");
-      const r=await fetch(url).then(res=>res.json());
+      // 新規登録はログイン成立前なのでトークンは無いが、経路はPOSTへ揃える。
+      // 目標の本文が長いとURLの長さ制限にも当たるため、本文で送るほうが確実
+      const r=await publicApiRaw("registerUser",{
+        studentEmail:email, name, nickname:nickname.trim(), avatar,
+        goal:goals[0]?.goal.trim()||"",  goal_deadline:goals[0]?.deadline||"",
+        goal2:goals[1]?.goal.trim()||"", goal_deadline2:goals[1]?.deadline||"",
+        goal3:goals[2]?.goal.trim()||"", goal_deadline3:goals[2]?.deadline||""
+      });
       if(r.ok||r.error==="already_registered"){
         const u={email,name,nickname:nickname.trim(),avatar,coachName:"コーチ",coachEmail:""};
         const validGoals=goals.filter(g=>g.goal.trim());
@@ -5087,8 +5127,7 @@ function LoginScreen({onLogin}) {
   const finishLine=async()=>{
     setCheckingLine(true);
     try{
-      const url=new URL(GAS_URL); url.searchParams.set("action","getUser"); url.searchParams.set("studentEmail",pendingUser.email);
-      const r=await fetch(url).then(res=>res.json());
+      const r=await publicApiRaw("getUser",{studentEmail:pendingUser.email});
       if(r.ok && r.data && !r.data.lineLinked && !lineWarning){
         setCheckingLine(false); setLineWarning(true); return;
       }
@@ -5895,10 +5934,7 @@ function App() {
   // LINE連携できたかをその場で再確認して、ゲートを進めるための再取得
   const recheckUser = async () => {
     try {
-      const url=new URL(GAS_URL);
-      url.searchParams.set("action","getUser");
-      url.searchParams.set("studentEmail",CURRENT_USER.email);
-      const r=await (await fetch(url)).json();
+      const r=await authedApi("getUser");
       if(r.ok&&r.data){
         const u={...CURRENT_USER, lineLinked:r.data.lineLinked===undefined?true:!!r.data.lineLinked, cohort:r.data.cohort||"", recordDays:(r.data.recordDays===undefined?null:r.data.recordDays), goalsV1:!!r.data.goalsV1};
         CURRENT_USER=u; localStorage.setItem("edventure_user",JSON.stringify(u)); setUser(u);
@@ -5984,10 +6020,7 @@ function App() {
   useEffect(()=>{
     if(!CURRENT_USER) return;
     // バックグラウンドで最新プロフィール取得＋存在確認（起動はブロックしない）
-    const url=new URL(GAS_URL);
-    url.searchParams.set("action","getUser");
-    url.searchParams.set("studentEmail",CURRENT_USER.email);
-    fetch(url).then(r=>r.json()).then(r=>{
+    authedApi("getUser").then(r=>{
       if(r.ok&&r.data){
         // lineLinkedがレスポンスに無い場合（GAS未再デプロイ等）は「未連携」と誤判定してバナーを
         // 誤表示しないよう、不明な場合は連携済み扱いにする（安全側に倒す）

@@ -590,7 +590,27 @@ function doPost(e) {
       case "coachGenerateStudentMessage": return jsonResponse(coachGenerateStudentMessage(body.coachEmail, body));
       case "coachGenerateNudgeMessage": return jsonResponse(coachGenerateNudgeMessage(body.coachEmail, body));
       case "coachSendStudentMessage": return jsonResponse(coachSendStudentMessage(body.coachEmail, body));
-      default: return jsonResponse({ ok: false, error: "Unknown action" });
+      // ★読み取りAPIもPOSTで受けられるようにする★
+      //
+      // なぜ必要か:
+      //   GETで呼ぶ限り、セッショントークンはURLのクエリ文字列に載せるしかない。
+      //   GASはリクエストヘッダーを読めないので、他に置き場所が無いため。
+      //   クエリに載ったトークンはブラウザ履歴・中間のログ・Googleの
+      //   アクセスログに残る。「URLへ入れない」と決めていたのに、
+      //   コードがそれを守れていなかった原因はここにある。
+      //
+      // 直し方:
+      //   読み取りもPOSTのJSON本文で受ける。ただし doGet の switch には
+      //   100以上の分岐があり、同じものをここへ複製すると
+      //   「片方だけ直して片方を忘れる」事故が必ず起きる。
+      //   そこで複製せず、doGet の処理をそのまま呼ぶ。
+      //   doGet は e.parameter しか見ないので、本文をそのまま渡せば動く。
+      //
+      //   認可はこの上で済んでいるが、doGet 側でもう一度走る。
+      //   同じ入力に対して同じ判定になるので結果は変わらない。
+      //   （二重に通しても緩くならない。厳しくなる方向にしか働かない）
+      default:
+        return doGet({ parameter: body });
     }
   } catch (err) {
     return jsonResponse({ ok: false, error: err.toString() });
@@ -7772,9 +7792,26 @@ const P1_SHEETS = {
   WeeklyGoals: ["weekly_goal_id","link_sprint_id","link_quarterly_goal_id","student_email","title",
     "metric_type","unit","target_total","min_line","std_line","stretch_line","planned_days",
     "actual_value","actual_calculated_at","status","created_at","updated_at"],
+  // ★重要度と緊急度は別物★（2026-08-01 追加）
+  // priority 1本では「重要だが急がない」を表現できず、いちばん大事な仕事が
+  // 常に後回しになる。急ぎの用事に押し流されるのを防ぐのが目的なので、
+  // 重要度（本人が決める）と緊急度（期限から自動で決まる）を分ける。
+  //
+  //   importance_level        HIGH / MEDIUM / LOW ─ 本人が決める。AIは提案止まり
+  //   due_at                  期限。日付＋時刻 / 日付のみ / 空（期限なし）
+  //   urgency_override        本人が緊急度を上書きしたい時だけ入る
+  //   urgency_override_reason 上書きの理由。後から見返すため
+  //   first_started_at        最初に着手した時刻。「期限前に着手できたか」を見る
+  //   carryover_count         翌日以降へ持ち越した回数。計画の甘さが見える
+  //
+  // ★urgency_level は保存しない★
+  // 時間とともに変わる値を保存すると、due_at と食い違ったまま古い値が残る。
+  // 表示のたびに due_at と現在時刻から算出する。
   Tasks: ["task_id","student_email","date","title","priority","link_weekly_goal_id","link_daily_focus_id",
     "estimated_minutes","actual_minutes","status","completed_at","completion_condition","memo",
-    "created_at","updated_at"]
+    "created_at","updated_at",
+    "importance_level","due_at","urgency_override","urgency_override_reason",
+    "first_started_at","carryover_count"]
 };
 // 既存シートへ追加する列（削除・改名は一切しない）
 const P1_ADDED_COLUMNS = {

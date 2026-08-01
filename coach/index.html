@@ -78,15 +78,20 @@ function handleAuthError(r) {
   return r;
 }
 
+// ★セッショントークンをURLへ載せない★
+// 以前は url.searchParams.set("token", ...) でクエリに載せていた。
+// クエリのトークンはブラウザ履歴・中間のログ・Googleのアクセスログに残る。
+// GASはリクエストヘッダーを読めないので、GETで送る限り回避できない。
+// → 読み取りも含めてPOSTのJSON本文へ統一した。
 async function api(action, params = {}) {
-  const url = new URL(GAS_URL);
-  url.searchParams.set("action", action);
-  url.searchParams.set("coachEmail", COACH_EMAIL || "");
-  const tk = getCoachSession();
-  if (tk) url.searchParams.set("token", tk);
-  Object.entries(params).forEach(([k, v]) => { if (v != null) url.searchParams.set(k, String(v)); });
-  try { const r = await fetch(url.toString(), { redirect: "follow" }); return handleAuthError(await r.json()); }
-  catch { return { ok: false, error: "network" }; }
+  try {
+    const r = await fetch(GAS_URL, {
+      method: "POST", headers: { "Content-Type": "text/plain" },
+      body: JSON.stringify({ action, coachEmail: COACH_EMAIL || "",
+                             token: getCoachSession() || undefined, ...params })
+    });
+    return handleAuthError(await r.json());
+  } catch { return { ok: false, error: "network" }; }
 }
 // POSTはボディが大きくなり得る操作（ファイルアップロード等）用。
 // GAS未対応環境の負荷を避けるためtext/plainで送る

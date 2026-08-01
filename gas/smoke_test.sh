@@ -130,15 +130,29 @@ PY
     ng "index.html Googleのエラー戻りを無視している（無反応に見える）"
   fi
 
-  # ★既知のP1が広がっていないか★
-  # セッショントークンをURLのクエリに載せている箇所。GASがヘッダーを読めないため
-  # 現状は解消できていないが、増えていないことだけは見張る。
-  n=$(grep -c 'searchParams.set("token"' ../index.html ../coach/index.html | awk -F: '{s+=$2} END{print s}')
-  if [ "${n:-0}" -le 4 ]; then
-    ok "URLクエリのトークン ${n}箇所（既知のP1。増えていない）"
+  # ★セッショントークンをURLへ載せない（2026-08-01に解消）★
+  # クエリのトークンはブラウザ履歴・中間のログ・Googleのアクセスログに残る。
+  # GASはヘッダーを読めないため、GETで送る限り回避できない。
+  # 読み取りを含めてPOSTのJSON本文へ統一した。1箇所でも戻ったら失敗にする。
+  n=$(grep -h 'searchParams\.set("token"' ../index.html ../coach/index.html | grep -vc '^\s*//' || true)
+  if [ "${n:-0}" -eq 0 ]; then
+    ok "URLクエリのトークン 0箇所"
   else
-    ng "URLクエリのトークンが ${n}箇所へ増えている（4以下であるべき）"
+    ng "URLクエリにトークンを載せる処理が ${n}箇所 復活している"
   fi
+
+  # GAS_URLへのGETが復活していないか（GETだとトークンの置き場所がクエリしか無い）
+  g=$(grep -hc "await fetch(url)\|fetch(url)\.then" ../index.html ../coach/index.html | awk '{s+=$1} END{print s}')
+  if [ "${g:-0}" -eq 0 ]; then
+    ok "GAS_URLへのGET 0箇所（POSTに統一されている）"
+  else
+    ng "GAS_URLへのGETが ${g}箇所 残っている"
+  fi
+
+  # 通信の入口が2つに集約されているか
+  for fn in publicApi authedApi; do
+    if grep -q "^async function ${fn}(" ../index.html; then ok "通信ラッパー ${fn}"; else ng "通信ラッパー ${fn} が無い"; fi
+  done
 fi
 
 # ── 実機チェック: デプロイ先を実際に叩く（すべて読み取り専用）──
