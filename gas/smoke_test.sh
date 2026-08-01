@@ -71,6 +71,74 @@ if [ "$MODE" = "static" ] || [ "$MODE" = "all" ]; then
   for ac in adminSetupPhase1 p1Status; do
     if grep -A3 "case \"${ac}\"" Code.gs | grep -q "verifyP1Admin"; then ok "${ac} は鍵チェックあり"; else ng "${ac} の鍵チェックが無い"; fi
   done
+
+  # ── 画面側（index.html / coach/index.html）──
+  #
+  # ★ここを見ていなかった★
+  # 2026-08-01、ログインが両方の画面で壊れたが、このスモークテストは
+  # Code.gs しか検査しておらず、まったく気づけなかった。
+  # サーバーが健全でもログインできなければ利用者にとっては全停止なので、
+  # 画面側の「ログインの骨格」も必ず検査する。
+  echo "── 静的チェック（画面側）──"
+
+  extract_js() {  # $1=htmlファイル → 埋め込みスクリプトを取り出す
+    python3 - "$1" <<'PY'
+import sys
+s = open(sys.argv[1]).read()
+i = s.index("<script>", 3000)
+j = s.rindex("</script>")
+sys.stdout.write(s[i+8:j])
+PY
+  }
+
+  for f in ../index.html ../coach/index.html; do
+    name=$(basename "$(dirname "$f")")/$(basename "$f")
+    if [ ! -f "$f" ]; then ng "${f} が無い"; continue; fi
+    if extract_js "$f" > /tmp/_smoke_front.js 2>/dev/null && node --check /tmp/_smoke_front.js 2>/dev/null; then
+      ok "${name} 構文"
+    else
+      ng "${name} 構文エラー"
+    fi
+  done
+
+  # Googleの公式ボタンを描画する土台が揃っているか。
+  # 「押しても無反応」は原因が見えず、いちばん困る壊れ方なので必ず確認する。
+  check_pair() {  # $1=ファイル $2=コンテナid $3=表示名
+    if grep -q "id=\"$2\"" "$1" && grep -q "getElementById(\"$2\")" "$1"; then
+      ok "$3 公式ボタンの土台（id=$2 の定義と参照が揃っている）"
+    else
+      ng "$3 公式ボタンの土台が壊れている（id=$2 の定義か参照が無い）"
+    fi
+    if grep -q "renderButton" "$1"; then ok "$3 renderButton あり"; else ng "$3 renderButton が無い"; fi
+    # GISはasync読み込み。待たずに諦めると毎回、予備の経路へ落ちる。
+    # ★関数名で探さないこと★
+    # 最初は waitForGis|waitGis を探していたが、index.html には別用途の
+    # waitForGis が元から存在しており、こちらを消しても検査が通ってしまった
+    # （実際に壊して確かめて発覚）。readyかどうかを見ている式そのものを探す。
+    if grep -q "accounts?.id?.renderButton" "$1"; then ok "$3 GISの読み込み待ちあり"; else ng "$3 GISの読み込み待ちが無い"; fi
+    # htm+Reactでは ref がDOM要素へ渡らない。ボタンの取得にrefを使うと必ずnullになる
+    if grep -q "ref=\${btnRef}" "$1"; then ng "$3 ボタン取得にrefを使っている（htmではnullになる）"; else ok "$3 ボタン取得にrefを使っていない"; fi
+    if grep -q "accounts.google.com/gsi/client" "$1"; then ok "$3 GISスクリプトの読み込みあり"; else ng "$3 GISスクリプトが読み込まれていない"; fi
+  }
+  check_pair ../index.html       gsi-btn-app "index.html"
+  check_pair ../coach/index.html gsi-btn     "coach"
+
+  # Googleがエラーで返したとき、黙って元の画面に戻さない
+  if grep -q 'hash.get("error")' ../index.html; then
+    ok "index.html Googleのエラー戻りを表示する"
+  else
+    ng "index.html Googleのエラー戻りを無視している（無反応に見える）"
+  fi
+
+  # ★既知のP1が広がっていないか★
+  # セッショントークンをURLのクエリに載せている箇所。GASがヘッダーを読めないため
+  # 現状は解消できていないが、増えていないことだけは見張る。
+  n=$(grep -c 'searchParams.set("token"' ../index.html ../coach/index.html | awk -F: '{s+=$2} END{print s}')
+  if [ "${n:-0}" -le 4 ]; then
+    ok "URLクエリのトークン ${n}箇所（既知のP1。増えていない）"
+  else
+    ng "URLクエリのトークンが ${n}箇所へ増えている（4以下であるべき）"
+  fi
 fi
 
 # ── 実機チェック: デプロイ先を実際に叩く（すべて読み取り専用）──
