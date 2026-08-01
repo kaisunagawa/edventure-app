@@ -575,6 +575,8 @@ function doPost(e) {
       case "generateWorkReport": return jsonResponse(generateWorkReport(studentEmail, body));
       case "migrateLocalTasks": return jsonResponse(migrateLocalTasks(studentEmail, body));
       // ── Checkpoint 3: タスク（重要度・緊急度）──
+      case "getSprints":  return jsonResponse(getSprints(studentEmail, body));
+      case "saveSprint":  return jsonResponse(saveSprint(studentEmail, body));
       case "getTasks":    return jsonResponse(getTasks(studentEmail, body));
       case "saveTask":    return jsonResponse(saveTask(studentEmail, body));
       case "deleteTask":  return jsonResponse(deleteTask(studentEmail, body));
@@ -9654,7 +9656,7 @@ const ACTION_POLICIES = {
 const ACTION_POLICIES_WRITE = {
   saveLog:{}, saveLogMulti:{}, quickLog:{}, deleteLog:{}, saveSettings:{}, saveOnboarding:{},
   saveTodayActions:{}, saveGoal:{}, saveWeeklyGoal:{}, archiveGoalItem:{}, migrateLocalTasks:{},
-  saveTask:{}, deleteTask:{},
+  saveTask:{}, deleteTask:{}, saveSprint:{},
   submitSurvey:{}, syncCalendar:{}, sendMessage:{}, saveWeeklyReflection:{}, saveContentProfile:{},
   generateWorkReport:{}, snsSaveAccount:{}, snsSaveMetrics:{}, snsSavePost:{}
 };
@@ -9663,7 +9665,7 @@ const ACTION_POLICIES_WRITE = {
 const ACTION_POLICIES_READ = {
   getUser:{}, getLogs:{}, getReport:{}, getReportList:{}, getHomeData:{}, getGoalTree:{},
   getGameStatus:{}, getJournal:{}, getInsights:{}, getWeeklySummary:{}, getMonthlyReview:{},
-  getTimeUse:{}, getAchievements:{}, getMessages:{}, p1Status2:{}, getTasks:{}
+  getTimeUse:{}, getAchievements:{}, getMessages:{}, p1Status2:{}, getTasks:{}, getSprints:{}
 };
 
 // 段階的に有効化するためのスイッチ。スクリプトプロパティで切り替えるので、
@@ -10222,6 +10224,94 @@ function decorateTask(t, nowMs) {
     overdue: !!u.overdue,
     quadrant: classifyTask(effectiveImportance, u.level)
   };
+}
+
+// ══════════════════════════════════════════════════════════════════
+// 2週間Sprint（Checkpoint 3）
+//
+// 3か月目標と週間目標のあいだをつなぐ層。
+// 「3か月で売上400万」から、いきなり「今週30万」は出てこない。
+// 2週間で何を変えるのか（ボトルネックと仮説）を挟むことで、
+// 週間目標が「ただの割り算」ではなくなる。
+//
+// ★進行中は原則1つ★
+// 複数を同時に進めると、どれが今の焦点か分からなくなる。
+// 作れはするが、画面には「今のSprint」を1つだけ出す。
+// ══════════════════════════════════════════════════════════════════
+function getSprints(studentEmail, body) {
+  const chk = p1RequireUser(studentEmail);
+  if (!chk.ok) return chk;
+  const today = formatDate(new Date());
+  const rows = p1List("Sprints", studentEmail)
+    .filter(function (x) { return p1Status_(x.status, "ACTIVE") !== "ARCHIVED"; })
+    .map(function (x) {
+      const sd = String(x.start_date || "").slice(0, 10);
+      const ed = String(x.end_date || "").slice(0, 10);
+      const current = !!(sd && ed && sd <= today && today <= ed);
+      let daysLeft = null, dayIndex = null, totalDays = null;
+      if (sd && ed) {
+        const d1 = new Date(sd + "T00:00:00+09:00").getTime();
+        const d2 = new Date(ed + "T00:00:00+09:00").getTime();
+        const t = new Date(today + "T00:00:00+09:00").getTime();
+        totalDays = Math.round((d2 - d1) / 86400000) + 1;
+        daysLeft = Math.round((d2 - t) / 86400000);
+        dayIndex = Math.round((t - d1) / 86400000) + 1;
+      }
+      return {
+        sprint_id: x.sprint_id, name: x.name || "",
+        link_quarterly_goal_id: x.link_quarterly_goal_id || "",
+        start_date: sd, end_date: ed,
+        bottleneck: x.bottleneck || "", target_state: x.target_state || "",
+        hypothesis: x.hypothesis || "",
+        action_metric: x.action_metric || "", result_metric: x.result_metric || "",
+        try_actions: x.try_actions || "", stop_actions: x.stop_actions || "",
+        if_then: x.if_then || "", success_condition: x.success_condition || "",
+        coaching_note: x.coaching_note || "", confirmed_at: x.confirmed_at || "",
+        status: p1Status_(x.status, "ACTIVE"),
+        isCurrent: current, daysLeft: daysLeft, dayIndex: dayIndex, totalDays: totalDays
+      };
+    })
+    .sort(function (a, b) { return String(b.start_date).localeCompare(String(a.start_date)); });
+
+  const current = rows.filter(function (x) { return x.isCurrent; });
+  return { ok: true, data: rows,
+           current: current.length ? current[0] : null,
+           multipleCurrent: current.length > 1,   // 画面で注意を出せるように隠さない
+           today: today };
+}
+
+function saveSprint(studentEmail, body) {
+  const chk = p1RequireUser(studentEmail);
+  if (!chk.ok) return chk;
+  const id = String((body && body.sprint_id) || "").trim();
+  if (id && !p1OwnedRow("Sprints", "sprint_id", id, studentEmail)) {
+    return { ok: false, error: "Sprintが見つかりません" };
+  }
+  const link = String(body.link_quarterly_goal_id || "").trim();
+  if (link && !p1OwnedRow("Goals", "quarterly_goal_id", link, studentEmail)) {
+    return { ok: false, error: "紐づけ先の3か月目標が見つかりません" };
+  }
+  // 期間の前後が逆になっていないか。逆だと残り日数が負になり画面が壊れる
+  const sd = p1Text_(body.start_date, 10), ed = p1Text_(body.end_date, 10);
+  if (sd && ed && String(sd) > String(ed)) {
+    return { ok: false, error: "開始日が終了日より後になっています" };
+  }
+
+  const rec = { sprint_id: id || makeP1Id("sp"), student_email: studentEmail };
+  const text = { name:60, bottleneck:1000, target_state:1000, hypothesis:1000,
+                 action_metric:200, result_metric:200, try_actions:1000, stop_actions:1000,
+                 if_then:1000, success_condition:1000, coaching_note:2000 };
+  Object.keys(text).forEach(function (k) {
+    if (body[k] !== undefined) rec[k] = p1Text_(body[k], text[k]);
+  });
+  if (body.start_date !== undefined) rec.start_date = sd;
+  if (body.end_date !== undefined) rec.end_date = ed;
+  if (body.link_quarterly_goal_id !== undefined) rec.link_quarterly_goal_id = link;
+  if (body.status !== undefined) rec.status = p1Status_(body.status, "ACTIVE");
+  if (String(body.confirm || "") === "1") rec.confirmed_at = new Date().toISOString();
+
+  const r = p1Upsert("Sprints", "sprint_id", rec);
+  return { ok: true, id: r.id, created: r.created };
 }
 
 // タスク一覧。並び順は「期限超過 → 重要かつ緊急 → 今日のフォーカス直結 →
