@@ -464,7 +464,12 @@ async function gasApi(action, params = {}) {
   // セッションを添える。サーバーはこれで本人を確定する（studentEmailは互換のため残す）
   const _t1 = getSessionToken(); if (_t1) url.searchParams.set("token", _t1);
   Object.entries(params).forEach(([k,v]) => url.searchParams.set(k,v));
-  try { const r = await fetch(url.toString(), { redirect:"follow" }); return await r.json(); }
+  try {
+    const r = await fetch(url.toString(), { redirect:"follow" });
+    const j = await r.json();
+    handleSessionInvalid(j, action, params);
+    return j;
+  }
   catch { return { ok:false, data:[] }; }
 }
 async function gasPost(action, body = {}) {
@@ -495,6 +500,7 @@ async function gasPostJson(action, body = {}) {
     if (j && j.ok === false && (j.error === "AUTH_REQUIRED" || j.error === "FORBIDDEN")) {
       stashPendingOp(action, body);
     }
+    handleSessionInvalid(j, action, body);
     return j;
   } catch { return { ok:false }; }
 }
@@ -508,6 +514,24 @@ const RETRYABLE_ACTIONS = {
   saveGoal:1, saveWeeklyGoal:1, archiveGoalItem:1, saveWeeklyReflection:1,
   saveIntent:1, submitSurvey:1, deleteLog:1
 };
+// ★サーバーが SESSION_INVALID を返したときの手順★
+// 順序が重要。先にトークンを消すと、預ける前に本人が分からなくなる。
+//   1. 無効セッションの応答を受ける（ここ）
+//   2. 未保存の操作を一時保存      ← 先にやる
+//   3. 古いトークンを削除
+//   4. 再ログインを要求
+// 5〜8（新しいセッション取得・本人確定・1回だけ再試行・一時保存の削除）は
+// ログイン成功後の flushPendingOps 側で行う。
+function handleSessionInvalid(j, action, body) {
+  if (!j || j.ok !== false || j.error !== "SESSION_INVALID") return false;
+  try { stashPendingOp(action, body || {}); } catch {}
+  try { localStorage.removeItem(SESSION_KEY); } catch {}
+  // 画面へ再ログインを促す。ReauthGate がこのフラグを見る
+  try { localStorage.setItem("jiroku_reauth_needed", "1"); } catch {}
+  try { window.dispatchEvent(new CustomEvent("jiroku:reauth")); } catch {}
+  return true;
+}
+
 function stashPendingOp(action, body) {
   if (!RETRYABLE_ACTIONS[action]) return;
   try {
@@ -527,23 +551,31 @@ async function flushPendingOps() {
   if (!list.length || !getSessionToken()) return { done:0, failed:0 };
   const rest = [];
   let done = 0;
+  let dropped = 0;
   for (const op of list) {
     // 古すぎるものは捨てる（3日以上前の記録を勝手に復活させない）
-    if (Date.now() - (op.at || 0) > 3 * 86400000) continue;
+    if (Date.now() - (op.at || 0) > 3 * 86400000) { dropped++; continue; }
+    // ★再試行は1操作につき1回まで★
+    // 以前は失敗したものを rest に戻し続けていたため、サーバー側が
+    // 恒久的に拒否する操作（権限が無い等）が毎回のログインでやり直され、
+    // 事実上の無限再試行になっていた。
+    if ((op.tries || 0) >= 1) { dropped++; continue; }
     try {
       const r = await fetch(GAS_URL, {
         method: "POST", headers: { "Content-Type": "text/plain" },
         body: JSON.stringify({ action: op.action, studentEmail: CURRENT_USER.email,
                                token: getSessionToken(), ...op.body })
       }).then(x => x.json());
-      if (r && r.ok) done++; else rest.push(op);
-    } catch { rest.push(op); }
+      if (r && r.ok) done++;
+      else rest.push({ ...op, tries: (op.tries || 0) + 1 });
+    } catch { rest.push({ ...op, tries: (op.tries || 0) + 1 }); }
   }
   try {
     if (rest.length) localStorage.setItem(PENDING_KEY, JSON.stringify(rest));
     else localStorage.removeItem(PENDING_KEY);
   } catch {}
-  return { done, failed: rest.length };
+  try { localStorage.removeItem("jiroku_reauth_needed"); } catch {}
+  return { done, failed: rest.length, dropped };
 }
 
 // ── セッション（Auth CP1）──
@@ -5823,7 +5855,18 @@ function App() {
   const [tab,setTab]=useState("home");
   // セッションを持っていない既存ログイン者に、一度だけ入り直してもらう。
   // サーバーがまだ認証段階に入っていない(LEGACY)なら何もしない
-  const [needsReauth,setNeedsReauth]=useState(false);
+  const [needsReauth,setNeedsReauth]=useState(()=>{
+    // サーバーに SESSION_INVALID で弾かれた直後は、その場で再ログインへ誘導する。
+    // 従来は「トークンを持っていない人」しか対象にしていなかったため、
+    // 失効したトークンを持ったまま使い続けられてしまった
+    try { return localStorage.getItem("jiroku_reauth_needed")==="1"; } catch { return false; }
+  });
+  // 通信中に失効した場合も、画面を切り替える（次の操作まで待たせない）
+  useEffect(()=>{
+    const on=()=>setNeedsReauth(true);
+    window.addEventListener("jiroku:reauth",on);
+    return ()=>window.removeEventListener("jiroku:reauth",on);
+  },[]);
   // セッションを持っている状態で預かり分が残っていれば、起動時にやり直す
   useEffect(()=>{
     if(!getSessionToken() || pendingOpCount()===0) return;
