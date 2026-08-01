@@ -110,6 +110,21 @@ function doGet(e) {
         if (!result) result = { ok: false, error: "user not found" };
         break;
       }
+      // ★全員のセッションを一度に失効させる★
+      // 旧方式ではセッショントークンがURLのクエリに載っていた。
+      // クエリはブラウザ履歴・中間のログ・Googleのアクセスログに残るため、
+      // 発行済みのトークンは「漏れたかもしれないもの」として扱う。
+      // 実際に漏れた証拠は無いが、証拠が無いことは安全の根拠にならない。
+      //
+      // 失効させると全員が再ログインになる。記録は消えない。
+      // confirm=yes が無ければ対象を数えるだけで何もしない。
+      case "authRevokeAllUsers": {
+        var _rau = verifyP1Admin(studentEmail, e.parameter.secret, e.parameter);
+        if (!_rau.ok) { result = _rau; break; }
+        result = authRevokeAllUsers(String(e.parameter.confirm || "") === "yes",
+                                    String(e.parameter.reason || "url_token_rotation"));
+        break;
+      }
       case "authCleanupTestData": {
         var _ac = verifyP1Admin(studentEmail, e.parameter.secret, e.parameter);
         if (!_ac.ok) { result = _ac; break; }
@@ -9109,6 +9124,74 @@ function authCohort(days) {
     cohort: cohort
   };
 }
+// 全利用者のセッションを失効させる。
+// token_version を1つ上げると、その利用者の既存セッションはすべて
+// verifySession の版チェックで落ちる（Sessionsシートを書き換えなくてよい）。
+//
+// ★実際に使えるセッションを持っている人だけを対象にする★
+// 全員の token_version を上げると、一度もログインしていない30人ぶんまで
+// 無駄に版が進み、後から「なぜ上がっているのか」が分からなくなる。
+function authRevokeAllUsers(confirm, reason) {
+  const sh = getSheet("Users");
+  const data = sh.getDataRange().getValues();
+  const h = data[0];
+  const iEmail = h.indexOf("student_email"), iUid = h.indexOf("user_id"), iTv = h.indexOf("token_version");
+  if (iTv === -1 || iUid === -1) return { ok: false, error: "Users に user_id / token_version 列がありません" };
+
+  // いま実際に使えるセッションを持っている人（authCohort と同一条件）
+  const tvByUser = {};
+  for (let i = 1; i < data.length; i++) {
+    if (data[i][iUid]) tvByUser[String(data[i][iUid])] = Number(data[i][iTv] || 0);
+  }
+  const now = Date.now();
+  const hasUsable = {};
+  let usableSessions = 0;
+  sheetToObjects(getAuthSheet("Sessions")).forEach(function (x) {
+    if (String(x.revoked_at || "").trim()) return;
+    if (new Date(String(x.expires_at)).getTime() <= now) return;
+    const cur = tvByUser[String(x.user_id)];
+    if (cur === undefined) return;
+    if (Number(x.token_version || 0) !== cur) return;
+    hasUsable[String(x.user_id)] = true;
+    usableSessions++;
+  });
+
+  const targets = [];
+  for (let i = 1; i < data.length; i++) {
+    const uid = String(data[i][iUid] || "");
+    if (!uid || !hasUsable[uid]) continue;
+    targets.push({ row: i + 1, uid: uid, tv: Number(data[i][iTv] || 0) });
+  }
+
+  // 消すキャッシュのキーを先に集める。
+  // verifySession は "sess_" + sha256Hex(token) をキーにしており、
+  // シートに入っている session_token_hash がその sha256Hex そのもの。
+  const cacheKeys = [];
+  sheetToObjects(getAuthSheet("Sessions")).forEach(function (x) {
+    if (hasUsable[String(x.user_id)]) cacheKeys.push("sess_" + String(x.session_token_hash));
+  });
+
+  if (!confirm) {
+    return { ok: true, dryRun: true, usableSessions: usableSessions,
+             affectedUsers: targets.length,
+             note: "confirm=yes を付けると実行します。全員が再ログインになります（記録は消えません）" };
+  }
+
+  targets.forEach(function (t) {
+    sh.getRange(t.row, iTv + 1).setValue(t.tv + 1);
+  });
+  // ★サーバー側のキャッシュも消す★
+  // verifySession は判定結果を300秒キャッシュする。消さないと最大5分間、
+  // 失効させたはずのセッションが通り続ける。
+  // removeAll に空配列を渡しても何も消えないので、キーを明示して渡す。
+  try { if (cacheKeys.length) CacheService.getScriptCache().removeAll(cacheKeys); } catch (e) {}
+  authAudit("REVOKE_ALL_USERS", { result: "SUCCESS", action: "authRevokeAllUsers",
+            failureReason: reason + " / users=" + targets.length + " sessions=" + usableSessions });
+
+  return { ok: true, dryRun: false, usableSessions: usableSessions,
+           affectedUsers: targets.length, reason: reason };
+}
+
 function verifyIdToken(idToken, expectedNonceHash) {
   if (!idToken) return { ok: false, reason: "NO_ID_TOKEN" };
   let res;

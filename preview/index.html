@@ -648,7 +648,20 @@ function getSessionToken() {
   try { return localStorage.getItem(SESSION_KEY) || ""; } catch { return ""; }
 }
 function setSessionToken(t) {
-  try { if (t) localStorage.setItem(SESSION_KEY, t); else localStorage.removeItem(SESSION_KEY); } catch {}
+  try {
+    if (t) {
+      localStorage.setItem(SESSION_KEY, t);
+      // ★セッションを取れたら、再ログイン要求の印を必ず消す★
+      // 以前は flushPendingOps の末尾でしか消しておらず、
+      // 預かりが0件だと早期returnで通り抜けて印が残り続けた。
+      // その結果、ログインに成功しても起動時に再ログイン画面が出て、
+      // 「ログイン → サインイン画面へ戻る」を延々と繰り返した（2026-08-01に発生）。
+      // 印を消す場所は「セッションを持てた瞬間」以外にない。
+      localStorage.removeItem("jiroku_reauth_needed");
+    } else {
+      localStorage.removeItem(SESSION_KEY);
+    }
+  } catch {}
 }
 // 認証付きPOST。CP1では既存APIへの強制はまだ行わないが、
 // これから追加するAPIはすべてこれを通す
