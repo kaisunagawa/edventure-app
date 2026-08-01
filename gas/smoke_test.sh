@@ -240,17 +240,33 @@ if [ "$MODE" = "live" ] || [ "$MODE" = "all" ]; then
   # 反映待ちのウォームアップ（結果は判定に使わない）
   call "&action=getUser&studentEmail=${SMOKE_ADMIN_EMAIL:-work.sunagawa@gmail.com}" >/dev/null
 
-  # 一般APIが ReferenceError や例外で落ちていないこと
-  for ac in getUser getLogs getReportList getHomeData; do
-    r=$(call "&action=${ac}&studentEmail=${ADMIN}")
-    if echo "$r" | grep -q '"ok":true'; then ok "${ac} 正常応答"
-    elif echo "$r" | grep -qi "ReferenceError\|TypeError\|is not defined\|is not a function"; then ng "${ac} が例外: $(echo "$r" | head -c 120)"
-    else ng "${ac} 異常: $(echo "$r" | head -c 120)"; fi
-  done
+  # ★期待値は「認証を強制しているかどうか」で変わる★
+  # READ必須化や SESSION_REQUIRED を入れると、トークン無しの読み取りは
+  # 拒否されるのが正しい。それを「異常」と判定すると、正しく守れているのに
+  # デプロイが止まる（2026-08-01、実際にそうなった）。
+  # まず1本叩いて現在の姿勢を調べ、全部が同じ姿勢かを確かめる。
+  # ★どちらの姿勢でも「例外で落ちている」は必ず不合格★
+  probe=$(call "&action=getUser&studentEmail=${ADMIN}")
+  if echo "$probe" | grep -q "AUTH_REQUIRED"; then
+    ENFORCED=1; echo "  （読み取りは認証必須。トークン無しは拒否されるのが正常）"
+  else
+    ENFORCED=0
+  fi
 
-  # goals_v1 が有効な本人で目標階層が引けること
-  r=$(call "&action=getGoalTree&studentEmail=${ADMIN}")
-  if echo "$r" | grep -q '"ok":true'; then ok "getGoalTree 正常応答"; else ng "getGoalTree 異常: $(echo "$r" | head -c 120)"; fi
+  for ac in getUser getLogs getReportList getHomeData getGoalTree; do
+    r=$(call "&action=${ac}&studentEmail=${ADMIN}")
+    if [ -z "$r" ]; then ng "${ac} 応答が空（判定できない）"; continue; fi
+    if echo "$r" | grep -qi "ReferenceError\|TypeError\|is not defined\|is not a function"; then
+      ng "${ac} が例外: $(echo "$r" | head -c 120)"; continue
+    fi
+    if [ "$ENFORCED" = "1" ]; then
+      if echo "$r" | grep -q "AUTH_REQUIRED"; then ok "${ac} 認証なしを拒否"
+      else ng "${ac} 認証必須のはずが通った: $(echo "$r" | head -c 120)"; fi
+    else
+      if echo "$r" | grep -q '"ok":true'; then ok "${ac} 正常応答"
+      else ng "${ac} 異常: $(echo "$r" | head -c 120)"; fi
+    fi
+  done
 
   # 管理APIが鍵なしで確実に閉じること（fail-closed）。
   # ここで ok:true が返ったら重大。ReferenceError も「壊れている」ので不合格にする

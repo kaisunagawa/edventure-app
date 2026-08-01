@@ -125,6 +125,15 @@ function doGet(e) {
                                     String(e.parameter.reason || "url_token_rotation"));
         break;
       }
+      // 検証で作ってしまった架空ユーザーの掃除。
+      // ★対象は .invalid ドメインだけ★（RFC 2606 で「絶対に実在しない」と
+      // 予約されているドメイン）。実在の利用者には構造上あたらない。
+      case "adminPurgeTestUsers": {
+        var _ptu = verifyP1Admin(studentEmail, e.parameter.secret, e.parameter);
+        if (!_ptu.ok) { result = _ptu; break; }
+        result = adminPurgeTestUsers(String(e.parameter.confirm || "") === "yes");
+        break;
+      }
       case "authCleanupTestData": {
         var _ac = verifyP1Admin(studentEmail, e.parameter.secret, e.parameter);
         if (!_ac.ok) { result = _ac; break; }
@@ -8753,6 +8762,33 @@ function authAudit(eventType, o) {
 
 // 検証で作ったセッションを片付ける。AuthAuditは監査記録なので消さない
 // （environment列でTEST/PRODを区別できるようにしてある）。
+// 検証で作った架空ユーザーだけを消す。
+// ★.invalid で終わるメールの行しか触らない★
+//   .invalid は RFC 2606 で「絶対に実在しない」と予約されたドメイン。
+//   条件をメールの末尾一致にしておけば、実在の利用者に当たりようがない。
+//   「テスト用と分かるように名前を付ける」といった運用の約束にはしない。
+//   約束は破られるが、ドメインの判定は破られない。
+function adminPurgeTestUsers(confirm) {
+  const sh = getSheet("Users");
+  const data = sh.getDataRange().getValues();
+  const h = data[0];
+  const iEmail = h.indexOf("student_email");
+  if (iEmail === -1) return { ok: false, error: "student_email 列がありません" };
+
+  const hits = [];
+  for (let i = 1; i < data.length; i++) {
+    const em = String(data[i][iEmail] || "").trim().toLowerCase();
+    if (em && em.slice(-8) === ".invalid") hits.push({ row: i + 1, emailHead: em.split("@")[0] });
+  }
+  if (!confirm) return { ok: true, dryRun: true, found: hits.length, rows: hits.map(function (x) { return x.row; }) };
+
+  // 下の行から消す（上から消すと行番号がずれる）
+  hits.sort(function (a, b) { return b.row - a.row; }).forEach(function (x) { sh.deleteRow(x.row); });
+  authAudit("PURGE_TEST_USERS", { result: "SUCCESS", action: "adminPurgeTestUsers",
+            failureReason: "removed=" + hits.length });
+  return { ok: true, dryRun: false, removed: hits.length };
+}
+
 function authCleanupTestData() {
   const now = new Date().toISOString();
   const sh = getAuthSheet("Sessions");
@@ -9683,8 +9719,35 @@ function policyFor(action) {
   if (enforceFlag("READ") && ACTION_POLICIES_READ[action]) {
     return { roles: ["USER","COACH","JIROKU_ADMIN"], scope: "SELF" };
   }
+
+  // ★SESSION_REQUIRED ─ 取りこぼしを潰す最後の段階★
+  //
+  // WRITE / READ は「対象を列挙して守る」方式なので、
+  // 列挙し忘れたアクションは素通りする。実際 ACTION_POLICIES_WRITE には
+  // 20件、READ には15件しか載っておらず、それ以外は無防備のまま。
+  // 列挙を増やし続けても、新しいアクションを足すたびに書き忘れる。
+  //
+  // SESSION_REQUIRED では逆にする。
+  // 「明示的に公開したもの以外はすべて要認証」。書き忘れても守られる。
+  //
+  // ★この判定はここまでの分岐をすべて通り抜けた後に置くこと★
+  // 先に置くと admin/coach の厳しいポリシーを上書きして緩めてしまう。
+  if (authMode() === "SESSION_REQUIRED" && !SESSION_REQUIRED_EXEMPT[String(action || "")]) {
+    return { roles: ["USER","COACH","JIROKU_ADMIN"], scope: "SELF" };
+  }
   return null;
 }
+
+// SESSION_REQUIRED でも認証を求めないもの。
+// ここを絞りすぎると「新規登録できない」「失効した人がログインできない」
+// という詰みが起きるので、入口だけは必ず開けておく。
+const SESSION_REQUIRED_EXEMPT = {
+  authChallenge: 1, login: 1, loginAccess: 1, authConfig: 1, healthCheck: 1,
+  // ★新規登録は認証前に通す必要がある★
+  //   まだユーザーが存在しないので、セッションを持ちようがない。
+  //   ここを閉じると誰も新規登録できなくなる。
+  registerUser: 1
+};
 
 // COACHが相手を見てよいか。担当関係は CoachingNotes / Users.coach_email で判断する
 function isAssignedTo(actorEmail, targetEmail) {
@@ -9731,7 +9794,7 @@ const ADMIN_SECRET_ALLOWLIST = {
   // セットアップ・保守
   adminSetupTriggers:1, adminInstallTrigger:1, adminSetupPhase1:1, adminSetupAuth:1,
   authSetMode:1, authSetEnforce:1, authRoleApply:1, authRoleDryRun:1, authRevokeAll:1,
-  authCleanupTestData:1, authBreakerReset:1, rotateSessionSecret:1,
+  authCleanupTestData:1, adminPurgeTestUsers:1, authBreakerReset:1, rotateSessionSecret:1,
   p1Backup:1, p1BackupInfo:1, p1PurgeArchived:1, weeklyBackup:1
 };
 
