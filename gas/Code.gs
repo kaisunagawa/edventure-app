@@ -565,6 +565,10 @@ function doPost(e) {
       case "saveTodayActions": return jsonResponse(saveTodayActions(studentEmail, body));
       case "generateWorkReport": return jsonResponse(generateWorkReport(studentEmail, body));
       case "migrateLocalTasks": return jsonResponse(migrateLocalTasks(studentEmail, body));
+      // ── Checkpoint 3: タスク（重要度・緊急度）──
+      case "getTasks":    return jsonResponse(getTasks(studentEmail, body));
+      case "saveTask":    return jsonResponse(saveTask(studentEmail, body));
+      case "deleteTask":  return jsonResponse(deleteTask(studentEmail, body));
       // ── Auth CP1 ──
       case "login":  return jsonResponse(authLogin(body));
       case "loginAccess": return jsonResponse(authLoginAccess(body));
@@ -7826,7 +7830,7 @@ const P1_SHEETS = {
     "estimated_minutes","actual_minutes","status","completed_at","completion_condition","memo",
     "created_at","updated_at",
     "importance_level","due_at","urgency_override","urgency_override_reason",
-    "first_started_at","carryover_count"]
+    "first_started_at","carryover_count","deleted_at","sort_order"]
 };
 // 既存シートへ追加する列（削除・改名は一切しない）
 const P1_ADDED_COLUMNS = {
@@ -9599,6 +9603,7 @@ const ACTION_POLICIES = {
 const ACTION_POLICIES_WRITE = {
   saveLog:{}, saveLogMulti:{}, quickLog:{}, deleteLog:{}, saveSettings:{}, saveOnboarding:{},
   saveTodayActions:{}, saveGoal:{}, saveWeeklyGoal:{}, archiveGoalItem:{}, migrateLocalTasks:{},
+  saveTask:{}, deleteTask:{},
   submitSurvey:{}, syncCalendar:{}, sendMessage:{}, saveWeeklyReflection:{}, saveContentProfile:{},
   generateWorkReport:{}, snsSaveAccount:{}, snsSaveMetrics:{}, snsSavePost:{}
 };
@@ -9607,7 +9612,7 @@ const ACTION_POLICIES_WRITE = {
 const ACTION_POLICIES_READ = {
   getUser:{}, getLogs:{}, getReport:{}, getReportList:{}, getHomeData:{}, getGoalTree:{},
   getGameStatus:{}, getJournal:{}, getInsights:{}, getWeeklySummary:{}, getMonthlyReview:{},
-  getTimeUse:{}, getAchievements:{}, getMessages:{}, p1Status2:{}
+  getTimeUse:{}, getAchievements:{}, getMessages:{}, p1Status2:{}, getTasks:{}
 };
 
 // 段階的に有効化するためのスイッチ。スクリプトプロパティで切り替えるので、
@@ -9999,6 +10004,244 @@ function hasFeature(user, key) {
 // これを Tasks シートへ移す。日単位で全スキップすると取りこぼすため、タスク単位でマージする。
 // 既存のサーバーデータは絶対に上書きしない。再試行しても同じIDになるので重複しない。
 // body.items = [{date, title, estimated_minutes, status, memo, completed}] の配列
+// ══════════════════════════════════════════════════════════════════
+// タスクの重要度・緊急度（Checkpoint 3）
+//
+// なぜ分けるのか:
+//   priority 1本では「重要だが急がない」を表現できない。
+//   その結果、急ぎの用事に押し流されて、いちばん大事な仕事が
+//   いつまでも後回しになる。これを見えるようにするのが目的。
+//
+//   重要度 … 本人が決める。AIやシステムは提案までで、確定はしない
+//   緊急度 … 期限から自動で決まる。時間が経てば勝手に上がる
+//
+// ★緊急度は保存しない★
+//   時間とともに変わる値を保存すると、due_at と食い違ったまま
+//   古い値が残る。「昨日はHIGHだった」が今日も表示され続ける。
+//   表示のたびに算出する。上書きしたいときだけ urgency_override を持つ。
+// ══════════════════════════════════════════════════════════════════
+
+const IMPORTANCE_LEVELS = ["HIGH", "MEDIUM", "LOW"];
+const URGENCY_LEVELS = ["HIGH", "MEDIUM", "LOW", "NONE"];
+
+// 期限から緊急度を出す。
+//   期限超過        → HIGH
+//   24時間以内      → HIGH
+//   3日以内         → MEDIUM
+//   それより先      → LOW
+//   期限なし        → NONE
+// 日付だけの期限は「その日の終わり(23:59)」を期限として扱う。
+// 朝9時を期限にしてしまうと、その日中に終わらせるつもりの人が
+// 朝から超過扱いになる。
+function computeUrgency(dueAt, overrideLevel, nowMs) {
+  const ov = String(overrideLevel || "").trim().toUpperCase();
+  if (URGENCY_LEVELS.indexOf(ov) !== -1) return { level: ov, overridden: true };
+
+  const raw = String(dueAt || "").trim();
+  if (!raw) return { level: "NONE", overridden: false };
+
+  const now = nowMs || Date.now();
+  const dateOnly = /^\d{4}-\d{2}-\d{2}$/.test(raw);
+
+  if (dateOnly) {
+    // ★日付だけの期限は「日数」で見る。時間で見てはいけない★
+    //   その日の終わり(23:59)を期限として時間差で測ると、
+    //   「3日後」と入れた人が 82時間 → LOW に落ちる。
+    //   利用者の感覚は「3日以内なら気にしはじめる」なので食い違う。
+    //   何日後かで数える。
+    //     今日まで（超過含む） … HIGH
+    //     明日                … HIGH（今日から手を付けないと間に合わない）
+    //     2〜3日後            … MEDIUM
+    //     それより先          … LOW
+    const startOfDay = function (ms) {
+      const d = new Date(ms + 9 * 3600000);       // 日本時間の日付に直す
+      return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+    };
+    const p = raw.split("-");
+    const dueDay = Date.UTC(Number(p[0]), Number(p[1]) - 1, Number(p[2]));
+    if (isNaN(dueDay)) return { level: "NONE", overridden: false, invalidDue: true };
+    const days = Math.round((dueDay - startOfDay(now)) / 86400000);
+    if (days < 0) return { level: "HIGH", overridden: false, overdue: true };
+    if (days <= 1) return { level: "HIGH", overridden: false };
+    if (days <= 3) return { level: "MEDIUM", overridden: false };
+    return { level: "LOW", overridden: false };
+  }
+
+  // 時刻まで指定されている場合は時間で見る（その時刻に間に合わせる必要があるため）
+  const due = new Date(raw.indexOf("T") === -1 ? raw.replace(" ", "T") + "+09:00" : raw);
+  if (isNaN(due.getTime())) return { level: "NONE", overridden: false, invalidDue: true };
+  const hours = (due.getTime() - now) / 3600000;
+  if (hours < 0) return { level: "HIGH", overridden: false, overdue: true };
+  if (hours <= 24) return { level: "HIGH", overridden: false };
+  if (hours <= 72) return { level: "MEDIUM", overridden: false };
+  return { level: "LOW", overridden: false };
+}
+
+// 重要度×緊急度の4分類。★保存しない★
+// 保存すると importance_level や due_at を変えたときに食い違う。
+// 表示のたびに出す。
+function classifyTask(importance, urgency) {
+  const imp = String(importance || "MEDIUM").toUpperCase();
+  const urg = String(urgency || "NONE").toUpperCase();
+  const important = (imp === "HIGH");
+  const urgent = (urg === "HIGH");
+  if (important && urgent) return "DO_NOW";
+  if (important && !urgent) return "SCHEDULE";
+  if (!important && urgent) return "DELEGATE_OR_LIMIT";
+  return "DEFER_OR_DELETE";
+}
+
+// 既存の priority(1〜5) から重要度を提案する。
+// ★上書きはしない★ importance_level が既に入っていればそちらを使う。
+// priority は当面そのまま残す（既存互換）。
+function importanceFromPriority(p) {
+  const n = Number(p);
+  if (isNaN(n)) return "MEDIUM";
+  if (n <= 2) return "HIGH";
+  if (n >= 4) return "LOW";
+  return "MEDIUM";
+}
+
+// 3か月目標・週間目標・今日のフォーカスに紐づくタスクは重要度を高めに提案する。
+// ★提案であって確定ではない★ 本人が決める。
+function suggestImportance(task) {
+  if (String(task.link_weekly_goal_id || "").trim()) return "HIGH";
+  if (String(task.link_daily_focus_id || "").trim()) return "HIGH";
+  return importanceFromPriority(task.priority);
+}
+
+// タスク1件に、算出した値を足して返す（保存はしない）
+function decorateTask(t, nowMs) {
+  const imp = IMPORTANCE_LEVELS.indexOf(String(t.importance_level || "").toUpperCase()) !== -1
+    ? String(t.importance_level).toUpperCase() : "";
+  const u = computeUrgency(t.due_at, t.urgency_override, nowMs);
+  const effectiveImportance = imp || suggestImportance(t);
+  return {
+    task_id: t.task_id, title: t.title, date: t.date, status: t.status,
+    link_weekly_goal_id: t.link_weekly_goal_id || "",
+    link_daily_focus_id: t.link_daily_focus_id || "",
+    estimated_minutes: t.estimated_minutes || "", actual_minutes: t.actual_minutes || "",
+    due_at: t.due_at || "", memo: t.memo || "",
+    completed_at: t.completed_at || "", first_started_at: t.first_started_at || "",
+    carryover_count: Number(t.carryover_count || 0),
+    priority: t.priority || "",                    // 既存互換。新UIでは使わない
+    importance_level: effectiveImportance,
+    importance_is_suggestion: !imp,                // 本人が決めていないなら提案値だと明示する
+    urgency_level: u.level,                        // 都度算出。保存していない
+    urgency_overridden: !!u.overridden,
+    urgency_override_reason: t.urgency_override_reason || "",
+    overdue: !!u.overdue,
+    quadrant: classifyTask(effectiveImportance, u.level)
+  };
+}
+
+// タスク一覧。並び順は「期限超過 → 重要かつ緊急 → 今日のフォーカス直結 →
+// 重要で期限が近い → その他 → 後回し候補」。
+// 本人が手で並べ替えたぶん（sort_order）があればそれを最優先で尊重する。
+function getTasks(studentEmail, body) {
+  const chk = p1RequireUser(studentEmail);
+  if (!chk.ok) return chk;
+  const now = Date.now();
+  const includeDone = String((body && body.includeDone) || "") === "1";
+
+  let rows = p1List("Tasks", studentEmail).filter(function (t) {
+    if (String(t.deleted_at || "").trim()) return false;
+    if (!includeDone && String(t.status || "").toUpperCase() === "DONE") return false;
+    return true;
+  }).map(function (t) { return decorateTask(t, now); });
+
+  const rank = function (t) {
+    if (t.overdue) return 0;
+    if (t.quadrant === "DO_NOW") return 1;
+    if (t.link_daily_focus_id) return 2;
+    if (t.importance_level === "HIGH" && t.urgency_level === "MEDIUM") return 3;
+    if (t.quadrant === "DEFER_OR_DELETE") return 5;
+    return 4;
+  };
+  rows.sort(function (a, b) {
+    const ra = rank(a), rb = rank(b);
+    if (ra !== rb) return ra - rb;
+    // 同じ段の中では期限が近いものを先に。期限なしは最後
+    const da = a.due_at ? new Date(a.due_at).getTime() : Infinity;
+    const db = b.due_at ? new Date(b.due_at).getTime() : Infinity;
+    return da - db;
+  });
+
+  return { ok: true, data: rows, asOf: new Date().toISOString() };
+}
+
+// タスクの作成・更新。最小入力は「タスク名」のみ。
+// 重要度・期限・週間目標との紐づけ・想定時間は任意。
+function saveTask(studentEmail, body) {
+  const chk = p1RequireUser(studentEmail);
+  if (!chk.ok) return chk;
+  const id = String((body && body.task_id) || "").trim();
+  if (id && !p1OwnedRow("Tasks", "task_id", id, studentEmail)) {
+    return { ok: false, error: "タスクが見つかりません" };
+  }
+  const title = p1Text_(body.title, 200);
+  if (!id && !String(title).trim()) return { ok: false, error: "タスク名を入れてください" };
+
+  // 紐づけ先が本人のものかを必ず確認する（他人の週間目標へ結び付けさせない）
+  const wg = String(body.link_weekly_goal_id || "").trim();
+  if (wg && !p1OwnedRow("WeeklyGoals", "weekly_goal_id", wg, studentEmail)) {
+    return { ok: false, error: "紐づけ先の週間目標が見つかりません" };
+  }
+
+  const rec = { task_id: id || makeP1Id("task"), student_email: studentEmail };
+  if (body.title !== undefined) rec.title = title;
+  if (body.date !== undefined) rec.date = p1Text_(body.date, 10);
+  if (body.link_weekly_goal_id !== undefined) rec.link_weekly_goal_id = wg;
+  if (body.link_daily_focus_id !== undefined) rec.link_daily_focus_id = p1Text_(body.link_daily_focus_id, 40);
+  if (body.estimated_minutes !== undefined) rec.estimated_minutes = p1Num_(body.estimated_minutes);
+  if (body.actual_minutes !== undefined) rec.actual_minutes = p1Num_(body.actual_minutes);
+  if (body.memo !== undefined) rec.memo = p1Text_(body.memo, 1000);
+  if (body.completion_condition !== undefined) rec.completion_condition = p1Text_(body.completion_condition, 500);
+
+  // 重要度は本人が決める。範囲外の値は受け取らない
+  if (body.importance_level !== undefined) {
+    const imp = String(body.importance_level).toUpperCase();
+    rec.importance_level = IMPORTANCE_LEVELS.indexOf(imp) !== -1 ? imp : "MEDIUM";
+  }
+  if (body.due_at !== undefined) rec.due_at = p1Text_(body.due_at, 25);
+  // 緊急度の上書き。NONE や空なら解除
+  if (body.urgency_override !== undefined) {
+    const uo = String(body.urgency_override).toUpperCase();
+    rec.urgency_override = URGENCY_LEVELS.indexOf(uo) !== -1 && uo !== "NONE" ? uo : "";
+  }
+  if (body.urgency_override_reason !== undefined) {
+    rec.urgency_override_reason = p1Text_(body.urgency_override_reason, 300);
+  }
+
+  // 着手・完了の記録。あとから「期限前に着手できたか」を見るために使う
+  if (body.status !== undefined) {
+    const st = String(body.status).toUpperCase();
+    rec.status = ["TODO", "DOING", "DONE"].indexOf(st) !== -1 ? st : "TODO";
+    const cur = id ? p1OwnedRow("Tasks", "task_id", id, studentEmail) : null;
+    if (st === "DOING" && (!cur || !String(cur.first_started_at || "").trim())) {
+      rec.first_started_at = new Date().toISOString();
+    }
+    if (st === "DONE") rec.completed_at = new Date().toISOString();
+    if (st !== "DONE" && cur && String(cur.completed_at || "").trim()) rec.completed_at = "";
+  }
+
+  const r = p1Upsert("Tasks", "task_id", rec);
+  const saved = p1OwnedRow("Tasks", "task_id", r.id, studentEmail);
+  return { ok: true, id: r.id, created: r.created, data: saved ? decorateTask(saved, Date.now()) : null };
+}
+
+// タスクの削除は論理削除にする。集計（持ち越し率・完了率）の母数が
+// 消えてしまうと、あとから振り返れなくなるため。
+function deleteTask(studentEmail, body) {
+  const chk = p1RequireUser(studentEmail);
+  if (!chk.ok) return chk;
+  const id = String((body && body.task_id) || "").trim();
+  const row = id ? p1OwnedRow("Tasks", "task_id", id, studentEmail) : null;
+  if (!row) return { ok: false, error: "タスクが見つかりません" };
+  p1Upsert("Tasks", "task_id", { task_id: id, deleted_at: new Date().toISOString() });
+  return { ok: true, deleted: true, task_id: id };
+}
+
 function migrateLocalTasks(studentEmail, body) {
   // ── 認可 ──
   // 書き込み先は常に「リクエストのstudentEmail本人のTasks」に限定される（後述のp1Upsertで

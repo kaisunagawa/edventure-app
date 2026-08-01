@@ -130,6 +130,19 @@ PY
     ng "index.html Googleのエラー戻りを無視している（無反応に見える）"
   fi
 
+  # 緊急度と4分類の計算（純粋な計算なのでここで確かめられる）
+  # ★Code.gs と urgency_test.js は貼り付けで二重管理★
+  #   ずれていないかを、定義の一致で機械的に見る
+  if node ../gas/urgency_test.js >/dev/null 2>&1 || node urgency_test.js >/dev/null 2>&1; then
+    ok "緊急度と4分類の計算"
+  else
+    ng "緊急度と4分類の計算が期待どおりでない"
+  fi
+  for fn in computeUrgency classifyTask decorateTask; do
+    n=$(grep -c "^function ${fn}(" Code.gs)
+    if [ "$n" -eq 1 ]; then ok "function ${fn}"; else ng "function ${fn} が ${n} 個"; fi
+  done
+
   # ══════════════════════════════════════════
   # ★ログインの出入口チェック★
   #
