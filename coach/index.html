@@ -298,7 +298,20 @@ function LoginScreen({ onLogin }) {
       if (okBtn) timer = setTimeout(mount, CHALLENGE_REFRESH_MS);
     };
     mount();
-    return () => { alive = false; if (timer) clearTimeout(timer); };
+
+    // ★画面に戻ってきたら合言葉を取り直す★
+    // スマホでは画面を離れるとタイマーが止まり、戻ったときには
+    // 合言葉が切れている。タイマーに頼らない。
+    const onVisible = () => { if (document.visibilityState === "visible" && alive) mount(); };
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("pageshow", onVisible);
+
+    return () => {
+      alive = false;
+      if (timer) clearTimeout(timer);
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("pageshow", onVisible);
+    };
   }, []);
 
   // 逃げ道。クリックから直接呼ぶ（await を挟まない）

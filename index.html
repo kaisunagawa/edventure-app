@@ -5157,6 +5157,15 @@ function LoginScreen({onLogin}) {
   // リダイレクト方式は、公式ボタンを出せない環境（LINE内ブラウザ等）のための
   // 予備として残す。
   const [gsiReady,setGsiReady]=useState(false);
+  // ログインに失敗したら、理由を出して合言葉を取り直す
+  useEffect(()=>{
+    const on=()=>{
+      setLoading(false);
+      setError("ログインの有効期限が切れました。もう一度ボタンを押してください");
+    };
+    window.addEventListener("jiroku:loginfail",on);
+    return ()=>window.removeEventListener("jiroku:loginfail",on);
+  },[]);
   useEffect(()=>{
     if(loading) return;
     let alive=true, timer=null;
@@ -5202,7 +5211,24 @@ function LoginScreen({onLogin}) {
       }catch{ if(alive) setGsiReady(false); }
     };
     mount();
-    return ()=>{ alive=false; if(timer) clearTimeout(timer); };
+
+    // ★画面に戻ってきたら合言葉を取り直す★
+    //   合言葉は5分で切れる。3分ごとのタイマーで張り直しているが、
+    //   スマホでは画面を離れるとOSがタイマーを止める。
+    //   他のアプリを見て戻ってきたときには切れていて、
+    //   ボタンを押しても「ログインできませんでした」になる。
+    //   （実測: 2026-08-01 17:29 に CHALLENGE_EXPIRED が発生）
+    //   タイマーに頼らず、戻ってきた事実をきっかけに取り直す。
+    const onVisible=()=>{ if(document.visibilityState==="visible" && alive) mount(); };
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("pageshow", onVisible);
+
+    return ()=>{
+      alive=false;
+      if(timer) clearTimeout(timer);
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("pageshow", onVisible);
+    };
   },[loading]);
 
   const handleGoogleSignIn=async()=>{
@@ -5279,7 +5305,13 @@ function LoginScreen({onLogin}) {
           .then(r=>r.json())
           .then(j=>{
             if(j&&j.ok&&j.token) setSessionToken(j.token);
-            else { try{ localStorage.setItem("auth_last_error", String((j&&j.error)||"UNKNOWN")); }catch{} }
+            else {
+              try{ localStorage.setItem("auth_last_error", String((j&&j.error)||"UNKNOWN")); }catch{}
+              // ★合言葉が切れていた場合は、そのまま伝えて取り直させる★
+              //   「ログインできませんでした」だけだと、何をすればいいか分からない。
+              //   もう一度押せば直る、と分かれば利用者は詰まらない。
+              try{ window.dispatchEvent(new CustomEvent("jiroku:loginfail")); }catch{}
+            }
           })
           .catch(()=>{ try{ localStorage.setItem("auth_last_error","NETWORK"); }catch{} })
       : Promise.resolve().then(()=>{ try{ localStorage.setItem("auth_last_error","NO_STATE"); }catch{} });
