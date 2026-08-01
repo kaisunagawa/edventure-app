@@ -403,6 +403,16 @@ function doGet(e) {
         result = adminBroadcastLine(e.parameter.coachEmail, _bmsg, e.parameter.confirm);
         break;
       }
+      // まだセッションを取得していない人だけへ送る（切替日の予告用）
+      case "adminBroadcastLinePending": {
+        var _pmsg = e.parameter.message;
+        if (e.parameter.messageB64) {
+          try { _pmsg = Utilities.newBlob(Utilities.base64DecodeWebSafe(e.parameter.messageB64)).getDataAsString("UTF-8"); }
+          catch (err) { result = { ok: false, error: "messageB64 を読めませんでした" }; break; }
+        }
+        result = adminBroadcastLinePending(e.parameter.coachEmail, _pmsg, e.parameter.confirm);
+        break;
+      }
       case "adminDiagnosePush": result = adminDiagnosePush(e.parameter.coachEmail, e.parameter.targetEmail); break;
       case "adminDebugStripeSearch": result = adminDebugStripeSearch(e.parameter.coachEmail, e.parameter.email); break;
       case "adminDebugCalendarColors": result = adminDebugCalendarColors(e.parameter.coachEmail); break;
@@ -4776,6 +4786,53 @@ function adminBroadcastLine(email, message, confirm) {
   let sent = 0;
   targets.forEach(u => { if (sendLineMessage(u.line_user_id, message)) sent++; });
   return { ok: true, dryRun: false, recipientCount: targets.length, sentCount: sent };
+}
+
+// ★まだセッションを取得していない人だけへ送る★
+//
+// なぜ必要か:
+//   切替日の予告（2通目）を全員へ送ると、すでに再ログインを済ませた人に
+//   「まだやっていませんね」と伝わってしまう。協力してくれた人へ
+//   催促を送るのは失礼だし、次の案内も読まれなくなる。
+//
+// 対象の数え方は authCohort / authInspect と同一条件にすること。
+// revoked_at が空なだけの行を「有効」と数えると、実際には使えない
+// セッションを持つ人を対象から外してしまい、その人が切替日に詰む。
+function adminBroadcastLinePending(email, message, confirm) {
+  if (!verifyAdmin(email)) return { ok: false, error: "not admin" };
+  if (!message) return { ok: false, error: "message is required" };
+
+  const users = sheetToObjects(getSheet("Users"));
+  const tvByUser = {};
+  users.forEach(function (u) { if (u.user_id) tvByUser[String(u.user_id)] = Number(u.token_version || 0); });
+
+  const now = Date.now();
+  const hasUsable = {};
+  sheetToObjects(getAuthSheet("Sessions")).forEach(function (x) {
+    if (String(x.revoked_at || "").trim()) return;
+    if (new Date(String(x.expires_at)).getTime() <= now) return;
+    const cur = tvByUser[String(x.user_id)];
+    if (cur === undefined) return;
+    if (Number(x.token_version || 0) !== cur) return;
+    hasUsable[String(x.user_id)] = true;
+  });
+
+  const linked = users.filter(function (u) {
+    return String(u.is_active).toUpperCase() === "TRUE" && String(u.line_user_id || "").trim();
+  });
+  const targets = linked.filter(function (u) {
+    return !(u.user_id && hasUsable[String(u.user_id)]);
+  });
+  const skipped = linked.length - targets.length;
+
+  if (confirm !== "yes") {
+    return { ok: true, dryRun: true, linkedCount: linked.length,
+             recipientCount: targets.length, alreadyDoneSkipped: skipped, preview: message };
+  }
+  let sent = 0;
+  targets.forEach(function (u) { if (sendLineMessage(u.line_user_id, message)) sent++; });
+  return { ok: true, dryRun: false, linkedCount: linked.length,
+           recipientCount: targets.length, alreadyDoneSkipped: skipped, sentCount: sent };
 }
 
 function nightlyCoachMessage() {
@@ -9470,7 +9527,7 @@ const ADMIN_SECRET_ALLOWLIST = {
   adminBackfillReports:1, adminBackfillReportsForDate:1, adminBackfillReportReasons:1,
   adminBackfillCalendar:1, adminDedupeCalendar:1, adminRepairStreaksFreeze:1,
   // 一斉送信（Kaiの明示的な要望により残す）
-  adminBroadcastLine:1, adminSendStudentCampaign:1,
+  adminBroadcastLine:1, adminBroadcastLinePending:1, adminSendStudentCampaign:1,
   // セットアップ・保守
   adminSetupTriggers:1, adminInstallTrigger:1, adminSetupPhase1:1, adminSetupAuth:1,
   authSetMode:1, authSetEnforce:1, authRoleApply:1, authRoleDryRun:1, authRevokeAll:1,
