@@ -16,7 +16,13 @@ a = s.index("  const toStored = function(titles){")
 b = s.index("\n  };", a) + 4
 stored = s[a:b].replace("const toStored", "var toStored")
 cases = open(os.path.join(root, "gas/roundtrip_cases.js")).read()
-code = body + "\nlet customActions = null;\n" + stored + "\n" + cases
+# toStored は端末内のマップ（重要度・期限・想定時間）を参照して
+# 一緒に保存する。検査では空のマップを与えて、id と title の
+# 往復そのものを確かめる。
+# ★Phase 2 でマップが増えるたびにここへ足す。足し忘れれば落ちる★
+code = (body + "\nlet customActions = null;\n"
+        + "const taskImportance={}, taskDue={}, taskEstimates={};\n"
+        + stored + "\n" + cases)
 open("/tmp/_rt.js", "w").write(code)
 node = os.path.expanduser("~/.local/node-v22.17.0-darwin-arm64/bin/node")
 if not os.path.exists(node): node = "node"

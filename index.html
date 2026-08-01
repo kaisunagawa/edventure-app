@@ -1325,6 +1325,27 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
           const fromServer = normalizeTaskList(d.todayActions.actions);
           setCustomActions(fromServer);
           localStorage.setItem("jiroku_custom_actions_"+todayStr, JSON.stringify(fromServer));
+          // ★他の端末で設定した重要度・期限・想定時間を取り込む★
+          //   ただし、この端末で既に設定してある値は上書きしない。
+          //   上書きすると「さっき変えたのに戻った」になる。
+          //   まだ持っていないものだけ足す。
+          const takeIn = (cur, pick) => {
+            const next = {...cur};
+            let changed = false;
+            fromServer.forEach(t=>{
+              const v = pick(t);
+              if (v === undefined || v === "" || v === null) return;
+              if (next[t.id] !== undefined) return;   // この端末の値を優先
+              next[t.id] = v; changed = true;
+            });
+            return changed ? next : null;
+          };
+          const ni = takeIn(taskImportance, t=>t.imp);
+          if (ni) { setTaskImportance(ni); localStorage.setItem("jiroku_task_importance_"+todayStr, JSON.stringify(ni)); }
+          const nd = takeIn(taskDue, t=>t.due);
+          if (nd) { setTaskDue(nd); localStorage.setItem("jiroku_task_due_"+todayStr, JSON.stringify(nd)); }
+          const ne = takeIn(taskEstimates, t=>t.est);
+          if (ne) { setTaskEstimates(ne); localStorage.setItem("jiroku_task_estimates_"+todayStr, JSON.stringify(ne)); }
         }
         if(d.todayActions.checked && Object.keys(d.todayActions.checked).length > 0){
           setChecked(prev=>{
@@ -1424,7 +1445,15 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
       let id = prev[title];
       if(!id || used[id]) id = makeLocalTaskId(title, i);   // 同名2件目は別idにする
       used[id] = 1;
-      return { id: id, title: title };
+      const o = { id: id, title: title };
+      // 端末内のマップから拾って一緒に保存する（他の端末へ届くように）
+      const imp = taskImportance[id] || taskImportance[title];
+      const due = taskDue[id] || taskDue[title];
+      const est = taskEstimates[id] !== undefined ? taskEstimates[id] : taskEstimates[title];
+      if (imp) o.imp = imp;
+      if (due) o.due = due;
+      if (est > 0) o.est = Number(est);
+      return o;
     });
   };
   // 名前から id を引く（Phase 2 への足がかり。いまは保存にだけ使う）
@@ -2043,9 +2072,16 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
         ? (()=>{
           // モバイルは元のシンプルなチェックリスト表示（未完了→完了フォルダ）。
           // 行タップで完了トグル。時間つきは横に⏱表示
+          // ★行を「完了トグル」と「詳細を開く」に分ける★
+          //   以前は行全体が完了トグルのボタンで、詳細を開く導線が
+          //   PCのタスクボードにしか無かった。そのため重要度と期限を
+          //   設定する画面へ、スマホからは到達できなかった（機能が死んでいた）。
+          //   ボタンの入れ子は無効なHTMLになるので、外側をdivにして分ける。
           const row = (item, showBorder) => html`
-            <button key=${item} onClick=${()=>toggleCheck(item)}
-              style=${{display:"flex",alignItems:"flex-start",gap:12,width:"100%",background:checked[item]?"var(--bg)":"none",border:"none",padding:"13px 16px",cursor:"pointer",borderBottom:showBorder?"1px solid var(--border)":"none",textAlign:"left",fontFamily:"inherit",transition:"background .15s"}}>
+            <div key=${item}
+              style=${{display:"flex",alignItems:"flex-start",gap:12,width:"100%",background:checked[item]?"var(--bg)":"none",borderBottom:showBorder?"1px solid var(--border)":"none",transition:"background .15s"}}>
+            <button onClick=${()=>toggleCheck(item)}
+              style=${{display:"flex",alignItems:"flex-start",gap:12,flex:1,minWidth:0,background:"none",border:"none",padding:"13px 4px 13px 16px",cursor:"pointer",textAlign:"left",fontFamily:"inherit"}}>
               <div style=${{width:20,height:20,borderRadius:6,border:`2px solid ${checked[item]?"var(--accent)":"var(--border)"}`,background:checked[item]?"var(--accent)":"transparent",flexShrink:0,marginTop:1,display:"flex",alignItems:"center",justifyContent:"center",transition:"all .15s"}}>
                 ${checked[item]&&html`<svg width="11" height="11" viewBox="0 0 10 10" fill="none"><path d="M2 5l2.5 2.5L8 3" stroke="white" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`}
               </div>
@@ -2055,7 +2091,11 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
               ${dueOf(item)&&html`<span style=${{flexShrink:0,fontSize:10.5,color:quadrantOf(item).overdue?"#dc2626":"var(--sub)",fontWeight:quadrantOf(item).overdue?700:400}}>${dueLabel(dueOf(item), quadrantOf(item).overdue)}</span>`}
               ${taskEstimates[item]>0&&html`<span style=${{flexShrink:0,fontSize:11,fontWeight:600,color:checked[item]?"var(--sub)":"var(--accent)",background:checked[item]?"var(--bg)":"var(--accent-l)",borderRadius:20,padding:"2px 8px",marginTop:1}}>⏱${taskEstimates[item]}分</span>`}
 
-            </button>`;
+            </button>
+            <button onClick=${()=>setDetailTask(item)} aria-label="詳細を開く"
+              style=${{flexShrink:0,background:"none",border:"none",cursor:"pointer",color:"var(--sub)",
+                       padding:"13px 14px 13px 6px",fontFamily:"inherit",fontSize:12.5}}>詳細</button>
+            </div>`;
           return html`
             ${incompleteItems.length>0
               ? incompleteItems.map((item,i)=>row(item, i<incompleteItems.length-1 || completedItems.length>0))
@@ -5091,7 +5131,16 @@ function normalizeTaskList(raw) {
     if (v && typeof v === "object") {
       const title = String(v.title != null ? v.title : (v.text != null ? v.text : "")).trim();
       if (!title) return null;
-      return { id: String(v.id || v.task_id || makeLocalTaskId(title, i)), title: title };
+      // ★付随情報も一緒に運ぶ★
+      //   重要度・期限・想定時間は端末内にしか無く、
+      //   スマホで設定してもPCに出てこなかった（実際にそうなった）。
+      //   サーバーへ送っているのはタスク名と完了状態だけだったため。
+      //   ここへ載せれば、既にある同期の仕組みにそのまま乗る。
+      const o = { id: String(v.id || v.task_id || makeLocalTaskId(title, i)), title: title };
+      if (v.imp) o.imp = String(v.imp);
+      if (v.due) o.due = String(v.due);
+      if (v.est !== undefined && v.est !== "" && v.est !== null) o.est = Number(v.est);
+      return o;
     }
     const title = String(v || "").trim();
     if (!title) return null;

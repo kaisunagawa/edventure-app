@@ -192,6 +192,13 @@ PY
     ng "publicApiRaw が未使用のまま残っている ─ 認証なしで呼べる道具を残さない"
   fi
 
+  # 端末間の同期（スマホで設定した重要度・期限がPCへ届くか）
+  if python3 build_sync_test.py >/dev/null 2>&1 || python3 ../gas/build_sync_test.py >/dev/null 2>&1; then
+    ok "端末間の同期（重要度・期限・想定時間）"
+  else
+    ng "端末間の同期が壊れている ─ スマホの設定がPCに出ない"
+  fi
+
   # マップのキーを id へ付け替える（改名しても設定が残るか・消さないか）
   if python3 build_keymigration_test.py >/dev/null 2>&1 || python3 ../gas/build_keymigration_test.py >/dev/null 2>&1; then
     ok "マップのキー付け替え（改名しても設定が残る）"
