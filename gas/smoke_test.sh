@@ -130,6 +130,54 @@ PY
     ng "index.html Googleのエラー戻りを無視している（無反応に見える）"
   fi
 
+  # ══════════════════════════════════════════
+  # ★ログインの出入口チェック★
+  #
+  # 2026-08-01、ログインを1日に3回壊した。3回とも同じ型だった:
+  #   ① コーチCRM  : awaitでポップアップが塞がれた（押しても反応しない）
+  #   ② 本体       : Googleのエラー戻りを無視（何も出ない）
+  #   ③ 再ログイン : 出す条件だけ書いて消す条件が無い（無限ループ）
+  #
+  # 共通するのは「入る道は作ったが、出る道を作っていない」こと。
+  # そして3つとも、コードを読むだけでは見つからなかった。
+  #
+  # ここでは「出る道が存在するか」だけを機械的に確かめる。
+  # 存在の確認でしかないが、丸ごと消えたことには必ず気づける。
+  # ══════════════════════════════════════════
+  echo "── ログインの出入口 ──"
+
+  # ③の再発防止: 再ログイン画面へ入る印を立てる箇所があるなら、消す箇所も必ずある
+  inn=$(grep -c 'setItem("jiroku_reauth_needed"' ../index.html || true)
+  outn=$(grep -c 'removeItem("jiroku_reauth_needed"' ../index.html || true)
+  if [ "${inn:-0}" -ge 1 ] && [ "${outn:-0}" -ge 1 ]; then
+    ok "再ログイン要求 立てる${inn}/消す${outn}（出る道あり）"
+  else
+    ng "再ログイン要求 立てる${inn}/消す${outn} ─ ★消す道が無い。ログインしても抜けられない★"
+  fi
+
+  # 画面側の状態も戻せること（localStorageを消すだけでは足りない）
+  if grep -q 'jiroku:reauth' ../index.html && grep -q 'jiroku:authed' ../index.html; then
+    ok "再ログイン画面 出す合図と戻す合図が両方ある"
+  else
+    ng "再ログイン画面 戻す合図(jiroku:authed)が無い ─ 画面から抜けられなくなる"
+  fi
+
+  # セッションを持てたら必ず印を消す（消す場所はここ以外にありえない）
+  if awk '/function setSessionToken/,/^}/' ../index.html | grep -q 'jiroku_reauth_needed'; then
+    ok "setSessionToken が再ログイン要求を解除している"
+  else
+    ng "setSessionToken が再ログイン要求を解除していない ─ 無限ループの原因"
+  fi
+
+  # ログインの入口は、トークンが無効でも必ず通れること（詰み防止）
+  for a in authChallenge login authConfig; do
+    if grep -q "${a}: *1" ../gas/Code.gs 2>/dev/null || grep -q "${a}: *1" Code.gs; then
+      ok "PUBLIC_ACTIONS に ${a}（失効しても再ログインできる）"
+    else
+      ng "PUBLIC_ACTIONS に ${a} が無い ─ 失効した人がログインできなくなる"
+    fi
+  done
+
   # ★セッショントークンをURLへ載せない（2026-08-01に解消）★
   # クエリのトークンはブラウザ履歴・中間のログ・Googleのアクセスログに残る。
   # GASはヘッダーを読めないため、GETで送る限り回避できない。
