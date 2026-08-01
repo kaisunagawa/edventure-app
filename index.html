@@ -4976,6 +4976,61 @@ function SettingsScreen({onToast,onLogout,onGoalSaved,profile,onProfileSaved,onC
 const TABS=[{id:"home",l:"ホーム",n:"home"},{id:"timer",l:"タイマー",n:"timer"},{id:"log",l:"記録",n:"clock"},{id:"report",l:"レポート",n:"chart"},{id:"brain",l:"気づき",n:"bulb"},{id:"settings",l:"設定",n:"gear"}];
 const AVATAR_OPTIONS=["🦊","🐱","🐶","🐻","🐼","🦉","🐧","🦁","🐢","🐰","🐹","🐨","🐵","🐺","🦄","🐴","🐥","🐻‍❄️","🦋","🦭"];
 
+// ══════════════════════════════════════════════════════════════════
+// タスクの識別子（task_id）への一本化 ─ 第1段
+//
+// いまの「今日のタスク」はタスクが文字列そのもので、完了・想定時間・
+// 重要度・期限はすべて「タスク名」をキーにしたマップで持っている。
+// そのため:
+//   ・名前を変えると付随情報が古い名前に取り残される
+//   ・同名のタスクを2件作ると区別できない（片方を完了にすると両方完了）
+//   ・日付をまたぐと別物になり、持ち越しを追えない
+//
+// 名前ではなく id で持つようにする。ただし既に保存されている
+// 文字列配列を壊さないよう、読むときは両方の形を受け取る。
+// ══════════════════════════════════════════════════════════════════
+
+// 保存されているタスク一覧を、必ず [{id,title}] の形にして返す。
+// 旧形式（文字列の配列）なら、その場で id を振る。
+function normalizeTaskList(raw) {
+  if (!Array.isArray(raw)) return [];
+  return raw.map(function (v, i) {
+    if (v && typeof v === "object") {
+      const title = String(v.title != null ? v.title : (v.text != null ? v.text : "")).trim();
+      if (!title) return null;
+      return { id: String(v.id || v.task_id || makeLocalTaskId(title, i)), title: title };
+    }
+    const title = String(v || "").trim();
+    if (!title) return null;
+    return { id: makeLocalTaskId(title, i), title: title };
+  }).filter(Boolean);
+}
+
+// 旧データへ id を振るときの決め方。
+// ★同じ入力からは必ず同じ id になるようにする★
+// 端末ごとに違う id を振ると、同じタスクが2つに見える。
+// 並び順（i）を混ぜるのは、同名タスクが2件あっても別物として扱うため。
+function makeLocalTaskId(title, i) {
+  let h = 0;
+  const src = String(title) + "|" + i;
+  for (let k = 0; k < src.length; k++) { h = ((h << 5) - h + src.charCodeAt(k)) | 0; }
+  return "lt_" + (h >>> 0).toString(36);
+}
+
+// 名前をキーにした古いマップを、id をキーに付け替える。
+// 同名が2件あるときは、最初の1件にだけ引き継ぐ（推測で複製しない）。
+function remapByTaskId(oldMap, list) {
+  const out = {}, used = {};
+  (list || []).forEach(function (t) {
+    if (used[t.title]) return;
+    if (oldMap && Object.prototype.hasOwnProperty.call(oldMap, t.title)) {
+      out[t.id] = oldMap[t.title];
+      used[t.title] = 1;
+    }
+  });
+  return out;
+}
+
 // ── タスクの重要度×緊急度（Checkpoint 3）──
 // ★色だけで区別しない★
 // 色覚には個人差があり、屋外の明るい画面でも色は判別しにくい。

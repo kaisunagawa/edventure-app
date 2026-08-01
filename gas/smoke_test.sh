@@ -175,6 +175,13 @@ PY
     ng "認証前の取得が残っている: ${bad}─ 既存利用者が新規扱いになる"
   fi
 
+  # task_id への変換（同名タスクの区別・改名時の情報保持）
+  if python3 build_taskid_test.py >/dev/null 2>&1 || python3 ../gas/build_taskid_test.py >/dev/null 2>&1; then
+    ok "task_idへの変換"
+  else
+    ng "task_idへの変換が期待どおりでない"
+  fi
+
   # 進捗とペースの計算（純粋な計算。未入力と0を取り違えないことを含む）
   if python3 build_pace_test.py >/dev/null 2>&1 || python3 ../gas/build_pace_test.py >/dev/null 2>&1; then
     ok "進捗とペースの計算"
