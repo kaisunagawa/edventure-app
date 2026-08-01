@@ -192,6 +192,13 @@ PY
     ng "publicApiRaw が未使用のまま残っている ─ 認証なしで呼べる道具を残さない"
   fi
 
+  # タスクの保存形式の往復（★いちばん困るのはタスクが消えること★）
+  if python3 build_roundtrip_test.py >/dev/null 2>&1 || python3 ../gas/build_roundtrip_test.py >/dev/null 2>&1; then
+    ok "タスクの保存形式の往復（件数・順番・idが保たれる）"
+  else
+    ng "タスクの保存形式の往復が壊れている ─ タスクが消える恐れ"
+  fi
+
   # task_id への変換（同名タスクの区別・改名時の情報保持）
   if python3 build_taskid_test.py >/dev/null 2>&1 || python3 ../gas/build_taskid_test.py >/dev/null 2>&1; then
     ok "task_idへの変換"

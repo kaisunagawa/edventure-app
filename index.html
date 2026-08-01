@@ -1122,9 +1122,26 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
   const [todayLogs, setTodayLogs] = useState([]);
   const [checked, setChecked] = useState(()=>JSON.parse(localStorage.getItem("today_actions")||"{}"));
   const todayKey = formatDateStr(new Date());
+  // ★保存の形を [{id,title}] にする（Phase 1）★
+  //   これまではタスク名の文字列配列だった。名前が識別子を兼ねていたため、
+  //   改名で付随情報が外れ、同名2件を区別できず、持ち越しも追えなかった。
+  //   まず「保存の形」だけを変える。画面はまだ名前で動かす（Phase 2で差し替え）。
+  //   旧形式も読めるので、既に保存されているデータは壊れない。
   const [customActions, setCustomActions] = useState(()=>{
-    const s=localStorage.getItem("jiroku_custom_actions_"+formatDateStr(new Date()));
-    return s ? JSON.parse(s) : null; // null = use AI actions
+    try {
+      const s=localStorage.getItem("jiroku_custom_actions_"+formatDateStr(new Date()));
+      if(!s) return null;                    // null = AIのアクションを使う
+      const raw=JSON.parse(s);
+      if(!Array.isArray(raw)) return null;
+      const norm=normalizeTaskList(raw);
+      // ★件数が減ったら変換を信用しない★
+      //   変換の取りこぼしでタスクが消えるのが、いちばん困る壊れ方。
+      //   減っていたら旧形式のまま扱い、画面には全部出す。
+      if(norm.length < raw.filter(function(x){ return x && (typeof x==="object" ? (x.title||x.text) : String(x).trim()); }).length) {
+        return normalizeTaskList(raw.map(function(x){ return typeof x==="object" ? x : String(x); }));
+      }
+      return norm;
+    } catch(e){ return null; }
   });
   const [editMode, setEditMode] = useState(false);
   const [editItems, setEditItems] = useState([]); // [{text, min}]（minは想定時間・分、任意）
@@ -1187,7 +1204,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
     const rows = intentTasks.map(r=>({text:String(r&&r.text||"").trim(), min:parseInt(r&&r.min,10)}))
       .filter(r=>r.text.length>0 && !actionItems.includes(r.text));
     if(rows.length>0){
-      const merged = [...actionItems, ...rows.map(r=>r.text)];
+      const merged = toStored([...actionItems, ...rows.map(r=>r.text)]);
       setCustomActions(merged);
       localStorage.setItem("jiroku_custom_actions_"+todayKey, JSON.stringify(merged));
       gasPostJson("saveTodayActions", {actions: JSON.stringify(merged)});
@@ -1295,8 +1312,9 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
       // 今日のアクションの端末間同期
       if(d.todayActions){
         if(d.todayActions.actions !== null && localStorage.getItem("jiroku_custom_actions_"+todayStr) === null){
-          setCustomActions(d.todayActions.actions);
-          localStorage.setItem("jiroku_custom_actions_"+todayStr, JSON.stringify(d.todayActions.actions));
+          const fromServer = normalizeTaskList(d.todayActions.actions);
+          setCustomActions(fromServer);
+          localStorage.setItem("jiroku_custom_actions_"+todayStr, JSON.stringify(fromServer));
         }
         if(d.todayActions.checked && Object.keys(d.todayActions.checked).length > 0){
           setChecked(prev=>{
@@ -1381,7 +1399,29 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
   // 「今日のタスク」は、ユーザーが自分で追加したものだけを表示する。
   // AIコーチレポートの「明日のアクション」は自動でタスクには入れない（提案は
   // レポート画面で見られる）。要望により、勝手にタスクが増えないようにした。
-  const actionItems = customActions !== null ? customActions : [];
+  // 画面はまだ名前で動く（Phase 2 で task_id へ差し替える）。
+  // ここで名前の配列へ落として、既存の参照をそのまま生かす。
+  const taskList = customActions !== null ? customActions : [];
+  const actionItems = taskList.map(function(t){ return t.title; });
+  // ★保存するときに使う★ 名前の配列を [{id,title}] へ戻す。
+  //   既にあるタスクは id をそのまま保つ（新しく振り直すと別物になる）。
+  //   新しく増えたものだけ id を作る。
+  const toStored = function(titles){
+    const prev = {};
+    (customActions||[]).forEach(function(t){ if(!prev[t.title]) prev[t.title]=t.id; });
+    const used = {};
+    return titles.map(function(title, i){
+      let id = prev[title];
+      if(!id || used[id]) id = makeLocalTaskId(title, i);   // 同名2件目は別idにする
+      used[id] = 1;
+      return { id: id, title: title };
+    });
+  };
+  // 名前から id を引く（Phase 2 への足がかり。いまは保存にだけ使う）
+  const idOfTitle = function(title){
+    const hit = taskList.find(function(t){ return t.title===title; });
+    return hit ? hit.id : "";
+  };
 
   // タイマー画面の「何に集中しますか？」からも今日のタスクを選べるよう、
   // 完了していない項目を端末に共有しておく（未完了のものだけ、選ぶ意味があるため）。
@@ -1439,7 +1479,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
   const deleteTask = (task) => {
     const list = actionItems.filter(t=>t!==task);
     if(list.length===0){ setCustomActions(null); localStorage.removeItem("jiroku_custom_actions_"+todayKey); }
-    else { setCustomActions(list); localStorage.setItem("jiroku_custom_actions_"+todayKey, JSON.stringify(list)); }
+    else { const st=toStored(list); setCustomActions(st); localStorage.setItem("jiroku_custom_actions_"+todayKey, JSON.stringify(st)); }
     const est={...taskEstimates}; delete est[task]; setTaskEstimates(est); localStorage.setItem("jiroku_task_estimates_"+todayKey, JSON.stringify(est));
     const imp={...taskImportance}; delete imp[task]; setTaskImportance(imp); localStorage.setItem("jiroku_task_importance_"+todayKey, JSON.stringify(imp));
     const du={...taskDue}; delete du[task]; setTaskDue(du); localStorage.setItem("jiroku_task_due_"+todayKey, JSON.stringify(du));
@@ -1559,10 +1599,11 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
     setChecked(newChecked);
     localStorage.setItem("today_actions", JSON.stringify(newChecked));
     // 空で保存したらAIアクションに戻す
+    const storedList = toStored(finalList);
     if(finalList.length===0){ setCustomActions(null); localStorage.removeItem("jiroku_custom_actions_"+todayKey); }
-    else { setCustomActions(finalList); localStorage.setItem("jiroku_custom_actions_"+todayKey, JSON.stringify(finalList)); }
+    else { setCustomActions(storedList); localStorage.setItem("jiroku_custom_actions_"+todayKey, JSON.stringify(storedList)); }
     // 他端末にも同期
-    gasPostJson("saveTodayActions", {actions: finalList.length===0?"":JSON.stringify(finalList), checked: JSON.stringify(newChecked)});
+    gasPostJson("saveTodayActions", {actions: finalList.length===0?"":JSON.stringify(storedList), checked: JSON.stringify(newChecked)});
     setEditMode(false);
   };
 
