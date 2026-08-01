@@ -658,6 +658,12 @@ function setSessionToken(t) {
       // 「ログイン → サインイン画面へ戻る」を延々と繰り返した（2026-08-01に発生）。
       // 印を消す場所は「セッションを持てた瞬間」以外にない。
       localStorage.removeItem("jiroku_reauth_needed");
+      // ★画面側の状態も戻す★
+      // 再ログイン画面を出すかどうかはReactの状態で持っている。
+      // localStorage を消しても、その状態は true のまま残るため、
+      // ログインに成功しても再ログイン画面が出続ける。
+      // 保存できた瞬間に知らせて、画面側を戻す。
+      try { window.dispatchEvent(new CustomEvent("jiroku:authed")); } catch {}
     } else {
       localStorage.removeItem(SESSION_KEY);
     }
@@ -5914,10 +5920,17 @@ function App() {
     try { return localStorage.getItem("jiroku_reauth_needed")==="1"; } catch { return false; }
   });
   // 通信中に失効した場合も、画面を切り替える（次の操作まで待たせない）
+  // ★戻す側も必ず用意する★
+  // 出す側だけを作ると、ログインに成功しても再ログイン画面から抜けられない。
+  // 2026-08-01、まさにこれで「ログイン → サインイン画面へ戻る」の
+  // 無限ループを本番で発生させた。出す条件を書いたら、必ず消す条件も書く。
   useEffect(()=>{
     const on=()=>setNeedsReauth(true);
+    const off=()=>setNeedsReauth(false);
     window.addEventListener("jiroku:reauth",on);
-    return ()=>window.removeEventListener("jiroku:reauth",on);
+    window.addEventListener("jiroku:authed",off);
+    return ()=>{ window.removeEventListener("jiroku:reauth",on);
+                 window.removeEventListener("jiroku:authed",off); };
   },[]);
   // セッションを持っている状態で預かり分が残っていれば、起動時にやり直す
   useEffect(()=>{
@@ -5936,6 +5949,10 @@ function App() {
         const cfg=await (await fetch(u.toString())).json();
         if(cfg&&cfg.ok&&cfg.auth_mode) mode=noteAuthMode(cfg.auth_mode);
       }catch{ return; }   // 通信できない時は促さない（オフラインで締め出さない）
+      // ★この判定は通信を挟むので、その間にログインが完了していることがある★
+      // 開始時点では未ログインでも、応答が返る頃には成功しているという順序。
+      // 確認し直さないと、ログイン直後に再ログイン画面を出してしまう。
+      if(getSessionToken()) return;
       if((AUTH_RANK[mode]||0)>=1) setNeedsReauth(true);
     })();
   },[]);
