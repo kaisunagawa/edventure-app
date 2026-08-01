@@ -143,6 +143,18 @@ PY
     if [ "$n" -eq 1 ]; then ok "function ${fn}"; else ng "function ${fn} が ${n} 個"; fi
   done
 
+  # ★ログイン後の取得はトークンを添えること★
+  # SESSION_REQUIRED を入れた際、ログイン直後の getUser がトークン無しで
+  # 呼ばれており AUTH_REQUIRED になった。アプリはそれを「利用者が存在しない」と
+  # 解釈し、既存利用者へ「はじめまして」の新規登録画面を出した（2026-08-01）。
+  # 認証前に呼んでよいのは registerUser だけ。
+  bad=$(grep -o 'publicApiRaw("[a-zA-Z]*"' ../index.html | sed 's/publicApiRaw("//;s/"//' | grep -v '^registerUser$' | sort -u | tr '\n' ' ')
+  if [ -z "$bad" ]; then
+    ok "ログイン後の取得はトークン付き（publicApiRawはregisterUserのみ）"
+  else
+    ng "認証前の取得が残っている: ${bad}─ 既存利用者が新規扱いになる"
+  fi
+
   # ══════════════════════════════════════════
   # ★ログインの出入口チェック★
   #

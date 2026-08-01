@@ -504,7 +504,10 @@ async function authedApi(action, params = {}) {
       method: "POST", headers: { "Content-Type": "text/plain" },
       body: JSON.stringify({
         action,
-        studentEmail: CURRENT_USER.email,
+        // ★CURRENT_USER が未確定のことがある★
+        //   ログイン直後は、まだ全体の利用者が決まっていない。
+        //   そこで落ちると「ログインできたのに画面が出ない」になる。
+        studentEmail: (CURRENT_USER && CURRENT_USER.email) || "",
         token: getSessionToken() || undefined,   // 無ければ入れない（互換段階のため）
         ...params
       })
@@ -5059,10 +5062,25 @@ function LoginScreen({onLogin}) {
       // 以前は待ち時間の上限が無く、サーバーの応答が返らないと
       // 「ログインしています…」から永久に動かなくなっていた（2026-08-01に発生）
       const withTimeout=(pr,ms)=>Promise.race([pr,new Promise((_,rej)=>setTimeout(()=>rej(new Error("timeout")),ms))]);
-      // ★POSTで取得する（URLにトークンを載せないため。ここは未ログインなので
-      //   トークンは無いが、経路を1本にしておかないと後で必ず取り残す）
-      const r=await withTimeout(publicApiRaw("getUser",{studentEmail:email}), 25000);
-      try{ await withTimeout(sessionPromise, 25000); }catch{}   // 本人確認は待つが、詰まらせない
+      // ★セッションを先に受け取る。getUser はそのあと★
+      //
+      // 以前は「待ち時間を短くする」ために並行して走らせていた。
+      // ところが getUser が認証必須になった瞬間、順序が逆になった:
+      //   ログイン成功 → トークン未取得のまま getUser → AUTH_REQUIRED
+      //   → アプリは「そんな利用者はいない」と解釈 → 新規登録画面へ
+      // 2026-08-01、既存利用者に「はじめまして」の画面を出した。
+      //
+      // 数秒遅くなるが、正しさを優先する。
+      // 「速いが、たまに別人として扱う」より「少し遅いが必ず本人」が良い。
+      try{ await withTimeout(sessionPromise, 25000); }catch{}
+
+      // トークンを添えて取得する（authedApi が本文へ入れる）。
+      // まだセッションを取れていない場合でも、トークン無しで送られるだけなので
+      // 互換段階（SESSION_OPTIONAL）ではこれまでどおり通る。
+      // ★CURRENT_USER を先に書き換えない★
+      //   まだログインが確定していない段階で全体の状態を触ると、
+      //   別の画面が中途半端な利用者を掴む。宛先は引数で渡す。
+      const r=await withTimeout(authedApi("getUser",{studentEmail:email}), 25000);
       // セッション切れで預かっていた操作を、ログインできたらやり直す
       if(getSessionToken() && pendingOpCount()>0){
         try{ await flushPendingOps(); }catch{}
@@ -5146,7 +5164,9 @@ function LoginScreen({onLogin}) {
   const finishLine=async()=>{
     setCheckingLine(true);
     try{
-      const r=await publicApiRaw("getUser",{studentEmail:pendingUser.email});
+      // ★トークンを添える★ 認証必須になると publicApiRaw では弾かれ、
+      //   「連携できていない」と誤判定してしまう
+      const r=await authedApi("getUser",{studentEmail:pendingUser.email});
       if(r.ok && r.data && !r.data.lineLinked && !lineWarning){
         setCheckingLine(false); setLineWarning(true); return;
       }

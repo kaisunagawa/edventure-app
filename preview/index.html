@@ -504,7 +504,10 @@ async function authedApi(action, params = {}) {
       method: "POST", headers: { "Content-Type": "text/plain" },
       body: JSON.stringify({
         action,
-        studentEmail: CURRENT_USER.email,
+        // ★CURRENT_USER が未確定のことがある★
+        //   ログイン直後は、まだ全体の利用者が決まっていない。
+        //   そこで落ちると「ログインできたのに画面が出ない」になる。
+        studentEmail: (CURRENT_USER && CURRENT_USER.email) || "",
         token: getSessionToken() || undefined,   // 無ければ入れない（互換段階のため）
         ...params
       })
@@ -4862,33 +4865,6 @@ function SettingsScreen({onToast,onLogout,onGoalSaved,profile,onProfileSaved,onC
 const TABS=[{id:"home",l:"ホーム",n:"home"},{id:"timer",l:"タイマー",n:"timer"},{id:"log",l:"記録",n:"clock"},{id:"report",l:"レポート",n:"chart"},{id:"brain",l:"気づき",n:"bulb"},{id:"settings",l:"設定",n:"gear"}];
 const AVATAR_OPTIONS=["🦊","🐱","🐶","🐻","🐼","🦉","🐧","🦁","🐢","🐰","🐹","🐨","🐵","🐺","🦄","🐴","🐥","🐻‍❄️","🦋","🦭"];
 
-// ── タスクの重要度×緊急度（Checkpoint 3）──
-// ★色だけで区別しない★
-// 色覚には個人差があり、屋外の明るい画面でも色は判別しにくい。
-// 必ず文字とアイコンでも分かるようにする。
-const QUADRANT_LABEL = {
-  DO_NOW:            { icon:"🔥", label:"今すぐ",       hint:"重要かつ緊急", color:"#dc2626" },
-  SCHEDULE:          { icon:"📌", label:"予定する",     hint:"重要だが急がない", color:"#0891b2" },
-  DELEGATE_OR_LIMIT: { icon:"⏩", label:"手短に",       hint:"急ぎだが重要ではない", color:"#d97706" },
-  DEFER_OR_DELETE:   { icon:"🗂", label:"後回し",       hint:"重要でも緊急でもない", color:"#6b7280" }
-};
-const IMPORTANCE_LABEL = { HIGH:"高", MEDIUM:"中", LOW:"低" };
-// 期限の表示。何日後かが一目で分かるようにする
-function dueLabel(dueAt, overdue){
-  const raw=String(dueAt||"").trim();
-  if(!raw) return "";
-  const dateOnly=/^\d{4}-\d{2}-\d{2}$/.test(raw);
-  const p=raw.substring(0,10).split("-");
-  const due=new Date(Number(p[0]),Number(p[1])-1,Number(p[2]));
-  const t=new Date(); const today=new Date(t.getFullYear(),t.getMonth(),t.getDate());
-  const days=Math.round((due-today)/86400000);
-  const time=dateOnly?"":(" "+raw.substring(11,16));
-  if(overdue||days<0) return "期限超過（"+(p[1]*1)+"/"+(p[2]*1)+time+"）";
-  if(days===0) return "今日まで"+time;
-  if(days===1) return "明日まで"+time;
-  return days+"日後（"+(p[1]*1)+"/"+(p[2]*1)+time+"）";
-}
-
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
 const XP_THRESHOLDS = [0, 500, 1200, 2200, 3500, 5200, 7500, 10000, 13000, 17000, 21000, 25500, 30500, 36000, 42000, 49000];
@@ -5086,10 +5062,25 @@ function LoginScreen({onLogin}) {
       // 以前は待ち時間の上限が無く、サーバーの応答が返らないと
       // 「ログインしています…」から永久に動かなくなっていた（2026-08-01に発生）
       const withTimeout=(pr,ms)=>Promise.race([pr,new Promise((_,rej)=>setTimeout(()=>rej(new Error("timeout")),ms))]);
-      // ★POSTで取得する（URLにトークンを載せないため。ここは未ログインなので
-      //   トークンは無いが、経路を1本にしておかないと後で必ず取り残す）
-      const r=await withTimeout(publicApiRaw("getUser",{studentEmail:email}), 25000);
-      try{ await withTimeout(sessionPromise, 25000); }catch{}   // 本人確認は待つが、詰まらせない
+      // ★セッションを先に受け取る。getUser はそのあと★
+      //
+      // 以前は「待ち時間を短くする」ために並行して走らせていた。
+      // ところが getUser が認証必須になった瞬間、順序が逆になった:
+      //   ログイン成功 → トークン未取得のまま getUser → AUTH_REQUIRED
+      //   → アプリは「そんな利用者はいない」と解釈 → 新規登録画面へ
+      // 2026-08-01、既存利用者に「はじめまして」の画面を出した。
+      //
+      // 数秒遅くなるが、正しさを優先する。
+      // 「速いが、たまに別人として扱う」より「少し遅いが必ず本人」が良い。
+      try{ await withTimeout(sessionPromise, 25000); }catch{}
+
+      // トークンを添えて取得する（authedApi が本文へ入れる）。
+      // まだセッションを取れていない場合でも、トークン無しで送られるだけなので
+      // 互換段階（SESSION_OPTIONAL）ではこれまでどおり通る。
+      // ★CURRENT_USER を先に書き換えない★
+      //   まだログインが確定していない段階で全体の状態を触ると、
+      //   別の画面が中途半端な利用者を掴む。宛先は引数で渡す。
+      const r=await withTimeout(authedApi("getUser",{studentEmail:email}), 25000);
       // セッション切れで預かっていた操作を、ログインできたらやり直す
       if(getSessionToken() && pendingOpCount()>0){
         try{ await flushPendingOps(); }catch{}
@@ -5173,7 +5164,9 @@ function LoginScreen({onLogin}) {
   const finishLine=async()=>{
     setCheckingLine(true);
     try{
-      const r=await publicApiRaw("getUser",{studentEmail:pendingUser.email});
+      // ★トークンを添える★ 認証必須になると publicApiRaw では弾かれ、
+      //   「連携できていない」と誤判定してしまう
+      const r=await authedApi("getUser",{studentEmail:pendingUser.email});
       if(r.ok && r.data && !r.data.lineLinked && !lineWarning){
         setCheckingLine(false); setLineWarning(true); return;
       }
@@ -5933,174 +5926,6 @@ function QuickLogSheet({onClose,onToast}){
   `, document.body);
 }
 
-// ── タスク（重要度×緊急度）──
-// 入力の負荷を増やさないため、必須はタスク名だけ。
-// 重要度・期限・週間目標・想定時間は任意で、開かないと出てこない。
-// 緊急度と4分類はサーバーが都度算出するので、利用者は入力しない。
-function TaskSection({ isActive, onToast }) {
-  const [tasks,setTasks]=useState([]);
-  const [loading,setLoading]=useState(false);
-  const [title,setTitle]=useState("");
-  const [open,setOpen]=useState(false);        // 詳細入力を開いているか
-  const [imp,setImp]=useState("MEDIUM");
-  const [due,setDue]=useState("");
-  const [est,setEst]=useState("");
-  const [wg,setWg]=useState("");
-  const [goals,setGoals]=useState([]);
-  const [busy,setBusy]=useState(false);
-
-  const load=async()=>{
-    setLoading(true);
-    const r=await gasApi("getTasks");
-    if(r&&r.ok) setTasks(r.data||[]);
-    setLoading(false);
-  };
-  useEffect(()=>{ if(isActive){ load();
-    gasApi("getGoalTree").then(g=>{
-      if(!g||!g.ok||!g.data) return;
-      const list=[];
-      (g.data.goals||[]).forEach(q=>(q.weeklyGoals||[]).forEach(w=>list.push(w)));
-      (g.data.orphanWeeklyGoals||[]).forEach(w=>list.push(w));
-      setGoals(list);
-    }).catch(()=>{});
-  } },[isActive]);
-
-  const add=async()=>{
-    if(!title.trim()||busy) return;
-    setBusy(true);
-    const body={ title:title.trim(), importance_level:imp };
-    if(due) body.due_at=due;
-    if(est) body.estimated_minutes=est;
-    if(wg) body.link_weekly_goal_id=wg;
-    const r=await gasApi("saveTask",body);
-    setBusy(false);
-    if(r&&r.ok){ setTitle(""); setDue(""); setEst(""); setWg(""); setImp("MEDIUM"); setOpen(false); load(); }
-    else onToast&&onToast((r&&r.error)||"保存できませんでした");
-  };
-  const setStatus=async(t,st)=>{
-    const r=await gasApi("saveTask",{task_id:t.task_id,status:st});
-    if(r&&r.ok) load(); else onToast&&onToast((r&&r.error)||"更新できませんでした");
-  };
-  const remove=async(t)=>{
-    const r=await gasApi("deleteTask",{task_id:t.task_id});
-    if(r&&r.ok) load(); else onToast&&onToast((r&&r.error)||"削除できませんでした");
-  };
-
-  const box={background:"var(--card)",border:"1px solid var(--border)",borderRadius:10,padding:12,marginBottom:10};
-  const inp={width:"100%",padding:"10px 12px",borderRadius:8,border:"1px solid var(--border)",
-             background:"var(--bg)",color:"var(--text)",fontSize:15,fontFamily:"inherit",boxSizing:"border-box"};
-
-  return html`
-    <div style=${{padding:"12px 16px 24px"}}>
-      <div style=${{fontSize:15,fontWeight:700,marginBottom:10}}>やること</div>
-
-      <div style=${box}>
-        <input style=${inp} placeholder="やることを書く" value=${title}
-          onInput=${e=>setTitle(e.target.value)}
-          onKeyDown=${e=>{ if(e.key==="Enter") add(); }}/>
-        <div style=${{display:"flex",gap:8,marginTop:8,alignItems:"center"}}>
-          <button onClick=${()=>setOpen(!open)}
-            style=${{flex:"0 0 auto",padding:"8px 12px",borderRadius:8,border:"1px solid var(--border)",
-                     background:"var(--bg)",color:"var(--sub)",fontSize:13,cursor:"pointer",fontFamily:"inherit"}}>
-            ${open?"閉じる":"詳しく"}
-          </button>
-          <button onClick=${add} disabled=${!title.trim()||busy}
-            style=${{flex:1,padding:"10px 12px",borderRadius:8,border:"none",
-                     background:title.trim()?"var(--accent)":"var(--border)",
-                     color:"#fff",fontSize:14,fontWeight:600,
-                     cursor:title.trim()?"pointer":"default",fontFamily:"inherit"}}>
-            ${busy?"追加中…":"追加"}
-          </button>
-        </div>
-
-        ${open && html`
-          <div style=${{marginTop:12,display:"flex",flexDirection:"column",gap:10}}>
-            <div>
-              <div style=${{fontSize:12,color:"var(--sub)",marginBottom:5}}>重要度（自分で決める）</div>
-              <div style=${{display:"flex",gap:6}}>
-                ${["HIGH","MEDIUM","LOW"].map(v=>html`
-                  <button key=${v} onClick=${()=>setImp(v)}
-                    style=${{flex:1,padding:"8px 0",borderRadius:8,fontSize:13,cursor:"pointer",fontFamily:"inherit",
-                             border:"1px solid "+(imp===v?"var(--accent)":"var(--border)"),
-                             background:imp===v?"var(--accent)":"var(--bg)",
-                             color:imp===v?"#fff":"var(--text)",fontWeight:imp===v?700:400}}>
-                    ${IMPORTANCE_LABEL[v]}
-                  </button>`)}
-              </div>
-            </div>
-            <div>
-              <div style=${{fontSize:12,color:"var(--sub)",marginBottom:5}}>期限（緊急度は自動で決まります）</div>
-              <input type="date" style=${inp} value=${due} onInput=${e=>setDue(e.target.value)}/>
-            </div>
-            <div>
-              <div style=${{fontSize:12,color:"var(--sub)",marginBottom:5}}>想定時間（分）</div>
-              <input type="number" inputmode="numeric" style=${inp} value=${est}
-                placeholder="30" onInput=${e=>setEst(e.target.value)}/>
-            </div>
-            ${goals.length>0 && html`
-            <div>
-              <div style=${{fontSize:12,color:"var(--sub)",marginBottom:5}}>週間目標とつなぐ</div>
-              <select style=${inp} value=${wg} onChange=${e=>setWg(e.target.value)}>
-                <option value="">つながない</option>
-                ${goals.map(g=>html`<option key=${g.weekly_goal_id} value=${g.weekly_goal_id}>${g.title}</option>`)}
-              </select>
-            </div>`}
-          </div>`}
-      </div>
-
-      ${loading && tasks.length===0 && html`<div style=${{fontSize:13,color:"var(--sub)",textAlign:"center",padding:20}}>読み込み中…</div>`}
-      ${!loading && tasks.length===0 && html`
-        <div style=${{fontSize:13,color:"var(--sub)",textAlign:"center",padding:"24px 12px",lineHeight:1.8}}>
-          まだやることがありません。<br/>
-          期限を入れると、急ぎのものが上に並びます。
-        </div>`}
-
-      ${tasks.map(t=>{
-        const q=QUADRANT_LABEL[t.quadrant]||QUADRANT_LABEL.DEFER_OR_DELETE;
-        const dl=dueLabel(t.due_at,t.overdue);
-        const done=String(t.status||"").toUpperCase()==="DONE";
-        return html`
-          <div key=${t.task_id} style=${{...box,opacity:done?0.55:1}}>
-            <div style=${{display:"flex",alignItems:"flex-start",gap:10}}>
-              <button onClick=${()=>setStatus(t,done?"TODO":"DONE")}
-                title=${done?"未完了に戻す":"完了にする"}
-                style=${{flex:"0 0 auto",width:24,height:24,marginTop:1,borderRadius:6,cursor:"pointer",
-                         border:"2px solid "+(done?"var(--accent)":"var(--border)"),
-                         background:done?"var(--accent)":"transparent",color:"#fff",
-                         fontSize:14,lineHeight:1,padding:0,fontFamily:"inherit"}}>${done?"✓":""}</button>
-              <div style=${{flex:1,minWidth:0}}>
-                <div style=${{fontSize:14.5,fontWeight:600,lineHeight:1.5,
-                              textDecoration:done?"line-through":"none",wordBreak:"break-word"}}>${t.title}</div>
-                <div style=${{display:"flex",flexWrap:"wrap",gap:6,marginTop:6,alignItems:"center"}}>
-                  <!-- ★色だけに頼らない★ アイコンと文字を必ず添える -->
-                  <span style=${{fontSize:11.5,fontWeight:700,color:q.color,
-                                 border:"1px solid "+q.color,borderRadius:6,padding:"2px 7px"}}
-                        title=${q.hint}>${q.icon} ${q.label}</span>
-                  ${dl && html`<span style=${{fontSize:11.5,color:t.overdue?"#dc2626":"var(--sub)",
-                                              fontWeight:t.overdue?700:400}}>${dl}</span>`}
-                  <span style=${{fontSize:11.5,color:"var(--sub)"}}>
-                    重要度 ${IMPORTANCE_LABEL[t.importance_level]||"中"}${t.importance_is_suggestion?"（提案）":""}
-                  </span>
-                  ${t.estimated_minutes && html`<span style=${{fontSize:11.5,color:"var(--sub)"}}>${t.estimated_minutes}分</span>`}
-                  ${t.carryover_count>0 && html`<span style=${{fontSize:11.5,color:"#d97706"}}>${t.carryover_count}回持ち越し</span>`}
-                </div>
-              </div>
-              <button onClick=${()=>remove(t)} title="削除"
-                style=${{flex:"0 0 auto",background:"none",border:"none",color:"var(--sub)",
-                         fontSize:16,cursor:"pointer",padding:2,fontFamily:"inherit"}}>×</button>
-            </div>
-          </div>`;
-      })}
-
-      ${tasks.length>0 && html`
-        <div style=${{fontSize:11.5,color:"var(--sub)",lineHeight:1.9,marginTop:6}}>
-          並び順は「期限超過 → 今すぐ → 今日のフォーカス → 重要で期限が近い → その他 → 後回し」です。<br/>
-          緊急度は期限から自動で決まります。重要度はご自身で決めてください。
-        </div>`}
-    </div>
-  `;
-}
-
 function App() {
   // 起動を速くするため、ログイン済みキャッシュがあれば即アプリを表示する。
   // アカウントの存在確認はバックグラウンドで行い、消えていた場合だけログアウトさせる
@@ -6285,10 +6110,7 @@ function App() {
       <div style=${{position:"relative",flex:1,minHeight:0}}>
         <div class="screen">
           <div style=${{display:tab==="home"?"block":"none"}}><${HomeScreen} goalData=${goalData} onGoalSaved=${setGoalData} profile=${profile} isActive=${tab==="home"} showInCommunity=${user.showInCommunity!==false} studentCohort=${user.cohort||""} recordDays=${user.recordDays} onGoTimer=${()=>setTab("timer")}/></div>
-          <div style=${{display:tab==="log"?"block":"none"}}>
-            <${LogScreen} onToast=${setToast} isActive=${tab==="log"}/>
-            <${TaskSection} isActive=${tab==="log"} onToast=${setToast}/>
-          </div>
+          <div style=${{display:tab==="log"?"block":"none"}}><${LogScreen} onToast=${setToast} isActive=${tab==="log"}/></div>
           <div style=${{display:tab==="report"?"block":"none"}}><${ReportScreen}/></div>
           <div style=${{display:tab==="brain"?"block":"none"}}><${SecondBrainScreen} isActive=${tab==="brain"}/></div>
           <div style=${{display:tab==="timer"?"block":"none",height:"100%"}}><${TimerScreen} onToast=${setToast} isActive=${tab==="timer"}/></div>
