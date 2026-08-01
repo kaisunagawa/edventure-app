@@ -143,6 +143,26 @@ PY
     if [ "$n" -eq 1 ]; then ok "function ${fn}"; else ng "function ${fn} が ${n} 個"; fi
   done
 
+  # ★registerUser で新規のUsers行を作れないこと★
+  # 2026-08-01の監査で、curl 1本で任意のメールの有効な利用者を作れた。
+  # 招待制なので「登録で行を作る」経路は存在してはいけない。
+  if grep -q 'function registerUser' Code.gs && \
+     awk '/^function registerUser/,/^}/' Code.gs | grep -q 'verifySession'; then
+    ok "registerUser はセッション必須"
+  else
+    ng "registerUser がセッション無しで通る ─ 誰でも利用者を作れる"
+  fi
+  if awk '/^function registerUser/,/^}/' Code.gs | grep -q 'appendRow\|insertRow'; then
+    ng "registerUser が新規行を作れる ─ 招待制に反する"
+  else
+    ok "registerUser は新規行を作らない（更新のみ）"
+  fi
+  if grep -q 'registerUser: 1' Code.gs; then
+    ng "registerUser が認証免除リストに残っている"
+  else
+    ok "registerUser は認証免除リストに無い"
+  fi
+
   # ★ログイン後の取得はトークンを添えること★
   # SESSION_REQUIRED を入れた際、ログイン直後の getUser がトークン無しで
   # 呼ばれており AUTH_REQUIRED になった。アプリはそれを「利用者が存在しない」と

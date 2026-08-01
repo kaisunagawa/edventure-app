@@ -5240,7 +5240,9 @@ function LoginScreen({onLogin}) {
       const {email,name}=pendingUser;
       // 新規登録はログイン成立前なのでトークンは無いが、経路はPOSTへ揃える。
       // 目標の本文が長いとURLの長さ制限にも当たるため、本文で送るほうが確実
-      const r=await publicApiRaw("registerUser",{
+      // ★セッション必須になった★（招待制のため、新規行は作られない）
+      //   ログイン時に発行されたセッションで、自分の行を更新する
+      const r=await authedApi("registerUser",{
         studentEmail:email, name, nickname:nickname.trim(), avatar,
         goal:goals[0]?.goal.trim()||"",  goal_deadline:goals[0]?.deadline||"",
         goal2:goals[1]?.goal.trim()||"", goal_deadline2:goals[1]?.deadline||"",

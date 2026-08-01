@@ -652,61 +652,72 @@ function doPost(e) {
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 function registerUser(studentEmail, body) {
+  // ══════════════════════════════════════════════════════════════
+  // ★新規のUsers行は作らない★（2026-08-01 招待制であることを確認して変更）
+  //
+  // 変更前は、curl 1本で任意のメールアドレスの有効な利用者を作れた。
+  // Googleログインもセッションも招待も不要で、監査ログにも残らなかった。
+  //
+  // JIROKUは招待制。Kaiが先にUsers行を用意し、その人だけがログインできる。
+  // つまり「登録」で行を作る必要がそもそも無い。作れる口があること自体が穴。
+  //
+  // この関数の役割は「招待済みの人が、自分のプロフィールを埋める」だけ。
+  //   ・セッション必須（本人であることを確定してから書く）
+  //   ・宛先はセッションから取る（リクエストのメールは信用しない）
+  //   ・行が無ければ作らずに断る
+  // ══════════════════════════════════════════════════════════════
+  const v = verifySession((body && body.token) || "", false);
+  if (!v.ok) {
+    authAudit("REGISTER", { result: "DENY", action: "registerUser", failureReason: v.reason || "NO_SESSION" });
+    return { ok: false, error: "AUTH_REQUIRED" };
+  }
+  // ★リクエストのstudentEmailは使わない★ 偽装できるため
+  const actorEmail = String(v.actor.email || "").trim();
+  if (!actorEmail) return { ok: false, error: "AUTH_REQUIRED" };
+  studentEmail = actorEmail;
+
   const sheet = getSheet("Users");
   const rows = sheetToObjects(sheet);
-
-  // すでに登録済みならエラー
-  if (rows.find(r => r.student_email === studentEmail)) {
-    return { ok: false, error: "already_registered" };
+  const mine = rows.find(function (r) { return r.student_email === studentEmail; });
+  if (!mine) {
+    // セッションが出ている＝行があるはずなので、ここへ来るのは異常。
+    // それでも「作る」に倒さない。作れる経路を残さないため。
+    authAudit("REGISTER", { result: "DENY", action: "registerUser", failureReason: "NOT_INVITED",
+                            actorUserId: v.actor.actor_user_id });
+    return { ok: false, error: "このアカウントは登録されていません。管理者へご連絡ください" };
   }
 
-  const today = formatDate(new Date());
-  let headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  // 招待済みの行を「更新」する。プロフィールの初期設定にあたる部分だけ。
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  const data = sheet.getDataRange().getValues();
+  const iEmail = headers.indexOf("student_email");
+  let row = -1;
+  for (let k = 1; k < data.length; k++) { if (String(data[k][iEmail]) === studentEmail) { row = k + 1; break; } }
+  if (row === -1) return { ok: false, error: "このアカウントは登録されていません" };
 
-  function ensureHeader(name) {
-    if (!headers.includes(name)) { sheet.getRange(1, headers.length + 1).setValue(name); headers.push(name); }
-    return headers.indexOf(name);
-  }
+  const setIf = function (col, val) {
+    const c = headers.indexOf(col);
+    if (c === -1) return;
+    if (val === undefined || val === null || String(val) === "") return;
+    sheet.getRange(row, c + 1).setValue(val);
+  };
+  setIf("name", body.name);
+  setIf("nickname", body.nickname);
+  setIf("avatar", body.avatar);
+  setIf("goal", body.goal);            setIf("goal_deadline", body.goal_deadline);
+  setIf("goal2", body.goal2);          setIf("goal_deadline2", body.goal_deadline2);
+  setIf("goal3", body.goal3);          setIf("goal_deadline3", body.goal_deadline3);
 
-  const idxEmail     = ensureHeader("student_email");
-  const idxName      = ensureHeader("name");
-  const idxActive    = ensureHeader("is_active");
-  const idxJoined    = ensureHeader("joined_at");
-  const idxGoal1     = ensureHeader("goal");
-  const idxDead1     = ensureHeader("goal_deadline");
-  const idxGoal2     = ensureHeader("goal2");
-  const idxDead2     = ensureHeader("goal_deadline2");
-  const idxGoal3     = ensureHeader("goal3");
-  const idxDead3     = ensureHeader("goal_deadline3");
-  const idxStart     = ensureHeader("notify_start");
-  const idxEnd       = ensureHeader("notify_end");
-  const idxNickname  = ensureHeader("nickname");
-  const idxAvatar    = ensureHeader("avatar");
-  const idxPlan      = ensureHeader("plan_status");
-  const idxTrial     = ensureHeader("trial_start");
-
-  const newRow = new Array(headers.length).fill("");
-  newRow[idxEmail]  = studentEmail;
-  newRow[idxName]   = body.name || "";
-  newRow[idxActive] = "TRUE";
-  newRow[idxJoined] = today;
-  newRow[idxGoal1]  = body.goal || "";
-  newRow[idxDead1]  = body.goal_deadline || "";
-  newRow[idxGoal2]  = body.goal2 || "";
-  newRow[idxDead2]  = body.goal_deadline2 || "";
-  newRow[idxGoal3]  = body.goal3 || "";
-  newRow[idxDead3]  = body.goal_deadline3 || "";
-  newRow[idxStart]  = 7;
-  newRow[idxEnd]    = 23;
-  newRow[idxNickname] = (body.nickname || body.name || "").trim();
-  newRow[idxAvatar]   = body.avatar || "🦊";
-  // 新規登録は7日間の無料トライアルから開始（既存ユーザーはplan_status空欄のまま＝制限なし）
-  newRow[idxPlan]     = "trial";
-  newRow[idxTrial]    = today;
-  sheet.appendRow(newRow);
-
-  return { ok: true, data: { name: body.name, nickname: newRow[idxNickname], avatar: newRow[idxAvatar], coachName: "コーチ", coach_email: "" } };
+  authAudit("REGISTER", { result: "SUCCESS", action: "registerUser",
+                          actorUserId: v.actor.actor_user_id, failureReason: "profile_updated" });
+  return { ok: true, updated: true, data: getUser(studentEmail).data };
 }
+
+// 旧実装（新規のUsers行を作る registerUser）は 2026-08-01 に削除した。
+// 招待制なので行を作る経路は存在してはいけない。
+// 使わないから残しておく、では済まない。残っていれば誰かが戻せるし、
+// 実際この関数は「誰でも任意のメールで有効な利用者を作れる」ものだった。
+
 
 function getStreak(studentEmail) {
   const user = sheetToObjects(getSheet("Users")).find(u => u.student_email === studentEmail);
@@ -9765,11 +9776,12 @@ function policyFor(action) {
 // ここを絞りすぎると「新規登録できない」「失効した人がログインできない」
 // という詰みが起きるので、入口だけは必ず開けておく。
 const SESSION_REQUIRED_EXEMPT = {
-  authChallenge: 1, login: 1, loginAccess: 1, authConfig: 1, healthCheck: 1,
-  // ★新規登録は認証前に通す必要がある★
-  //   まだユーザーが存在しないので、セッションを持ちようがない。
-  //   ここを閉じると誰も新規登録できなくなる。
-  registerUser: 1
+  authChallenge: 1, login: 1, loginAccess: 1, authConfig: 1, healthCheck: 1
+  // ★registerUser は外した★（2026-08-01）
+  //   招待制なので「登録で行を作る」必要が無い。Kaiが先に行を用意し、
+  //   その人がログインするとセッションが出る。プロフィールの記入は
+  //   そのセッションを使って行う。免除に入れていたせいで、
+  //   誰でも任意のメールで有効な利用者を作れる穴になっていた。
 };
 
 // COACHが相手を見てよいか。担当関係は CoachingNotes / Users.coach_email で判断する
