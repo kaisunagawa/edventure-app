@@ -1158,6 +1158,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
   const [taskStatus, setTaskStatus] = useState(()=>{
     try { return JSON.parse(localStorage.getItem("jiroku_task_status_"+formatDateStr(new Date()))||"{}"); } catch(e){ return {}; }
   });
+  const [editError, setEditError] = useState("");  // 編集画面で保存できない理由
   const [dragTask, setDragTask] = useState(null); // PCのドラッグ中タスク
   const [detailTask, setDetailTask] = useState(null); // タスク詳細画面で開いているタスク名（Trello風カード詳細）
   // タスクごとのメモ（詳細画面で編集）。日付キーで保持
@@ -1515,13 +1516,30 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
     setEditItems(incomplete.length===0 ? [{text:"",min:""}] : toEditRows(incomplete));
     setEditMode(true);
   };
+  // ★編集画面を開くたびに前回の警告を消す★
+  // 残っていると、直したのに怒られ続けているように見える
+  useEffect(()=>{ if(editMode) setEditError(""); },[editMode]);
   // 「＋ タスクを追加」用。未完了タスクに空欄を1つ足した状態で編集モーダルを開き、すぐ入力できる
   const openAddTask = () => {
     setEditItems([...toEditRows(actionItems.filter(t=>!checked[t])), {text:"",min:""}]);
     setEditMode(true);
   };
   const saveEdit = () => {
-    const rows = editItems.map(r=>({text:String(r.text||"").trim(), min:r.min})).filter(r=>r.text.length>0);
+    const rows = editItems.map(r=>({text:String(r.text||"").trim(), min:r.min, imp:r.imp, due:r.due})).filter(r=>r.text.length>0);
+
+    // ★同じ名前のタスクを2件作らせない（暫定の防御）★
+    //   いまタスクは名前そのものが識別子で、完了・想定時間・重要度・期限は
+    //   すべて名前をキーに持っている。同名が2件あると区別できず、
+    //   片方を完了にすると両方が完了になる。データが静かに壊れる。
+    //   本来は task_id で持つべきで、その変換層は用意した。
+    //   画面の差し替えが済むまでは、作らせないことで防ぐ。
+    const seen = {}, dup = [];
+    rows.forEach(function(r){ if(seen[r.text]) { if(dup.indexOf(r.text)===-1) dup.push(r.text); } seen[r.text]=1; });
+    if (dup.length) {
+      setEditError("同じ名前のタスクが2つあります：「"+dup[0]+"」\n区別できないので、どちらかの名前を変えてください。");
+      return;
+    }
+    setEditError("");
     const editedTexts = rows.map(r=>r.text);
     // 完了済みタスクは編集画面に出していないので、ここで保持してマージする（未完了→完了の順）
     const completed = actionItems.filter(t=>checked[t] && !editedTexts.includes(t));
@@ -2187,6 +2205,8 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
             style=${{width:"100%",padding:"10px",borderRadius:10,border:"1.5px dashed var(--border)",background:"none",color:"var(--accent)",fontSize:14,fontWeight:600,cursor:"pointer",marginBottom:16}}>
             ＋ タスクを追加
           </button>
+          ${editError && html`<div style=${{background:"#fef2f2",border:"1px solid #fecaca",color:"#b91c1c",
+            borderRadius:10,padding:"10px 12px",fontSize:12.5,lineHeight:1.8,marginBottom:10,whiteSpace:"pre-wrap"}}>${editError}</div>`}
           <button class="btn" onClick=${saveEdit} style=${{marginBottom:10}}>保存する</button>
           <button onClick=${()=>setEditMode(false)}
             style=${{width:"100%",background:"none",border:"none",color:"var(--sub)",fontSize:13,padding:"8px",cursor:"pointer"}}>キャンセル</button>
