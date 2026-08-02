@@ -5380,13 +5380,6 @@ function SettingsScreen({onToast,onLogout,onGoalSaved,profile,onProfileSaved,onC
         <button class="btn" onClick=${saveGoal}>保存する</button>
       <//>`}
 
-      <!-- LINE連携（ワンタイムのことば方式）。
-           以前はメールアドレスを送るだけで連携できたが、それだと他人になりすまして
-           通知の宛先を奪えたため、アプリで発行したことばでのみ連携する -->
-      <${SettingsSec} k="linelink" icon="💬" title="LINE連携" open=${openSec==="linelink"} onToggle=${()=>setOpenSec(openSec==="linelink"?"":"linelink")}>
-        <${LineLinkSection} onToast=${onToast} linked=${CURRENT_USER&&CURRENT_USER.lineLinked!==false}/>
-      <//>
-
       <!-- 新・目標。3か月目標→週間目標の階層。goals_v1 が有効な人はこちらが本体 -->
       ${CURRENT_USER&&CURRENT_USER.goalsV1&&html`
       <${SettingsSec} k="goaltree" icon="🎯" title="目標" open=${openSec==="goaltree"} onToggle=${()=>setOpenSec(openSec==="goaltree"?"":"goaltree")}>
@@ -5495,6 +5488,13 @@ function SettingsScreen({onToast,onLogout,onGoalSaved,profile,onProfileSaved,onC
       <//>
 
       ${GroupLabel("連携")}
+
+      <!-- LINE連携（ワンタイムのことば方式）。
+           以前はメールアドレスを送るだけで連携できたが、それだと他人になりすまして
+           通知の宛先を奪えたため、アプリで発行したことばでのみ連携する -->
+      <${SettingsSec} k="linelink" icon="💬" title="LINE連携" open=${openSec==="linelink"} onToggle=${()=>setOpenSec(openSec==="linelink"?"":"linelink")}>
+        <${LineLinkSection} onToast=${onToast} linked=${CURRENT_USER&&CURRENT_USER.lineLinked!==false}/>
+      <//>
 
       <!-- カレンダー -->
       <${SettingsSec} k="calendar" icon="📅" title="Googleカレンダー連携" sub=${(calLinked||isServerCalendar())?"連携済み":""} open=${openSec==="calendar"} onToggle=${()=>setOpenSec(openSec==="calendar"?"":"calendar")}>
@@ -5779,7 +5779,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260802-141055";
+const APP_BUILD = "20260802-143329";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
