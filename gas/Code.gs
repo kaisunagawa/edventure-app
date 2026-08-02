@@ -81,6 +81,18 @@ function doGet(e) {
       case "getUser":      result = getUser(studentEmail); break;
       // ── Phase 1: 自己経営OS の基盤（管理者のみ実行可能なセットアップ）──
       case "adminPhase4DryRun": return jsonResponse(phase4DryRun());
+      case "adminLegacyBackfill":
+        return jsonResponse(legacyBackfill(String(e.parameter.execute || "") === "1", e.parameter.migrationId));
+      case "adminWritePathStats": {
+        const p = PropertiesService.getScriptProperties();
+        const out = {};
+        for (let i = 0; i < 14; i++) {
+          const d = Utilities.formatDate(new Date(Date.now() - i * 86400000), "Asia/Tokyo", "yyyyMMdd");
+          out[d] = { bridge: Number(p.getProperty("wp_JOURNAL_BRIDGE_" + d) || 0),
+                     direct: Number(p.getProperty("wp_TASKS_DIRECT_" + d) || 0) };
+        }
+        return jsonResponse({ ok: true, days: out });
+      }
       case "adminSetupPhase1": {
         // シート構造を変える操作。共有シークレットを必須にする
         var _a1 = verifyP1Admin(studentEmail, e.parameter.secret, e.parameter);
@@ -5492,7 +5504,17 @@ function saveTodayActions(studentEmail, body) {
 //   ・削除済み（deleted_at あり）は復活させない
 //   ・Tasks 側にしか無いタスクは消さない。まだ画面が Tasks を見ていないため、
 //     ここで消すと Tasks 側の編集が一方的に失われる
+// 書き込み経路の日次カウント。橋渡し撤去の終了条件（直近7日で bridge 0件）の判定に使う
+function countWritePath_(path) {
+  try {
+    const key = "wp_" + path + "_" + Utilities.formatDate(new Date(), "Asia/Tokyo", "yyyyMMdd");
+    const p = PropertiesService.getScriptProperties();
+    p.setProperty(key, String(Number(p.getProperty(key) || 0) + 1));
+  } catch (e) {}
+}
+
 function bridgeActionsToTasks(studentEmail, dateStr, actionsJson, checkedJson) {
+  countWritePath_("JOURNAL_BRIDGE");
   let items = [];
   try { items = JSON.parse(actionsJson || "[]"); } catch (e) { return; }
   if (!Array.isArray(items)) return;
@@ -7961,7 +7983,10 @@ const P1_SHEETS = {
     // requested_by      依頼者
     // requested_at      依頼された日時
     "version","last_mutation_id","context",
-    "carried_from","source_type","requested_by","requested_at"]
+    "carried_from","source_type","requested_by","requested_at",
+    // 旧形式（Journal.actionsのid無しタスク）からの移行の出どころ。
+    // 何をどこから移したかを行ごとに残す。監査と巻き戻しに使う
+    "migrated_from","source_journal_id","source_action_index","migration_id","migrated_at"]
 };
 // 既存シートへ追加する列（削除・改名は一切しない）
 const P1_ADDED_COLUMNS = {
@@ -9950,7 +9975,7 @@ const ADMIN_SECRET_ALLOWLIST = {
   // 一斉送信（Kaiの明示的な要望により残す）
   adminBroadcastLine:1, adminBroadcastLinePending:1, adminSendStudentCampaign:1,
   // セットアップ・保守
-  adminSetupTriggers:1, adminInstallTrigger:1, adminSetupPhase1:1, adminSetupAuth:1, adminPhase4DryRun:1,
+  adminSetupTriggers:1, adminInstallTrigger:1, adminSetupPhase1:1, adminSetupAuth:1, adminPhase4DryRun:1, adminLegacyBackfill:1, adminWritePathStats:1,
   authSetMode:1, authSetEnforce:1, authRoleApply:1, authRoleDryRun:1, authRevokeAll:1,
   authCleanupTestData:1, adminPurgeTestUsers:1, adminMigrateTasks:1, authBreakerReset:1, rotateSessionSecret:1,
   p1Backup:1, p1BackupInfo:1, p1PurgeArchived:1, weeklyBackup:1
@@ -10691,6 +10716,92 @@ function phase4DryRun() {
   };
 }
 
+// ★旧形式111件のバックフィル★
+//   Journal.actions に残る id 無しタスク（文字列）を Tasks へ移す。
+//   ・IDはタイトルから作らない（同名で衝突する）。移行元の
+//     「持ち主|Journal行の日付|並び位置」から決定的に作る。
+//     再実行しても同じIDになり、同名タスクでも別々になる。
+//   ・元の日付と完了状態を保つ（今日の未完了として蘇らせない）。
+//   ・execute=false なら1行も書かない。
+function legacyBackfill(execute, migrationId) {
+  const users = {};
+  sheetToObjects(getSheet("Users")).forEach(function (u) {
+    if (String(u.is_active).toUpperCase() === "TRUE") users[String(u.student_email).trim()] = 1;
+  });
+  const journal = sheetToObjects(getJournalSheet());
+  const seenSource = {};
+  const plan = [];
+  let legacyTotal = 0, noTitle = 0, unknownUser = 0, dupSource = 0, withIdSkipped = 0;
+
+  journal.forEach(function (r) {
+    const raw = String(r.actions || "").trim();
+    if (!raw) return;
+    let items; try { items = JSON.parse(raw); } catch (e) { return; }
+    if (!Array.isArray(items)) return;
+    const em = String(r.student_email || "").trim();
+    const rd = r.date instanceof Date ? Utilities.formatDate(r.date, "Asia/Tokyo", "yyyy-MM-dd") : String(r.date).slice(0, 10);
+    let checked = {}; try { checked = JSON.parse(String(r.actions_checked || "{}")) || {}; } catch (e) {}
+    items.forEach(function (it, idx) {
+      const isLegacy = (typeof it !== "object" || !it || !(it.id || it.task_id));
+      if (!isLegacy) { withIdSkipped++; return; }   // id付きは橋渡し/直接書き込みの領分
+      legacyTotal++;
+      const title = String(typeof it === "string" ? it : (it && it.title) || "").trim();
+      if (!title) { noTitle++; return; }
+      if (!users[em]) { unknownUser++; return; }
+      const sourceKey = em + "|" + rd + "|" + idx;
+      if (seenSource[sourceKey]) { dupSource++; return; }
+      seenSource[sourceKey] = 1;
+      const tid = "legacy_" + sha256Hex(sourceKey).slice(0, 16);
+      const done = !!(checked[title]);
+      plan.push({ email: em, tid: tid, title: title, date: rd, done: done,
+                  sourceJournalId: em + "|" + rd, sourceIndex: idx });
+    });
+  });
+
+  // 既存との突き合わせ（所有者スコープで）
+  let willCreate = 0, alreadyMigrated = 0, conflict = 0;
+  const conflicts = [];
+  plan.forEach(function (p) {
+    const ex = p1OwnedRow("Tasks", "task_id", p.tid, p.email);
+    if (!ex) { p.create = true; willCreate++; return; }
+    if (String(ex.title) === p.title) { alreadyMigrated++; return; }
+    conflict++; conflicts.push(p.tid);
+  });
+
+  const stop = conflict > 0 || unknownUser > 0 || dupSource > 0;
+  const result = {
+    ok: true, executed: false,
+    counts: { legacyTotal: legacyTotal, targets: plan.length, willCreate: willCreate,
+              alreadyMigrated: alreadyMigrated, conflict: conflict, noTitle: noTitle,
+              unknownUser: unknownUser, dupSource: dupSource, withIdSkipped: withIdSkipped },
+    stopConditions: { conflict: conflict > 0, unknownUser: unknownUser > 0, dupSource: dupSource > 0 },
+    conflicts: conflicts.slice(0, 10)
+  };
+  if (!execute) return result;
+  if (stop) { result.error = "停止条件に該当。書き込みません"; return result; }
+
+  const mid = String(migrationId || ("bf_" + Date.now()));
+  const nowIso = new Date().toISOString();
+  let created = 0;
+  plan.forEach(function (p) {
+    if (!p.create) return;
+    p1Upsert("Tasks", "task_id", {
+      task_id: p.tid, student_email: p.email, date: p.date, title: p.title,
+      status: p.done ? "DONE" : "TODO",
+      completed_at: p.done ? (p.date + "T23:59:00+09:00") : "",
+      created_at: nowIso, version: 1, source_type: "SELF", context: "UNSET",
+      migrated_from: "JOURNAL_ACTIONS", source_journal_id: p.sourceJournalId,
+      source_action_index: p.sourceIndex, migration_id: mid, migrated_at: nowIso
+    });
+    created++;
+  });
+  result.executed = true;
+  result.created = created;
+  result.migration_id = mid;
+  result.after = sheetToObjects(getSheet("Tasks")).length;
+  return result;
+}
+
 function migrateTasksToSheet(studentEmail, body) {
   const chk = p1RequireUser(studentEmail);
   if (!chk.ok) return chk;
@@ -10855,6 +10966,7 @@ function saveTaskMutations(studentEmail, body) {
   catch (e) { return { ok: false, error: "mutations を読めませんでした" }; }
   if (!Array.isArray(muts)) return { ok: false, error: "mutations が配列ではありません" };
   if (muts.length > 50) return { ok: false, error: "1回50件までです" };
+  countWritePath_("TASKS_DIRECT");
 
   const results = muts.map(function (m) {
     const mid = String((m && m.client_mutation_id) || "").trim();

@@ -274,6 +274,36 @@ sys.exit(1 if missing else 0)
     fi
   fi
 
+  # ★Tasksの行を「持ち主なし」で特定するコードを増やさないこと★
+  #   task_idはクライアント採番（旧lt_はタイトルのハッシュ）のため
+  #   別ユーザー間で衝突し得る。idだけで行を引くと他人の行に当たる。
+  #   行の特定は p1OwnedRow / p1List（持ち主で絞る）だけに限定する。
+  #   直接 getSheet("Tasks") を触ってよいのは phase4DryRun / legacyBackfill
+  #   （管理者専用の全体集計）だけ。
+  direct_reads=$(grep -c 'getSheet("Tasks")' Code.gs)
+  if [ "$direct_reads" -le 2 ]; then ok "Tasksの直接読みは管理者集計のみ（${direct_reads}箇所）"
+  else ng "Tasksを直接読む箇所が増えた（${direct_reads}箇所）─ 持ち主なしの行特定は禁止"; fi
+  #   各呼び出しの直前60行以内で rec に student_email を入れているか
+  upsert_bad=$(python3 - <<'PYEOF'
+lines = open("Code.gs").read().split("\n")
+bad = 0
+for i, ln in enumerate(lines):
+    if 'p1Upsert("Tasks"' not in ln: continue
+    ctx = "\n".join(lines[max(0, i-60):i+13])   # 複数行呼び出しは引数が後ろに続く
+    if "student_email" not in ctx: bad += 1
+print(bad)
+PYEOF
+)
+  if [ "$upsert_bad" -eq 0 ]; then ok "Tasksへの書き込みは全て持ち主つき"
+  else ng "持ち主なしのTasks書き込みが ${upsert_bad} 箇所ある"; fi
+
+  # ★新規タスクIDはランダムであること★ タイトル由来のIDは同名で衝突する
+  if grep -q 'makeClientTaskId()' ../index.html && grep -A3 'let id = prev\[title\];' ../index.html | grep -q 'makeClientTaskId'; then
+    ok "新規タスクIDはランダム（makeClientTaskId）"
+  else
+    ng "新規タスクIDがランダムでない ─ タイトル由来IDは衝突する"
+  fi
+
   # ★タスク行は「押す場所」と「起きること」が一致していること★
   # 行全体が完了トグルだったため、内容を見ようとして押しただけで
   # 完了になっていた（Kaiの指摘）。チェックボックスだけが完了。

@@ -1588,7 +1588,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
     const used = {};
     return titles.map(function(title, i){
       let id = prev[title];
-      if(!id || used[id]) id = makeLocalTaskId(title, i);   // 同名2件目は別idにする
+      if(!id || used[id]) id = makeClientTaskId();   // 新規・同名2件目はランダムID
       used[id] = 1;
       const o = { id: id, title: title };
       // 端末内のマップから拾って一緒に保存する（他の端末へ届くように）
@@ -5663,11 +5663,23 @@ function normalizeTaskList(raw) {
 // ★同じ入力からは必ず同じ id になるようにする★
 // 端末ごとに違う id を振ると、同じタスクが2つに見える。
 // 並び順（i）を混ぜるのは、同名タスクが2件あっても別物として扱うため。
+// ★旧形式（文字列一覧）の正規化にだけ使う決定的ID★
+//   複数の端末が同じ旧データを見ても同じIDになるので、二重登録にならない。
+//   新規作成には使わない（タイトルのハッシュは同名で衝突するため）。
 function makeLocalTaskId(title, i) {
   let h = 0;
   const src = String(title) + "|" + i;
   for (let k = 0; k < src.length; k++) { h = ((h << 5) - h + src.charCodeAt(k)) | 0; }
   return "lt_" + (h >>> 0).toString(36);
+}
+// ★新規タスクのID★ ランダムで一意。タイトル・並び順・日付を材料にしない。
+//   オフラインでも発行できる（作成→編集→完了がキューで同じIDのまま並ぶ）。
+//   IDは認可の代わりではない。サーバーは必ず持ち主で行を引く。
+function makeClientTaskId() {
+  try { return "task_c_" + crypto.randomUUID(); } catch (e) {}
+  const a = new Uint8Array(16);
+  (window.crypto || {}).getRandomValues ? crypto.getRandomValues(a) : a.forEach((_,i)=>a[i]=Math.floor(Math.random()*256));
+  return "task_c_" + Array.from(a, b => b.toString(16).padStart(2,"0")).join("");
 }
 
 // 2つのタスク一覧を、task_id を頼りに1つにまとめる。
@@ -5779,7 +5791,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260802-143329";
+const APP_BUILD = "20260802-143621";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
