@@ -204,6 +204,27 @@ PY
     ng "actions を文字列前提で読んでいる箇所がある（${bad}箇所中 ${norm} だけ正規化）"
   fi
 
+  # ★設定を変えたらサーバーへ送ること★
+  # 重要度・期限・想定時間・メモは localStorage に書くだけで、
+  # タスクの追加や編集をしたついでにしか送られていなかった。
+  # 設定だけ変えても他の端末に届かない（Kaiの指摘で判明）。
+  if python3 -c "
+import sys
+s=open('../index.html').read()
+missing=[]
+for n in ['setTaskImp','setTaskDueAt','setTaskTime','setTaskNote']:
+    i=s.find('const '+n+' = ')
+    if i<0: missing.append(n+'(無い)'); continue
+    j=s.index(chr(10)+'  };', i)
+    if 'pushTaskMeta' not in s[i:j]: missing.append(n)
+print(','.join(missing))
+sys.exit(1 if missing else 0)
+" 2>/dev/null; then
+    ok "設定変更がサーバーへ送られる（重要度・期限・想定時間・メモ）"
+  else
+    ng "設定を変えてもサーバーへ送っていない ─ 端末間で食い違う"
+  fi
+
   # ★index.html を変えたら APP_BUILD も変える★
   # 変え忘れると、利用者の端末は古い版のまま更新されない。
   # 実際、更新検知が「サーバーの版と自分自身」を比べる作りになっており、

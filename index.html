@@ -1520,6 +1520,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
     setChecked(nc);
     localStorage.setItem("today_actions", JSON.stringify(nc));
     gasPostJson("saveTodayActions", {checked: JSON.stringify(nc)});
+    pushTaskMeta({ stt: next });
   };
   // カードをタップ→タイマー画面へ。想定時間つきならその時間で、タイマー側が自動選択する。
   // タイマーに送ったタスクは「実行中」に進める（着手の可視化）
@@ -1535,6 +1536,9 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
     if (nKey !== task) delete next[task];
     setTaskNotes(next);
     try { localStorage.setItem("jiroku_task_memo_"+todayKey, JSON.stringify(next)); } catch(e){}
+    // メモは打つたびに送ると通信が多すぎるので、少し待ってからまとめて送る
+    clearTimeout(window.__jirokuMemoTimer);
+    window.__jirokuMemoTimer = setTimeout(()=>pushTaskMeta({ memo: next }), 1200);
   };
   // タスクの想定時間を更新（詳細画面）
   const setTaskTime = (task, min) => {
@@ -1545,6 +1549,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
     delete next[task];   // 旧形式（名前キー）の掃除
     setTaskEstimates(next);
     try { localStorage.setItem("jiroku_task_estimates_"+todayKey, JSON.stringify(next)); } catch(e){}
+    pushTaskMeta({ est: next });
   };
   // タスクを削除（詳細画面）。関連する状態・時間・メモ・チェックも掃除する
   const deleteTask = (task) => {
@@ -1576,7 +1581,31 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
     delete next[task];   // 旧形式（名前キー）が残っていたら掃除する
     setTaskImportance(next);
     localStorage.setItem("jiroku_task_importance_"+todayKey, JSON.stringify(next));
+    pushTaskMeta({ imp: next });
   };
+  // ★設定を変えたら、その場でサーバーへ送る★
+  //   これまでは localStorage に書くだけで、タスクの追加や編集をした
+  //   ついでにしか送られていなかった。重要度や期限だけ変えても
+  //   他の端末に届かない（実際にそうなった）。
+  //   setState は非同期なので、変更後の値を引数で受け取る。
+  const pushTaskMeta = (over) => {
+    const o = over || {};
+    const imp = o.imp || taskImportance, due = o.due || taskDue;
+    const est = o.est || taskEstimates, memo = o.memo || taskNotes, stt = o.stt || taskStatus;
+    const list = (customActions||[]);
+    if (!list.length) return;
+    const payload = list.map(t=>{
+      const x = { id:t.id, title:t.title };
+      const a = imp[t.id]  || imp[t.title];   if (a) x.imp = a;
+      const b = due[t.id]  || due[t.title];   if (b) x.due = b;
+      const c = est[t.id] !== undefined ? est[t.id] : est[t.title]; if (c > 0) x.est = Number(c);
+      const d = memo[t.id] || memo[t.title];  if (d) x.memo = String(d);
+      const e = stt[t.id]  || stt[t.title];   if (e) x.stt = String(e);
+      return x;
+    });
+    gasPostJson("saveTodayActions", { actions: JSON.stringify(payload) });
+  };
+
   // ★読み出しは必ずここを通す★
   //   「idで引き、無ければ名前で引く」を11箇所に散らすと必ず書き漏らす。
   // ★完了状態も id で引く★
@@ -1601,6 +1630,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
     delete next[task];   // 旧形式（名前キー）の掃除
     setTaskDue(next);
     localStorage.setItem("jiroku_task_due_"+todayKey, JSON.stringify(next));
+    pushTaskMeta({ due: next });
   };
   // ★緊急度と4分類は保存しない★
   // 期限から都度出す。保存すると日付が変わっても古い判定が残る。
@@ -5337,7 +5367,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260802-102615";
+const APP_BUILD = "20260802-104515";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
