@@ -561,21 +561,19 @@ function setTaskVersion(id, v){
   const m = taskVersions(); m[id] = v;
   try { localStorage.setItem(TASK_VER_KEY, JSON.stringify(m)); } catch {}
 }
-function enqueueTaskMutation(op, taskId, changes){
+function enqueueTaskMutation(op, taskId, changes, baseValues){
   if (!taskId) return;
   const q = loadTaskQueue();
   const m = { mid: "m_"+Date.now()+"_"+Math.random().toString(36).slice(2,8),
               op: op, task_id: taskId, changes: changes||{}, tries: 0, state: "pending" };
-  // ★版チェックは「名前・メモ」の書き換えだけ★
-  //   進捗・重要度・期限・想定時間・分類は1項目だけの変更で、サーバーは
-  //   送られた項目しか書かない＝他の項目を壊せない。これにまで版チェックを
-  //   かけると、PCで重要度を変えた後にスマホでチェックしただけで
-  //   「確認してください」が出てしまう（実際に3件出た）。
-  //   文章（名前・メモ）は上書きされると本当に消えるので、版チェックを残す。
-  const GUARDED = { title: 1, memo: 1 };
-  const needsGuard = Object.keys(changes || {}).some(k => GUARDED[k]);
-  if (op === "UPDATE" && needsGuard) {
-    const v = taskVersions()[taskId]; if (v !== undefined) m.base_version = v;
+  // ★フィールド単位の競合検出★
+  //   「変える項目について、自分が見ていた値」を一緒に送る。
+  //   サーバーは、その項目が別の端末で変わっていたときだけ止める。
+  //   ・PCで重要度／スマホで期限 → ぶつからないので両方通る
+  //   ・PCとスマホが両方とも期限 → 要確認になる（黙って消えない）
+  //   レコード全体のversionでは前者まで止まり、versionを見ないと後者が消える。
+  if (op === "UPDATE" && baseValues && Object.keys(baseValues).length) {
+    m.base_values = baseValues;
   }
   q.push(m); saveTaskQueue(q);
   clearTimeout(window.__jirokuQueueTimer);
@@ -591,7 +589,7 @@ async function flushTaskQueue(){
   try {
     const batch = pending.slice(0, 50).map(x=>({
       client_mutation_id: x.mid, task_id: x.task_id, operation: x.op,
-      base_version: x.base_version, changes: x.changes }));
+      base_version: x.base_version, base_values: x.base_values, changes: x.changes }));
     const r = await gasPostJson("saveTaskMutations", { mutations: JSON.stringify(batch) });
     if (!r || !r.ok || !Array.isArray(r.results)) {
       // 通信失敗: 残して後で再送（回数だけ数える）
@@ -608,9 +606,12 @@ async function flushTaskQueue(){
         if (res.canonical_task) setTaskVersion(res.task_id, res.canonical_task.version);
         return false;
       }
-      if (res.result === "CONFLICT") {
-        // ★黙って上書きしない★ 保持して画面に「競合」と出し、本人に選ばせる
+      if (res.result === "CONFLICT" || res.result === "FIELD_CONFLICT") {
+        // ★黙って上書きしない★ 保持して画面に出し、本人に選ばせる
         x.state = "conflict"; x.server = res.canonical_task || null;
+        x.field_name = res.field_name || "";
+        x.server_value = res.server_value;
+        x.base_value = res.base_value;
         return true;
       }
       if (res.result === "DELETED_REJECTED") return false;   // 恒久エラー。再試行しても無駄
@@ -621,15 +622,17 @@ async function flushTaskQueue(){
     window.dispatchEvent(new CustomEvent("jiroku:taskflushed"));
   } finally { __taskQueueFlushing = false; }
 }
-// 以前の作りで「重要度だけ」「チェックだけ」の変更が確認待ちに積まれた端末の救済。
-// 名前・メモ以外の変更は版チェックなしで送り直す（他の項目を壊せないため安全）
+// 旧版で「レコード全体の版ずれ」だけを理由に確認待ちへ入った分の救済。
+// ★同じ項目がサーバーで変わっていたものは自動再送しない★
+//   それを送り直すと、別端末の同じ項目の変更を黙って消すことになる。
+//   フィールド単位で止められたもの（field_name あり）はそのまま要確認に残す。
 (function rescueStuckConflicts(){
   try {
     const q = loadTaskQueue();
     let changed = false;
     q.forEach(x => {
       if (x.state !== "conflict") return;
-      if (Object.keys(x.changes || {}).some(k => k === "title" || k === "memo")) return;
+      if (x.field_name) return;                 // 同じ項目の衝突。本人に選ばせる
       delete x.base_version; x.state = "pending"; delete x.server; changed = true;
     });
     if (changed) saveTaskQueue(q);
@@ -1652,7 +1655,8 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
     setChecked(next);
     localStorage.setItem("today_actions", JSON.stringify(next));
     gasPostJson("saveTodayActions", {checked: JSON.stringify(next), noBridge: "1"}); // 他端末にも同期
-    enqueueTaskMutation("UPDATE", idk, { status: !cur ? "DONE" : "TODO" });
+    enqueueTaskMutation("UPDATE", idk, { status: !cur ? "DONE" : "TODO" },
+                        { status: cur ? "DONE" : (taskStatus[idk]==="doing" ? "IN_PROGRESS" : "TODO") });
   };
 
   // ── タスクボード用ヘルパー ──
@@ -1676,7 +1680,8 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
     pushTaskMeta({ stt: next });
     // Tasksシートへ直接（キュー経由でまとめ送り）
     const stMap = { done: "DONE", doing: "IN_PROGRESS", todo: "TODO" };
-    enqueueTaskMutation("UPDATE", sKey, { status: stMap[status] || "TODO" });
+    enqueueTaskMutation("UPDATE", sKey, { status: stMap[status] || "TODO" },
+                        { status: stMap[statusOf(task)] || "TODO" });
   };
   // カードをタップ→タイマー画面へ。想定時間つきならその時間で、タイマー側が自動選択する。
   // タイマーに送ったタスクは「実行中」に進める（着手の可視化）
@@ -1688,6 +1693,12 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
   // タスクのメモを保存（詳細画面）
   const setTaskNote = (task, note) => {
     const nKey = idOfTitle(task) || task;
+    // ★打ち始める前の値を控える★ 送信は1.2秒後なので、そのときの値を
+    //   base に使うと「自分が今打った内容」と比べることになり検出できない
+    if (window.__memoBase === undefined || window.__memoBaseKey !== nKey) {
+      window.__memoBaseKey = nKey;
+      window.__memoBase = taskNotes[nKey] || taskNotes[task] || "";
+    }
     const next = {...taskNotes, [nKey]: note};
     if (nKey !== task) delete next[task];
     setTaskNotes(next);
@@ -1696,7 +1707,9 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
     clearTimeout(window.__jirokuMemoTimer);
     window.__jirokuMemoTimer = setTimeout(()=>{
       pushTaskMeta({ memo: next });
-      enqueueTaskMutation("UPDATE", nKey, { memo: String(note || "") });
+      enqueueTaskMutation("UPDATE", nKey, { memo: String(note || "") },
+                          { memo: window.__memoBase || "" });
+      window.__memoBase = undefined; window.__memoBaseKey = undefined;
     }, 1200);
   };
   // タスクの想定時間を更新（詳細画面）
@@ -1709,7 +1722,8 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
     setTaskEstimates(next);
     try { localStorage.setItem("jiroku_task_estimates_"+todayKey, JSON.stringify(next)); } catch(e){}
     pushTaskMeta({ est: next });
-    enqueueTaskMutation("UPDATE", key, { estimated_minutes: (m>0 && m<=600) ? m : "" });
+    enqueueTaskMutation("UPDATE", key, { estimated_minutes: (m>0 && m<=600) ? m : "" },
+                        { estimated_minutes: (taskEstimates[key] !== undefined ? taskEstimates[key] : "") });
   };
   // タスクの文脈（仕事/プライベート等）。初期値はUNSET。タイトルから推測しない
   const setTaskCtx = (task, v) => {
@@ -1718,7 +1732,8 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
     if (v && v !== "UNSET") next[key] = v; else delete next[key];
     setTaskContextMap(next);
     try { localStorage.setItem("jiroku_task_context_"+todayKey, JSON.stringify(next)); } catch(e){}
-    enqueueTaskMutation("UPDATE", key, { context: v || "UNSET" });
+    enqueueTaskMutation("UPDATE", key, { context: v || "UNSET" },
+                        { context: taskContext[key] || taskContext[task] || "UNSET" });
   };
   // 持ち越し: 同じtask_idのまま日付を移す（複製しない）。一覧からは外す
   const carryOverLocal = (task, toDate) => {
@@ -1768,7 +1783,8 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
     setTaskImportance(next);
     localStorage.setItem("jiroku_task_importance_"+todayKey, JSON.stringify(next));
     pushTaskMeta({ imp: next });
-    enqueueTaskMutation("UPDATE", key, { importance_level: v || "" });
+    enqueueTaskMutation("UPDATE", key, { importance_level: v || "" },
+                        { importance_level: taskImportance[key] || taskImportance[task] || "" });
   };
   // ★サーバー（Tasksシート）を正として画面へ反映する★
   //   これまで「端末の値を優先」で取り込んでいたため、端末間で
@@ -1908,7 +1924,8 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
     setTaskDue(next);
     localStorage.setItem("jiroku_task_due_"+todayKey, JSON.stringify(next));
     pushTaskMeta({ due: next });
-    enqueueTaskMutation("UPDATE", key, { due_at: v || "" });
+    enqueueTaskMutation("UPDATE", key, { due_at: v || "" },
+                        { due_at: taskDue[key] || taskDue[task] || "" });
   };
   // ★緊急度と4分類は保存しない★
   // 期限から都度出す。保存すると日付が変わっても古い判定が残る。
@@ -2045,7 +2062,14 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
       if (String(t.imp||"") !== String(oldImp)) ch.importance_level = t.imp || "";
       if (String(t.due||"") !== String(oldDue)) ch.due_at = t.due || "";
       if (String(t.est||"") !== String(oldEst)) ch.estimated_minutes = t.est || "";
-      if (Object.keys(ch).length) enqueueTaskMutation("UPDATE", t.id, ch);
+      if (Object.keys(ch).length) {
+        const bv = {};
+        if (ch.title !== undefined) bv.title = prevById[t.id] || "";
+        if (ch.importance_level !== undefined) bv.importance_level = oldImp;
+        if (ch.due_at !== undefined) bv.due_at = oldDue;
+        if (ch.estimated_minutes !== undefined) bv.estimated_minutes = oldEst;
+        enqueueTaskMutation("UPDATE", t.id, ch, bv);
+      }
     });
     (customActions||[]).forEach(t=>{
       if (!storedList.some(x=>x.id===t.id)) enqueueTaskMutation("DELETE", t.id, {});
@@ -2486,15 +2510,24 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
             const mine = Object.keys(conflictItem.changes||{}).map(k=>jp(k, conflictItem.changes[k])).join("、");
             const sv = conflictItem.server;
             const name = (sv&&sv.title)||"このタスク";
+            const f = conflictItem.field_name;
+            const show = v => (v === "" || v === undefined || v === null) ? "なし" : (VAL[String(v)] || String(v));
             return html`
-          <div style=${{fontSize:15,fontWeight:800,marginBottom:8,lineHeight:1.5}}>「${name}」が2つの端末で変更されました</div>
+          <div style=${{fontSize:15,fontWeight:800,marginBottom:8,lineHeight:1.5}}>
+            ${f ? `「${name}」の${FIELD[f]||f}が2か所で変わっています` : `「${name}」が2つの端末で変更されました`}</div>
           <div style=${{fontSize:13,color:"var(--sub)",lineHeight:1.8,marginBottom:12}}>
-            この端末とは別の端末（スマホやPC）でも同じタスクの名前かメモが変更されていました。
-            どちらを残すか選んでください。選ぶまでこのタスクは同期されません。
+            ${f
+              ? `この端末で${FIELD[f]||f}を変えている間に、別の端末（スマホやPC）でも同じ${FIELD[f]||f}が変わっていました。どちらを残すか選んでください。`
+              : "別の端末でも同じタスクが変更されていました。どちらを残すか選んでください。"}
+            選ぶまでこのタスクは同期されません。
           </div>
-          <div style=${{background:"var(--bg)",borderRadius:10,padding:"10px 12px",fontSize:12.5,lineHeight:1.8,marginBottom:12}}>
-            <div>🖥 別の端末: 「${name}」${sv&&sv.memo?`（メモあり）`:""}</div>
-            <div>📱 この端末: ${mine||"（変更内容を読み取れませんでした）"}</div>
+          <div style=${{background:"var(--bg)",borderRadius:10,padding:"10px 12px",fontSize:12.5,lineHeight:1.9,marginBottom:12}}>
+            ${f
+              ? html`<div>🖥 別の端末: ${FIELD[f]||f} = <b>${show(conflictItem.server_value)}</b></div>
+                     <div>📱 この端末: ${FIELD[f]||f} = <b>${show((conflictItem.changes||{})[f])}</b></div>
+                     <div style=${{color:"var(--sub)",fontSize:11.5}}>（あなたが編集を始めたときの値: ${show(conflictItem.base_value)}）</div>`
+              : html`<div>🖥 別の端末: 「${name}」</div>
+                     <div>📱 この端末: ${mine||"（変更内容を読み取れませんでした）"}</div>`}
           </div>
           <button class="btn" style=${{marginBottom:8}} onClick=${()=>{
             saveTaskQueue(loadTaskQueue().filter(x=>x.mid!==conflictItem.mid));
@@ -2503,8 +2536,15 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
           <button class="btn" style=${{marginBottom:8,background:"var(--bg)",color:"var(--text)"}} onClick=${()=>{
             const q = loadTaskQueue();
             const m = q.find(x=>x.mid===conflictItem.mid);
-            if (m) { m.base_version = conflictItem.server ? conflictItem.server.version : undefined;
-                     m.state = "pending"; saveTaskQueue(q); flushTaskQueue(); }
+            if (m) {
+              m.base_version = conflictItem.server ? conflictItem.server.version : undefined;
+              // サーバーの今の値を「見ていた値」として送り直す＝本人が承知のうえで上書き
+              if (m.base_values && conflictItem.field_name) {
+                m.base_values[conflictItem.field_name] = conflictItem.server_value;
+              }
+              delete m.field_name; delete m.server_value; delete m.base_value;
+              m.state = "pending"; saveTaskQueue(q); flushTaskQueue();
+            }
             setConflictItem(null);
           }}>この端末の変更を反映する</button>
           <button style=${{width:"100%",padding:"10px",background:"none",border:"none",color:"var(--sub)",fontSize:12.5,cursor:"pointer"}}
@@ -5856,7 +5896,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260802-154124";
+const APP_BUILD = "20260802-154554";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 

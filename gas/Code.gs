@@ -11068,6 +11068,8 @@ function saveTaskMutations(studentEmail, body) {
         req.mutation_id = mid;
         if (op === "CREATE") req.create = "1";
         if (m.base_version !== undefined && m.base_version !== null) req.base_version = m.base_version;
+        // 変える項目ごとの「自分が見ていた値」。新規作成には使わない
+        if (op === "UPDATE" && m.base_values) req.base_values = m.base_values;
         r = saveTask(studentEmail, req);
       } else if (op === "DELETE") {
         r = deleteTask(studentEmail, { task_id: m.task_id, mutation_id: mid });
@@ -11082,6 +11084,16 @@ function saveTaskMutations(studentEmail, body) {
         out.result = r.duplicate ? "DUPLICATE" : "APPLIED";
         out.task_id = String(r.id || r.task_id || out.task_id);
         if (r.data) { out.new_version = r.data.version; out.canonical_task = r.data; }
+        return out;
+      }
+      if (r.error === "FIELD_CONFLICT") {
+        out.result = "FIELD_CONFLICT";
+        out.error_code = "FIELD_CONFLICT";
+        out.field_name = r.field_name;
+        out.base_value = r.base_value;
+        out.server_value = r.server_value;
+        out.client_value = r.client_value;
+        out.canonical_task = r.server;
         return out;
       }
       if (r.error === "TASK_CONFLICT") {
@@ -11135,7 +11147,42 @@ function saveTask(studentEmail, body) {
              note: "削除済みのタスクです。戻すには明示的な復元が要ります" };
   }
 
-  // ★競合を黙って上書きしない★
+  // ★同じ項目を2端末で変えたときだけ止める（フィールド単位）★
+  //   レコード全体のversionで見ると、PCで重要度・スマホで期限のような
+  //   ぶつからない変更まで止まってしまう。逆にversionを見ないと、
+  //   同じ期限を両方が変えたときに片方が黙って消える。
+  //   そこで「変える項目の、自分が見ていた値」を送ってもらい、
+  //   サーバーの今の値と違うときだけ止める。
+  if (existing && body.base_values !== undefined) {
+    let bv = body.base_values;
+    if (typeof bv === "string") { try { bv = JSON.parse(bv); } catch (e) { bv = null; } }
+    if (bv && typeof bv === "object") {
+      const norm = function (k, v) {
+        if (v === undefined || v === null) return "";
+        if ((k === "due_at" || k === "date") && v instanceof Date) return p1DateOut_(v);
+        if (k === "status") return normalizeTaskStatus(v);
+        return String(v).trim();
+      };
+      const keys = Object.keys(bv);
+      for (let i = 0; i < keys.length; i++) {
+        const f = keys[i];
+        const serverVal = norm(f, existing[f]);
+        const baseVal = norm(f, bv[f]);
+        if (serverVal !== baseVal) {
+          authAudit("TASK_FIELD_CONFLICT", { result: "DENY", action: "saveTask",
+                    failureReason: "task=" + id + " field=" + f });
+          return { ok: false, error: "FIELD_CONFLICT",
+                   task_id: id, field_name: f,
+                   base_value: baseVal, server_value: serverVal,
+                   client_value: (body[f] !== undefined ? String(body[f]) : ""),
+                   server: decorateTask(existing, Date.now()),
+                   note: "別の端末で同じ項目が変更されています" };
+        }
+      }
+    }
+  }
+
+  // ★レコード全体の版チェック（明示的に送られたときだけ）★
   //   クライアントが「自分が見ていた版」を送る。サーバーと違えば、
   //   どちらが正しいかはこちらで決めず、両方返して判断を委ねる。
   if (existing && body.base_version !== undefined && String(body.base_version) !== "") {
