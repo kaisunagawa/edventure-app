@@ -1272,6 +1272,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
   const [wgSheet, setWgSheet] = useState(false);          // 今週の目標をつくる
   const [sprintIdx, setSprintIdx] = useState(0);
   const [openRow, setOpenRow] = useState("");   // 目標ロードマップで開いている行
+  const [showWhy, setShowWhy] = useState(false);   // 次にやることの選定理由
   const [goalDetail, setGoalDetail] = useState(false);   // 数字の出どころ（普段は隠す）
   const [deepenGoal, setDeepenGoal] = useState(null);    // 目標の深掘り
   const [goalQuick, setGoalQuick] = useState({current:"", start:"", end:""});   // 足りない値をその場で入れる
@@ -2496,209 +2497,140 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
       </div>
     `}
 
-    <!-- ★今日のフォーカス（自己経営OSホームの「今日」）★
-         ここを開いて数秒で今日の動きが決まるように、宣言・時間の進捗・
-         次にやるタスク・今日の状況を1枚にまとめる。
-         以前は別枠の「今日 — まずこれ」と二重になっていたので統合した。 -->
-    <div style=${{margin:"16px 16px 0",background:"var(--card)",borderRadius:16,border:"1.5px solid var(--accent)",padding:"14px 16px"}}>
-        <div style=${{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
-          <div style=${{fontSize:11,fontWeight:600,color:"var(--sub)"}}>⭐ 今日のフォーカス</div>
-          <button onClick=${onGoTimer}
-            style=${{display:"inline-flex",alignItems:"center",gap:4,padding:"4px 9px",borderRadius:99,border:"1px solid var(--border)",background:"none",color:"var(--sub)",fontSize:10.5,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>
-            <${S} n="timer" s=${11}/>タイマーで測る
-          </button>
-        </div>
-        ${!intent&&html`
-          <button onClick=${()=>{ setIntentEditMode(true); setShowIntentModal(true); }}
-            style=${{width:"100%",background:"none",border:"1.5px dashed var(--border)",borderRadius:10,padding:"12px",textAlign:"left",fontSize:13.5,color:"var(--sub)",cursor:"pointer",fontFamily:"inherit",marginBottom:12,lineHeight:1.6}}>
-            今日いちばん達成したいことを決める<br/>
-            <span style=${{fontSize:11.5,opacity:0.8}}>決めておくと、迷ったときにここへ戻ってこられます</span>
-          </button>`}
-        ${intent&&html`<div>
-        <!-- 左の丸＝達成トグル / 本文・右ラベル＝タップで編集、と挙動を分ける -->
-        <div style=${{display:"flex",alignItems:"center",gap:12,marginBottom:12}}>
-          <button onClick=${toggleIntentDone} aria-label="達成の切り替え"
-            style=${{flexShrink:0,width:24,height:24,padding:0,borderRadius:"50%",border:"2px solid var(--accent)",background:intent.done?"var(--accent)":"transparent",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",transition:"all .15s"}}>
-            ${intent.done&&html`<span style=${{color:"#fff",fontSize:13,fontWeight:800,lineHeight:1}}>✓</span>`}
-          </button>
-          <button onClick=${openEditIntent} aria-label="今日のフォーカスを編集"
-            style=${{flex:1,minWidth:0,display:"flex",alignItems:"center",gap:8,background:"none",border:"none",padding:0,textAlign:"left",cursor:"pointer",fontFamily:"inherit"}}>
-            <span style=${{flex:1,minWidth:0,fontSize:15,fontWeight:700,color:"var(--text)",lineHeight:1.4,textDecoration:intent.done?"line-through":"none",opacity:intent.done?0.6:1,overflow:"hidden",textOverflow:"ellipsis"}}>${intent.intent}</span>
-            <span style=${{flexShrink:0,display:"inline-flex",alignItems:"center",gap:6}}>
-              ${intent.done&&html`<span style=${{fontSize:12,fontWeight:800,color:"var(--accent)"}}>達成🎉</span>`}
-              <span style=${{fontSize:11,fontWeight:600,color:"var(--sub)",whiteSpace:"nowrap"}}>✎ 編集</span>
-            </span>
-          </button>
-        </div>
-        <!-- 時間の進捗（目標関連の記録時間 / 宣言した時間） -->
-        ${(()=>{
-          const targetH=Number(intent.hours)||dailyGoalHours;
-          const goalMins=todayLogs.filter(l=>l.goal_related==="true"||l.goal_related===true).length*60;
-          const targetMins=targetH*60;
-          const pct=Math.min(100,Math.round(goalMins/targetMins*100));
-          const hh=Math.floor(goalMins/60),mm=goalMins%60;
-          const done=goalMins>=targetMins;
-          return html`
-            <div style=${{display:"flex",alignItems:"baseline",gap:6,marginBottom:8}}>
-              <div style=${{fontSize:22,fontWeight:800,color:"var(--text)",lineHeight:1}}>${hh>0?html`${hh}<span style=${{fontSize:13,fontWeight:700}}>時間</span>`:""}${mm}<span style=${{fontSize:13,fontWeight:700}}>分</span></div>
-              <div style=${{fontSize:12.5,color:"var(--sub)",fontWeight:600}}>/ ${targetH}時間 取り組む</div>
-            </div>
-            <div style=${{display:"flex",alignItems:"center",gap:10}}>
-              <div style=${{flex:1,height:8,background:"var(--bg)",borderRadius:99,overflow:"hidden"}}>
-                <div style=${{height:"100%",width:pct+"%",background:"var(--accent)",borderRadius:99,transition:"width .5s ease"}}/>
-              </div>
-              <div style=${{fontSize:12.5,fontWeight:800,color:"var(--accent)",minWidth:42,textAlign:"right"}}>${done?"達成🎉":pct+"%"}</div>
-            </div>
-          `;
-        })()}
-        </div>`}
-        <!-- 今日の状況。次にやる1件と、判断に要る数だけ -->
-        ${(()=>{
-          const items = actionItems || [];
-          const undone = items.filter(t=>!isDone(t));
-          const fmtMin = m => m>=60 ? `${Math.floor(m/60)}時間${m%60?`${m%60}分`:""}` : `${m}分`;
-          let overdue=0, dueToday=0, restMin=0, noEst=0;
-          undone.forEach(t=>{
-            const q = quadrantOf(t);
-            if (q.overdue) overdue++;
-            else if (dueOf(t) === todayKey) dueToday++;
-            const e2 = Number(estOf(t))||0;
-            if (e2>0) restMin+=e2; else noEst++;
-          });
-          // 次にやる1件: 期限超過 → 今すぐやる分類 → 先頭の未完了
-          const next = undone.find(t=>quadrantOf(t).overdue)
-                    || undone.find(t=>quadrantOf(t).quadrant==="DO_NOW")
-                    || undone[0];
-          const slots = new Set((todayLogs||[]).map(l=>String(l.time_block||"").slice(0,2)).filter(Boolean)).size;
-          const chip = (bg,color,txt) => html`<span style=${{fontSize:11,fontWeight:600,background:bg,color:color,borderRadius:20,padding:"3px 9px",whiteSpace:"nowrap"}}>${txt}</span>`;
-          if (!next && !items.length && !slots) return "";
-          return html`
-          <div style=${{borderTop:"1px solid var(--border)",marginTop:12,paddingTop:11}}>
-            ${next&&html`
-              <button onClick=${()=>goToTimerWith(next)}
-                style=${{width:"100%",display:"flex",alignItems:"center",gap:8,background:"none",border:"none",padding:0,marginBottom:9,textAlign:"left",cursor:"pointer",fontFamily:"inherit"}}>
-                <span style=${{flexShrink:0,fontSize:10.5,fontWeight:700,color:"var(--sub)"}}>次にやる</span>
-                <span style=${{flex:1,minWidth:0,overflow:"hidden"}}>
-                  <span style=${{display:"block",fontSize:13.5,fontWeight:700,color:"var(--text)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>${next}</span>
-                  <span style=${{display:"block",fontSize:10.5,color:"var(--sub)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>${
-                    taskWhy[idOfTitle(next)] || (quadrantOf(next).overdue ? "期限が過ぎています" : "上から順番に")}</span>
-                </span>
-                ${estOf(next)>0&&html`<span style=${{flexShrink:0,fontSize:11,fontWeight:600,color:"var(--accent)"}}>${estOf(next)}分</span>`}
-                <span style=${{flexShrink:0,fontSize:11,color:"var(--sub)"}}>▶ 始める</span>
+    <!-- ★今日のフォーカス★
+         3か月目標のどれに効くのか、今日どれだけ進んだかを1枚で見せる。
+         関連タスクの件数から、今日の行動へ降りられるようにする。 -->
+    <div style=${{margin:"16px 16px 0",background:"var(--card)",borderRadius:16,border:"1px solid var(--border)",padding:"14px 16px"}}>
+      <div style=${{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:intent?12:8}}>
+        <span style=${{fontSize:13,fontWeight:800,color:"var(--text)"}}>今日のフォーカス</span>
+        ${intent
+          ? html`<button onClick=${openEditIntent}
+              style=${{background:"none",border:"none",color:"var(--accent)",fontSize:11.5,fontWeight:700,cursor:"pointer",fontFamily:"inherit",padding:0}}>編集</button>`
+          : ""}
+      </div>
+
+      ${!intent&&html`
+        <button onClick=${()=>{ setIntentEditMode(true); setShowIntentModal(true); }}
+          style=${{width:"100%",background:"none",border:"1.5px dashed var(--border)",borderRadius:10,padding:"12px",textAlign:"left",fontSize:13.5,color:"var(--sub)",cursor:"pointer",fontFamily:"inherit",lineHeight:1.6}}>
+          今日いちばん達成したいことを決める<br/>
+          <span style=${{fontSize:11.5,opacity:0.8}}>決めておくと、迷ったときにここへ戻ってこられます</span>
+        </button>`}
+
+      ${intent&&(()=>{
+        const targetH=Number(intent.hours)||dailyGoalHours;
+        const goalMins=todayLogs.filter(l=>l.goal_related==="true"||l.goal_related===true).length*60;
+        const targetMins=targetH*60;
+        const pct=Math.min(100,Math.round(goalMins/targetMins*100));
+        const hh=Math.floor(goalMins/60), mm=goalMins%60;
+        const goals2=((goalTree&&goalTree.goals)||[]).filter(g=>String(g.status||"ACTIVE").toUpperCase()!=="ARCHIVED");
+        const parent=goals2[Math.min(mainGoalIdx,Math.max(0,goals2.length-1))];
+        const relCount=(actionItems||[]).length;
+        // 円形の進捗リング
+        const R=26, C=2*Math.PI*R;
+        return html`
+        <div style=${{display:"flex",alignItems:"center",gap:12}}>
+          <div style=${{width:44,height:44,borderRadius:12,background:"var(--accent-l)",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/></svg>
+          </div>
+          <div style=${{flex:1,minWidth:0}}>
+            <button onClick=${toggleIntentDone}
+              style=${{display:"block",width:"100%",background:"none",border:"none",padding:0,textAlign:"left",cursor:"pointer",fontFamily:"inherit"}}>
+              <span style=${{display:"block",fontSize:14.5,fontWeight:800,color:"var(--text)",lineHeight:1.45,
+                             textDecoration:intent.done?"line-through":"none",opacity:intent.done?0.6:1,overflowWrap:"anywhere"}}>
+                ${intent.intent}${intent.done?" 達成🎉":""}</span>
+            </button>
+            ${parent&&html`
+              <button onClick=${()=>setOpenRow("goal")}
+                style=${{display:"flex",alignItems:"center",gap:4,background:"none",border:"none",padding:"5px 0 0",cursor:"pointer",fontFamily:"inherit",maxWidth:"100%"}}>
+                <span style=${{fontSize:11,color:"var(--sub)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                  目標: ${parent.title}（3か月目標）</span>
+                <span style=${{fontSize:11,color:"var(--sub)",flexShrink:0}}>›</span>
               </button>`}
-            <div style=${{display:"flex",gap:6,flexWrap:"wrap"}}>
-              ${overdue>0&&chip("var(--red,#d33)","#fff",`期限超過 ${overdue}件`)}
-              ${dueToday>0&&chip("var(--accent-l)","var(--accent)",`今日中 ${dueToday}件`)}
-              ${undone.length>0&&chip("var(--bg)","var(--sub)",`残り${undone.length}件${restMin>0?` / 想定${fmtMin(restMin)}`:""}`)}
-              ${noEst>0&&chip("var(--bg)","var(--sub)",`見積もり未設定 ${noEst}件`)}
-              ${chip("var(--bg)","var(--sub)",`記録 ${slots}時間帯`)}
-              ${taskSync.failed>0&&chip("var(--amber,#BA7517)","#fff",`保存できず ${taskSync.failed}件`)}
-              ${taskSync.pending>0&&chip("var(--bg)","var(--sub)","保存中…")}
-              ${taskSync.conflict>0&&chip("var(--red,#d33)","#fff",`要確認 ${taskSync.conflict}件`)}
-            </div>
+            ${relCount>0&&html`
+              <div style=${{fontSize:11,color:"var(--accent)",fontWeight:700,marginTop:4}}>関連タスク ${relCount}件</div>`}
+          </div>
+          <div style=${{flexShrink:0,textAlign:"center"}}>
+            <svg width="62" height="62" viewBox="0 0 62 62">
+              <circle cx="31" cy="31" r=${R} fill="none" stroke="var(--bg)" stroke-width="6"/>
+              <circle cx="31" cy="31" r=${R} fill="none" stroke="var(--accent)" stroke-width="6" stroke-linecap="round"
+                stroke-dasharray=${C} stroke-dashoffset=${C*(1-pct/100)} transform="rotate(-90 31 31)"/>
+              <text x="31" y="35" text-anchor="middle" font-size="14" font-weight="800" fill="var(--text)">${pct}%</text>
+            </svg>
+            <div style=${{fontSize:10.5,color:"var(--sub)",marginTop:2,whiteSpace:"nowrap"}}>
+              ${hh>0?`${hh}時間`:""}${mm}分 / ${targetH}時間</div>
+          </div>
+        </div>`;
+      })()}
+
+      <!-- ★次にやること★ 迷う時間を消すために1件だけ大きく出す。
+           なぜそれが選ばれたのかは隠さない（押すと理由が出る）。 -->
+      ${(()=>{
+        const items = actionItems || [];
+        const undone = items.filter(t=>!isDone(t));
+        if (!undone.length) return "";
+        const next = undone.find(t=>quadrantOf(t).overdue)
+                  || undone.find(t=>quadrantOf(t).quadrant==="DO_NOW")
+                  || undone[0];
+        const fmtMin = m => m>=60 ? `${Math.floor(m/60)}時間${m%60?`${m%60}分`:""}` : `${m}分`;
+        let overdue=0, dueToday=0, restMin=0, noEst=0;
+        undone.forEach(t=>{
+          const q=quadrantOf(t);
+          if (q.overdue) overdue++; else if (dueOf(t)===todayKey) dueToday++;
+          const e2=Number(estOf(t))||0;
+          if (e2>0) restMin+=e2; else noEst++;
+        });
+        const q0=quadrantOf(next);
+        const L=taskLabel(q0.importance,q0.urgency);
+        const why = taskWhy[idOfTitle(next)] || (q0.overdue ? "期限が過ぎています" : "上から順番に");
+        const tile=(color,icon,label,value)=>html`
+          <div style=${{flex:"1 1 0",minWidth:0,background:"var(--bg)",borderRadius:10,padding:"7px 7px"}}>
+            <div style=${{display:"flex",alignItems:"center",gap:2,fontSize:9.5,color:color,fontWeight:700,whiteSpace:"nowrap",overflow:"hidden"}}>
+              <span style=${{flexShrink:0}}>${icon}</span><span style=${{overflow:"hidden",textOverflow:"ellipsis"}}>${label}</span></div>
+            <div style=${{fontSize:13.5,fontWeight:800,color:"var(--text)",marginTop:1,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>${value}</div>
           </div>`;
-        })()}
-      </div>
-
-    ${showIntentModal&&ReactDOM.createPortal(html`
-      <div style=${{position:"fixed",inset:0,height:"100dvh",background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"flex-end",zIndex:500}}>
-        <div style=${{background:"var(--card)",borderRadius:"20px 20px 0 0",padding:"24px 20px calc(28px + env(safe-area-inset-bottom))",width:"100%",boxSizing:"border-box",maxHeight:"88dvh",overflowY:"auto"}}>
-          <div style=${{fontSize:18,fontWeight:800,marginBottom:4,color:"var(--text)"}}>${intentEditMode?"⭐ 今日のフォーカスを編集":"⭐ 今日いちばん達成したいことは？"}</div>
-          <div style=${{fontSize:13,color:"var(--sub)",marginBottom:16,lineHeight:1.6}}>${intentEditMode?"やりたいことと、かける時間を編集できます。":"やりたいこと1つと、それに使う時間を決めましょう。今日はこの達成をコーチと一緒に目指します。"}</div>
-          <label class="form-lbl" style=${{fontSize:11}}>達成したいこと</label>
-          <input class="inp" placeholder="例：企画書を仕上げる、30分走る" value=${intentInput}
-            onInput=${e=>setIntentInput(e.target.value)} style=${{marginBottom:12}}/>
-          ${actionItems.length>0&&html`
-            <div style=${{display:"flex",flexWrap:"wrap",gap:6,marginBottom:16}}>
-              ${actionItems.slice(0,3).map((a,i)=>html`
-                <button key=${i} onClick=${()=>setIntentInput(a)}
-                  style=${{padding:"5px 10px",borderRadius:20,border:`1.5px solid ${intentInput===a?"var(--accent)":"var(--border)"}`,background:intentInput===a?"var(--accent-l)":"transparent",color:intentInput===a?"var(--accent)":"var(--sub)",fontSize:11.5,fontWeight:500,cursor:"pointer",fontFamily:"inherit",maxWidth:"100%",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
-                  🎯 ${a}
-                </button>
-              `)}
-            </div>
-          `}
-          <label class="form-lbl" style=${{fontSize:11}}>どれくらい時間をかける？</label>
-          <div style=${{display:"flex",alignItems:"center",justifyContent:"center",gap:20,margin:"6px 0 18px"}}>
-            <button onClick=${()=>setIntentHours(v=>Math.max(0.5,Math.round((v-0.5)*10)/10))}
-              style=${{width:44,height:44,borderRadius:"50%",border:"1.5px solid var(--border)",background:"transparent",color:"var(--text)",fontSize:20,fontWeight:700,cursor:"pointer"}}>−</button>
-            <div style=${{fontSize:30,fontWeight:800,color:"var(--text)",minWidth:96,textAlign:"center"}}>${intentHours}<span style=${{fontSize:15,fontWeight:600,color:"var(--sub)"}}>時間</span></div>
-            <button onClick=${()=>setIntentHours(v=>Math.min(12,Math.round((v+0.5)*10)/10))}
-              style=${{width:44,height:44,borderRadius:"50%",border:"1.5px solid var(--border)",background:"transparent",color:"var(--text)",fontSize:20,fontWeight:700,cursor:"pointer"}}>＋</button>
+        return html`
+        <div style=${{borderTop:"1px solid var(--border)",marginTop:13,paddingTop:12}}>
+          <div style=${{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+            <span style=${{fontSize:12,fontWeight:800,color:"var(--text)"}}>次にやること</span>
+            <button onClick=${()=>setShowWhy(v=>!v)}
+              style=${{background:"none",border:"none",color:"var(--accent)",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit",padding:0}}>
+              ${showWhy?"選定理由を隠す ▲":"選定理由を表示 ▼"}</button>
           </div>
-          <label class="form-lbl" style=${{fontSize:11}}>今日のタスクも追加（任意）</label>
-          <div style=${{display:"flex",flexDirection:"column",gap:8,marginBottom:6}}>
-            ${intentTasks.map((t,i)=>html`
-              <div key=${i} style=${{display:"flex",gap:8,alignItems:"center"}}>
-                <input class="inp" style=${{flex:1,margin:0}} value=${t.text} placeholder="例：数学の課題を出す"
-                  onInput=${e=>{ const a=[...intentTasks]; a[i]={...a[i],text:e.target.value}; setIntentTasks(a); }}/>
-                <input class="inp" type="number" inputmode="numeric" value=${t.min} placeholder="分"
-                  style=${{width:56,margin:0,textAlign:"center",padding:"10px 6px",flexShrink:0}}
-                  onInput=${e=>{ const a=[...intentTasks]; a[i]={...a[i],min:e.target.value}; setIntentTasks(a); }}/>
-                <span style=${{fontSize:12,color:"var(--sub)",flexShrink:0}}>分</span>
-                ${intentTasks.length>1&&html`<button onClick=${()=>setIntentTasks(intentTasks.filter((_,j)=>j!==i))}
-                  style=${{background:"none",border:"none",color:"var(--sub)",fontSize:20,cursor:"pointer",flexShrink:0,padding:"0 4px"}}>×</button>`}
-              </div>
-            `)}
+          <div style=${{display:"flex",alignItems:"center",gap:9,marginBottom:showWhy?8:11}}>
+            <span style=${{flexShrink:0,width:26,height:26,borderRadius:"50%",background:"var(--accent)",color:"#fff",fontSize:12,fontWeight:800,display:"flex",alignItems:"center",justifyContent:"center"}}>1</span>
+            <button onClick=${()=>setDetailTask(next)}
+              style=${{flex:1,minWidth:0,background:"none",border:"none",padding:0,textAlign:"left",cursor:"pointer",fontFamily:"inherit"}}>
+              <span style=${{display:"block",fontSize:13.5,fontWeight:800,color:"var(--text)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>${next}</span>
+              <span style=${{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap",marginTop:2}}>
+                ${estOf(next)>0&&html`<span style=${{fontSize:10.5,color:"var(--sub)"}}>⏱ 想定 ${estOf(next)}分</span>`}
+                <span style=${{fontSize:10,fontWeight:700,color:L.color,border:"1px solid "+L.color,borderRadius:20,padding:"1px 6px"}}>${L.icon}${L.label}</span>
+              </span>
+            </button>
+            <button onClick=${()=>goToTimerWith(next)}
+              style=${{flexShrink:0,padding:"8px 12px",borderRadius:99,border:"none",background:"var(--accent)",color:"#fff",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>
+              ▶ 始める</button>
           </div>
-          <button onClick=${()=>setIntentTasks([...intentTasks,{text:"",min:""}])}
-            style=${{width:"100%",padding:"8px",borderRadius:10,border:"1.5px dashed var(--border)",background:"none",color:"var(--accent)",fontSize:12.5,fontWeight:600,cursor:"pointer",marginBottom:16,fontFamily:"inherit"}}>
-            ＋ タスクを追加
-          </button>
-          <button class="btn" disabled=${!intentInput.trim()||intentSaving} onClick=${saveIntent}
-            style=${{opacity:intentInput.trim()?1:0.5}}>${intentEditMode?"更新する":"今日のフォーカスにする"}</button>
-          <button onClick=${intentEditMode?closeIntentModal:skipIntent}
-            style=${{display:"block",width:"100%",marginTop:10,background:"none",border:"none",color:"var(--sub)",fontSize:13,cursor:"pointer",fontFamily:"inherit",padding:8}}>${intentEditMode?"キャンセル":"今日はスキップ"}</button>
-        </div>
-      </div>
-    `, document.body)}
-
-    ${showGoalTimeEdit&&ReactDOM.createPortal(html`
-      <div style=${{position:"fixed",inset:0,height:"100dvh",background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"flex-end",zIndex:500}}
-        onClick=${e=>{if(e.target===e.currentTarget)setShowGoalTimeEdit(false);}}>
-        <div style=${{background:"var(--card)",borderRadius:"20px 20px 0 0",padding:"24px 20px calc(28px + env(safe-area-inset-bottom))",width:"100%",boxSizing:"border-box",maxHeight:"70dvh",overflowY:"auto"}}>
-          <div style=${{fontSize:18,fontWeight:800,marginBottom:4,color:"var(--text)"}}>1日の目標時間</div>
-          <div style=${{fontSize:13,color:"var(--sub)",marginBottom:18,lineHeight:1.6}}>目標に関連した記録を、1日に何時間積みたいですか？無理なく続けられる時間を、自分で決めましょう。</div>
-          <div style=${{display:"flex",alignItems:"center",justifyContent:"center",gap:24,marginBottom:20}}>
-            <button onClick=${()=>setPendingGoalHours(v=>Math.max(0.5,Math.round((v-0.5)*10)/10))}
-              style=${{width:48,height:48,borderRadius:"50%",border:"1.5px solid var(--border)",background:"transparent",color:"var(--text)",fontSize:22,fontWeight:700,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>−</button>
-            <div style=${{fontSize:34,fontWeight:800,color:"var(--text)",minWidth:110,textAlign:"center"}}>${pendingGoalHours}<span style=${{fontSize:16,fontWeight:600,color:"var(--sub)"}}>時間</span></div>
-            <button onClick=${()=>setPendingGoalHours(v=>Math.min(12,Math.round((v+0.5)*10)/10))}
-              style=${{width:48,height:48,borderRadius:"50%",border:"1.5px solid var(--border)",background:"transparent",color:"var(--text)",fontSize:22,fontWeight:700,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>＋</button>
+          ${showWhy&&html`
+            <div style=${{background:"var(--accent-l)",color:"var(--accent)",borderRadius:9,padding:"7px 10px",fontSize:11,marginBottom:11,lineHeight:1.6}}>
+              理由: ${why}</div>`}
+          <div style=${{display:"flex",gap:5}}>
+            ${tile(overdue>0?"var(--red,#d33)":"var(--sub)", "⚠", "超過", overdue+"件")}
+            ${tile("var(--amber,#BA7517)", "🕐", "今日中", dueToday+"件")}
+            ${tile("var(--accent)", "☰", "残り", undone.length+"件")}
+            ${tile("#7F77DD", "◷", "想定", restMin>0?fmtMin(restMin):"—")}
           </div>
-          <div style=${{display:"flex",flexWrap:"wrap",gap:8,justifyContent:"center",marginBottom:20}}>
-            ${[1,2,3,4,6,8,12].map(h=>{
-              const on=pendingGoalHours===h;
-              return html`<button key=${h} onClick=${()=>setPendingGoalHours(h)}
-                style=${{padding:"6px 12px",borderRadius:20,border:`1.5px solid ${on?"var(--accent)":"var(--border)"}`,background:on?"var(--accent-l)":"transparent",color:on?"var(--accent)":"var(--sub)",fontSize:12.5,fontWeight:on?700:500,cursor:"pointer",fontFamily:"inherit"}}>
-                ${h}時間</button>`;
-            })}
+          <div style=${{display:"flex",alignItems:"center",gap:7,flexWrap:"wrap",marginTop:8,fontSize:10.5,color:"var(--sub)"}}>
+            ${noEst>0&&html`<span>見積もり未設定 ${noEst}件</span>`}
+            <span style=${{marginLeft:"auto"}}></span>
+            ${taskSync.pending>0&&html`<span style=${{background:"var(--bg)",borderRadius:20,padding:"3px 9px"}}>保存中…</span>`}
+            ${taskSync.failed>0&&html`<button onClick=${()=>{ const q=loadTaskQueue(); q.forEach(x=>{ if(x.state==="failed"){x.state="pending";x.tries=0;} }); saveTaskQueue(q); flushTaskQueue(); }}
+              style=${{background:"var(--amber,#BA7517)",color:"#fff",border:"none",borderRadius:20,padding:"3px 9px",fontSize:10.5,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>保存できず ${taskSync.failed}件</button>`}
+            ${taskSync.conflict>0&&html`<button onClick=${()=>{ const c=loadTaskQueue().find(x=>x.state==="conflict"); if(c) setConflictItem(c); }}
+              style=${{background:"var(--red,#d33)",color:"#fff",border:"none",borderRadius:20,padding:"3px 9px",fontSize:10.5,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>要確認 ${taskSync.conflict}件</button>`}
           </div>
-          <button class="btn" onClick=${()=>pickDailyGoal(pendingGoalHours)}>この時間で決定する</button>
-        </div>
-      </div>
-    `, document.body)}
-
-    ${showWeeklyGoalEdit&&ReactDOM.createPortal(html`
-      <div style=${{position:"fixed",inset:0,height:"100dvh",background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"flex-end",zIndex:500}}
-        onClick=${e=>{if(e.target===e.currentTarget)setShowWeeklyGoalEdit(false);}}>
-        <div style=${{background:"var(--card)",borderRadius:"20px 20px 0 0",padding:"24px 20px calc(28px + env(safe-area-inset-bottom))",width:"100%",boxSizing:"border-box",maxHeight:"70dvh",overflowY:"auto"}}>
-          <div style=${{fontSize:18,fontWeight:800,marginBottom:4,color:"var(--text)"}}>週の記録ペース</div>
-          <div style=${{fontSize:13,color:"var(--sub)",marginBottom:18,lineHeight:1.6}}>週に何日、記録したいですか？毎日じゃなくて大丈夫。<b style=${{color:"var(--text)"}}>自分で決めたペースを守れたか</b>で続けていきましょう。</div>
-          <div style=${{display:"flex",flexDirection:"column",gap:8,marginBottom:8}}>
-            ${[[7,"毎日","しっかり習慣にしたい"],[5,"週5日","平日ペース"],[4,"週4日","無理なく多め"],[3,"週3日","ちょうどいい"],[2,"週2日","まずはゆるく"]].map(([n,label,desc])=>{
-              const on=weeklyGoal===n;
-              return html`<button key=${n} onClick=${()=>pickWeeklyGoal(n)}
-                style=${{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"13px 16px",borderRadius:12,border:`1.5px solid ${on?"var(--accent)":"var(--border)"}`,background:on?"var(--accent-l)":"transparent",cursor:"pointer",fontFamily:"inherit",textAlign:"left"}}>
-                <span><span style=${{fontSize:15,fontWeight:700,color:on?"var(--accent)":"var(--text)"}}>${label}</span>
-                  <span style=${{fontSize:12,color:"var(--sub)",marginLeft:8}}>${desc}</span></span>
-                ${on&&html`<span style=${{color:"var(--accent)",fontWeight:800}}>✓</span>`}
-              </button>`;
-            })}
-          </div>
-        </div>
-      </div>
-    `, document.body)}
+        </div>`;
+      })()}
+    </div>
 
     <!-- Goals -->
     <!-- ★旧「目標1/2/3」★ 文言と期限だけの古い目標。
@@ -6505,7 +6437,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260802-202956";
+const APP_BUILD = "20260802-204438";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
