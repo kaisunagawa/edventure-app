@@ -2308,19 +2308,22 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
       const Row = ({icon, color, label, title, right, sub, open, onToggle, onAdd, addLabel, last, children}) => html`
         <div style=${{display:"flex",alignItems:"stretch",gap:0}}>
           <!-- アイコンと縦線 -->
-          <div style=${{width:52,flexShrink:0,display:"flex",flexDirection:"column",alignItems:"center",paddingTop:14}}>
+          <div style=${{width:56,flexShrink:0,display:"flex",flexDirection:"column",alignItems:"center",paddingTop:14,paddingLeft:6}}>
             <div style=${{width:30,height:30,borderRadius:"50%",background:color,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,boxShadow:"0 1px 3px rgba(0,0,0,0.12)"}}>${icon}</div>
             ${!last&&html`<div style=${{flex:1,width:2,background:"var(--border)",marginTop:4,marginBottom:-2,minHeight:18}}/>`}
           </div>
           <div style=${{flex:1,minWidth:0,paddingRight:14}}>
             <button onClick=${title?onToggle:onAdd}
               style=${{width:"100%",display:"flex",alignItems:"center",gap:10,background:"none",border:"none",
-                       padding:"14px 0 12px",cursor:"pointer",textAlign:"left",fontFamily:"inherit",
+                       padding:"13px 0 11px",cursor:"pointer",textAlign:"left",fontFamily:"inherit",gap:9,
                        borderBottom:last?"none":"1px solid var(--border)"}}>
-              <span style=${{flexShrink:0,fontSize:11,fontWeight:700,color:color,width:76}}>${label}</span>
+              <span style=${{flexShrink:0,fontSize:10.5,fontWeight:700,color:color,width:68}}>${label}</span>
               <span style=${{flex:1,minWidth:0}}>
-                <span style=${{display:"block",fontSize:13.5,fontWeight:700,color:title?"var(--text)":"var(--accent)",
-                               overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>${title||addLabel}</span>
+                <!-- ★切らずに折り返す★ 目標名が「会社としての売上を400…」で
+                     切れて何の目標か分からなくなっていた。2行まで見せる -->
+                <span style=${{display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical",overflow:"hidden",
+                               fontSize:13.5,fontWeight:700,lineHeight:1.45,
+                               color:title?"var(--text)":"var(--accent)",overflowWrap:"anywhere"}}>${title||addLabel}</span>
                 ${sub&&html`<span style=${{display:"block",fontSize:10.5,color:"var(--sub)",marginTop:2}}>${sub}</span>`}
               </span>
               ${right&&html`<span style=${{flexShrink:0,fontSize:12,color:"var(--sub)",whiteSpace:"nowrap"}}>${right}</span>`}
@@ -2501,7 +2504,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
          3か月目標のどれに効くのか、今日どれだけ進んだかを1枚で見せる。
          関連タスクの件数から、今日の行動へ降りられるようにする。 -->
     <div style=${{margin:"16px 16px 0",background:"var(--card)",borderRadius:16,border:"1px solid var(--border)",padding:"14px 16px"}}>
-      <div style=${{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:intent?12:8}}>
+      <div style=${{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:intent?10:8}}>
         <span style=${{fontSize:13,fontWeight:800,color:"var(--text)"}}>今日のフォーカス</span>
         ${intent
           ? html`<button onClick=${openEditIntent}
@@ -2528,8 +2531,8 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
         // 円形の進捗リング
         const R=26, C=2*Math.PI*R;
         return html`
-        <div style=${{display:"flex",alignItems:"center",gap:12}}>
-          <div style=${{width:44,height:44,borderRadius:12,background:"var(--accent-l)",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
+        <div style=${{display:"flex",alignItems:"center",gap:13,paddingTop:2}}>
+          <div style=${{width:42,height:42,borderRadius:12,background:"var(--accent-l)",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/></svg>
           </div>
           <div style=${{flex:1,minWidth:0}}>
@@ -2539,15 +2542,10 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
                              textDecoration:intent.done?"line-through":"none",opacity:intent.done?0.6:1,overflowWrap:"anywhere"}}>
                 ${intent.intent}${intent.done?" 達成🎉":""}</span>
             </button>
-            ${parent&&html`
-              <button onClick=${()=>setOpenRow("goal")}
-                style=${{display:"flex",alignItems:"center",gap:4,background:"none",border:"none",padding:"5px 0 0",cursor:"pointer",fontFamily:"inherit",maxWidth:"100%"}}>
-                <span style=${{fontSize:11,color:"var(--sub)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
-                  目標: ${parent.title}（3か月目標）</span>
-                <span style=${{fontSize:11,color:"var(--sub)",flexShrink:0}}>›</span>
-              </button>`}
             ${relCount>0&&html`
-              <div style=${{fontSize:11,color:"var(--accent)",fontWeight:700,marginTop:4}}>関連タスク ${relCount}件</div>`}
+              <button onClick=${()=>setOpenRow("goal")}
+                style=${{background:"none",border:"none",padding:"6px 0 0",cursor:"pointer",fontFamily:"inherit",
+                         fontSize:11.5,color:"var(--accent)",fontWeight:700}}>関連タスク ${relCount}件 ›</button>`}
           </div>
           <div style=${{flexShrink:0,textAlign:"center"}}>
             <svg width="62" height="62" viewBox="0 0 62 62">
@@ -6428,7 +6426,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260802-204928";
+const APP_BUILD = "20260802-205616";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
