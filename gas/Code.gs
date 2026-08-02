@@ -5467,8 +5467,83 @@ function saveTodayActions(studentEmail, body) {
   if (body.actions !== undefined) fields.actions = String(body.actions);          // JSON配列文字列 or ""（AIアクションに戻す）
   if (body.checked !== undefined) fields.actions_checked = String(body.checked);  // JSONオブジェクト文字列
   if (Object.keys(fields).length === 0) return { ok: false, error: "missing params" };
-  upsertJournalRow(studentEmail, formatDate(new Date()), fields);
+  const today = formatDate(new Date());
+  upsertJournalRow(studentEmail, today, fields);
+
+  // ★Tasksシートへの橋渡し★
+  //   画面はまだ Journal.actions で動いている。ここで Tasks シートにも
+  //   写しておかないと、移行済みの4件だけが古いまま取り残される。
+  //   画面を Tasks に繋ぎ替えるまでの間だけの処理で、Phase 4 で外す。
+  //   失敗しても本体の保存は成功させる（記録が消える方がずっと困る）。
+  if (body.actions !== undefined) {
+    try { bridgeActionsToTasks(studentEmail, today, String(body.actions), body.checked); }
+    catch (err) { console.error("bridgeActionsToTasks", err); }
+  }
   return { ok: true };
+}
+
+// Journal.actions の内容を Tasks シートへ写す。
+//   ・すでに同じ内容なら何も書かない（毎回全行を書き換えない）
+//   ・削除済み（deleted_at あり）は復活させない
+//   ・Tasks 側にしか無いタスクは消さない。まだ画面が Tasks を見ていないため、
+//     ここで消すと Tasks 側の編集が一方的に失われる
+function bridgeActionsToTasks(studentEmail, dateStr, actionsJson, checkedJson) {
+  let items = [];
+  try { items = JSON.parse(actionsJson || "[]"); } catch (e) { return; }
+  if (!Array.isArray(items)) return;
+
+  let checked = {};
+  try { checked = JSON.parse(checkedJson || "{}") || {}; } catch (e) {}
+
+  const sheet = getP1Sheet("Tasks");
+  const nowIso = new Date().toISOString();
+
+  items.forEach(function (it) {
+    if (!it || typeof it !== "object") return;   // 旧形式（ただの文字列）は id が無いので写せない
+    const id = String(it.id || "").trim();
+    const title = String(it.title || "").trim();
+    if (!id || !title) return;
+
+    const existing = p1OwnedRow("Tasks", "task_id", id, studentEmail);
+    if (existing && String(existing.deleted_at || "").trim()) return;   // 消したものは戻さない
+
+    const done = !!(checked[id] !== undefined ? checked[id] : checked[title]);
+    const rec = {
+      task_id: id, student_email: studentEmail, date: dateStr, title: title,
+      status: done ? "DONE" : normalizeTaskStatus(it.stt || (existing && existing.status) || "TODO")
+    };
+    if (it.imp) rec.importance_level = String(it.imp).toUpperCase();
+    if (it.due) rec.due_at = String(it.due);
+    if (it.est > 0) rec.estimated_minutes = Number(it.est);
+    if (it.memo) rec.memo = String(it.memo);
+    if (done && !(existing && String(existing.completed_at || "").trim())) rec.completed_at = nowIso;
+    if (!done) rec.completed_at = "";
+
+    // 中身が変わっていなければ書かない
+    //   ★日付は型をそろえてから比べる★ シートは "2026-08-02" を日付型に変換して
+    //   保存するため、文字列のまま比べると毎回「違う」と判定され、
+    //   保存のたびに version が際限なく増える。
+    const norm = function (k, v) {
+      if (v === undefined || v === null) return "";
+      if (k === "date") return v instanceof Date ? formatDate(v) : String(v).slice(0, 10);
+      return String(v);
+    };
+    if (existing) {
+      let same = true;
+      Object.keys(rec).forEach(function (k) {
+        if (norm(k, existing[k]) !== norm(k, rec[k])) same = false;
+      });
+      if (same) return;
+      rec.version = Number(existing.version || 0) + 1;
+    } else {
+      rec.created_at = nowIso;
+      rec.version = 1;
+      rec.source_type = "SELF";
+      rec.context = "UNSET";
+    }
+    rec.updated_at = nowIso;
+    p1Upsert("Tasks", "task_id", rec);
+  });
 }
 
 function getTodayActions(studentEmail) {
