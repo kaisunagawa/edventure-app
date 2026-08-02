@@ -8065,9 +8065,17 @@ function p1Upsert(sheetName, idColumn, record) {
     const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
     const now = new Date().toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" });
     const idIdx = headers.indexOf(idColumn);
+    // ★他人の行を上書きしない★
+    //   クライアント由来のタスクid（lt_〜）はタイトルと並び順のハッシュなので、
+    //   別ユーザーが同じ名前のタスクを作ると同じidになる。idだけで行を探すと
+    //   他人の行を乗っ取ってしまう（持ち主ごと書き換わり、相手のタスクが消える）。
+    //   record に student_email があれば、持ち主が一致する行だけを更新対象にする。
+    const emIdx = headers.indexOf("student_email");
     const data = sheet.getDataRange().getValues();
     for (let i = 1; i < data.length; i++) {
       if (String(data[i][idIdx]) !== String(record[idColumn])) continue;
+      if (emIdx !== -1 && record.student_email !== undefined &&
+          String(data[i][emIdx]) !== String(record.student_email)) continue;
       const row = data[i].slice();
       headers.forEach((h, c) => { if (record[h] !== undefined) row[c] = record[h]; });
       if (headers.indexOf("updated_at") !== -1) row[headers.indexOf("updated_at")] = now;
@@ -10882,7 +10890,8 @@ function deleteTask(studentEmail, body) {
   if (String(row.deleted_at || "").trim()) {
     return { ok: true, deleted: true, task_id: id, already: true };  // 何度呼んでも同じ
   }
-  const rec = { task_id: id, deleted_at: new Date().toISOString(),
+  const rec = { task_id: id, student_email: studentEmail,
+                deleted_at: new Date().toISOString(),
                 version: Number(row.version || 0) + 1,
                 updated_at: new Date().toISOString() };
   if (mutationId) rec.last_mutation_id = mutationId;
@@ -10911,7 +10920,7 @@ function carryOverTask(studentEmail, body) {
   if (from === to) return { ok: false, error: "同じ日付へは持ち越せません" };
 
   const rec = {
-    task_id: id, date: to,
+    task_id: id, student_email: studentEmail, date: to,
     carryover_count: Number(row.carryover_count || 0) + 1,
     // 元の日付を残す。積み重なるので履歴として連ねる
     carried_from: (String(row.carried_from || "") ? row.carried_from + "," : "") + from,
