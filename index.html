@@ -6493,7 +6493,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260802-165417";
+const APP_BUILD = "20260802-174144";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
@@ -7200,6 +7200,132 @@ function detectDevice(){
   return { isIOS, isAndroid, iosSafari, iosOther };
 }
 
+// ★3か月目標の初回セットアップ★
+// 目標が1つも無い人は、ここを通ってからホームへ入る。
+// 自己経営OSは3か月目標が起点で、そこが空だと下の層（スプリント・週間目標・
+// 今日のタスク）が何にも繋がらないため。
+//
+// 気をつけたこと:
+//   ・目標の取得に失敗したときは出さない（通信が不安定な人を締め出さない）
+//   ・保存に失敗したら、その場で理由を出してやり直せるようにする
+//     （閉じ込めて記録できなくするのが一番まずい）
+//   ・数字を先に聞かない。「どうなったら達成か」を決めてから数えるものを選ぶ
+function FirstGoalGate({onDone, onToast}) {
+  const today = formatDateStr(new Date());
+  const plusM = (n)=>{ const x=new Date(today+"T00:00:00+09:00"); x.setMonth(x.getMonth()+n); return formatDateStr(x); };
+  const [step, setStep] = useState(0);
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState("");
+  const [d, setD] = useState({ title:"", why:"", success_condition:"", unit:"", 
+                               target_value:"", current_value:"",
+                               start_date: today, end_date: plusM(3), priority:1, status:"ACTIVE" });
+  const set = (k,v)=>setD(p=>({...p,[k]:v}));
+
+  const STEPS = [
+    { title:"3か月後、どうなっていたいですか？",
+      hint:"まず1つだけ決めます。ここが決まると、2週間でやること・今週やること・今日やることが順に決まります。",
+      body: html`<input class="inp" placeholder="例：会社としての売上を月400万円にする"
+        value=${d.title} onInput=${e=>set("title",e.target.value)} style=${{marginBottom:8}}/>`,
+      ok: ()=>String(d.title).trim().length>0, req:"やりたいことを書いてください" },
+    { title:"なぜ、それをやりたい？",
+      hint:"きれいな言葉でなくて大丈夫です。しんどい時に自分を戻してくれるのは、この一行です。",
+      body: html`<textarea class="inp" placeholder="例：家族に心配をかけずに、来年も同じ働き方を続けたいから"
+        value=${d.why} onInput=${e=>set("why",e.target.value)}
+        style=${{minHeight:100,resize:"vertical",lineHeight:1.7,fontFamily:"inherit"}}/>`,
+      ok: ()=>true },
+    { title:"どうなっていたら「できた」と言える？",
+      hint:"「がんばる」ではなく、他の人が見ても分かる状態で書きます。ここが決まると、数えるものが決まります。",
+      body: html`<textarea class="inp" placeholder="例：3社と継続契約していて、月の売上が400万円を超えている"
+        value=${d.success_condition} onInput=${e=>set("success_condition",e.target.value)}
+        style=${{minHeight:100,resize:"vertical",lineHeight:1.7,fontFamily:"inherit"}}/>`,
+      ok: ()=>String(d.success_condition).trim().length>0, req:"どうなったら達成かを書いてください" },
+    { title:"では、何を数えますか？",
+      hint:"上の状態に近づいたかを測れる数字を1つだけ選びます。増えるほど良い数字にしてください。",
+      body: html`
+        <div style=${{display:"flex",gap:6,flexWrap:"wrap",marginBottom:10}}>
+          ${["万円","件","回","時間","日","kg","%","点"].map(u=>html`
+            <button key=${u} onClick=${()=>set("unit",u)}
+              style=${{padding:"7px 14px",borderRadius:20,fontSize:12.5,cursor:"pointer",fontFamily:"inherit",
+                       border:`1.5px solid ${d.unit===u?"var(--accent)":"var(--border)"}`,
+                       background:d.unit===u?"var(--accent-l)":"transparent",
+                       color:d.unit===u?"var(--accent)":"var(--sub)",fontWeight:d.unit===u?700:500}}>${u}</button>`)}
+        </div>
+        <input class="inp" placeholder="ほかの単位（例：社、本、ページ）" value=${d.unit}
+          onInput=${e=>set("unit",e.target.value)} style=${{marginBottom:12}}/>
+        <div style=${{display:"flex",gap:10}}>
+          <label style=${{flex:1}}><span class="form-lbl">3か月後にいくつ？</span>
+            <input class="inp" type="number" inputmode="decimal" value=${d.target_value}
+              onInput=${e=>set("target_value",e.target.value)} style=${{margin:0,textAlign:"right"}}/></label>
+          <label style=${{flex:1}}><span class="form-lbl">いまはいくつ？</span>
+            <input class="inp" type="number" inputmode="decimal" value=${d.current_value}
+              onInput=${e=>set("current_value",e.target.value)} style=${{margin:0,textAlign:"right"}}/></label>
+        </div>
+        <div style=${{fontSize:11.5,color:"var(--sub)",lineHeight:1.7,marginTop:8}}>
+          いまが0でも書いてください。空欄だと「まだ測っていない」扱いになり、進み具合を出せません。
+        </div>`,
+      ok: ()=>String(d.unit).trim() && String(d.target_value).trim(),
+      req:"単位と、3か月後の数字を入れてください" },
+    { title:"いつまで？",
+      hint:"3か月が基本です。長すぎると今日が変わらず、短すぎると形になりません。",
+      body: html`
+        <div style=${{display:"flex",gap:6,marginBottom:12}}>
+          ${[["3か月",3],["2か月",2],["1か月",1]].map(([lb,n])=>html`
+            <button key=${lb} onClick=${()=>set("end_date", plusM(n))}
+              style=${{flex:1,padding:"11px 4px",borderRadius:10,fontSize:13,cursor:"pointer",fontFamily:"inherit",fontWeight:700,
+                       border:`1.5px solid ${d.end_date===plusM(n)?"var(--accent)":"var(--border)"}`,
+                       background:d.end_date===plusM(n)?"var(--accent-l)":"transparent",
+                       color:d.end_date===plusM(n)?"var(--accent)":"var(--sub)"}}>${lb}</button>`)}
+        </div>
+        <div style=${{display:"flex",gap:10}}>
+          <label style=${{flex:1}}><span class="form-lbl">はじめ</span>
+            <input class="inp" type="date" value=${d.start_date} onInput=${e=>set("start_date",e.target.value)} style=${{margin:0}}/></label>
+          <label style=${{flex:1}}><span class="form-lbl">おわり</span>
+            <input class="inp" type="date" value=${d.end_date} onInput=${e=>set("end_date",e.target.value)} style=${{margin:0}}/></label>
+        </div>`,
+      ok: ()=>String(d.end_date).trim(), req:"いつまでかを決めてください" }
+  ];
+  const cur = STEPS[step];
+  const last = step === STEPS.length - 1;
+
+  const next = async () => {
+    if (!cur.ok()) { setErr(cur.req || "入力してください"); return; }
+    setErr("");
+    if (!last) { setStep(step+1); return; }
+    setSaving(true);
+    const r = await gasPostJson("saveGoal", d);
+    setSaving(false);
+    if (r && r.ok) { onToast && onToast("目標を決めました"); onDone(); }
+    // ★閉じ込めない★ 失敗したら理由を出してやり直せるようにする
+    else setErr((r && r.error) || "保存できませんでした。通信を確かめて、もう一度お試しください");
+  };
+
+  return html`
+    <div style=${{position:"fixed",inset:0,zIndex:600,background:"var(--bg)",display:"flex",flexDirection:"column"}}>
+      <div style=${{padding:"18px 16px 12px",flexShrink:0,paddingTop:"calc(18px + var(--safe-top, 0px))"}}>
+        <div style=${{fontSize:10.5,color:"var(--sub)",fontWeight:700,marginBottom:3}}>はじめの設定　${step+1} / ${STEPS.length}</div>
+        <div style=${{height:3,background:"var(--border)",borderRadius:99}}>
+          <div style=${{height:"100%",width:((step+1)/STEPS.length*100)+"%",background:"var(--accent)",borderRadius:99,transition:"width .3s"}}/>
+        </div>
+      </div>
+      <div style=${{flex:1,overflowY:"auto",WebkitOverflowScrolling:"touch",padding:"8px 16px calc(28px + var(--safe-bottom, 0px))"}}>
+        <div style=${{fontSize:19,fontWeight:800,lineHeight:1.5,marginBottom:8}}>${cur.title}</div>
+        <div style=${{fontSize:12.5,color:"var(--sub)",lineHeight:1.8,marginBottom:16}}>${cur.hint}</div>
+        ${cur.body}
+        ${err&&html`<div style=${{fontSize:12.5,color:"var(--red,#d33)",lineHeight:1.7,marginTop:10}}>${err}</div>`}
+        <div style=${{display:"flex",gap:8,marginTop:18}}>
+          ${step>0&&html`<button onClick=${()=>{setErr("");setStep(step-1);}}
+            style=${{flex:1,padding:"13px",borderRadius:10,border:"1.5px solid var(--border)",background:"none",color:"var(--sub)",fontSize:13.5,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>もどる</button>`}
+          <button disabled=${saving} onClick=${next}
+            style=${{flex:2,padding:"13px",borderRadius:10,border:"none",background:"var(--accent)",color:"#fff",fontSize:13.5,fontWeight:700,cursor:"pointer",fontFamily:"inherit",opacity:saving?0.6:1}}>
+            ${saving?"保存中…":(last?"はじめる":"次へ")}</button>
+        </div>
+        ${step===1&&html`<button onClick=${()=>{setErr("");setStep(step+1);}}
+          style=${{width:"100%",marginTop:10,background:"none",border:"none",color:"var(--sub)",fontSize:12,cursor:"pointer",fontFamily:"inherit"}}>
+          ここは飛ばす</button>`}
+      </div>
+    </div>`;
+}
+
 // 学生向け・必須セットアップ画面（①ホーム画面に追加 ②LINE連携 の両方が済むまで先へ進めない）
 function StudentSetupGate({email, lineLinked, onRecheck, onSkip}){
   const installed = isStandaloneDisplay();
@@ -7485,27 +7611,35 @@ function FeatureAnnounce({onClose,onGo}){
   return html`
     <div style=${{position:"fixed",inset:0,height:"100dvh",background:"rgba(0,0,0,0.55)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:600,padding:20}}
       onClick=${e=>{if(e.target===e.currentTarget)onClose();}}>
-      <div style=${{background:"var(--card)",borderRadius:20,width:"100%",maxWidth:380,overflow:"hidden",boxShadow:"0 20px 50px rgba(0,0,0,0.3)"}}>
+      <div style=${{background:"var(--card)",borderRadius:20,width:"100%",maxWidth:380,maxHeight:"86dvh",overflowY:"auto",boxShadow:"0 20px 50px rgba(0,0,0,0.3)"}}>
         <div style=${{background:"linear-gradient(135deg, var(--hero1) 0%, var(--hero2) 100%)",padding:"28px 22px 22px",textAlign:"center"}}>
-          <div style=${{fontSize:40,marginBottom:6}}>📋</div>
+          <div style=${{fontSize:40,marginBottom:6}}>🎯</div>
           <div style=${{fontSize:12,fontWeight:700,color:"rgba(255,255,255,0.85)",letterSpacing:"0.05em",marginBottom:4}}>UPDATE</div>
-          <div style=${{fontSize:20,fontWeight:800,color:"#fff",lineHeight:1.4}}>アップデートしました✨<br/>記録が"報告"に変わる</div>
+          <div style=${{fontSize:20,fontWeight:800,color:"#fff",lineHeight:1.4}}>記録するだけ、から<br/>目標に向かう毎日へ</div>
         </div>
         <div style=${{padding:"20px 22px 22px"}}>
-          <div style=${{display:"flex",gap:10,marginBottom:14}}>
-            <div style=${{fontSize:20,flexShrink:0}}>📋</div>
-            <div><div style=${{fontSize:13,fontWeight:700,color:"var(--text)"}}>業務報告書がワンタップで</div>
-              <div style=${{fontSize:12,color:"var(--sub)",lineHeight:1.6,marginTop:1}}>レポート画面の「レポートを生成する」を押すと、今日の記録から上司・会社への報告文を自動作成。コピーしてメールやチャットに貼るだけです。</div></div>
+          <div style=${{fontSize:12.5,color:"var(--sub)",lineHeight:1.8,marginBottom:16}}>
+            これまでは「今日を記録する」アプリでした。今回から、3か月後にたどり着きたい場所と今日やることが、ひと続きになります。
           </div>
           <div style=${{display:"flex",gap:10,marginBottom:14}}>
-            <div style=${{fontSize:20,flexShrink:0}}>⏱️</div>
-            <div><div style=${{fontSize:13,fontWeight:700,color:"var(--text)"}}>朝の宣言でタスクも時間も</div>
-              <div style=${{fontSize:12,color:"var(--sub)",lineHeight:1.6,marginTop:1}}>「今日いちばん達成したいこと」の画面で、タスクと想定時間（分）を一緒に登録できるように。タスクの横に⏱時間が表示され、タイマーもその時間で始まります。</div></div>
+            <div style=${{fontSize:20,flexShrink:0}}>🎯</div>
+            <div><div style=${{fontSize:13,fontWeight:700,color:"var(--text)"}}>3か月目標 → 2週間 → 今週 → 今日</div>
+              <div style=${{fontSize:12,color:"var(--sub)",lineHeight:1.6,marginTop:1}}>ホームがこの順に並びました。上から読むと、今日なにをやるかが決まります。3か月目標はまだの方に、最初に5つの質問でお聞きします（5分ほど）。</div></div>
+          </div>
+          <div style=${{display:"flex",gap:10,marginBottom:14}}>
+            <div style=${{fontSize:20,flexShrink:0}}>📱</div>
+            <div><div style=${{fontSize:13,fontWeight:700,color:"var(--text)"}}>スマホとパソコンでタスクが揃う</div>
+              <div style=${{fontSize:12,color:"var(--sub)",lineHeight:1.6,marginTop:1}}>片方で足したタスクや変えた期限が、もう片方にも届きます。両方で同じ項目を変えたときだけ「どちらを残すか」をお聞きします。</div></div>
+          </div>
+          <div style=${{display:"flex",gap:10,marginBottom:14}}>
+            <div style=${{fontSize:20,flexShrink:0}}>✅</div>
+            <div><div style=${{fontSize:13,fontWeight:700,color:"var(--text)"}}>タスクに期限・重要度・分類</div>
+              <div style=${{fontSize:12,color:"var(--sub)",lineHeight:1.6,marginTop:1}}>タスクを押すと詳細が開きます。期限と重要度から「今すぐ」「早めに」を自動で出し、仕事とプライベートも分けられます。明日へ持ち越しても同じタスクのまま残ります。</div></div>
           </div>
           <div style=${{display:"flex",gap:10,marginBottom:20}}>
-            <div style=${{fontSize:20,flexShrink:0}}>🗓️</div>
-            <div><div style=${{fontSize:13,fontWeight:700,color:"var(--text)"}}>レポート一覧が月ごとに</div>
-              <div style=${{fontSize:12,color:"var(--sub)",lineHeight:1.6,marginTop:1}}>過去のレポートが「7月」「6月」と月ごとにまとまり、月の平均点も見えるようになりました。成長の振り返りがしやすくなります。</div></div>
+            <div style=${{fontSize:20,flexShrink:0}}>↕️</div>
+            <div><div style=${{fontSize:13,fontWeight:700,color:"var(--text)"}}>並べ替えと、今日の合計時間</div>
+              <div style=${{fontSize:12,color:"var(--sub)",lineHeight:1.6,marginTop:1}}>▲▼で自分の順に。想定時間の合計も出るので、今日そもそも入るのかが分かります。</div></div>
           </div>
           <button class="btn" onClick=${onClose}>さっそく使ってみる</button>
           <button onClick=${onClose}
@@ -7625,6 +7759,21 @@ function App() {
       if(r.done>0) setToast("保存できていなかった記録を"+r.done+"件、反映しました");
     })();
   },[]);
+  // 3か月目標があるかを確かめる。取得できたときだけ判定する
+  useEffect(()=>{
+    if(!user || needsReauth) return;
+    let alive = true;
+    gasApi("getGoalTree").then(r=>{
+      if(!alive) return;
+      if(r && r.ok && r.data && Array.isArray(r.data.goals)){
+        const n = r.data.goals.filter(g=>String(g.status||"ACTIVE").toUpperCase()!=="ARCHIVED").length;
+        setGoalsProbe(n);
+      }
+      // 失敗時は null のまま＝ゲートを出さない（締め出さない）
+    }).catch(()=>{});
+    return ()=>{ alive = false; };
+  },[user, needsReauth]);
+
   useEffect(()=>{
     if(getSessionToken()) return;
     (async()=>{
@@ -7646,6 +7795,9 @@ function App() {
   // 学生向け必須セットアップ（ホーム画面追加＋LINE連携）。PC等でどうしてもできない人用に
   // 目立たないスキップだけ用意（セッション内のみ・次回開くとまた出る）
   const [setupSkipped,setSetupSkipped]=useState(false);
+  // 3か月目標があるか。null=未確認（この間はゲートを出さない）
+  const [goalsProbe,setGoalsProbe]=useState(null);
+  const [firstGoalDone,setFirstGoalDone]=useState(false);
   // LINE連携できたかをその場で再確認して、ゲートを進めるための再取得
   const recheckUser = async () => {
     try {
@@ -7669,7 +7821,7 @@ function App() {
   // 新機能のお知らせ（アプリを開いた時に1回だけ表示）。IDを変えれば次の告知を出せる。
   // チュートリアル中の新規ユーザーには出さない（既存ユーザーへの告知が目的のため）
   // チュートリアル中は下でreturnするので出ない。それ以外の全員に未読なら表示する
-  const ANNOUNCE_ID="update5_2026_07_22";
+  const ANNOUNCE_ID = "20260802-selfmgmt-os";
   const [showAnnounce,setShowAnnounce]=useState(()=>localStorage.getItem("announce_seen")!==ANNOUNCE_ID);
   const dismissAnnounce=()=>{ localStorage.setItem("announce_seen",ANNOUNCE_ID); setShowAnnounce(false); };
   // チュートリアル終了後は記録タブに着地させる（登録だけして使い始めない人が多いため、
@@ -7762,6 +7914,13 @@ function App() {
   if(needsReauth) return html`<${ReauthGate}/>`;
   if(showOnboarding) return html`<${OnboardingQuiz} onDone=${()=>setShowOnboarding(false)}/>`;
   if(showTutorial) return html`<${TutorialOverlay} onDone=${dismissTutorial}/>`;
+  // ★3か月目標が空の人は、先に1つ決めてもらう★
+  //   goalsProbe: null=まだ分からない / 0=無い / 1以上=ある
+  //   ★分からないうちは絶対に出さない★ 通信が不安定なだけの人を
+  //   記録できない状態に閉じ込めてしまうため
+  if (goalsProbe === 0 && !firstGoalDone) {
+    return html`<${FirstGoalGate} onDone=${()=>{ setFirstGoalDone(true); setGoalsProbe(1); }} onToast=${setToast}/>`;
+  }
   // 学生（cohort付き）は、ホーム画面追加＋LINE連携が両方済むまで必須セットアップ画面を出す
   if(!!user.cohort && !setupSkipped && (!isStandaloneDisplay() || user.lineLinked===false)){
     return html`<${StudentSetupGate} email=${user.email} lineLinked=${user.lineLinked!==false} onRecheck=${recheckUser} onSkip=${()=>setSetupSkipped(true)}/>`;
