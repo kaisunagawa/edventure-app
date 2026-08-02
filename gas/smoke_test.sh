@@ -192,6 +192,18 @@ PY
     ng "publicApiRaw が未使用のまま残っている ─ 認証なしで呼べる道具を残さない"
   fi
 
+  # ★保存形式を変えたのに、読む側が文字列前提のまま残っていないか★
+  # Phase 1 で actions を [{id,title}] にしたが、業務レポート生成が
+  # 文字列前提のままで、text にオブジェクトが入っていた（実際に混入）。
+  # localStorage から actions を読む箇所は、必ず normalizeTaskList を通す。
+  bad=$(grep -n 'getItem("jiroku_custom_actions_' ../index.html | grep -v setItem | grep -v removeItem | wc -l | tr -d " ")
+  norm=$(grep -A3 'getItem("jiroku_custom_actions_' ../index.html | grep -c "normalizeTaskList" || true)
+  if [ "${norm:-0}" -ge 2 ]; then
+    ok "actions を読む箇所が正規化を通っている"
+  else
+    ng "actions を文字列前提で読んでいる箇所がある（${bad}箇所中 ${norm} だけ正規化）"
+  fi
+
   # 端末間の同期（スマホで設定した重要度・期限がPCへ届くか）
   if python3 build_sync_test.py >/dev/null 2>&1 || python3 ../gas/build_sync_test.py >/dev/null 2>&1; then
     ok "端末間の同期（重要度・期限・想定時間）"

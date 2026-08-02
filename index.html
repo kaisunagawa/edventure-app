@@ -3290,10 +3290,19 @@ function ReportScreen() {
     // タスクの完了状態と見積もり時間は端末にしかないため、ここで集めて送る
     let tasks=[];
     try{
-      const actions = JSON.parse(localStorage.getItem("jiroku_custom_actions_"+todayKey)||"[]")||[];
+      // ★保存形式が [{id,title}] に変わっている★
+      //   ここは文字列前提のままだったため、text にオブジェクトが入り、
+      //   完了状態も見積もりも引けなくなっていた（Phase 1 の見落とし）。
+      //   normalizeTaskList を通して、id と title の両方で引く。
+      const rawActions = JSON.parse(localStorage.getItem("jiroku_custom_actions_"+todayKey)||"[]")||[];
+      const actions = normalizeTaskList(rawActions);
       const checked = JSON.parse(localStorage.getItem("today_actions")||"{}");
       const est = JSON.parse(localStorage.getItem("jiroku_task_estimates_"+todayKey)||"{}");
-      tasks = actions.map(t=>({text:t, done:!!checked[t], min:Number(est[t])||0}));
+      tasks = actions.map(t=>({
+        text: t.title,
+        done: !!(checked[t.id] || checked[t.title]),
+        min: Number(est[t.id] !== undefined ? est[t.id] : est[t.title]) || 0
+      }));
     }catch(e){}
     let intent=null;
     try{ const s=JSON.parse(localStorage.getItem("jiroku_intent")||"null"); if(s&&s.date===todayKey) intent=s; }catch(e){}
