@@ -566,8 +566,17 @@ function enqueueTaskMutation(op, taskId, changes){
   const q = loadTaskQueue();
   const m = { mid: "m_"+Date.now()+"_"+Math.random().toString(36).slice(2,8),
               op: op, task_id: taskId, changes: changes||{}, tries: 0, state: "pending" };
-  // ★楽観的ロック★ 自分が知っている版を添える。サーバーと違えば競合として返る
-  if (op === "UPDATE") { const v = taskVersions()[taskId]; if (v !== undefined) m.base_version = v; }
+  // ★版チェックは「名前・メモ」の書き換えだけ★
+  //   進捗・重要度・期限・想定時間・分類は1項目だけの変更で、サーバーは
+  //   送られた項目しか書かない＝他の項目を壊せない。これにまで版チェックを
+  //   かけると、PCで重要度を変えた後にスマホでチェックしただけで
+  //   「確認してください」が出てしまう（実際に3件出た）。
+  //   文章（名前・メモ）は上書きされると本当に消えるので、版チェックを残す。
+  const GUARDED = { title: 1, memo: 1 };
+  const needsGuard = Object.keys(changes || {}).some(k => GUARDED[k]);
+  if (op === "UPDATE" && needsGuard) {
+    const v = taskVersions()[taskId]; if (v !== undefined) m.base_version = v;
+  }
   q.push(m); saveTaskQueue(q);
   clearTimeout(window.__jirokuQueueTimer);
   window.__jirokuQueueTimer = setTimeout(flushTaskQueue, 800);   // 連続操作は1回にまとめる
@@ -612,6 +621,20 @@ async function flushTaskQueue(){
     window.dispatchEvent(new CustomEvent("jiroku:taskflushed"));
   } finally { __taskQueueFlushing = false; }
 }
+// 以前の作りで「重要度だけ」「チェックだけ」の変更が確認待ちに積まれた端末の救済。
+// 名前・メモ以外の変更は版チェックなしで送り直す（他の項目を壊せないため安全）
+(function rescueStuckConflicts(){
+  try {
+    const q = loadTaskQueue();
+    let changed = false;
+    q.forEach(x => {
+      if (x.state !== "conflict") return;
+      if (Object.keys(x.changes || {}).some(k => k === "title" || k === "memo")) return;
+      delete x.base_version; x.state = "pending"; delete x.server; changed = true;
+    });
+    if (changed) saveTaskQueue(q);
+  } catch (e) {}
+})();
 window.addEventListener("jiroku:authed", ()=>setTimeout(flushTaskQueue, 500));
 window.addEventListener("online", ()=>setTimeout(flushTaskQueue, 500));
 setTimeout(flushTaskQueue, 3000);
@@ -1438,7 +1461,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
       // ★Tasksシートを正とした反映（Phase 3）★
       //   下の Journal.actions 同期より後に走らせる（あとに適用した方が勝つため、
       //   Tasksシートの内容が最終的な画面になる）。
-      setTimeout(applyTasksFromServer, 0);
+      setTimeout(()=>{ Promise.resolve(applyTasksFromServer()).catch(e=>{ console.error("[JIROKU] タスク同期の取得に失敗:", e); }); }, 0);
       // 今日のアクションの端末間同期
       if(d.todayActions){
         // ★タスク一覧はサーバーと突き合わせて1つにまとめる★
@@ -1822,9 +1845,19 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
 
   // 送信が済んだら最新を取り直す（他端末の変更もここで届く）
   useEffect(()=>{
-    const onFlushed = () => { if (!loadTaskQueue().length) applyTasksFromServer(); };
-    window.addEventListener("jiroku:taskflushed", onFlushed);
-    return () => window.removeEventListener("jiroku:taskflushed", onFlushed);
+    // ★確認待ち（旧: 競合）が残っていても取得は止めない★
+    //   確認待ちのタスクは applyTasksFromServer 側が個別に守るので、
+    //   他のタスクの同期まで道連れにしない。以前は「キューが空のときだけ
+    //   取得」にしていたため、確認待ち3件が居座るとスマホが一切
+    //   同期しなくなった（実際に起きた）。
+    const refetch = () => { if (!loadTaskQueue().some(x=>x.state==="pending")) applyTasksFromServer(); };
+    const onVis = () => { if (document.visibilityState === "visible") refetch(); };
+    window.addEventListener("jiroku:taskflushed", refetch);
+    document.addEventListener("visibilitychange", onVis);
+    const timer = setInterval(refetch, 60000);   // 画面を開きっぱなしでも1分ごとに追いつく
+    return () => { window.removeEventListener("jiroku:taskflushed", refetch);
+                   document.removeEventListener("visibilitychange", onVis);
+                   clearInterval(timer); };
   });
 
   // ★設定を変えたら、その場でサーバーへ送る★
@@ -2085,43 +2118,6 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
             </div>
           </div>`;
       })()}
-      ${game&&game.weekDayCounts&&(()=>{
-        const wc=game.weekDayCounts;               // 新しい順（[0]=今週）
-        const thisWeek=wc[0]?wc[0].days:0;
-        const met=thisWeek>=weeklyGoal;
-        // 週ストリーク: 直近の「完了した週」から遡って、目標達成した週が連続する数。
-        // 今週すでに達成していれば+1（今週も達成としてカウント）
-        let streakW=0;
-        for(let i=1;i<wc.length;i++){ if(wc[i].days>=weeklyGoal) streakW++; else break; }
-        if(met) streakW+=1;
-        const pctW=Math.min(100,Math.round(thisWeek/weeklyGoal*100));
-        return html`
-          <div style=${{background:"rgba(255,255,255,0.15)",borderRadius:12,padding:"10px 14px",backdropFilter:"blur(4px)",marginTop:10}}>
-            <div style=${{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:7}}>
-              <div style=${{display:"flex",alignItems:"baseline",gap:8}}>
-                <span style=${{fontSize:13,fontWeight:700,color:"#fff"}}>今週のペース</span>
-                <button onClick=${()=>setShowWeeklyGoalEdit(true)}
-                  style=${{fontSize:10.5,color:"rgba(255,255,255,0.8)",background:"rgba(255,255,255,0.18)",border:"none",borderRadius:20,padding:"2px 8px",fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>
-                  目標 ${weeklyGoal===7?"毎日":"週"+weeklyGoal}日 ✎
-                </button>
-              </div>
-              <span style=${{fontSize:13,fontWeight:800,color:"#fff"}}>
-                <span style=${{fontSize:18}}>${thisWeek}</span><span style=${{fontSize:12,color:"rgba(255,255,255,0.7)"}}>/${weeklyGoal===7?7:weeklyGoal}日</span>
-                ${met&&html` <span style=${{fontSize:12}}>✅</span>`}
-              </span>
-            </div>
-            <div style=${{display:"flex",gap:4}}>
-              ${Array.from({length:weeklyGoal===7?7:weeklyGoal}).map((_,i)=>html`
-                <div key=${i} style=${{flex:1,height:6,borderRadius:99,background:i<thisWeek?"#fff":"rgba(255,255,255,0.25)"}}/>
-              `)}
-            </div>
-            <div style=${{fontSize:11,color:"rgba(255,255,255,0.7)",marginTop:6}}>
-              ${streakW>0
-                ? html`🎯 <b style=${{color:"#fff"}}>${streakW}週連続</b>で目標達成中${met?"":"（今週あと"+Math.max(0,weeklyGoal-thisWeek)+"日）"}`
-                : (met?"🎯 今週の目標を達成！":"今週あと"+Math.max(0,weeklyGoal-thisWeek)+"日で目標達成")}
-            </div>
-          </div>`;
-      })()}
       <div style=${{display:"flex",gap:8,marginTop:10}}>
         ${ranking&&html`
           <div style=${{flex:1,minWidth:0,display:"flex",alignItems:"center",gap:7,background:"rgba(255,255,255,0.15)",borderRadius:12,padding:"7px 12px",backdropFilter:"blur(4px)"}}>
@@ -2150,6 +2146,50 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
     </div>
 
     ${showCommunity&&html`<${CommunityOverlay} onClose=${()=>setShowCommunity(false)}/>`}
+
+    <!-- ★今日ブロック（自己経営OSホーム 段階1）★
+         ホームを「情報の一覧」ではなく「次に何をするか決める画面」にする。
+         開いて3秒で今日の動きが決まるよう、判断材料だけを1枚に集める。
+         データはすべて既存の状態から計算する（新しい通信はしない） -->
+    ${(()=>{
+      const items = actionItems || [];
+      const undone = items.filter(t=>!isDone(t));
+      const fmtMin = m => m>=60 ? `${Math.floor(m/60)}時間${m%60?`${m%60}分`:""}` : `${m}分`;
+      let overdue=0, dueToday=0, restMin=0, noEst=0;
+      undone.forEach(t=>{
+        const q = quadrantOf(t);
+        if (q.overdue) overdue++;
+        else if (dueOf(t) === todayKey) dueToday++;
+        const e2 = Number(estOf(t))||0;
+        if (e2>0) restMin+=e2; else noEst++;
+      });
+      // 今すぐやる1件: 期限超過 → 今すぐやる分類 → 先頭の未完了
+      const next = undone.find(t=>quadrantOf(t).overdue)
+                || undone.find(t=>quadrantOf(t).quadrant==="DO_NOW")
+                || undone[0];
+      const slots = new Set((todayLogs||[]).map(l=>String(l.time_block||"").slice(0,2)).filter(Boolean)).size;
+      const hasFocus = intent && intent.date === todayKey && intent.intent;
+      const chip = (bg,color,txt) => html`<span style=${{fontSize:11,fontWeight:600,background:bg,color:color,borderRadius:20,padding:"3px 9px",whiteSpace:"nowrap"}}>${txt}</span>`;
+      return html`
+      <div style=${{margin:"16px 16px 0",background:"var(--card)",borderRadius:16,border:"1.5px solid var(--accent)",padding:"14px 16px"}}>
+        <div style=${{fontSize:11,fontWeight:700,color:"var(--accent)",letterSpacing:"0.06em",marginBottom:8}}>今日 — まずこれ</div>
+        ${hasFocus
+          ? html`<div style=${{fontSize:15,fontWeight:800,color:"var(--text)",lineHeight:1.5,marginBottom:4,overflowWrap:"anywhere"}}>${intent.intent}
+              ${intent.hours>0&&html`<span style=${{fontSize:12,fontWeight:600,color:"var(--sub)"}}> / ${intent.hours}時間</span>`}</div>`
+          : html`<button onClick=${()=>{ setIntentEditMode(true); setShowIntentModal(true); }}
+              style=${{background:"none",border:"1.5px dashed var(--border)",borderRadius:10,padding:"9px 12px",width:"100%",textAlign:"left",fontSize:13,color:"var(--sub)",cursor:"pointer",fontFamily:"inherit",marginBottom:4}}>
+              ⭐ 今日いちばんやりたいことを決める</button>`}
+        ${next&&html`<div style=${{fontSize:12.5,color:"var(--sub)",marginBottom:8}}>次のタスク: <b style=${{color:"var(--text)"}}>${next}</b>${estOf(next)>0&&html` <span>（${estOf(next)}分）</span>`}</div>`}
+        <div style=${{display:"flex",gap:6,flexWrap:"wrap"}}>
+          ${overdue>0&&chip("var(--red,#d33)","#fff",`期限超過 ${overdue}件`)}
+          ${dueToday>0&&chip("var(--accent-l)","var(--accent)",`今日中 ${dueToday}件`)}
+          ${undone.length>0&&chip("var(--bg)","var(--sub)",`残り${undone.length}件${restMin>0?` / 想定${fmtMin(restMin)}`:""}`)}
+          ${chip("var(--bg)","var(--sub)",`記録 ${slots}時間帯`)}
+          ${taskSync.pending>0&&chip("var(--bg)","var(--sub)",`保存中…`)}
+          ${taskSync.conflict>0&&chip("var(--red,#d33)","#fff",`要確認 ${taskSync.conflict}件`)}
+        </div>
+      </div>`;
+    })()}
 
     <!-- 週次ふりかえり（今週のまとめ＋振り返り記入＋来週の一言）。週末（土日）に、未記入かつ未閉じの時だけ大きく出す -->
     ${weekly && !weekly.reflected && !weekDismissed && shouldShowWeeklyReview(weekly) && html`
@@ -2429,27 +2469,41 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
     ${conflictItem&&html`
       <div onClick=${()=>setConflictItem(null)} style=${{position:"fixed",inset:0,background:"rgba(0,0,0,0.45)",zIndex:220,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
         <div onClick=${e=>e.stopPropagation()} style=${{background:"var(--card)",borderRadius:16,padding:"20px 18px",maxWidth:420,width:"100%"}}>
-          <div style=${{fontSize:14.5,fontWeight:700,marginBottom:8}}>別の端末で更新されています</div>
-          <div style=${{fontSize:12.5,color:"var(--sub)",lineHeight:1.7,marginBottom:12}}>
-            「${(conflictItem.server&&conflictItem.server.title)||conflictItem.task_id}」が、この端末の知らないうちに変わっていました。<br/>
-            サーバー版: ${conflictItem.server ? `${conflictItem.server.title}（版${conflictItem.server.version}）` : "不明"}<br/>
-            この端末の変更: ${Object.keys(conflictItem.changes||{}).map(k=>`${k}=${conflictItem.changes[k]}`).join(" / ")||"（内容なし）"}
+          ${(()=>{
+            // 変更内容を日本語で読めるようにする（status=IN_PROGRESS のような表示をしない）
+            const FIELD = { title:"名前", status:"進捗", importance_level:"重要度", due_at:"期限",
+                            estimated_minutes:"想定時間", memo:"メモ", context:"分類", date:"日付" };
+            const VAL = { TODO:"予定", IN_PROGRESS:"実行中", DONE:"完了", CARRIED_OVER:"持ち越し",
+                          HIGH:"高", MEDIUM:"中", LOW:"低",
+                          UNSET:"未設定", WORK:"仕事", PERSONAL:"プライベート", LEARNING:"学び", HEALTH:"健康", OTHER:"その他" };
+            const jp = (k,v) => `${FIELD[k]||k}を「${VAL[String(v)]||v||"なし"}」に`;
+            const mine = Object.keys(conflictItem.changes||{}).map(k=>jp(k, conflictItem.changes[k])).join("、");
+            const sv = conflictItem.server;
+            const name = (sv&&sv.title)||"このタスク";
+            return html`
+          <div style=${{fontSize:15,fontWeight:800,marginBottom:8,lineHeight:1.5}}>「${name}」が2つの端末で変更されました</div>
+          <div style=${{fontSize:13,color:"var(--sub)",lineHeight:1.8,marginBottom:12}}>
+            この端末とは別の端末（スマホやPC）でも同じタスクの名前かメモが変更されていました。
+            どちらを残すか選んでください。選ぶまでこのタスクは同期されません。
+          </div>
+          <div style=${{background:"var(--bg)",borderRadius:10,padding:"10px 12px",fontSize:12.5,lineHeight:1.8,marginBottom:12}}>
+            <div>🖥 別の端末: 「${name}」${sv&&sv.memo?`（メモあり）`:""}</div>
+            <div>📱 この端末: ${mine||"（変更内容を読み取れませんでした）"}</div>
           </div>
           <button class="btn" style=${{marginBottom:8}} onClick=${()=>{
-            // サーバー版を使う: この端末の変更を捨てて、最新を取り直す
             saveTaskQueue(loadTaskQueue().filter(x=>x.mid!==conflictItem.mid));
             setConflictItem(null); applyTasksFromServer();
-          }}>サーバーの内容を使う</button>
+          }}>別の端末の内容を残す（この端末の変更をやめる）</button>
           <button class="btn" style=${{marginBottom:8,background:"var(--bg)",color:"var(--text)"}} onClick=${()=>{
-            // 自分の変更を再適用: サーバーの版に載せ直して送る
             const q = loadTaskQueue();
             const m = q.find(x=>x.mid===conflictItem.mid);
             if (m) { m.base_version = conflictItem.server ? conflictItem.server.version : undefined;
                      m.state = "pending"; saveTaskQueue(q); flushTaskQueue(); }
             setConflictItem(null);
-          }}>自分の変更で更新する</button>
+          }}>この端末の変更を反映する</button>
           <button style=${{width:"100%",padding:"10px",background:"none",border:"none",color:"var(--sub)",fontSize:12.5,cursor:"pointer"}}
-            onClick=${()=>setConflictItem(null)}>あとで決める</button>
+            onClick=${()=>setConflictItem(null)}>あとで決める</button>`;
+          })()}
         </div>
       </div>`}
     <!-- タスクボード（予定/実行中/完了。PC=ドラッグ、スマホ=移動ボタン。カードタップでタイマー） -->
@@ -2467,8 +2521,8 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
               const c = loadTaskQueue().find(x=>x.state==="conflict");
               if (c) setConflictItem(c);
             }}
-            style=${{fontSize:11,background:"var(--red,#d33)",color:"#fff",border:"none",borderRadius:20,padding:"2px 9px",fontWeight:600,cursor:"pointer"}}>競合${taskSync.conflict}件</button>`}
-          ${taskSync.pending>0&&html`<span style=${{fontSize:11,background:"var(--bg)",color:"var(--sub)",borderRadius:20,padding:"2px 9px",fontWeight:600}}>同期待ち${taskSync.pending}件</span>`}
+            style=${{fontSize:11,background:"var(--red,#d33)",color:"#fff",border:"none",borderRadius:20,padding:"2px 9px",fontWeight:600,cursor:"pointer"}}>要確認 ${taskSync.conflict}件</button>`}
+          ${taskSync.pending>0&&html`<span style=${{fontSize:11,background:"var(--bg)",color:"var(--sub)",borderRadius:20,padding:"2px 9px",fontWeight:600}}>保存中…</span>`}
           ${boardWide&&html`<span style=${{fontSize:10.5,color:"var(--sub)"}}>カードをドラッグで移動</span>`}
           <button onClick=${openEdit} style=${{background:"none",border:"none",cursor:"pointer",color:"var(--accent)",fontSize:12,fontWeight:600,padding:"2px 6px"}}>編集</button>
         </div>
@@ -5791,7 +5845,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260802-143621";
+const APP_BUILD = "20260802-150427";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
