@@ -5334,6 +5334,11 @@ function dueLabel(dueAt, overdue){
   return days+"日後（"+(p[1]*1)+"/"+(p[2]*1)+time+"）";
 }
 
+// ★このファイルの版★
+// 更新検知に使う。index.html を変えたら必ずここも変える
+// （スモークテストが、変え忘れたら落とす）。
+const APP_BUILD = "20260802-102615";
+
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
 const XP_THRESHOLDS = [0, 500, 1200, 2200, 3500, 5200, 7500, 10000, 13000, 17000, 21000, 25500, 30500, 36000, 42000, 49000];
@@ -6747,10 +6752,15 @@ if('serviceWorker' in navigator){
       lastVerCheck = now;
       const res = await fetch("index.html", { cache: "no-store" });
       if (!res.ok) return;
-      const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(await res.text()));
-      const h = Array.from(new Uint8Array(buf)).join(",");
-      if (baselineHtmlHash === null) { baselineHtmlHash = h; return; }
-      if (h !== baselineHtmlHash) { pendingReload = true; safeReload(); }
+      const text = await res.text();
+      // ★「今動いている版」と「サーバーにある版」を比べる★
+      //   以前は起動時にサーバーのファイルを取って、それを基準にしていた。
+      //   古い版で動いていてもサーバーの版と自分を比べるので、
+      //   差が出ず永久に更新されなかった（実際にそうなった）。
+      //   埋め込んだ版番号どうしを比べれば、確実に分かる。
+      const m = text.match(/const APP_BUILD = "([^"]+)"/);
+      if (!m) return;
+      if (m[1] !== APP_BUILD) { pendingReload = true; safeReload(); }
     }catch(e){}
   }
   checkAppUpdate(); // 起動時に基準ハッシュを取得

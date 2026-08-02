@@ -5,7 +5,7 @@
 // ★v10★ 2026-08-01: 通信をPOSTのJSON本文へ統一（URLにトークンを載せない）。
 // 古いフロントがキャッシュに残っていると、URLへトークンを載せる旧コードが
 // 動き続けてしまう。版を上げて確実に入れ替える。
-const CACHE = "jiroku-v10-post-auth";
+const CACHE = "jiroku-v11-taskid";
 
 // タイマー終了などをバックグラウンドでも通知するためのFirebase Cloud Messaging。
 // 別ファイル（firebase-messaging-sw.js）として登録すると、同じスコープ('/')の

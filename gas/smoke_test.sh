@@ -204,6 +204,31 @@ PY
     ng "actions を文字列前提で読んでいる箇所がある（${bad}箇所中 ${norm} だけ正規化）"
   fi
 
+  # ★index.html を変えたら APP_BUILD も変える★
+  # 変え忘れると、利用者の端末は古い版のまま更新されない。
+  # 実際、更新検知が「サーバーの版と自分自身」を比べる作りになっており、
+  # 古い版で動いていても差が出ず、変更が永久に届かなかった。
+  if git -C .. diff --quiet HEAD -- index.html 2>/dev/null; then
+    if grep -q '^const APP_BUILD = "' ../index.html; then
+      ok "APP_BUILD あり（index.html に変更なし）"
+    else
+      ng "APP_BUILD が無い ─ 更新検知が働かない"
+    fi
+  else
+    # ★行頭に固定する★ 更新検知のコード内にある正規表現の文字列
+    #   /const APP_BUILD = "([^"]+)"/ にも一致してしまい、
+    #   宣言を消しても値が取れて検査が素通りしていた
+    cur=$(grep -o '^const APP_BUILD = "[^"]*"' ../index.html | head -1)
+    prev=$(git -C .. show HEAD:index.html 2>/dev/null | grep -o '^const APP_BUILD = "[^"]*"' | head -1)
+    if [ -z "$cur" ]; then
+      ng "APP_BUILD が無い ─ 更新検知が働かず、端末は古い版のままになる"
+    elif [ "$cur" = "$prev" ]; then
+      ng "index.html を変えたのに APP_BUILD が同じ ─ 端末に更新が届かない"
+    else
+      ok "APP_BUILD を更新済み"
+    fi
+  fi
+
   # ★タスク行は「押す場所」と「起きること」が一致していること★
   # 行全体が完了トグルだったため、内容を見ようとして押しただけで
   # 完了になっていた（Kaiの指摘）。チェックボックスだけが完了。
