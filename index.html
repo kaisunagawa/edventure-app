@@ -5383,7 +5383,7 @@ function GoalDeepenSheet({goal, onClose, onSaved, onToast}) {
   };
 
   return html`
-    <div style=${{position:"fixed",inset:0,zIndex:430,background:"var(--bg)",display:"flex",flexDirection:"column"}}>
+    <div style=${{position:"fixed",inset:0,height:"100dvh",zIndex:430,background:"var(--bg)",display:"flex",flexDirection:"column"}}>
       <div style=${{display:"flex",alignItems:"center",gap:10,padding:"14px 16px",borderBottom:"1px solid var(--border)",flexShrink:0,paddingTop:"calc(14px + var(--safe-top, 0px))"}}>
         <div style=${{flex:1,minWidth:0}}>
           <div style=${{fontSize:10.5,color:"var(--sub)",fontWeight:700}}>${step+1} / ${STEPS.length}</div>
@@ -5395,7 +5395,7 @@ function GoalDeepenSheet({goal, onClose, onSaved, onToast}) {
         <div style=${{height:"100%",width:((step+1)/STEPS.length*100)+"%",background:"var(--accent)",transition:"width .3s"}}/>
       </div>
 
-      <div style=${{flex:1,overflowY:"auto",WebkitOverflowScrolling:"touch",padding:"20px 16px calc(28px + var(--safe-bottom, 0px))"}}>
+      <div style=${{flex:1,minHeight:0,overflowY:"auto",WebkitOverflowScrolling:"touch",padding:"20px 16px calc(28px + var(--safe-bottom, 0px))"}}>
         <div style=${{fontSize:17,fontWeight:800,lineHeight:1.5,marginBottom:8}}>${cur.title}</div>
         <div style=${{fontSize:12.5,color:"var(--sub)",lineHeight:1.8,marginBottom:16}}>${cur.hint}</div>
 
@@ -5470,10 +5470,13 @@ function SprintSheet({goals, editing, onClose, onSaved, onToast}) {
     try_actions:"", stop_actions:"", if_then:"", success_condition:"", coaching_note:"", status:"ACTIVE"
   });
   const [saving, setSaving] = useState(false);
+  const [more, setMore] = useState(false);
   const set = (k,v)=>setD(p=>({...p,[k]:v}));
   const save = async () => {
-    if(!String(d.name||"").trim()){ onToast&&onToast("スプリント名を入れてください"); return; }
-    if(!String(d.link_quarterly_goal_id||"").trim()){ onToast&&onToast("どの3か月目標のためのスプリントか選んでください"); return; }
+    if(!String(d.link_quarterly_goal_id||"").trim()){ onToast&&onToast("どの3か月目標のためか選んでください"); return; }
+    if(!String(d.target_state||"").trim()){ onToast&&onToast("2週間後どうなっていたいかを書いてください"); return; }
+    // ★名前は聞かない★ 項目が多いほど手が止まる。到達状態の先頭を名前にする
+    if(!String(d.name||"").trim()) d.name = String(d.target_state).replace(/\n/g," ").slice(0,40);
     setSaving(true);
     const r = await gasPostJson("saveSprint", d);
     setSaving(false);
@@ -5488,41 +5491,59 @@ function SprintSheet({goals, editing, onClose, onSaved, onToast}) {
       : html`<input class="inp" placeholder=${ph} value=${d[key]||""} onInput=${e=>set(key,e.target.value)}
           style=${{marginBottom:14}}/>`}`;
   return html`
-    <div style=${{position:"fixed",inset:0,zIndex:420,background:"var(--bg)",display:"flex",flexDirection:"column"}}>
+    <div style=${{position:"fixed",inset:0,height:"100dvh",zIndex:420,background:"var(--bg)",display:"flex",flexDirection:"column"}}>
       <div style=${{display:"flex",alignItems:"center",gap:10,padding:"14px 16px",borderBottom:"1px solid var(--border)",flexShrink:0,paddingTop:"calc(14px + var(--safe-top, 0px))"}}>
         <div style=${{fontSize:15,fontWeight:800,flex:1}}>${editing?"スプリントを編集":"2週間スプリントをつくる"}</div>
         <button onClick=${onClose} style=${{background:"none",border:"none",color:"var(--sub)",fontSize:22,cursor:"pointer",lineHeight:1,padding:"0 4px"}}>×</button>
       </div>
-      <div style=${{flex:1,overflowY:"auto",WebkitOverflowScrolling:"touch",padding:"14px 16px calc(28px + var(--safe-bottom, 0px))"}}>
-        <div style=${{fontSize:12,color:"var(--sub)",lineHeight:1.7,marginBottom:14}}>
-          3か月は遠すぎて動けず、1週間は短すぎて形になりません。2週間で「何が変わっていれば前進か」を決めます。
+      <div style=${{flex:1,minHeight:0,overflowY:"auto",WebkitOverflowScrolling:"touch",padding:"14px 16px calc(28px + var(--safe-bottom, 0px))"}}>
+        <div style=${{fontSize:12,color:"var(--sub)",lineHeight:1.7,marginBottom:16}}>
+          2週間で「何が変わっていれば前進か」を決めます。まずは3つだけ。
         </div>
 
         <label class="form-lbl">どの3か月目標のため？</label>
         ${goals.length===0
           ? html`<div style=${{fontSize:12.5,color:"var(--red,#d33)",lineHeight:1.7,marginBottom:14}}>
-              先に3か月目標をつくってください。スプリントは目標にぶら下げます。</div>`
+              先に3か月目標をつくってください。</div>`
           : html`<select class="inp" value=${d.link_quarterly_goal_id} onInput=${e=>set("link_quarterly_goal_id",e.target.value)}
-              style=${{marginBottom:14}}>
+              style=${{marginBottom:16}}>
               ${goals.map(g=>html`<option key=${g.quarterly_goal_id} value=${g.quarterly_goal_id}>${g.title}</option>`)}
             </select>`}
 
-        ${F("スプリント名","name","例：法人導入の型づくり")}
-        <div style=${{display:"flex",gap:10,marginBottom:14}}>
-          <label style=${{flex:1}}><span class="form-lbl">開始</span>
-            <input class="inp" type="date" value=${d.start_date} onInput=${e=>set("start_date",e.target.value)} style=${{margin:0}}/></label>
-          <label style=${{flex:1}}><span class="form-lbl">終了</span>
-            <input class="inp" type="date" value=${d.end_date} onInput=${e=>set("end_date",e.target.value)} style=${{margin:0}}/></label>
+        <label class="form-lbl">2週間後、どうなっていたい？</label>
+        <textarea class="inp" placeholder="例：3社に同じ資料で提案できている" value=${d.target_state||""}
+          onInput=${e=>set("target_state",e.target.value)}
+          style=${{minHeight:70,resize:"vertical",lineHeight:1.7,fontFamily:"inherit",marginBottom:4}}/>
+        <div style=${{fontSize:11,color:"var(--sub)",lineHeight:1.6,marginBottom:16}}>
+          これがスプリントの名前になります。うまく書けなければ、いまの困りごとの反対を書いてみてください。
         </div>
-        ${F("いま何が詰まっている？","bottleneck","例：提案資料がなく、面談の後が続かない",true)}
-        ${F("2週間後どうなっていたい？","target_state","例：3社へ同じ資料で提案できている",true)}
-        ${F("なぜそれで進むと思う？（仮説）","hypothesis","例：資料があれば面談から提案までの間が空かない",true)}
-        ${F("行動の指標（自分で動かせる数）","action_metric","例：架電70件 / 面談6件")}
-        ${F("結果の指標（相手が決める数）","result_metric","例：提案3社")}
-        ${F("やること","try_actions","例：資料を1本作る、毎朝2時間を架電に固定",true)}
-        ${F("やめること","stop_actions","例：夜の作り込み、返信待ちの手待ち",true)}
-        ${F("もし〜なら、こうする","if_then","例：面談が流れたら、その枠で資料を作る",true)}
-        ${F("これができたら成功と言える","success_condition","例：3社に提案が届いている",true)}
+
+        <label class="form-lbl">そのために、自分は何回やる？</label>
+        <input class="inp" placeholder="例：架電70件 / 面談6件" value=${d.action_metric||""}
+          onInput=${e=>set("action_metric",e.target.value)} style=${{marginBottom:4}}/>
+        <div style=${{fontSize:11,color:"var(--sub)",lineHeight:1.6,marginBottom:16}}>
+          相手が決めることではなく、自分だけで決められる数にしてください。契約数ではなく、架電数です。
+        </div>
+
+        <label class="form-lbl">いつからいつまで</label>
+        <div style=${{display:"flex",gap:10,marginBottom:16}}>
+          <input class="inp" type="date" value=${d.start_date} onInput=${e=>set("start_date",e.target.value)} style=${{flex:1,margin:0}}/>
+          <input class="inp" type="date" value=${d.end_date} onInput=${e=>set("end_date",e.target.value)} style=${{flex:1,margin:0}}/>
+        </div>
+
+        <!-- ★残りは畳んでおく★ 一度に11個聞かれると手が止まる。
+             決めたい人だけ開ける。あとから足せる -->
+        <button onClick=${()=>setMore(v=>!v)}
+          style=${{width:"100%",padding:"10px",marginBottom:14,background:"none",border:"1px dashed var(--border)",borderRadius:10,color:"var(--sub)",fontSize:12.5,cursor:"pointer",fontFamily:"inherit"}}>
+          ${more?"くわしい設定を閉じる ▲":"くわしく決める（あとからでもOK） ▼"}</button>
+        ${more&&html`
+          <div>
+            ${F("いま何が詰まっている？","bottleneck","例：提案資料がなく、面談の後が続かない",true)}
+            ${F("結果はどうなれば？（相手が決める数）","result_metric","例：提案3社")}
+            ${F("やめること","stop_actions","例：夜の作り込み、返信待ちの手待ち",true)}
+            ${F("もし〜なら、こうする","if_then","例：面談が流れたら、その枠で資料を作る",true)}
+          </div>`}
+
         <button class="btn" disabled=${saving} onClick=${save} style=${{marginTop:4}}>${saving?"保存中…":"保存する"}</button>
       </div>
     </div>`;
@@ -5569,13 +5590,13 @@ function GoalTreeSheet({onClose, onToast}) {
 
   const goals = (tree&&tree.goals)||[];
   return html`
-    <div style=${{position:"fixed",inset:0,zIndex:400,background:"var(--bg)",display:"flex",flexDirection:"column"}}>
+    <div style=${{position:"fixed",inset:0,height:"100dvh",zIndex:400,background:"var(--bg)",display:"flex",flexDirection:"column"}}>
       <div style=${{display:"flex",alignItems:"center",gap:10,padding:"14px 16px",borderBottom:"1px solid var(--border)",flexShrink:0,paddingTop:"calc(14px + var(--safe-top, 0px))"}}>
         <div style=${{fontSize:15,fontWeight:800,color:"var(--text)",flex:1}}>目標のつながり</div>
         <button onClick=${onClose} style=${{background:"none",border:"none",color:"var(--sub)",fontSize:22,cursor:"pointer",lineHeight:1,padding:"0 4px"}}>×</button>
       </div>
 
-      <div style=${{flex:1,overflowY:"auto",WebkitOverflowScrolling:"touch",padding:"14px 16px calc(28px + var(--safe-bottom, 0px))"}}>
+      <div style=${{flex:1,minHeight:0,overflowY:"auto",WebkitOverflowScrolling:"touch",padding:"14px 16px calc(28px + var(--safe-bottom, 0px))"}}>
         <div style=${{fontSize:12,color:"var(--sub)",lineHeight:1.7,marginBottom:14}}>
           3か月後にたどり着きたい場所を決めて、その下に「今週やること」をぶら下げます。
           毎時間の記録がどの目標につながっているかを、これから見えるようにしていきます。
@@ -6492,7 +6513,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260802-174606";
+const APP_BUILD = "20260802-180111";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
@@ -7299,14 +7320,14 @@ function FirstGoalGate({onDone, onToast}) {
   };
 
   return html`
-    <div style=${{position:"fixed",inset:0,zIndex:600,background:"var(--bg)",display:"flex",flexDirection:"column"}}>
+    <div style=${{position:"fixed",inset:0,height:"100dvh",zIndex:600,background:"var(--bg)",display:"flex",flexDirection:"column"}}>
       <div style=${{padding:"18px 16px 12px",flexShrink:0,paddingTop:"calc(18px + var(--safe-top, 0px))"}}>
         <div style=${{fontSize:10.5,color:"var(--sub)",fontWeight:700,marginBottom:3}}>はじめの設定　${step+1} / ${STEPS.length}</div>
         <div style=${{height:3,background:"var(--border)",borderRadius:99}}>
           <div style=${{height:"100%",width:((step+1)/STEPS.length*100)+"%",background:"var(--accent)",borderRadius:99,transition:"width .3s"}}/>
         </div>
       </div>
-      <div style=${{flex:1,overflowY:"auto",WebkitOverflowScrolling:"touch",padding:"8px 16px calc(28px + var(--safe-bottom, 0px))"}}>
+      <div style=${{flex:1,minHeight:0,overflowY:"auto",WebkitOverflowScrolling:"touch",padding:"8px 16px calc(28px + var(--safe-bottom, 0px))"}}>
         <div style=${{fontSize:19,fontWeight:800,lineHeight:1.5,marginBottom:8}}>${cur.title}</div>
         <div style=${{fontSize:12.5,color:"var(--sub)",lineHeight:1.8,marginBottom:16}}>${cur.hint}</div>
         ${cur.body}
