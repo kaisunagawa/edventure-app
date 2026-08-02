@@ -525,6 +525,9 @@ function doGet(e) {
       case "saveLog":      result = saveLog(studentEmail, e.parameter); break;
       case "deleteLog":    result = deleteLog(studentEmail, e.parameter); break;
       case "setLogClassification": result = setLogClassification(studentEmail, e.parameter); break;
+      case "getDayPlan":   result = getDayPlan(studentEmail, e.parameter); break;
+      case "saveDayPlan":  result = saveDayPlan(studentEmail, e.parameter); break;
+      case "saveWeeklyAvailable": result = saveWeeklyAvailable(studentEmail, e.parameter); break;
       case "quickLog":     result = quickLog(studentEmail, e.parameter); break;
       case "saveLogMulti": result = saveLogMulti(studentEmail, e.parameter); break;
       case "coachGetStudents":      result = coachGetStudents(e.parameter.coachEmail); break;
@@ -707,6 +710,9 @@ function doPost(e) {
       case "saveLog":      return jsonResponse(saveLog(studentEmail, body));
       case "deleteLog":    return jsonResponse(deleteLog(studentEmail, body));
       case "setLogClassification": return jsonResponse(setLogClassification(studentEmail, body));
+      case "getDayPlan":   return jsonResponse(getDayPlan(studentEmail, body));
+      case "saveDayPlan":  return jsonResponse(saveDayPlan(studentEmail, body));
+      case "saveWeeklyAvailable": return jsonResponse(saveWeeklyAvailable(studentEmail, body));
       case "quickLog":     return jsonResponse(quickLog(studentEmail, body));
       case "saveLogMulti": return jsonResponse(saveLogMulti(studentEmail, body));
       case "sendMessage":  return jsonResponse(sendMessage(studentEmail, body));
@@ -9326,6 +9332,16 @@ const P1_SHEETS = {
   //   所有者キーは student_email（既存のp1List/p1OwnedRow/p1Upsertが
   //   この列名で所有権を絞っているため。owner_emailを新設すると
   //   所有権の仕組みを二重化してしまう）
+  // ★1日の設計（DayPlan）★ 1ユーザー1日1行。
+  //   day_type … NORMAL（ふつうの日）／REST（休息すると決めた日）／
+  //               ADJUSTED（当日に事情があって計画を縮めた日）
+  //   available_minutes … その日に使える時間。推測しない（未設定は空のまま）
+  DayPlan: ["row_id","student_email","date","day_type","available_minutes",
+    "source","reason","created_at","updated_at"],
+  // ★DayPlanの変更履歴★ 追記だけ。過去の行は書き換えも削除もしない。
+  DayPlanHistory: ["history_id","student_email","date","previous_day_type","new_day_type",
+    "previous_available_minutes","new_available_minutes","reason","changed_by","changed_at",
+    "change_timing","mutation_id"],
   // ★XP台帳★ どの記録で何点入ったかを1行ずつ残す。
   //   記録を消したときに、その分だけを正確に戻せるようにするため。
   //   同じ source_id では二重に加算しない。
@@ -9963,7 +9979,135 @@ function classifyLogTime_(studentEmail, targetDate, body, current) {
   return { classification: "", method: "RULE", reason_code: "RULE_UNCERTAIN" };
 }
 
-// 記録カードから分類を変え��（B6）。本人の行だけ、正しい値だけを書く。
+// ══════════════════════════════════════════════════════════════════
+// 1日の設計（DayPlan）と、曜日ごとの使える時間
+//   休息日を「未達」「0点」にしないための土台。
+//   ★推測しない★ 設定が無い日は insufficient_data のままにする。
+// ══════════════════════════════════════════════════════════════════
+const DAY_TYPES = { NORMAL: 1, REST: 1, ADJUSTED: 1 };
+const WEEKDAY_KEYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
+
+function parseWeeklyAvailable_(raw) {
+  let o = raw;
+  if (typeof o === "string") { try { o = JSON.parse(o); } catch (e) { return null; } }
+  if (!o || typeof o !== "object") return null;
+  const out = {};
+  const keys = Object.keys(o);
+  for (let i = 0; i < keys.length; i++) {
+    if (WEEKDAY_KEYS.indexOf(keys[i]) === -1) return null;      // 知らないキーは受け取らない
+    const v = Number(o[keys[i]]);
+    if (!isFinite(v) || v < 0 || v > 1440 || Math.floor(v) !== v) return null;
+    out[keys[i]] = v;
+  }
+  return out;
+}
+
+function saveWeeklyAvailable(studentEmail, body) {
+  const parsed = parseWeeklyAvailable_(body && body.weekly_available_minutes);
+  if (!parsed) return { ok: false, error: "invalid weekly_available_minutes" };
+  const sheet = getSheet("Users");
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0];
+  const iEm = headers.indexOf("student_email");
+  let iW = headers.indexOf("weekly_available_minutes");
+  if (iW === -1) { iW = headers.length; sheet.getRange(1, iW + 1).setValue("weekly_available_minutes"); }
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][iEm]) !== studentEmail) continue;
+    sheet.getRange(i + 1, iW + 1).setValue(JSON.stringify(parsed));
+    return { ok: true, weekly_available_minutes: parsed };
+  }
+  return { ok: false, error: "no user" };
+}
+
+// その日に使える時間を決める。当日のDayPlan → 曜日既定 → 未設定
+function resolveAvailableMinutes(studentEmail, dateStr) {
+  const date = String(dateStr || formatDate(new Date())).slice(0, 10);
+  const plan = p1List("DayPlan", studentEmail).find(function (r) {
+    return String(r.date).slice(0, 10) === date; }) || null;
+  if (plan && String(plan.available_minutes || "").trim() !== "") {
+    return { minutes: Number(plan.available_minutes), source: "DAY_PLAN",
+             day_type: String(plan.day_type || "NORMAL"), state: "evaluated" };
+  }
+  const user = sheetToObjects(getSheet("Users")).find(function (u) { return u.student_email === studentEmail; });
+  const wk = parseWeeklyAvailable_(user && user.weekly_available_minutes);
+  const dow = WEEKDAY_KEYS[(new Date(date + "T00:00:00+09:00").getDay() + 6) % 7];
+  if (wk && wk[dow] !== undefined) {
+    return { minutes: wk[dow], source: "WEEKDAY_DEFAULT", weekday: dow,
+             day_type: plan ? String(plan.day_type || "NORMAL") : "NORMAL", state: "evaluated" };
+  }
+  return { minutes: null, source: "NONE", day_type: plan ? String(plan.day_type || "NORMAL") : "",
+           state: "insufficient_data", reason_code: "AVAILABLE_TIME_MISSING" };
+}
+
+function getDayPlan(studentEmail, body) {
+  const date = String((body && body.date) || "").slice(0, 10) || formatDate(new Date());
+  const plan = p1List("DayPlan", studentEmail).find(function (r) {
+    return String(r.date).slice(0, 10) === date; }) || null;
+  const user = sheetToObjects(getSheet("Users")).find(function (u) { return u.student_email === studentEmail; });
+  return { ok: true, data: {
+    date: date,
+    day_type: plan ? String(plan.day_type || "NORMAL") : "",
+    available_minutes: plan && String(plan.available_minutes || "").trim() !== "" ? Number(plan.available_minutes) : null,
+    reason: plan ? String(plan.reason || "") : "",
+    weekly_available_minutes: parseWeeklyAvailable_(user && user.weekly_available_minutes) || null,
+    resolved: resolveAvailableMinutes(studentEmail, date)
+  } };
+}
+
+function saveDayPlan(studentEmail, body) {
+  const date = String((body && body.date) || "").slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return { ok: false, error: "bad date" };
+  const dt = String((body && body.day_type) || "").toUpperCase();
+  if (dt && !DAY_TYPES[dt]) return { ok: false, error: "bad day_type" };
+  let am = body && body.available_minutes;
+  if (am !== undefined && am !== null && String(am).trim() !== "") {
+    am = Number(am);
+    if (!isFinite(am) || am < 0 || am > 1440 || Math.floor(am) !== am) return { ok: false, error: "bad available_minutes" };
+  } else am = "";
+
+  const prev = p1List("DayPlan", studentEmail).find(function (r) {
+    return String(r.date).slice(0, 10) === date; }) || null;
+  const prevType = prev ? String(prev.day_type || "") : "";
+  const prevMin = prev && String(prev.available_minutes || "").trim() !== "" ? Number(prev.available_minutes) : "";
+  const newType = dt || prevType || "NORMAL";
+  const newMin = (am === "" && prev) ? prevMin : am;
+
+  const now = new Date();
+  const today = formatDate(now);
+  // ★いつ変えたのかを必ず残す★ あとから都合よく休息日にしたのかが分かるように
+  let timing = "SAME_DAY";
+  if (date > today) timing = "BEFORE_DAY";
+  else if (date < today) {
+    timing = "AFTER_DAY";
+    const evaluated = p1List("DailyOpsReport", studentEmail).some(function (r) {
+      return String(r.report_date).slice(0, 10) === date; });
+    if (evaluated) timing = "AFTER_EVALUATION";
+  }
+
+  p1Upsert("DayPlan", "row_id", {
+    row_id: prev ? prev.row_id : ("dp_" + sha256Hex(studentEmail + "|" + date).slice(0, 16)),
+    student_email: studentEmail, date: date, day_type: newType,
+    available_minutes: newMin, source: "USER",
+    reason: p1Text_((body && body.reason) || "", 200),
+    created_at: prev ? prev.created_at : now.toISOString(), updated_at: now.toISOString()
+  });
+  // 履歴は追記だけ。過去行は書き換えない
+  p1Upsert("DayPlanHistory", "history_id", {
+    history_id: "dph_" + Utilities.getUuid().slice(0, 12),
+    student_email: studentEmail, date: date,
+    previous_day_type: prevType, new_day_type: newType,
+    previous_available_minutes: prevMin, new_available_minutes: newMin,
+    reason: p1Text_((body && body.reason) || "", 200),
+    changed_by: studentEmail, changed_at: now.toISOString(),
+    change_timing: timing, mutation_id: p1Text_((body && body.mutation_id) || "", 60)
+  });
+  return { ok: true, data: { date: date, day_type: newType,
+                             available_minutes: newMin === "" ? null : newMin,
+                             change_timing: timing,
+                             resolved: resolveAvailableMinutes(studentEmail, date) } };
+}
+
+// 記録カードから分類を変える（B6）。本人の行だけ、正しい値だけを書く。
 //   ・classification_method はサーバーが決める（クライアントが USER/RULE/AI を名乗れない）
 //   ・許可された5値以外は保存しない
 //   ・他人の log_id では何も起きない
@@ -11363,7 +11507,7 @@ const ACTION_POLICIES = {
 // いずれも scope="SELF"。セッションから確定した本人の行だけを書き換えられる。
 // クライアントが送る studentEmail は無視して、必ず本人で上書きする。
 const ACTION_POLICIES_WRITE = {
-  saveLog:{}, saveLogMulti:{}, quickLog:{}, deleteLog:{}, setLogClassification:{}, saveDayPlan:{}, saveSettings:{}, saveOnboarding:{},
+  saveLog:{}, saveLogMulti:{}, quickLog:{}, deleteLog:{}, setLogClassification:{}, saveDayPlan:{}, saveWeeklyAvailable:{}, saveSettings:{}, saveOnboarding:{},
   saveTodayActions:{}, saveGoal:{}, saveWeeklyGoal:{}, archiveGoalItem:{}, migrateLocalTasks:{},
   saveTask:{}, deleteTask:{}, carryOverTask:{}, saveTaskMutations:{}, saveSprint:{}, migrateTasksToSheet:{},
   submitSurvey:{}, syncCalendar:{}, sendMessage:{}, saveWeeklyReflection:{}, saveContentProfile:{},
@@ -11373,7 +11517,7 @@ const ACTION_POLICIES_WRITE = {
 // ランキングや「みんなの頑張り」は共有情報なのでここには入れない
 const ACTION_POLICIES_READ = {
   getUser:{}, getLogs:{}, getReport:{}, getReportList:{}, getHomeData:{}, getGoalTree:{},
-  getGameStatus:{}, getJournal:{}, getInsights:{}, getWeeklySummary:{}, getMonthlyReview:{}, getSelfMgmtPower:{}, getDailyOpsReport:{},
+  getGameStatus:{}, getJournal:{}, getInsights:{}, getWeeklySummary:{}, getMonthlyReview:{}, getSelfMgmtPower:{}, getDailyOpsReport:{}, getDayPlan:{},
   getTimeUse:{}, getAchievements:{}, getMessages:{}, p1Status2:{}, getTasks:{}, getSprints:{}
 };
 

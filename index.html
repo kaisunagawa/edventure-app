@@ -4543,131 +4543,101 @@ function ReportScreen() {
     <!-- ★新しい日次レポート（self_management_daily_v1）★
          featureがONの人にだけ出す。巨大な点数を主役にせず、
          状態ラベルと「明日の一手」を先に見せる。 -->
+    <!-- ★AI日次レポート（self_management_daily_v1）★
+         見た目と項目は従来のレポートに合わせる（点数→採点の内訳→フィードバック→
+         良かった点／改善点→明日のタスク）。中身の評価だけが新しい方式。
+         「今日の経営状態」のような言い方は使わない（人によって伝わらないため）。 -->
     ${currentView==="report"&&ops&&ops.data&&html`<div>
       ${(()=>{
         const x=ops.data;
-        const CONF={HIGH:"高",MEDIUM:"中",LOW:"低",NONE:"—"};
-        const f=x.facts||{};
-        // 文章はサーバー（AI or 機械組み立て）が確定させたものを使う。
-        // 画面側で作文しない ── 事実と食い違わせないため
-        const N=x.narrative||null;
-        const prog=N?(N.progress_items||[]).map(p=>p.text):(()=>{
-          const a=[];
-          (f.important_done||[]).slice(0,2).forEach(t=>a.push("重要タスク「"+t+"」を完了した"));
-          if(f.daily_focus_done&&f.daily_focus) a.push("今日のフォーカス「"+f.daily_focus+"」を達成した");
-          else if(f.tasks_started>0) a.push("予定していたタスクに"+f.tasks_started+"件着手した");
-          if(f.memo_count>0) a.push(f.logged_blocks+"時間帯を記録し、"+f.memo_count+"件の振り返りを残した");
-          return a; })();
+        const N=x.narrative||{};
+        const CATICON={progress:"rocket",execution:"target",time_use:"clock",sustainability:"flame"};
+        // 総合が出ない日は、測れた範囲の点数を出す（点数が消えるとランキングと噛み合わないため）
+        const shown = (x.operating_score!==null&&x.operating_score!==undefined) ? x.operating_score : x.partial_score;
+        const partial = (x.operating_score===null||x.operating_score===undefined) && shown!==null && shown!==undefined;
+        const prog=(N.progress_items||[]).map(p=>p.text);
         return html`
-        <div class="card" style=${{marginBottom:12}}>
-          <div style=${{fontSize:11,fontWeight:700,color:"var(--sub)",marginBottom:5}}>今日の経営状態</div>
-          <div style=${{fontSize:20,fontWeight:800,color:"var(--text)",marginBottom:6}}>${x.operating_state_label}</div>
-          <div style=${{fontSize:12.5,color:"var(--sub)",lineHeight:1.8}}>
-            ${(N&&N.operating_summary&&N.operating_summary.text)
-              ? N.operating_summary.text
-              : x.operating_score!==null
-              ? "今日は決めたことを進められています。下の内訳で、どこが効いたかを確認できます。"
-              : x.partial_score!==null
-                ? (x.partial_scope||"評価できた項目")+"は「"+x.partial_label+"」です。総合スコアは、"
-                  +((x.excluded_items||[]).join("と")||"不足している項目")+"のデータを蓄積中です。"
-                : "評価に必要なデータがまだ足りません。記録が増えると状態が出せるようになります。"}
-          </div>
-          ${x.operating_score!==null&&html`
-            <div style=${{display:"flex",alignItems:"baseline",gap:10,marginTop:9,fontSize:11,color:"var(--sub)"}}>
-              <span>今日の運営スコア <b style=${{color:"var(--text)",fontSize:14}}>${x.operating_score}</b></span>
-              ${x.previous_day_delta!==null&&x.previous_day_delta!==undefined&&html`<span>昨日比 ${x.previous_day_delta>=0?"+":""}${x.previous_day_delta}</span>`}
-              ${x.seven_day_average_delta!==null&&x.seven_day_average_delta!==undefined&&html`<span>直近7日平均比 ${x.seven_day_average_delta>=0?"+":""}${x.seven_day_average_delta}</span>`}
-              ${x.previous_day_delta===null&&x.seven_day_average_delta===null&&x.comparison_unavailable_reason
-                &&html`<span>${x.comparison_unavailable_reason}</span>`}
-            </div>`}
+        <div class="report-hero" style=${{paddingTop:8}}>
+          <div class="report-score">${shown===null||shown===undefined?"—":shown}</div>
+          <div class="report-pts">/ 100点</div>
         </div>
-
-        ${prog.length>0&&html`
-          <div class="card" style=${{marginBottom:12}}>
-            <div class="card-label">今日の前進</div>
-            ${prog.slice(0,3).map((p,i)=>html`
-              <div key=${i} style=${{display:"flex",gap:8,fontSize:12.5,lineHeight:1.8,color:"var(--text)"}}>
-                <span style=${{color:"var(--accent)"}}>・</span><span>${p}</span></div>`)}
-          </div>`}
-
-        ${(()=>{const t=(N&&N.primary_management_issue&&N.primary_management_issue.text)||
-            ((f.carried_over||[]).length>0
-              ? "予定していた"+(f.carried_over||[]).length+"件を翌日へ回しました（"+(f.carried_over||[]).slice(0,2).join("、")+"）。積み残しが増えると、明日の予定が入らなくなります。"
-              : "");
-          return t?html`
-          <div class="card" style=${{marginBottom:12}}>
-            <div class="card-label">今日の経営課題</div>
-            <div style=${{fontSize:12.5,color:"var(--text)",lineHeight:1.8}}>${t}</div>
-          </div>`:"";})()}
-
-        ${(N&&(N.next_action||N.stop_action))&&html`
-          <div class="card" style=${{marginBottom:12}}>
-            <div class="card-label">明日の一手</div>
-            ${N.next_action&&html`
-              <div style=${{fontSize:12.5,color:"var(--text)",lineHeight:1.8}}>${N.next_action.text}</div>
-              ${N.next_action.measurable_condition&&html`
-                <div style=${{fontSize:11.5,color:"var(--sub)",lineHeight:1.8,marginTop:4}}>
-                  達成の目安：${N.next_action.measurable_condition}</div>`}`}
-            ${N.stop_action&&html`
-              <div style=${{fontSize:12,color:"var(--sub)",lineHeight:1.8,marginTop:6}}>やめること：${N.stop_action.text}</div>`}
-          </div>`}
-
-        <div class="card" style=${{marginBottom:12}}>
-          <div class="card-label">今日の立て直し</div>
-          <div style=${{fontSize:12.5,color:"var(--sub)",lineHeight:1.8}}>
-            ${(N&&N.recovery_summary&&N.recovery_summary.text)
-              ? N.recovery_summary.text
-              : (f.carried_over||[]).length>0
-              ? "崩れた予定を翌日へ移して整理しました。"
-              : "本日は立て直しが必要な場面はありませんでした。"}
-          </div>
-        </div>
-
-        <div class="card" style=${{marginBottom:12}}>
-          <div class="card-label">評価の内訳</div>
-          ${(x.components||[]).map((c,i)=>html`
-            <div key=${c.key} style=${{padding:"9px 0",borderTop:i?"1px solid var(--border)":"none"}}>
-              <div style=${{display:"flex",alignItems:"baseline",gap:8}}>
-                <span style=${{flex:1,fontSize:12.5,fontWeight:700,color:"var(--text)"}}>${c.label}</span>
-                <span style=${{fontSize:11,color:"var(--sub)"}}>配点 ${c.weight}</span>
-                <span style=${{fontSize:c.state==="evaluated"?14:11.5,fontWeight:c.state==="evaluated"?800:600,
-                               color:c.state==="evaluated"?"var(--text)":"var(--sub)",minWidth:34,textAlign:"right"}}>
-                  ${c.state==="evaluated"?c.score
-                    :c.state==="excluded_by_exception"?"対象外"
-                    :c.state==="not_evaluable"?"機会なし":"蓄積中"}</span>
-              </div>
-              ${c.state!=="evaluated"&&c.incomplete_reason&&html`
-                <div style=${{fontSize:11,color:"var(--sub)",marginTop:2,lineHeight:1.7}}>${c.incomplete_reason}</div>`}
-              <div style=${{fontSize:10.5,color:"var(--sub)",opacity:0.85,marginTop:2}}>
-                測定範囲 ${Math.round((c.weighted_coverage||0)*100)}%</div>
-              ${(c.components||[]).map((p,j)=>html`
-                <div key=${j} style=${{display:"flex",gap:8,fontSize:11.5,lineHeight:1.8,
-                                       color:p.state==="evaluated"?"var(--sub)":"var(--sub)",opacity:p.state==="evaluated"?1:0.7}}>
-                  <span style=${{flex:1,minWidth:0}}>${p.label}</span>
-                  <span>${p.state==="evaluated"?(p.value+(p.detail?"（"+p.detail+"）":"")):"—"}</span>
-                </div>`)}
-              ${c.reason&&html`<div style=${{fontSize:11,color:"var(--sub)",marginTop:4,lineHeight:1.7}}>${c.reason}</div>`}
-            </div>`)}
+        <div style=${{textAlign:"center",marginTop:-6,marginBottom:14}}>
+          <div style=${{fontSize:14,fontWeight:800,color:"var(--text)"}}>${x.operating_state_label}</div>
+          ${partial&&html`<div style=${{fontSize:11,color:"var(--sub)",marginTop:3}}>
+            測れた範囲での点数（データの充足度 ${Math.round((x.coverage||0)*100)}%）</div>`}
+          ${!partial&&x.previous_day_delta!==null&&x.previous_day_delta!==undefined&&html`
+            <div style=${{fontSize:11,color:"var(--sub)",marginTop:3}}>昨日比 ${x.previous_day_delta>=0?"+":""}${x.previous_day_delta}</div>`}
         </div>
 
         <div class="card">
-          <div class="card-label">データの充足度</div>
-          <div style=${{fontSize:11.5,color:"var(--sub)",lineHeight:1.9}}>
-            評価できた割合 ${Math.round((x.coverage||0)*100)}%（各項目の中で測れた割合まで含めて計算）<br/>
-            確からしさ ${CONF[x.confidence]||x.confidence}<br/>
-            ${x.operating_score===null&&x.score_blocked_by==="EVALUATED_CATEGORY_LT_3"
-              ?"総合スコアは、4項目のうち3項目以上を評価できた日に表示します。":""}
-            ${x.operating_score===null&&x.score_blocked_by==="COVERAGE_BELOW_THRESHOLD"
-              ?"総合スコアは、評価できた割合が65%以上の日に表示します。":""}
-            ${x.operating_score===null&&x.score_blocked_by==="PERFECT_SCORE_NEEDS_COVERAGE_080"
-              ?"満点は、評価できた割合が80%以上の日にだけ表示します。":""}
-            ${x.operating_score===null?html`<br/>`:""}
-            ${(x.excluded_items||[]).length>0?"今回評価できなかった項目：" + (x.excluded_items||[]).join("、"):"すべての項目を評価できました"}
+          <div class="card-label">採点の内訳</div>
+          <div style=${{display:"flex",flexDirection:"column",gap:14}}>
+            ${(x.components||[]).map(c=>{
+              const ev=c.state==="evaluated"&&c.score!==null;
+              const v=ev?c.score:0;
+              const color=!ev?"var(--sub)":v>=80?"var(--green)":v>=50?"var(--amber)":"var(--red)";
+              const isOpen=expandedBreakdown===c.key;
+              const got=ev?Math.round(c.score*c.weight/100):null;
+              return html`<div key=${c.key}>
+                <button onClick=${()=>setExpandedBreakdown(isOpen?null:c.key)}
+                  style=${{display:"flex",alignItems:"center",gap:10,width:"100%",background:"none",border:"none",padding:0,cursor:"pointer",fontFamily:"inherit",textAlign:"left"}}>
+                  <div style=${{width:34,height:34,borderRadius:11,background:"var(--bg)",display:"flex",alignItems:"center",justifyContent:"center",color:"var(--accent)",flexShrink:0}}><${S} n=${CATICON[c.key]||"target"} s=${17}/></div>
+                  <div style=${{flex:1,minWidth:0}}>
+                    <div style=${{display:"flex",justifyContent:"space-between",alignItems:"baseline",fontSize:12.5,color:"var(--text)",fontWeight:600,marginBottom:5}}>
+                      <span>${c.label}</span>
+                      <span>${ev
+                        ? html`<b style=${{fontSize:14,color}}>${got}</b><span style=${{color:"var(--sub)",fontWeight:500}}>/${c.weight}</span>`
+                        : html`<span style=${{fontSize:11.5,color:"var(--sub)",fontWeight:500}}>データ蓄積中</span>`}</span>
+                    </div>
+                    <div style=${{height:7,background:"var(--bg)",borderRadius:99,overflow:"hidden"}}>
+                      <div style=${{height:"100%",width:(ev?Math.max(0,Math.min(100,v)):0)+"%",background:`linear-gradient(90deg, var(--hero1), ${color})`,borderRadius:99,transition:"width .5s ease"}}/>
+                    </div>
+                  </div>
+                </button>
+                ${isOpen&&html`
+                  <div style=${{marginTop:8,marginLeft:44,padding:"9px 11px",background:"var(--bg)",borderRadius:9,fontSize:12,lineHeight:1.7,color:"var(--sub)"}}>
+                    ${(c.components||[]).map((p,j)=>html`
+                      <div key=${j} style=${{display:"flex",gap:8}}>
+                        <span style=${{flex:1,minWidth:0}}>${p.label}</span>
+                        <span>${p.state==="evaluated"?(p.value+(p.detail?"（"+p.detail+"）":"")):"—"}</span>
+                      </div>`)}
+                    ${c.incomplete_reason&&html`<div style=${{marginTop:5}}>${c.incomplete_reason}</div>`}
+                    ${c.reference&&html`<div style=${{marginTop:5}}>${c.reference}</div>`}
+                  </div>`}
+              </div>`;
+            })}
           </div>
-        </div>`;
+        </div>
+
+        <div class="card">
+          <div class="card-label">フィードバック</div>
+          <p style=${{fontSize:14,lineHeight:1.8,color:"var(--text)"}}>
+            ${(N.operating_summary&&N.operating_summary.text)||"今日の記録から、まだ十分に読み取れていません。"}</p>
+        </div>
+
+        ${(prog.length>0||(N.primary_management_issue&&N.primary_management_issue.text))&&html`
+          <div class="card">
+            ${prog.length>0&&html`
+              <div style=${{marginBottom:12}}>
+                <span class="tag t-g">良かった点</span>
+                <p style=${{fontSize:14,color:"var(--text)",marginTop:7,lineHeight:1.8}}>${prog.join(" ")}</p>
+              </div>`}
+            ${N.primary_management_issue&&N.primary_management_issue.text&&html`
+              <div>
+                <span class="tag t-a">改善点</span>
+                <p style=${{fontSize:14,color:"var(--text)",marginTop:7,lineHeight:1.8}}>${N.primary_management_issue.text}</p>
+              </div>`}
+          </div>`}
+
+        ${N.next_action&&N.next_action.text&&html`
+          <div class="card" style=${{marginBottom:24}}>
+            <div class="card-label">明日のタスク</div>
+            <p style=${{fontSize:14,lineHeight:1.8,color:"var(--text)"}}>${N.next_action.text}</p>
+            ${N.next_action.measurable_condition&&html`
+              <p style=${{fontSize:12,lineHeight:1.8,color:"var(--sub)",marginTop:4}}>達成の目安：${N.next_action.measurable_condition}</p>`}
+          </div>`}`;
       })()}
     </div>`}
-
     ${currentView==="report"&&report&&!(ops&&ops.data)&&html`<div>
           <div class="report-hero" style=${{paddingTop:8}}>
             <div class="report-score">${report.score}</div>
@@ -6818,7 +6788,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260803-013403";
+const APP_BUILD = "20260803-021038";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
