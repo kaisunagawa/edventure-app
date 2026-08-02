@@ -1194,6 +1194,15 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
   const [showStatusTip, setShowStatusTip] = useState(false);
   const [todayLogs, setTodayLogs] = useState([]);
   const [checked, setChecked] = useState(()=>JSON.parse(localStorage.getItem("today_actions")||"{}"));
+  // タスクの文脈（仕事/プライベート等）と持ち越し回数。Tasksシートが正
+  const [taskContext, setTaskContextMap] = useState(()=>{
+    try { return JSON.parse(localStorage.getItem("jiroku_task_context_"+formatDateStr(new Date()))||"{}")||{}; } catch(e){ return {}; }
+  });
+  const [taskCarry, setTaskCarry] = useState(()=>{
+    try { return JSON.parse(localStorage.getItem("jiroku_task_carry_"+formatDateStr(new Date()))||"{}")||{}; } catch(e){ return {}; }
+  });
+  const [ctxFilter, setCtxFilter] = useState("ALL");   // すべて/仕事/プライベート
+  const [carryPick, setCarryPick] = useState(null);    // 持ち越しの確認表示 {date}
   // タスク同期キューの見える化（同期待ちN件・競合N件）
   const [taskSync, setTaskSync] = useState(()=>({pending:0, conflict:0}));
   const [conflictItem, setConflictItem] = useState(null);   // 競合解決モーダル
@@ -1679,6 +1688,27 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
     pushTaskMeta({ est: next });
     enqueueTaskMutation("UPDATE", key, { estimated_minutes: (m>0 && m<=600) ? m : "" });
   };
+  // タスクの文脈（仕事/プライベート等）。初期値はUNSET。タイトルから推測しない
+  const setTaskCtx = (task, v) => {
+    const key = idOfTitle(task) || task;
+    const next = {...taskContext};
+    if (v && v !== "UNSET") next[key] = v; else delete next[key];
+    setTaskContextMap(next);
+    try { localStorage.setItem("jiroku_task_context_"+todayKey, JSON.stringify(next)); } catch(e){}
+    enqueueTaskMutation("UPDATE", key, { context: v || "UNSET" });
+  };
+  // 持ち越し: 同じtask_idのまま日付を移す（複製しない）。一覧からは外す
+  const carryOverLocal = (task, toDate) => {
+    const id = idOfTitle(task);
+    if (!id) return;
+    enqueueTaskMutation("CARRY_OVER", id, { to_date: toDate });
+    // 今日の一覧から外す（Tasksシート側は日付が変わるだけで消えない）
+    const list = actionItems.filter(x=>x!==task);
+    if(list.length===0){ setCustomActions(null); localStorage.removeItem("jiroku_custom_actions_"+todayKey); }
+    else { const st=toStored(list); setCustomActions(st); localStorage.setItem("jiroku_custom_actions_"+todayKey, JSON.stringify(st)); }
+    gasPostJson("saveTodayActions", {actions: list.length===0?"":JSON.stringify(toStored(list)), noBridge: "1"});
+    setCarryPick(null); setDetailTask(null);
+  };
   // タスクを削除（詳細画面）。関連する状態・時間・メモ・チェックも掃除する
   const deleteTask = (task) => {
     // ★Tasksシートにも「消えた」と伝える★（キュー経由。残ると復活する）
@@ -1751,8 +1781,10 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
     const heldLocal = (customActions||[]).filter(t => hold[t.id] && !rows.some(x => x.task_id === t.id));
     const list = rows.map(t => ({ id: t.task_id, title: t.title })).concat(
       heldLocal.map(t => ({ id: t.id, title: t.title })));
-    const imp = {}, due = {}, est = {}, memo = {}, stt = {}, chk = {};
+    const imp = {}, due = {}, est = {}, memo = {}, stt = {}, chk = {}, ctx = {}, cry = {};
     rows.forEach(t => {
+      if (t.context && t.context !== "UNSET") ctx[t.task_id] = t.context;
+      cry[t.task_id] = Number(t.carryover_count || 0);
       if (hold[t.task_id]) {   // 端末の値を優先
         if (taskImportance[t.task_id]) imp[t.task_id] = taskImportance[t.task_id];
         if (taskDue[t.task_id]) due[t.task_id] = taskDue[t.task_id];
@@ -1784,6 +1816,8 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
     setTaskNotes(memo);     localStorage.setItem("jiroku_task_memo_"+todayKey, JSON.stringify(memo));
     setTaskStatus(stt);     localStorage.setItem("jiroku_task_status_"+todayKey, JSON.stringify(stt));
     setChecked(chk);        localStorage.setItem("today_actions", JSON.stringify(chk));
+    setTaskContextMap(ctx); localStorage.setItem("jiroku_task_context_"+todayKey, JSON.stringify(ctx));
+    setTaskCarry(cry);      localStorage.setItem("jiroku_task_carry_"+todayKey, JSON.stringify(cry));
   };
 
   // 送信が済んだら最新を取り直す（他端末の変更もここで届く）
@@ -1999,8 +2033,16 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
   const checkedCount = actionItems.filter(item=>isDone(item)).length;
   // タスクを「未完了」「完了」で分けて表示する（完了は下に折りたたみ）。
   // 元の並び順を保ったまま、チェック状態でフォルダ分けする
-  const incompleteItems = actionItems.filter(item=>!isDone(item));
-  const completedItems = actionItems.filter(item=>isDone(item));
+  // contextフィルタ（表示のみ）。UNSETは「すべて」でだけ見える…にすると
+  // 未設定のタスクが仕事ビューから消えて事故るので、未設定は常に表示する
+  const ctxVisible = (item) => {
+    if (ctxFilter === "ALL") return true;
+    const k = idOfTitle(item);
+    const c = (k && taskContext[k]) || taskContext[item] || "UNSET";
+    return c === ctxFilter || c === "UNSET";
+  };
+  const incompleteItems = actionItems.filter(item=>!isDone(item)&&ctxVisible(item));
+  const completedItems = actionItems.filter(item=>isDone(item)&&ctxVisible(item));
   const doneCount = actionItems.filter(item=>statusOf(item)==="done").length;
 
   return html`<div style=${{paddingBottom:40}}>
@@ -2431,6 +2473,37 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
           <button onClick=${openEdit} style=${{background:"none",border:"none",cursor:"pointer",color:"var(--accent)",fontSize:12,fontWeight:600,padding:"2px 6px"}}>編集</button>
         </div>
       </div>
+      ${actionItems.length>0&&html`
+        <div style=${{padding:"9px 16px",borderBottom:"1px solid var(--border)",display:"flex",flexWrap:"wrap",alignItems:"center",gap:"6px 14px"}}>
+          <!-- context切り替え。集計は全context対象（フィルタは表示だけ） -->
+          <div style=${{display:"flex",gap:4}}>
+            ${[["ALL","すべて"],["WORK","仕事"],["PERSONAL","プライベート"]].map(([v,lb])=>{
+              const on = ctxFilter===v;
+              return html`<button key=${v} onClick=${()=>setCtxFilter(v)}
+                style=${{padding:"3px 10px",borderRadius:20,fontSize:11,cursor:"pointer",fontFamily:"inherit",fontWeight:on?700:500,
+                         border:`1px solid ${on?"var(--accent)":"var(--border)"}`,
+                         background:on?"var(--accent-l)":"transparent",color:on?"var(--accent)":"var(--sub)"}}>${lb}</button>`;
+            })}
+          </div>
+          <!-- 今日の計画量。利用可能時間が未設定のうちは判定しない（勝手に8時間と仮定しない） -->
+          ${(()=>{
+            const fmtMin = m => m>=60 ? `${Math.floor(m/60)}時間${m%60?`${m%60}分`:""}` : `${m}分`;
+            let total=0, impMin=0, overMin=0, noEst=0;
+            actionItems.forEach(it=>{
+              const e2 = Number(estOf(it))||0;
+              if (e2>0) total+=e2; else noEst++;
+              const q = quadrantOf(it);
+              if (q.importance==="HIGH" && e2>0) impMin+=e2;
+              if (q.overdue && !isDone(it) && e2>0) overMin+=e2;
+            });
+            return html`<div style=${{fontSize:11,color:"var(--sub)",lineHeight:1.6}}>
+              想定 <b style=${{color:"var(--text)"}}>${total>0?fmtMin(total):"—"}</b>
+              ${impMin>0&&html` ・重要 ${fmtMin(impMin)}`}
+              ${overMin>0&&html` ・<span style=${{color:"#dc2626"}}>期限超過 ${fmtMin(overMin)}</span>`}
+              ${noEst>0&&html` ・見積もり未設定 ${noEst}件`}
+            </div>`;
+          })()}
+        </div>`}
       ${actionItems.length===0
         ? html`<div style=${{padding:"16px",fontSize:13,color:"var(--sub)",lineHeight:1.7}}>${report?"タスクを取得中...":"「＋ タスクを追加」で今日やることを登録できます"}</div>`
         : !boardWide
@@ -2505,7 +2578,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
             </div>`;
           };
           const column=([key,label,emoji,color])=>{
-            const items=actionItems.filter(t=>statusOf(t)===key);
+            const items=actionItems.filter(t=>statusOf(t)===key&&ctxVisible(t));
             return html`<div key=${key}
               onDragOver=${boardWide?(e=>{e.preventDefault();}):undefined}
               onDrop=${boardWide?(()=>{ if(dragTask){ setStatus(dragTask,key); setDragTask(null);} }):undefined}
@@ -2594,6 +2667,50 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
           <textarea class="inp" placeholder="このタスクのメモ・詳細・持ち物など" value=${taskNotes[idOfTitle(t)]||taskNotes[t]||""}
             onInput=${e=>setTaskNote(t, e.target.value)}
             style=${{minHeight:90,resize:"vertical",lineHeight:1.6,fontFamily:"inherit",marginBottom:16}}/>
+
+          <label class="form-lbl">分類（仕事/プライベート）</label>
+          <div style=${{display:"flex",gap:6,flexWrap:"wrap",marginBottom:16}}>
+            ${[["UNSET","未設定"],["WORK","仕事"],["PERSONAL","プライベート"],["LEARNING","学び"],["HEALTH","健康"],["OTHER","その他"]].map(([v,lb])=>{
+              const ck2 = idOfTitle(t);
+              const cur = (ck2 && taskContext[ck2]) || taskContext[t] || "UNSET";
+              const on = cur === v;
+              return html`<button key=${v} onClick=${()=>setTaskCtx(t, v)}
+                style=${{padding:"7px 12px",borderRadius:20,fontSize:12,cursor:"pointer",fontFamily:"inherit",
+                         border:`1.5px solid ${on?"var(--accent)":"var(--border)"}`,
+                         background:on?"var(--accent-l)":"transparent",
+                         color:on?"var(--accent)":"var(--sub)",fontWeight:on?700:500}}>${lb}</button>`;
+            })}
+          </div>
+
+          ${st!=="done"&&html`
+            <label class="form-lbl">持ち越し</label>
+            ${(()=>{ const cid=idOfTitle(t); const cnt=Number((cid&&taskCarry[cid])||0);
+              return cnt>0 ? html`<div style=${{fontSize:11.5,color:"var(--sub)",marginBottom:6}}>これまでに${cnt}回持ち越しています</div>` : ""; })()}
+            ${carryPick===null ? html`
+              <div style=${{display:"flex",gap:8,marginBottom:16}}>
+                <button onClick=${()=>{
+                    const d=new Date(); d.setDate(d.getDate()+1);
+                    setCarryPick(formatDateStr(d));
+                  }}
+                  style=${{flex:1,padding:"10px 4px",borderRadius:10,border:"1.5px solid var(--border)",background:"transparent",color:"var(--text)",fontSize:12.5,cursor:"pointer",fontFamily:"inherit"}}>明日へ持ち越す</button>
+                <input class="inp" type="date" style=${{width:150,margin:0}}
+                  onInput=${e=>{ if(e.target.value && e.target.value!==todayKey) setCarryPick(e.target.value); }}/>
+              </div>`
+            : html`
+              <div style=${{background:"var(--bg)",borderRadius:10,padding:"12px 14px",marginBottom:16}}>
+                <div style=${{fontSize:12.5,lineHeight:1.8,marginBottom:10}}>
+                  ${todayKey} → <b>${carryPick}</b> へ持ち越します。<br/>
+                  タスクは複製されず、同じタスクの日付が変わります。
+                  ${(()=>{ const cid=idOfTitle(t); const cnt=Number((cid&&taskCarry[cid])||0);
+                    return html`持ち越し回数は ${cnt} → ${cnt+1} になります。`; })()}
+                </div>
+                <div style=${{display:"flex",gap:8}}>
+                  <button class="btn" style=${{flex:1,margin:0}} onClick=${()=>carryOverLocal(t, carryPick)}>持ち越す</button>
+                  <button onClick=${()=>setCarryPick(null)}
+                    style=${{flex:1,padding:"10px 4px",borderRadius:10,border:"1.5px solid var(--border)",background:"transparent",color:"var(--sub)",fontSize:12.5,cursor:"pointer",fontFamily:"inherit"}}>やめる</button>
+                </div>
+              </div>`}
+          `}
 
           ${st!=="done"&&html`<button class="btn" style=${{marginBottom:10}} onClick=${()=>{ goToTimerWith(t); setDetailTask(null); }}>⏱ タイマーで計測する</button>`}
           <button onClick=${()=>{ if(confirm("このタスクを削除しますか？")) deleteTask(t); }}
@@ -5662,7 +5779,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260802-135752";
+const APP_BUILD = "20260802-141055";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
