@@ -2527,17 +2527,20 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
         // 円形の進捗リング
         const R=26, C=2*Math.PI*R;
         return html`
-        <div style=${{display:"flex",alignItems:"center",gap:13}}>
-          <div style=${{width:42,height:42,borderRadius:12,background:"var(--accent-l)",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/></svg>
-          </div>
+        <div style=${{display:"flex",alignItems:"center",gap:11}}>
+          <!-- ★達成の切り替えはチェックボックスに分ける★
+               文字を押すと達成になるのは分かりにくく、達成後に「達成🎉」が
+               付いて2行になるのも収まりが悪かった。印は打ち消し線だけにする -->
+          <button onClick=${toggleIntentDone} aria-label=${intent.done?"未達成に戻す":"達成にする"}
+            style=${{flexShrink:0,width:26,height:26,padding:0,borderRadius:"50%",
+                     border:`2px solid var(--accent)`,background:intent.done?"var(--accent)":"transparent",
+                     display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",transition:"all .15s"}}>
+            ${intent.done&&html`<svg width="13" height="13" viewBox="0 0 10 10" fill="none"><path d="M2 5l2.5 2.5L8 3" stroke="#fff" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>`}
+          </button>
           <div style=${{flex:1,minWidth:0}}>
-            <button onClick=${toggleIntentDone}
-              style=${{display:"block",width:"100%",background:"none",border:"none",padding:0,textAlign:"left",cursor:"pointer",fontFamily:"inherit"}}>
-              <span style=${{display:"block",fontSize:14.5,fontWeight:800,color:"var(--text)",lineHeight:1.45,
-                             textDecoration:intent.done?"line-through":"none",opacity:intent.done?0.6:1,overflowWrap:"anywhere"}}>
-                ${intent.intent}${intent.done?" 達成🎉":""}</span>
-            </button>
+            <span style=${{display:"block",fontSize:14.5,fontWeight:800,color:"var(--text)",lineHeight:1.45,
+                           textDecoration:intent.done?"line-through":"none",opacity:intent.done?0.55:1,overflowWrap:"anywhere"}}>
+              ${intent.intent}</span>
 
           </div>
           <div style=${{flexShrink:0,textAlign:"center"}}>
@@ -6622,7 +6625,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260802-221741";
+const APP_BUILD = "20260802-222100";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
