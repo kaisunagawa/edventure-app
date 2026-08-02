@@ -1270,6 +1270,8 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
   });
   const [sprintSheet, setSprintSheet] = useState(null);   // null=閉 / {}=新規 / obj=編集
   const [sprintIdx, setSprintIdx] = useState(0);
+  const [goalDetail, setGoalDetail] = useState(false);   // 数字の出どころ（普段は隠す）
+  const [deepenGoal, setDeepenGoal] = useState(null);    // 目標の深掘り
   const [goalQuick, setGoalQuick] = useState({current:"", start:"", end:""});   // 足りない値をその場で入れる
   const [goalQuickSaving, setGoalQuickSaving] = useState(false);
   const [taskWhy, setTaskWhy] = useState({});          // なぜ上に来ているかの理由（サーバー算出）
@@ -2321,12 +2323,20 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
             <div style=${{fontSize:11.5,lineHeight:1.7}}>
               <span style=${{color:st[1],fontWeight:700}}>${st[0]}</span>
               ${num(p.forecast)!==null&&html`<span style=${{color:"var(--sub)"}}> ・このままなら <b style=${{color:"var(--text)"}}>${fmt(p.forecast)}${p.unit||""}</b> で着地</span>`}
-              ${p.confidence&&html`<span style=${{color:"var(--sub)"}}> ・確からしさ ${CONF[p.confidence]||p.confidence}</span>`}
-              ${p.period&&html`<span style=${{color:"var(--sub)"}}> ・集計 ${p.period}</span>`}
             </div>
             ${p.note&&html`<div style=${{fontSize:11,color:"var(--sub)",marginTop:5,lineHeight:1.6}}>${p.note}</div>`}
             ${p.forecastWarning&&html`<div style=${{fontSize:11,color:"var(--amber,#BA7517)",marginTop:5,lineHeight:1.6}}>⚠ ${p.forecastWarning}</div>`}
-            <div style=${{fontSize:10.5,color:"var(--sub)",marginTop:5}}>現在値は自己申告（本人が入力した値）です</div>`
+            <!-- ★内部の言葉は普段は隠す★「確からしさ」「集計期間」「自己申告」は
+                 開発側の言葉で、毎回見せると画面が読みにくくなる。知りたい人だけ開く -->
+            <button onClick=${()=>setGoalDetail(v=>!v)}
+              style=${{background:"none",border:"none",padding:"4px 0 0",color:"var(--sub)",fontSize:10.5,cursor:"pointer",fontFamily:"inherit"}}>
+              ${goalDetail?"数字の出どころを閉じる ▲":"この数字はどこから？ ▼"}</button>
+            ${goalDetail&&html`
+              <div style=${{fontSize:10.5,color:"var(--sub)",lineHeight:1.8,marginTop:4}}>
+                現在値：あなたが入力した値<br/>
+                ${p.period&&html`集計した期間：${p.period}<br/>`}
+                ${p.confidence&&html`予測の確からしさ：${CONF[p.confidence]||p.confidence}（記録が増えるほど上がります）`}
+              </div>`}`
           : html`
             <div style=${{fontSize:12,color:"var(--sub)",lineHeight:1.7,marginBottom:8}}>
               ${p.note || "目標の数値がまだ入っていないので、進み具合を出せません。"}
@@ -2374,10 +2384,33 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
                 ${goalQuickSaving?"保存中…":"保存"}</button>
             </div>
           </div>`}
-        <button onClick=${()=>setHomeGoalSheet(true)}
-          style=${{marginTop:10,width:"100%",padding:"9px",background:"none",border:"1px solid var(--border)",borderRadius:10,color:"var(--accent)",fontSize:12.5,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
-          ${num(p.target)!==null?"目標を編集する":"数値を設定する"}
-        </button>
+        <!-- ★目標そのものを深掘りする導線★
+             「腹筋をシックスパックにする / 12回」のように、何の12回か
+             分からない目標が作れてしまう。数字だけ聞くのではなく、
+             「できたと言える状態」から数えるものを決め直せるようにする -->
+        ${(!g.success_condition||!g.why)&&html`
+          <div style=${{background:"var(--accent-l)",borderRadius:10,padding:"10px 12px",marginTop:10}}>
+            <div style=${{fontSize:12,color:"var(--text)",lineHeight:1.7,marginBottom:8}}>
+              ${!g.success_condition
+                ? html`この目標は「どうなったら達成か」が決まっていません。<br/>そこが決まると、数えるものと今週やることが決まります。`
+                : html`なぜやりたいのかを書いておくと、しんどい時に戻ってこられます。`}
+            </div>
+            <button onClick=${()=>setDeepenGoal(g)}
+              style=${{width:"100%",padding:"9px",borderRadius:9,border:"none",background:"var(--accent)",color:"#fff",fontSize:12.5,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
+              5つの質問で深掘りする</button>
+          </div>`}
+        ${g.success_condition&&html`
+          <div style=${{fontSize:11.5,color:"var(--sub)",lineHeight:1.7,marginTop:9,paddingTop:9,borderTop:"1px solid var(--border)"}}>
+            <b style=${{color:"var(--text)"}}>できたと言える状態</b><br/>${g.success_condition}
+          </div>`}
+        <div style=${{display:"flex",gap:8,marginTop:10}}>
+          <button onClick=${()=>setDeepenGoal(g)}
+            style=${{flex:1,padding:"9px",background:"none",border:"1px solid var(--border)",borderRadius:10,color:"var(--accent)",fontSize:12.5,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
+            深掘りする</button>
+          <button onClick=${()=>setHomeGoalSheet(true)}
+            style=${{flex:1,padding:"9px",background:"none",border:"1px solid var(--border)",borderRadius:10,color:"var(--sub)",fontSize:12.5,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
+            一覧・編集</button>
+        </div>
       </div>`;
     })()}
 
@@ -2499,6 +2532,12 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
         })}
       </div>`;
     })()}
+
+    ${deepenGoal&&html`<${GoalDeepenSheet} goal=${deepenGoal}
+      onClose=${()=>setDeepenGoal(null)}
+      onSaved=${()=>gasApi("getGoalTree").then(r=>{ if(r&&r.ok&&r.data){ setGoalTree(r.data);
+        try { localStorage.setItem("cache_goaltree", JSON.stringify(r.data)); } catch(e){} } })}
+      onToast=${onToast}/>`}
 
     ${sprintSheet!==null&&html`<${SprintSheet}
       goals=${((goalTree&&goalTree.goals)||[]).filter(g=>String(g.status||"ACTIVE").toUpperCase()!=="ARCHIVED")}
@@ -2759,7 +2798,10 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
     `, document.body)}
 
     <!-- Goals -->
-    ${goalsArr.length>0&&html`
+    <!-- ★旧「目標1/2/3」★ 文言と期限だけの古い目標。
+         3か月目標（数値・ペース付き）を持っている人には二重表示になるので出さない。
+         まだ移行していない人のためだけに残す（消すと目標が画面から消えてしまう） -->
+    ${goalsArr.length>0&&!((goalTree&&goalTree.goals)||[]).some(g=>String(g.status||"ACTIVE").toUpperCase()!=="ARCHIVED")&&html`
       <div style=${{margin:"16px 16px 10px",background:"var(--card)",borderRadius:16,border:"1px solid var(--border)",overflow:"hidden"}}>
         ${!intent&&(()=>{
           const goalMins=todayLogs.filter(l=>l.goal_related==="true"||l.goal_related===true).length*60;
@@ -5303,6 +5345,122 @@ function WeeklyGoalEditor({draft, setDraft, onSave, onCancel, saving}) {
 
 // 2週間スプリントの作成・編集。3か月目標を必ず親に選ばせる
 // （親のない目標は集計に載らず、あとで宙に浮くため）
+// 3か月目標の深掘り。数字を先に聞かず、「達成した状態」から数えるものを決める。
+// 「腹筋をシックスパックにする / 12回」のように、何の12回か分からない目標を作らせない。
+function GoalDeepenSheet({goal, onClose, onSaved, onToast}) {
+  const [step, setStep] = useState(0);
+  const [d, setD] = useState(()=>({...goal}));
+  const [saving, setSaving] = useState(false);
+  const set = (k,v)=>setD(p=>({...p,[k]:v}));
+  const today = formatDateStr(new Date());
+  const plus = (n)=>{ const x=new Date(today+"T00:00:00+09:00"); x.setMonth(x.getMonth()+n); return formatDateStr(x); };
+
+  const STEPS = [
+    { key:"why", title:"なぜ、それをやりたい？",
+      hint:"きれいな言葉でなくて大丈夫です。しんどい時に自分を戻してくれるのは、この一行です。",
+      ph:"例：家族に心配をかけずに、来年も同じ働き方を続けたいから", multi:true },
+    { key:"success_condition", title:"どうなっていたら「できた」と言える？",
+      hint:"「がんばる」ではなく、他の人が見ても分かる状態で書きます。ここが決まると、数えるものが決まります。",
+      ph:"例：体脂肪率が15%を切って、腹筋の線が見えている", multi:true },
+    { key:"__metric", title:"では、何を数えますか？",
+      hint:"上の状態に近づいたかを測れる数字を1つだけ選びます。増えるほど良い数字にしてください。" },
+    { key:"__period", title:"いつまで？",
+      hint:"3か月が基本です。長すぎると今日が変わらず、短すぎると形になりません。" },
+    { key:"guardrails", title:"これは犠牲にしない、というものは？",
+      hint:"目標を追ううちに壊しがちなものを先に決めておきます。空欄でも進めます。",
+      ph:"例：睡眠6時間、週1回は家族と夕食", multi:true }
+  ];
+  const cur = STEPS[step];
+  const last = step === STEPS.length - 1;
+
+  const save = async () => {
+    setSaving(true);
+    const body = {...d};
+    delete body.pace; delete body.paceLabel; delete body.weeklyGoals; delete body.current_value_source;
+    const r = await gasPostJson("saveGoal", body);
+    setSaving(false);
+    if(r&&r.ok){ onToast&&onToast("保存しました"); onSaved&&onSaved(); onClose(); }
+    else onToast&&onToast((r&&r.error)||"保存できませんでした");
+  };
+
+  return html`
+    <div style=${{position:"fixed",inset:0,zIndex:430,background:"var(--bg)",display:"flex",flexDirection:"column"}}>
+      <div style=${{display:"flex",alignItems:"center",gap:10,padding:"14px 16px",borderBottom:"1px solid var(--border)",flexShrink:0,paddingTop:"calc(14px + var(--safe-top, 0px))"}}>
+        <div style=${{flex:1,minWidth:0}}>
+          <div style=${{fontSize:10.5,color:"var(--sub)",fontWeight:700}}>${step+1} / ${STEPS.length}</div>
+          <div style=${{fontSize:14,fontWeight:800,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>${d.title}</div>
+        </div>
+        <button onClick=${onClose} style=${{background:"none",border:"none",color:"var(--sub)",fontSize:22,cursor:"pointer",lineHeight:1,padding:"0 4px"}}>×</button>
+      </div>
+      <div style=${{height:3,background:"var(--border)",flexShrink:0}}>
+        <div style=${{height:"100%",width:((step+1)/STEPS.length*100)+"%",background:"var(--accent)",transition:"width .3s"}}/>
+      </div>
+
+      <div style=${{flex:1,overflowY:"auto",WebkitOverflowScrolling:"touch",padding:"20px 16px calc(28px + var(--safe-bottom, 0px))"}}>
+        <div style=${{fontSize:17,fontWeight:800,lineHeight:1.5,marginBottom:8}}>${cur.title}</div>
+        <div style=${{fontSize:12.5,color:"var(--sub)",lineHeight:1.8,marginBottom:16}}>${cur.hint}</div>
+
+        ${cur.key==="__metric" ? html`
+          <div style=${{marginBottom:14}}>
+            <div style=${{fontSize:12,color:"var(--sub)",marginBottom:6}}>数えるもの（単位）</div>
+            <div style=${{display:"flex",gap:6,flexWrap:"wrap",marginBottom:10}}>
+              ${["回","件","分","時間","日","万円","kg","%","点"].map(u=>html`
+                <button key=${u} onClick=${()=>set("unit",u)}
+                  style=${{padding:"7px 14px",borderRadius:20,fontSize:12.5,cursor:"pointer",fontFamily:"inherit",
+                           border:`1.5px solid ${d.unit===u?"var(--accent)":"var(--border)"}`,
+                           background:d.unit===u?"var(--accent-l)":"transparent",
+                           color:d.unit===u?"var(--accent)":"var(--sub)",fontWeight:d.unit===u?700:500}}>${u}</button>`)}
+            </div>
+            <input class="inp" placeholder="ほかの単位を書く（例：本、社、ページ）" value=${d.unit||""}
+              onInput=${e=>set("unit",e.target.value)} style=${{marginBottom:14}}/>
+            <div style=${{display:"flex",gap:10}}>
+              <label style=${{flex:1}}><span class="form-lbl">3か月後にいくつ？</span>
+                <input class="inp" type="number" inputmode="decimal" placeholder="目標" value=${d.target_value||""}
+                  onInput=${e=>set("target_value",e.target.value)} style=${{margin:0,textAlign:"right"}}/></label>
+              <label style=${{flex:1}}><span class="form-lbl">いまはいくつ？</span>
+                <input class="inp" type="number" inputmode="decimal" placeholder="現在" value=${d.current_value||""}
+                  onInput=${e=>set("current_value",e.target.value)} style=${{margin:0,textAlign:"right"}}/></label>
+            </div>
+            <div style=${{fontSize:11.5,color:"var(--sub)",lineHeight:1.7,marginTop:8}}>
+              いまが0でも書いてください。空欄のままだと「まだ測っていない」扱いになり、進み具合を出せません。
+            </div>
+          </div>`
+        : cur.key==="__period" ? html`
+          <div style=${{marginBottom:14}}>
+            <div style=${{display:"flex",gap:6,marginBottom:12}}>
+              ${[["3か月",3],["2か月",2],["1か月",1]].map(([lb,n])=>html`
+                <button key=${lb} onClick=${()=>{ set("start_date", d.start_date||today); set("end_date", plus(n)); }}
+                  style=${{flex:1,padding:"10px 4px",borderRadius:10,fontSize:12.5,cursor:"pointer",fontFamily:"inherit",
+                           border:`1.5px solid ${d.end_date===plus(n)?"var(--accent)":"var(--border)"}`,
+                           background:d.end_date===plus(n)?"var(--accent-l)":"transparent",
+                           color:d.end_date===plus(n)?"var(--accent)":"var(--sub)",fontWeight:700}}>${lb}</button>`)}
+            </div>
+            <div style=${{display:"flex",gap:10}}>
+              <label style=${{flex:1}}><span class="form-lbl">はじめ</span>
+                <input class="inp" type="date" value=${d.start_date||today} onInput=${e=>set("start_date",e.target.value)} style=${{margin:0}}/></label>
+              <label style=${{flex:1}}><span class="form-lbl">おわり</span>
+                <input class="inp" type="date" value=${d.end_date||""} onInput=${e=>set("end_date",e.target.value)} style=${{margin:0}}/></label>
+            </div>
+          </div>`
+        : html`
+          <textarea class="inp" placeholder=${cur.ph} value=${d[cur.key]||""}
+            onInput=${e=>set(cur.key, e.target.value)}
+            style=${{minHeight:110,resize:"vertical",lineHeight:1.7,fontFamily:"inherit",marginBottom:14}}/>`}
+
+        <div style=${{display:"flex",gap:8,marginTop:6}}>
+          ${step>0&&html`<button onClick=${()=>setStep(step-1)}
+            style=${{flex:1,padding:"12px",borderRadius:10,border:"1.5px solid var(--border)",background:"none",color:"var(--sub)",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>もどる</button>`}
+          <button disabled=${saving} onClick=${()=>{ if(last) save(); else setStep(step+1); }}
+            style=${{flex:2,padding:"12px",borderRadius:10,border:"none",background:"var(--accent)",color:"#fff",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit",opacity:saving?0.6:1}}>
+            ${saving?"保存中…":(last?"保存して終わる":"次へ")}</button>
+        </div>
+        <button onClick=${()=>{ if(last) save(); else setStep(step+1); }}
+          style=${{width:"100%",marginTop:10,background:"none",border:"none",color:"var(--sub)",fontSize:12,cursor:"pointer",fontFamily:"inherit"}}>
+          ここは飛ばす</button>
+      </div>
+    </div>`;
+}
+
 function SprintSheet({goals, editing, onClose, onSaved, onToast}) {
   const today = formatDateStr(new Date());
   const plus = (d,n)=>{ const x=new Date(d+"T00:00:00+09:00"); x.setDate(x.getDate()+n); return formatDateStr(x); };
@@ -6335,7 +6493,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260802-164245";
+const APP_BUILD = "20260802-165417";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
