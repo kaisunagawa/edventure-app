@@ -81,6 +81,9 @@ function doGet(e) {
       case "getUser":      result = getUser(studentEmail); break;
       // ── Phase 1: 自己経営OS の基盤（管理者のみ実行可能なセットアップ）──
       case "adminPhase4DryRun": return jsonResponse(phase4DryRun());
+      case "adminOpsSelfTest":
+        return jsonResponse(verifyAdmin(e.parameter.coachEmail)
+          ? opsSelfTest(e.parameter.studentEmail, e.parameter.date) : { ok: false, error: "not admin" });
       case "adminLegacyBackfill":
         return jsonResponse(legacyBackfill(String(e.parameter.execute || "") === "1", e.parameter.migrationId));
       case "adminWritePathStats": {
@@ -1313,22 +1316,37 @@ function opsBand(score) {
 }
 
 // その日の経営事実を数値化する。AIは呼ばない（同じ入力なら同じ結果）
-function computeDailyOpsFacts(studentEmail, dateStr) {
+// fixture を渡すとシートを読まずに計算する（テスト用）
+function computeDailyOpsFacts(studentEmail, dateStr, fixture) {
   const date = String(dateStr || formatDate(new Date())).slice(0, 10);
-  const logs = sheetToObjects(getSheet("DailyLog")).filter(function (l) {
+  const fx = fixture || null;
+  const logs = fx ? (fx.logs || []) : sheetToObjects(getSheet("DailyLog")).filter(function (l) {
     return String(l.student_email) === studentEmail && String(l.date).slice(0, 10) === date; });
-  const tasks = p1List("Tasks", studentEmail).filter(function (t) {
+  const tasks = fx ? (fx.tasks || []) : p1List("Tasks", studentEmail).filter(function (t) {
     return !String(t.deleted_at || "").trim() && p1DateOut_(t.date) === date; });
-  const journal = sheetToObjects(getJournalSheet()).find(function (r) {
+  const journal = fx ? (fx.journal || {}) : (sheetToObjects(getJournalSheet()).find(function (r) {
     const rd = r.date instanceof Date ? Utilities.formatDate(r.date, "Asia/Tokyo", "yyyy-MM-dd") : String(r.date).slice(0, 10);
-    return String(r.student_email) === studentEmail && rd === date; }) || {};
-  const wgs = p1List("WeeklyGoals", studentEmail).filter(function (w) { return p1Status_(w.status, "ACTIVE") === "ACTIVE"; });
+    return String(r.student_email) === studentEmail && rd === date; }) || {});
+  const wgs = fx ? (fx.weekly_goals || []) : p1List("WeeklyGoals", studentEmail).filter(function (w) { return p1Status_(w.status, "ACTIVE") === "ACTIVE"; });
 
-  const na = function (label, weight, reason, code) {
+  // state 既定は insufficient_data（測る手段が無い＝分母に残して充足度を下げる）。
+  // not_evaluable は「そもそも今日は評価する機会が無い」＝分母から外す。
+  const na = function (label, weight, reason, code, state) {
     return { key: label, label: label, weight: weight, value: null,
-             state: "insufficient_data", reason: reason, reason_code: code };
+             state: state || "insufficient_data", reason: reason, reason_code: code };
   };
+  const NO_CHANCE = "not_evaluable";
   const items = [];
+  // 休息日として計画した日は、前進・実行で減点しない
+  const restDay = journal.rest_day === true || String(journal.rest_day || "") === "true";
+  const restCat = function (key, label, weight) {
+    return { key: key, label: label, weight: weight, score: null,
+             state: "excluded_by_exception", evaluation_state: "excluded_by_exception",
+             weighted_coverage: 0, component_coverage: 0, coverage: 0, confidence: "NONE",
+             evaluated_weight: 0, total_weight: 0, sample_count: 0, components: [],
+             incomplete_reason: "休息日として計画された日のため評価しません",
+             reason: "休息日として計画された日のため評価しません", reason_code: "REST_DAY_EXCEPTION" };
+  };
 
   // ── 成果への前進（30）──────────────────────────────
   //   完了だけでなく着手も前進として数える。決めただけでは加点しない。
@@ -1343,7 +1361,7 @@ function computeDailyOpsFacts(studentEmail, dateStr) {
       parts.push({ label: "重要タスクの前進", weight: 2, sample: imp.length, state: "evaluated",
                    value: Math.round((done + started * 0.5) / imp.length * 100),
                    detail: "完了" + done + "件・着手" + started + "件 / " + imp.length + "件" });
-    } else parts.push(na("重要タスクの前進", 2, "今日は重要（高）のタスクがありません", "NO_IMPORTANT_TASK"));
+    } else parts.push(na("重要タスクの前進", 2, "今日は重要（高）のタスクがありません", "NO_IMPORTANT_TASK", NO_CHANCE));
 
     const focusText = String(journal.intent || "").trim();
     if (focusText) {
@@ -1353,9 +1371,10 @@ function computeDailyOpsFacts(studentEmail, dateStr) {
       parts.push({ label: "今日のフォーカスの前進", weight: 2, sample: 1, state: "evaluated",
                    value: doneFlag ? 100 : Math.min(100, Math.round(goalMin / Math.max(60, targetMin) * 100)),
                    detail: doneFlag ? "達成" : (Math.round(goalMin / 60 * 10) / 10) + "時間 / " + (targetMin / 60) + "時間" });
-    } else parts.push(na("今日のフォーカスの前進", 2, "今日のフォーカスが決まっていません", "NO_DAILY_FOCUS"));
+    } else parts.push(na("今日のフォーカスの前進", 2, "今日のフォーカスが決まっていません", "NO_DAILY_FOCUS", NO_CHANCE));
 
-    items.push(rollOps("progress", "成果への前進", OPS_WEIGHTS.progress, parts));
+    items.push(restDay ? restCat("progress", "成果への前進", OPS_WEIGHTS.progress)
+                       : rollOps("progress", "成果への前進", OPS_WEIGHTS.progress, parts));
   })();
 
   // ── 計画の実行（30）───────────────────────────────
@@ -1375,65 +1394,93 @@ function computeDailyOpsFacts(studentEmail, dateStr) {
                      value: Math.round(withDue.filter(function (t) {
                        const c = String(t.completed_at || "").slice(0, 10);
                        return c && c <= p1DateOut_(t.due_at); }).length / withDue.length * 100) });
-      } else parts.push(na("期限を守れた割合", 1, "期限を決めたタスクがありません", "NO_DUE_TASK"));
+      } else parts.push(na("期限を守れた割合", 1, "期限を決めたタスクがありません", "NO_DUE_TASK", NO_CHANCE));
       // 持ち越しは「少ないほど良い」。1件も無い日を減点しない
       parts.push({ label: "翌日へ残さなかった割合", weight: 1, sample: tasks.length, state: "evaluated",
                    value: Math.round((1 - tasks.filter(function (t) {
                      return normalizeTaskStatus(t.status) === "CARRIED_OVER"; }).length / tasks.length) * 100) });
     } else {
-      parts.push(na("予定したことの実行", 2, "今日のタスクが登録されていません", "NO_TASK_TODAY"));
-      parts.push(na("期限を守れた割合", 1, "今日のタスクが登録されていません", "NO_TASK_TODAY"));
-      parts.push(na("翌日へ残さなかった割合", 1, "今日のタスクが登録されていません", "NO_TASK_TODAY"));
+      parts.push(na("予定したことの実行", 2, "今日のタスクが登録されていません", "NO_TASK_TODAY", NO_CHANCE));
+      parts.push(na("期限を守れた割合", 1, "今日のタスクが登録されていません", "NO_TASK_TODAY", NO_CHANCE));
+      parts.push(na("翌日へ残さなかった割合", 1, "今日のタスクが登録されていません", "NO_TASK_TODAY", NO_CHANCE));
     }
-    items.push(rollOps("execution", "計画の実行", OPS_WEIGHTS.execution, parts));
+    items.push(restDay ? restCat("execution", "計画の実行", OPS_WEIGHTS.execution)
+                       : rollOps("execution", "計画の実行", OPS_WEIGHTS.execution, parts,
+                                 { required: ["予定したことの実行"] }));
   })();
 
   // ── 時間の使い方（20）── 5分類が入るまで算出しない ──────
-  items.push({ key: "time_use", label: "時間の使い方", weight: OPS_WEIGHTS.time_use,
-               score: null, state: "insufficient_data", coverage: 0, sample_count: 0, components: [],
-               reason: "時間の使い方を分類する機能を準備しています",
-               reason_code: "TIME_CLASSIFICATION_UNAVAILABLE" });
+  items.push(rollOps("time_use", "時間の使い方", OPS_WEIGHTS.time_use, [
+    na("集中に使った時間", 1, "時間の使い方を分類する機能を準備しています", "TIME_CLASSIFICATION_UNAVAILABLE"),
+    na("目標に直結した時間", 1, "時間の使い方を分類する機能を準備しています", "TIME_CLASSIFICATION_UNAVAILABLE"),
+    na("こま切れ時間の割合", 1, "時間の使い方を分類する機能を準備しています", "TIME_CLASSIFICATION_UNAVAILABLE")
+  ]));
 
   // ── 続けられる運営（20）─────────────────────────
   //   長く働くほど高得点にしない。休息を減点しない。
+  //   ★持ち越しは「計画の実行」で評価済み。ここでは点にせず参考事実に留める★
   (function () {
-    const parts = [];
     const planned = tasks.reduce(function (a, t) { return a + (Number(t.estimated_minutes) || 0); }, 0);
     const carried = tasks.filter(function (t) { return normalizeTaskStatus(t.status) === "CARRIED_OVER"; }).length;
-    if (tasks.length) {
-      // 翌日へ持ち越した量が多いほど、翌日が苦しくなる
-      parts.push({ label: "翌日へ残した量", weight: 1, sample: tasks.length, state: "evaluated",
-                   value: Math.max(0, Math.round((1 - carried / tasks.length) * 100)),
-                   detail: "持ち越し" + carried + "件 / " + tasks.length + "件" });
-    } else parts.push(na("翌日へ残した量", 1, "今日のタスクが登録されていません", "NO_TASK_TODAY"));
-    parts.push(na("回復・休息の時間", 1, "休息や回復を分類する機能を準備しています", "TIME_CLASSIFICATION_UNAVAILABLE"));
-    parts.push(na("予定量の適切さ", 1, "1日に使える時間の設定がないため判定できません", "AVAILABLE_TIME_MISSING"));
+    const parts = [
+      na("予定量 ÷ 使える時間", 1, "1日に使える時間の設定がないため判定できません", "AVAILABLE_TIME_MISSING"),
+      na("記録時間の偏り", 1, "実績時間の記録が十分でないため判定できません", "ACTUAL_MINUTES_COVERAGE_LOW"),
+      na("回復・休息の時間", 1, "休息や回復を分類する機能を準備しています", "TIME_CLASSIFICATION_UNAVAILABLE"),
+      na("翌日へ残る総負荷", 1, "残った作業量を見積もる情報が足りません", "REMAINING_LOAD_UNAVAILABLE")
+    ];
     const r = rollOps("sustainability", "続けられる運営", OPS_WEIGHTS.sustainability, parts);
-    r.reference = planned > 0 ? ("今日の予定は合計 " + planned + "分（参考）") : "";
+    // 参考事実（点数には使わない）
+    r.reference_facts = [];
+    if (tasks.length) r.reference_facts.push("翌日への持ち越し " + carried + "件 / " + tasks.length + "件（参考）");
+    if (planned > 0) r.reference_facts.push("今日の予定は合計 " + planned + "分（参考）");
+    r.reference = r.reference_facts.join(" ・ ");
     items.push(r);
   })();
 
   // ── 総合（中間案）──────────────────────────────
   //   条件を満たすときだけ出す。欠損を0にして下げない。
+  //   ★カテゴリ内部の測定率を、総合coverageへそのまま伝播させる★
   const evaluated = items.filter(function (x) { return x.state === "evaluated" && x.score !== null; });
-  const totalW = items.reduce(function (a, x) { return a + x.weight; }, 0);
+  // 評価する機会が無い／例外で除外したカテゴリは、分母からも外す
+  const scoped = items.filter(function (x) {
+    return x.state !== "not_evaluable" && x.state !== "excluded_by_exception"; });
+  const totalW = scoped.reduce(function (a, x) { return a + x.weight; }, 0);
   const okW = evaluated.reduce(function (a, x) { return a + x.weight; }, 0);
-  const weightedCoverage = totalW ? Math.round(okW / totalW * 100) / 100 : 0;
+  // Σ(カテゴリ配点 × カテゴリ内部weighted_coverage) ÷ 対象カテゴリ配点
+  const covAcc = scoped.reduce(function (a, x) { return a + x.weight * (x.weighted_coverage || 0); }, 0);
+  const weightedCoverage = totalW ? Math.round(covAcc / totalW * 100) / 100 : 0;
+  const categoryCoverage = totalW ? Math.round(okW / totalW * 100) / 100 : 0;
   const conf = weightedCoverage >= 0.8 ? "HIGH" : weightedCoverage >= 0.5 ? "MEDIUM" : "LOW";
   const hasCore = evaluated.some(function (x) { return x.key === "progress" || x.key === "execution"; });
   const canScore = evaluated.length >= 3 && weightedCoverage >= 0.65 && hasCore && conf !== "LOW";
-  let operating = null;
-  if (canScore) {
-    let acc = 0;
-    evaluated.forEach(function (x) { acc += x.score * x.weight; });
-    operating = Math.round(acc / okW);   // 評価できた重みで正規化
+  // 評価できた分だけの加重平均（総合として出せない日でも、部分の状態は伝える）
+  let partial = null;
+  if (okW) { let a = 0; evaluated.forEach(function (x) { a += x.score * x.weight; }); partial = Math.round(a / okW); }
+  let operating = canScore ? partial : null;
+  let scoreBlockedBy = canScore ? "" :
+      (!hasCore ? "CORE_CATEGORY_MISSING" :
+       evaluated.length < 3 ? "EVALUATED_CATEGORY_LT_3" :
+       weightedCoverage < 0.65 ? "COVERAGE_BELOW_THRESHOLD" : "CONFIDENCE_LOW");
+  // 満点は根拠を厳しく。測れていない日に100は出さない
+  if (operating !== null && operating >= 95 && weightedCoverage < 0.8) {
+    operating = null; scoreBlockedBy = "PERFECT_SCORE_NEEDS_COVERAGE_080";
   }
+  const evaluatedLabels = evaluated.map(function (x) { return x.label; });
   return {
     report_date: date, student_email: studentEmail,
     operating_score: operating,
-    operating_state_label: opsBand(operating),
+    partial_score: partial,
+    partial_label: partial === null ? "" : opsBand(partial),
+    partial_scope: evaluatedLabels.join("と"),
+    score_blocked_by: scoreBlockedBy,
+    operating_state_label: operating === null
+      ? (partial === null ? "データ蓄積中" : opsBand(partial))
+      : opsBand(operating),
+    label_scope: operating === null ? "partial" : "total",
     evaluation_state: operating === null ? "insufficient_data" : "evaluated",
-    coverage: weightedCoverage, confidence: operating === null ? "NONE" : conf,
+    coverage: weightedCoverage, category_coverage: categoryCoverage,
+    confidence: conf,
+    evaluated_categories: evaluatedLabels,
     excluded_items: items.filter(function (x) { return x.state !== "evaluated"; })
                          .map(function (x) { return x.label; }),
     components: items,
@@ -1459,23 +1506,52 @@ function computeDailyOpsFacts(studentEmail, dateStr) {
   };
 }
 
-// 構成要素を丸める。評価できたものだけで、重みを基準に正規化する
-function rollOps(key, label, weight, parts) {
+// 構成要素を丸める。
+//   ★数値が出せただけで evaluated にしない★
+//   内部の測定率（weighted_coverage）が半分未満、または必須要素が欠けていたら
+//   insufficient_data。評価する機会そのものが無い日は not_evaluable。
+function rollOps(key, label, weight, parts, opts) {
+  const o = opts || {};
+  const required = o.required || [];
   const ok = parts.filter(function (p) { return p.state === "evaluated" && p.value !== null; });
-  const totalW = parts.reduce(function (a, p) { return a + (p.weight || 1); }, 0);
-  if (!ok.length) {
-    const first = parts.find(function (p) { return p.reason; }) || {};
-    return { key: key, label: label, weight: weight, score: null, state: "insufficient_data",
-             coverage: 0, sample_count: 0, components: parts,
-             reason: parts.filter(function (p) { return p.reason; }).map(function (p) { return p.reason; }).join(" / "),
-             reason_code: first.reason_code || "INSUFFICIENT_DATA" };
+  // 「今日はその機会が無い」要素は分母から外す（無いことで測定率を下げない）
+  const inScope = parts.filter(function (p) { return p.state !== "not_evaluable"; });
+  const totalW = inScope.reduce(function (a, p) { return a + (p.weight || 1); }, 0);
+  const okW = ok.reduce(function (a, p) { return a + (p.weight || 1); }, 0);
+  const wc = totalW ? Math.round(okW / totalW * 100) / 100 : 0;
+  const cc = inScope.length ? Math.round(ok.length / inScope.length * 100) / 100 : 0;
+  let score = null, n = 0;
+  if (ok.length) {
+    let v = 0;
+    ok.forEach(function (p) { v += p.value * (p.weight || 1); n += (p.sample || 0); });
+    score = Math.round(v / okW);
   }
-  let w = 0, v = 0, n = 0;
-  ok.forEach(function (p) { w += (p.weight || 1); v += p.value * (p.weight || 1); n += (p.sample || 0); });
-  return { key: key, label: label, weight: weight, score: Math.round(v / w), state: "evaluated",
-           coverage: totalW ? Math.round(w / totalW * 100) / 100 : 0, sample_count: n, components: parts,
-           reason: parts.filter(function (p) { return p.state !== "evaluated" && p.reason; })
-                        .map(function (p) { return p.reason; }).join(" / "), reason_code: "" };
+  const missingRequired = required.filter(function (r) {
+    return !ok.some(function (p) { return p.label === r; }); });
+  const allNotEvaluable = parts.length > 0 && parts.every(function (p) { return p.state === "not_evaluable"; });
+  let state = "evaluated", incomplete = "";
+  if (allNotEvaluable) { state = "not_evaluable"; incomplete = "今日は評価する機会がありませんでした"; }
+  else if (!ok.length) { state = "insufficient_data"; incomplete = "評価できる要素がありません"; }
+  else if (missingRequired.length) { state = "insufficient_data"; incomplete = "必須の要素（" + missingRequired.join("・") + "）が測れていません"; }
+  else if (wc < 0.5) { state = "insufficient_data"; incomplete = "測れているのは全体の" + Math.round(wc * 100) + "%です"; }
+  const conf = score === null ? "NONE" : (wc >= 0.8 ? "HIGH" : wc >= 0.5 ? "MEDIUM" : "LOW");
+  const first = parts.find(function (p) { return p.reason_code; }) || {};
+  return {
+    key: key, label: label, weight: weight,
+    score: score,
+    state: state, evaluation_state: state,
+    weighted_coverage: wc, component_coverage: cc,
+    coverage: wc,                                  // 旧名（画面互換）
+    confidence: conf,
+    evaluated_weight: okW, total_weight: totalW,
+    sample_count: n, components: parts,
+    incomplete_reason: incomplete,
+    // 同じ理由が並ぶと読みにくいので重複は畳む
+    reason: parts.filter(function (p) { return p.state !== "evaluated" && p.reason; })
+                 .map(function (p) { return p.reason; })
+                 .filter(function (r, i, a) { return a.indexOf(r) === i; }).join(" / "),
+    reason_code: state === "evaluated" ? "" : (first.reason_code || "INSUFFICIENT_DATA")
+  };
 }
 
 function getDailyOpsReport(studentEmail, body) {
@@ -1485,14 +1561,26 @@ function getDailyOpsReport(studentEmail, body) {
   if (!hasFeature(user, OPS_FEATURE_KEY)) return { ok: false, error: "feature not enabled" };
   const date = String((body && body.date) || "").slice(0, 10) || formatDate(new Date());
   const cur = computeDailyOpsFacts(studentEmail, date);
-  // 自分の過去とだけ比べる。legacy score とは比べない
-  let prevDelta = null, avgDelta = null;
-  if (cur.operating_score !== null) {
+  // 自分の過去とだけ比べる。legacy score とは比べない。
+  // ★データ量の差を「成長」と誤読させないため、比較条件を満たす日だけ比べる★
+  let prevDelta = null, avgDelta = null, cmpReason = "";
+  const comparable = function (f) {
+    if (!f || f.operating_score === null) return false;
+    if (f.report_version !== cur.report_version) return false;
+    if (f.calculation_version !== cur.calculation_version) return false;
+    if (f.coverage < 0.65) return false;
+    if (Math.abs(f.coverage - cur.coverage) > 0.15) return false;
+    // 評価できたカテゴリの構成が一致していること
+    return f.evaluated_categories.join("|") === cur.evaluated_categories.join("|");
+  };
+  if (cur.operating_score === null) {
+    cmpReason = "総合スコアが出ていないため比較できません";
+  } else {
     const hist = [];
     for (let i = 1; i <= 7; i++) {
       const d = new Date(date + "T00:00:00+09:00"); d.setDate(d.getDate() - i);
       const f = computeDailyOpsFacts(studentEmail, formatDate(d));
-      if (f.operating_score !== null) hist.push({ i: i, s: f.operating_score });
+      if (comparable(f)) hist.push({ i: i, s: f.operating_score });
     }
     const y = hist.find(function (h) { return h.i === 1; });
     if (y) prevDelta = cur.operating_score - y.s;
@@ -1500,10 +1588,83 @@ function getDailyOpsReport(studentEmail, body) {
       const avg = hist.reduce(function (a, h) { return a + h.s; }, 0) / hist.length;
       avgDelta = Math.round(cur.operating_score - avg);
     }
+    if (prevDelta === null && avgDelta === null) cmpReason = "比較できるデータを蓄積中です";
+    cur.comparable_days = hist.length;
   }
   cur.previous_day_delta = prevDelta;
   cur.seven_day_average_delta = avgDelta;
+  cur.comparison_unavailable_reason = cmpReason;
   return { ok: true, data: cur };
+}
+
+// ── Phase R1 の検証用 ───────────────────────────────
+//   実データに触らず、作った入力で評価エンジンの挙動を確かめる。
+function opsSelfTest(studentEmail, dateStr) {
+  const date = String(dateStr || formatDate(new Date())).slice(0, 10);
+  const T = function (o) {
+    return { title: o.t || "タスク", status: o.s || "TODO", importance_level: o.i || "MEDIUM",
+             first_started_at: o.st ? (date + "T09:00") : "", completed_at: o.s === "DONE" ? (date + "T10:00") : "",
+             due_at: o.due || "", estimated_minutes: o.m || 30, date: date };
+  };
+  const brief = function (r) {
+    const c = {};
+    r.components.forEach(function (x) {
+      c[x.label] = { score: x.score, state: x.evaluation_state, wc: x.weighted_coverage,
+                     cc: x.component_coverage, conf: x.confidence }; });
+    return { operating_score: r.operating_score, label: r.operating_state_label,
+             label_scope: r.label_scope, partial_score: r.partial_score,
+             coverage: r.coverage, confidence: r.confidence,
+             blocked_by: r.score_blocked_by, excluded: r.excluded_items, categories: c };
+  };
+  const cases = {
+    // A: 重要タスクを全部終えたが、時間分類がない日
+    A: { tasks: [T({ t: "A1", s: "DONE", i: "HIGH" }), T({ t: "A2", s: "DONE", i: "HIGH" }), T({ t: "A3", s: "DONE" })],
+         journal: { intent: "提案書を仕上げる", intent_done: "true", intent_hours: 2 }, logs: [] },
+    // B: 半分を終え、最重要には着手した日
+    B: { tasks: [T({ t: "B1", s: "IN_PROGRESS", i: "HIGH", st: 1 }), T({ t: "B2", s: "DONE" }),
+                 T({ t: "B3", s: "DONE" }), T({ t: "B4", s: "TODO" })],
+         journal: { intent: "営業リストを作る", intent_done: "", intent_hours: 3 },
+         logs: [{ goal_related: "true" }, { goal_related: "false" }] },
+    // C: 予定は未達。体調不良で休み、計画を組み直した日（休息日フラグあり）
+    C: { tasks: [T({ t: "C1", s: "CARRIED_OVER", i: "HIGH" }), T({ t: "C2", s: "CARRIED_OVER" })],
+         journal: { intent: "", rest_day: true, memo: "体調不良のため休養" }, logs: [] },
+    // C_raw: 同じ日を、休息日フラグ無しで評価した場合（入力導線が未実装のため現状これ）
+    C_raw: { tasks: [T({ t: "C1", s: "CARRIED_OVER", i: "HIGH" }), T({ t: "C2", s: "CARRIED_OVER" })],
+             journal: { intent: "", memo: "体調不良のため休養" }, logs: [] },
+    // D: 長時間働いたが、重要目標が進んでいない日
+    D: { tasks: [T({ t: "D1", s: "TODO", i: "HIGH" }), T({ t: "D2", s: "DONE" }), T({ t: "D3", s: "DONE" })],
+         journal: { intent: "新規事業の設計", intent_done: "", intent_hours: 4 },
+         logs: [{ goal_related: "false" }, { goal_related: "false" }, { goal_related: "false" },
+                { goal_related: "false" }, { goal_related: "false" }, { goal_related: "false" },
+                { goal_related: "false" }, { goal_related: "false" }, { goal_related: "false" },
+                { goal_related: "false" }, { goal_related: "false" }, { goal_related: "false" }] },
+    // E: 休息日として決めて、そのとおり休んだ日
+    E: { tasks: [], journal: { intent: "しっかり休む", intent_done: "true", intent_hours: 0, rest_day: true }, logs: [] }
+  };
+  const out = { ok: true, date: date, cases: {}, week: [] };
+  Object.keys(cases).forEach(function (k) {
+    out.cases[k] = brief(computeDailyOpsFacts(studentEmail, date, cases[k]));
+  });
+  // 実データでの直近7日
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(date + "T00:00:00+09:00"); d.setDate(d.getDate() - i);
+    const ds = formatDate(d);
+    const f = computeDailyOpsFacts(studentEmail, ds);
+    out.week.push({ date: ds, score: f.operating_score, partial: f.partial_score,
+                    coverage: f.coverage, confidence: f.confidence, label: f.operating_state_label,
+                    blocked_by: f.score_blocked_by });
+  }
+  const scored = out.week.filter(function (w) { return w.score !== null; }).map(function (w) { return w.score; });
+  const parts = out.week.filter(function (w) { return w.partial !== null; }).map(function (w) { return w.partial; });
+  const stat = function (a) {
+    if (!a.length) return null;
+    const s = a.slice().sort(function (x, y) { return x - y; });
+    return { n: a.length, avg: Math.round(a.reduce(function (p, c) { return p + c; }, 0) / a.length),
+             median: s.length % 2 ? s[(s.length - 1) / 2] : Math.round((s[s.length / 2 - 1] + s[s.length / 2]) / 2) };
+  };
+  out.week_stats = { operating: stat(scored), partial: stat(parts) };
+  out.today = brief(computeDailyOpsFacts(studentEmail, date));
+  return out;
 }
 
 function getStatusSummary(studentEmail) {
@@ -10591,7 +10752,7 @@ const ADMIN_SECRET_ALLOWLIST = {
   // 一斉送信（Kaiの明示的な要望により残す）
   adminBroadcastLine:1, adminBroadcastLinePending:1, adminSendStudentCampaign:1,
   // セットアップ・保守
-  adminSetupTriggers:1, adminInstallTrigger:1, adminSetupPhase1:1, adminSetupAuth:1, adminPhase4DryRun:1, adminLegacyBackfill:1, adminWritePathStats:1, adminIssueTestSession:1, adminDropTestSessions:1,
+  adminSetupTriggers:1, adminInstallTrigger:1, adminSetupPhase1:1, adminSetupAuth:1, adminPhase4DryRun:1, adminLegacyBackfill:1, adminWritePathStats:1, adminIssueTestSession:1, adminDropTestSessions:1, adminOpsSelfTest:1,
   authSetMode:1, authSetEnforce:1, authRoleApply:1, authRoleDryRun:1, authRevokeAll:1,
   authCleanupTestData:1, adminPurgeTestUsers:1, adminMigrateTasks:1, authBreakerReset:1, rotateSessionSecret:1,
   p1Backup:1, p1BackupInfo:1, p1PurgeArchived:1, weeklyBackup:1

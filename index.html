@@ -3108,8 +3108,10 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
             <div key=${m.key} style=${{background:"var(--card)",borderRadius:12,border:"1px solid var(--border)",padding:"13px 14px",marginBottom:10}}>
               <div style=${{display:"flex",alignItems:"baseline",gap:8,marginBottom:3}}>
                 <span style=${{fontSize:14,fontWeight:800,color:"var(--text)"}}>${m.label}</span>
-                ${m.score!==null&&html`<span style=${{fontSize:17,fontWeight:800,color:"var(--text)"}}>${m.score}</span>`}
-                <span style=${{marginLeft:"auto",fontSize:11.5,color:"var(--sub)"}}>${m.provisional?"暫定値":view(m)}</span>
+                ${m.score!==null&&!m.provisional&&html`<span style=${{fontSize:17,fontWeight:800,color:"var(--text)"}}>${m.score}</span>`}
+                ${m.score!==null&&m.provisional&&html`
+                  <span style=${{fontSize:11.5,color:"var(--sub)"}}>参考値 ${m.score}　測定範囲 ${Math.round((m.coverage||0)*100)}%</span>`}
+                <span style=${{marginLeft:"auto",fontSize:11.5,color:"var(--sub)"}}>${m.provisional?"データ蓄積中":view(m)}</span>
               </div>
               <div style=${{fontSize:11.5,color:"var(--sub)",lineHeight:1.7,marginBottom:9}}>${m.description}</div>
               ${(m.components||[]).length>0&&html`
@@ -3125,7 +3127,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
                   ${m.incomplete_reason}</div>`}
               <div style=${{fontSize:10.5,color:"var(--sub)",marginTop:7,lineHeight:1.7}}>
                 評価できた要素 ${Math.round((m.coverage||0)*100)}%（重みで計算）・確からしさ ${CONF[m.confidence]||m.confidence} ・件数 ${m.sample_count}
-                ${m.provisional?html`<br/><span style=${{color:"var(--amber,#BA7517)"}}>測れている要素が半分未満のため、暫定値です</span>`:""}
+                ${m.provisional?html`<br/><span style=${{color:"var(--amber,#BA7517)"}}>測れている要素が半分未満のため、参考値です。ホームには点数を出していません</span>`:""}
               </div>
               ${m.evaluation_state==="evaluated"&&html`
                 <div style=${{fontSize:11.5,color:"var(--text)",lineHeight:1.7,marginTop:7,background:"var(--bg)",borderRadius:9,padding:"8px 10px"}}>
@@ -3174,7 +3176,20 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
             style=${{flexShrink:0,whiteSpace:"nowrap",background:"none",border:"none",color:"var(--accent)",fontSize:11.5,fontWeight:700,cursor:"pointer",fontFamily:"inherit",padding:0}}>詳細を見る</button>
         </div>
 
-        ${M.map((m,i)=>{ const v=view(m); return html`
+        ${M.map((m,i)=>{ const v=view(m);
+          // ★測れている範囲が半分未満のときは、点数をホームに出さない★
+          //   数字だけが一人歩きするため、代わりに「測れた事実」を見せる
+          const ev=(m.components||[]).filter(c=>c.state==="evaluated");
+          const fact=ev.length?(ev[0].label+(ev[0].detail?"（"+ev[0].detail+"）":"")):"";
+          if(v.kind==="num"&&m.provisional) return html`
+          <div key=${m.key} style=${{padding:"9px 0",borderTop:i?"1px solid var(--border)":"none"}}>
+            <div style=${{display:"flex",alignItems:"center",gap:10}}>
+              <span style=${{flex:1,minWidth:0,fontSize:12.5,fontWeight:700,color:"var(--text)"}}>${m.label}</span>
+              <span style=${{flexShrink:0,fontSize:11.5,color:"var(--sub)"}}>データ蓄積中</span>
+            </div>
+            ${fact&&html`<div style=${{fontSize:11,color:"var(--sub)",lineHeight:1.7,marginTop:3}}>${fact}</div>`}
+          </div>`;
+          return html`
           <div key=${m.key} style=${{display:"flex",alignItems:"center",gap:10,padding:"9px 0",
                                      borderTop:i?"1px solid var(--border)":"none"}}>
             <span style=${{flex:1,minWidth:0,fontSize:12.5,fontWeight:700,color:"var(--text)"}}>${m.label}</span>
@@ -3185,7 +3200,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
                     <span style=${{display:"block",height:"100%",width:Math.max(0,Math.min(100,m.score))+"%",background:"var(--accent)",borderRadius:99}}/>
                   </span>
                   <span style=${{fontSize:14,fontWeight:800,color:"var(--text)",minWidth:26,textAlign:"right"}}>${m.score}</span>
-                  <span style=${{fontSize:11,color:"var(--sub)",minWidth:52,textAlign:"right"}}>${m.provisional?"暫定":v.label}</span>
+                  <span style=${{fontSize:11,color:"var(--sub)",minWidth:52,textAlign:"right"}}>${v.label}</span>
                 </span>`
               : html`<span style=${{flexShrink:0,fontSize:11.5,color:"var(--sub)"}}>${v.label}</span>`}
           </div>`; })}
@@ -4531,15 +4546,20 @@ function ReportScreen() {
           <div style=${{fontSize:11,fontWeight:700,color:"var(--sub)",marginBottom:5}}>今日の経営状態</div>
           <div style=${{fontSize:20,fontWeight:800,color:"var(--text)",marginBottom:6}}>${x.operating_state_label}</div>
           <div style=${{fontSize:12.5,color:"var(--sub)",lineHeight:1.8}}>
-            ${x.operating_score===null
-              ? "評価に必要なデータがまだ足りません。記録が増えると状態が出せるようになります。"
-              : "今日は決めたことを進められています。下の内訳で、どこが効いたかを確認できます。"}
+            ${x.operating_score!==null
+              ? "今日は決めたことを進められています。下の内訳で、どこが効いたかを確認できます。"
+              : x.partial_score!==null
+                ? (x.partial_scope||"評価できた項目")+"は「"+x.partial_label+"」です。総合スコアは、"
+                  +((x.excluded_items||[]).join("と")||"不足している項目")+"のデータを蓄積中です。"
+                : "評価に必要なデータがまだ足りません。記録が増えると状態が出せるようになります。"}
           </div>
           ${x.operating_score!==null&&html`
             <div style=${{display:"flex",alignItems:"baseline",gap:10,marginTop:9,fontSize:11,color:"var(--sub)"}}>
               <span>今日の運営スコア <b style=${{color:"var(--text)",fontSize:14}}>${x.operating_score}</b></span>
               ${x.previous_day_delta!==null&&x.previous_day_delta!==undefined&&html`<span>昨日比 ${x.previous_day_delta>=0?"+":""}${x.previous_day_delta}</span>`}
               ${x.seven_day_average_delta!==null&&x.seven_day_average_delta!==undefined&&html`<span>直近7日平均比 ${x.seven_day_average_delta>=0?"+":""}${x.seven_day_average_delta}</span>`}
+              ${x.previous_day_delta===null&&x.seven_day_average_delta===null&&x.comparison_unavailable_reason
+                &&html`<span>${x.comparison_unavailable_reason}</span>`}
             </div>`}
         </div>
 
@@ -4576,9 +4596,16 @@ function ReportScreen() {
               <div style=${{display:"flex",alignItems:"baseline",gap:8}}>
                 <span style=${{flex:1,fontSize:12.5,fontWeight:700,color:"var(--text)"}}>${c.label}</span>
                 <span style=${{fontSize:11,color:"var(--sub)"}}>配点 ${c.weight}</span>
-                <span style=${{fontSize:14,fontWeight:800,color:"var(--text)",minWidth:34,textAlign:"right"}}>
-                  ${c.score===null?"—":c.score}</span>
+                <span style=${{fontSize:c.state==="evaluated"?14:11.5,fontWeight:c.state==="evaluated"?800:600,
+                               color:c.state==="evaluated"?"var(--text)":"var(--sub)",minWidth:34,textAlign:"right"}}>
+                  ${c.state==="evaluated"?c.score
+                    :c.state==="excluded_by_exception"?"対象外"
+                    :c.state==="not_evaluable"?"機会なし":"蓄積中"}</span>
               </div>
+              ${c.state!=="evaluated"&&c.incomplete_reason&&html`
+                <div style=${{fontSize:11,color:"var(--sub)",marginTop:2,lineHeight:1.7}}>${c.incomplete_reason}</div>`}
+              <div style=${{fontSize:10.5,color:"var(--sub)",opacity:0.85,marginTop:2}}>
+                測定範囲 ${Math.round((c.weighted_coverage||0)*100)}%</div>
               ${(c.components||[]).map((p,j)=>html`
                 <div key=${j} style=${{display:"flex",gap:8,fontSize:11.5,lineHeight:1.8,
                                        color:p.state==="evaluated"?"var(--sub)":"var(--sub)",opacity:p.state==="evaluated"?1:0.7}}>
@@ -4592,8 +4619,15 @@ function ReportScreen() {
         <div class="card">
           <div class="card-label">データの充足度</div>
           <div style=${{fontSize:11.5,color:"var(--sub)",lineHeight:1.9}}>
-            評価できた割合 ${Math.round((x.coverage||0)*100)}%（配点の重みで計算）<br/>
+            評価できた割合 ${Math.round((x.coverage||0)*100)}%（各項目の中で測れた割合まで含めて計算）<br/>
             確からしさ ${CONF[x.confidence]||x.confidence}<br/>
+            ${x.operating_score===null&&x.score_blocked_by==="EVALUATED_CATEGORY_LT_3"
+              ?"総合スコアは、4項目のうち3項目以上を評価できた日に表示します。":""}
+            ${x.operating_score===null&&x.score_blocked_by==="COVERAGE_BELOW_THRESHOLD"
+              ?"総合スコアは、評価できた割合が65%以上の日に表示します。":""}
+            ${x.operating_score===null&&x.score_blocked_by==="PERFECT_SCORE_NEEDS_COVERAGE_080"
+              ?"満点は、評価できた割合が80%以上の日にだけ表示します。":""}
+            ${x.operating_score===null?html`<br/>`:""}
             ${(x.excluded_items||[]).length>0?"今回評価できなかった項目：" + (x.excluded_items||[]).join("、"):"すべての項目を評価できました"}
           </div>
         </div>`;
@@ -6720,7 +6754,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260802-224233";
+const APP_BUILD = "20260802-231214";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
