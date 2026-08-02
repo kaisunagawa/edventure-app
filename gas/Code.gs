@@ -93,6 +93,38 @@ function doGet(e) {
         }
         return jsonResponse({ ok: true, days: out });
       }
+      // 検証用セッションの発行と削除（署名必須・監査ログ付き）。
+      // ローカルでの画面検証に使う。device_label=localtest で必ず区別し、
+      // 検証が終わったら adminDropTestSessions で行ごと消す運用。
+      // 正規の issueSession を通さない理由: 上限5本の押し出しで
+      // 本人の実機セッションが失効してしまうため。
+      case "adminIssueTestSession": {
+        const me = String(e.parameter.email || "").trim();
+        const u = sheetToObjects(getSheet("Users")).find(function (x) {
+          return String(x.student_email || "").trim() === me;
+        });
+        if (!u) return jsonResponse({ ok: false, error: "no user" });
+        const token = newSessionToken(u.user_id);
+        const now = new Date();
+        getAuthSheet("Sessions").appendRow([
+          sha256Hex(token), u.user_id, u.google_sub || "", u.auth_role || u.role || "USER", u.organization_id || "",
+          new Date(now.getTime() + 86400000).toISOString(), now.toISOString(), now.toISOString(), "",
+          Number(u.token_version || 0), "localtest"
+        ]);
+        authAudit("TEST_SESSION", { result: "ISSUED", action: "adminIssueTestSession" });
+        return jsonResponse({ ok: true, token: token });
+      }
+      case "adminDropTestSessions": {
+        const sh = getAuthSheet("Sessions");
+        const v = sh.getDataRange().getValues();
+        const iDev = v[0].indexOf("device_label");
+        let n = 0;
+        for (let i = v.length - 1; i >= 1; i--) {
+          if (String(v[i][iDev]) === "localtest") { sh.deleteRow(i + 1); n++; }
+        }
+        authAudit("TEST_SESSION", { result: "DROPPED", action: "adminDropTestSessions", failureReason: "n=" + n });
+        return jsonResponse({ ok: true, dropped: n });
+      }
       case "adminSetupPhase1": {
         // シート構造を変える操作。共有シークレットを必須にする
         var _a1 = verifyP1Admin(studentEmail, e.parameter.secret, e.parameter);
@@ -9975,7 +10007,7 @@ const ADMIN_SECRET_ALLOWLIST = {
   // 一斉送信（Kaiの明示的な要望により残す）
   adminBroadcastLine:1, adminBroadcastLinePending:1, adminSendStudentCampaign:1,
   // セットアップ・保守
-  adminSetupTriggers:1, adminInstallTrigger:1, adminSetupPhase1:1, adminSetupAuth:1, adminPhase4DryRun:1, adminLegacyBackfill:1, adminWritePathStats:1,
+  adminSetupTriggers:1, adminInstallTrigger:1, adminSetupPhase1:1, adminSetupAuth:1, adminPhase4DryRun:1, adminLegacyBackfill:1, adminWritePathStats:1, adminIssueTestSession:1, adminDropTestSessions:1,
   authSetMode:1, authSetEnforce:1, authRoleApply:1, authRoleDryRun:1, authRevokeAll:1,
   authCleanupTestData:1, adminPurgeTestUsers:1, adminMigrateTasks:1, authBreakerReset:1, rotateSessionSecret:1,
   p1Backup:1, p1BackupInfo:1, p1PurgeArchived:1, weeklyBackup:1
@@ -10768,12 +10800,51 @@ function legacyBackfill(execute, migrationId) {
     conflict++; conflicts.push(p.tid);
   });
 
+  // ★id付きだが Tasks に無い過去タスクも対象にする★
+  //   旧形式ではないのでバックフィル対象外、橋渡しは当日分しか写さない。
+  //   その隙間（例: 8/1 のid付き2件）を拾わないと、Journal の全アクションを
+  //   Tasks で説明できない。id は既存のものを保つ（採番し直さない）。
+  const withIdPlan = [];
+  {
+    const seenWid = {};
+    journal.forEach(function (r) {
+      const raw = String(r.actions || "").trim();
+      if (!raw) return;
+      let items; try { items = JSON.parse(raw); } catch (e) { return; }
+      if (!Array.isArray(items)) return;
+      const em = String(r.student_email || "").trim();
+      const rd = r.date instanceof Date ? Utilities.formatDate(r.date, "Asia/Tokyo", "yyyy-MM-dd") : String(r.date).slice(0, 10);
+      let checked = {}; try { checked = JSON.parse(String(r.actions_checked || "{}")) || {}; } catch (e) {}
+      items.forEach(function (it, idx) {
+        if (typeof it !== "object" || !it || !(it.id || it.task_id)) return;
+        if (!users[em]) return;
+        const id = String(it.id || it.task_id);
+        const k = em + "|" + id;
+        // 同じidが複数日に出るときは新しい日付を採用
+        if (seenWid[k] && seenWid[k].date >= rd) return;
+        seenWid[k] = { email: em, tid: id, title: String(it.title || ""), date: rd,
+                       done: !!(checked[id] !== undefined ? checked[id] : checked[it.title]),
+                       imp: String(it.imp || ""), due: String(it.due || ""),
+                       est: Number(it.est) > 0 ? Number(it.est) : "",
+                       memo: String(it.memo || ""),
+                       sourceJournalId: em + "|" + rd, sourceIndex: idx };
+      });
+    });
+    Object.keys(seenWid).forEach(function (k) {
+      const p = seenWid[k];
+      if (!p.title) return;
+      if (p1OwnedRow("Tasks", "task_id", p.tid, p.email)) return;   // 既にある
+      withIdPlan.push(p);
+    });
+  }
+
   const stop = conflict > 0 || unknownUser > 0 || dupSource > 0;
   const result = {
     ok: true, executed: false,
     counts: { legacyTotal: legacyTotal, targets: plan.length, willCreate: willCreate,
               alreadyMigrated: alreadyMigrated, conflict: conflict, noTitle: noTitle,
-              unknownUser: unknownUser, dupSource: dupSource, withIdSkipped: withIdSkipped },
+              unknownUser: unknownUser, dupSource: dupSource, withIdSkipped: withIdSkipped,
+              withIdMissing: withIdPlan.length },
     stopConditions: { conflict: conflict > 0, unknownUser: unknownUser > 0, dupSource: dupSource > 0 },
     conflicts: conflicts.slice(0, 10)
   };
@@ -10793,6 +10864,22 @@ function legacyBackfill(execute, migrationId) {
       migrated_from: "JOURNAL_ACTIONS", source_journal_id: p.sourceJournalId,
       source_action_index: p.sourceIndex, migration_id: mid, migrated_at: nowIso
     });
+    created++;
+  });
+  withIdPlan.forEach(function (p) {
+    const rec = {
+      task_id: p.tid, student_email: p.email, date: p.date, title: p.title,
+      status: p.done ? "DONE" : "TODO",
+      completed_at: p.done ? (p.date + "T23:59:00+09:00") : "",
+      created_at: nowIso, version: 1, source_type: "SELF", context: "UNSET",
+      migrated_from: "JOURNAL_ACTIONS", source_journal_id: p.sourceJournalId,
+      source_action_index: p.sourceIndex, migration_id: mid, migrated_at: nowIso
+    };
+    if (p.imp) rec.importance_level = p.imp;
+    if (p.due) rec.due_at = p.due;
+    if (p.est) rec.estimated_minutes = p.est;
+    if (p.memo) rec.memo = p.memo;
+    p1Upsert("Tasks", "task_id", rec);
     created++;
   });
   result.executed = true;
