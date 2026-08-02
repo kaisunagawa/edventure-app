@@ -544,6 +544,79 @@ async function gasPostJson(action, body = {}) {
   } catch { return { ok:false }; }
 }
 
+// ── タスク同期キュー（Phase 4A）──
+// タスク操作はここに貯めて、まとめて saveTaskMutations へ送る。
+// 操作1回=1リクエストにすると、GASの同時実行制限（全ユーザー共有）を食い潰すため。
+// 送信成功で消え、通信失敗では残り、再ログイン・オンライン復帰・起動時に再送する。
+const TASK_QUEUE_KEY = "jiroku_task_mutations";
+const TASK_VER_KEY = "jiroku_task_versions";
+function loadTaskQueue(){ try { return JSON.parse(localStorage.getItem(TASK_QUEUE_KEY)||"[]")||[]; } catch { return []; } }
+function saveTaskQueue(q){
+  try { localStorage.setItem(TASK_QUEUE_KEY, JSON.stringify(q)); } catch {}
+  window.dispatchEvent(new CustomEvent("jiroku:taskqueue"));
+}
+function taskVersions(){ try { return JSON.parse(localStorage.getItem(TASK_VER_KEY)||"{}")||{}; } catch { return {}; } }
+function setTaskVersion(id, v){
+  if (!id || v === undefined) return;
+  const m = taskVersions(); m[id] = v;
+  try { localStorage.setItem(TASK_VER_KEY, JSON.stringify(m)); } catch {}
+}
+function enqueueTaskMutation(op, taskId, changes){
+  if (!taskId) return;
+  const q = loadTaskQueue();
+  const m = { mid: "m_"+Date.now()+"_"+Math.random().toString(36).slice(2,8),
+              op: op, task_id: taskId, changes: changes||{}, tries: 0, state: "pending" };
+  // ★楽観的ロック★ 自分が知っている版を添える。サーバーと違えば競合として返る
+  if (op === "UPDATE") { const v = taskVersions()[taskId]; if (v !== undefined) m.base_version = v; }
+  q.push(m); saveTaskQueue(q);
+  clearTimeout(window.__jirokuQueueTimer);
+  window.__jirokuQueueTimer = setTimeout(flushTaskQueue, 800);   // 連続操作は1回にまとめる
+}
+let __taskQueueFlushing = false;
+async function flushTaskQueue(){
+  if (__taskQueueFlushing) return;
+  const pending = loadTaskQueue().filter(x=>x.state==="pending");
+  if (!pending.length) return;
+  if (!getSessionToken()) return;   // 再ログイン後の jiroku:authed で再送される
+  __taskQueueFlushing = true;
+  try {
+    const batch = pending.slice(0, 50).map(x=>({
+      client_mutation_id: x.mid, task_id: x.task_id, operation: x.op,
+      base_version: x.base_version, changes: x.changes }));
+    const r = await gasPostJson("saveTaskMutations", { mutations: JSON.stringify(batch) });
+    if (!r || !r.ok || !Array.isArray(r.results)) {
+      // 通信失敗: 残して後で再送（回数だけ数える）
+      const q2 = loadTaskQueue();
+      q2.forEach(x=>{ if (pending.some(p=>p.mid===x.mid)) x.tries=(x.tries||0)+1; });
+      saveTaskQueue(q2);
+      return;
+    }
+    const byMid = {}; r.results.forEach(res=>{ byMid[res.client_mutation_id]=res; });
+    const q2 = loadTaskQueue().filter(x=>{
+      const res = byMid[x.mid];
+      if (!res) return true;   // 今回送っていない分は残す
+      if (res.result === "APPLIED" || res.result === "DUPLICATE") {
+        if (res.canonical_task) setTaskVersion(res.task_id, res.canonical_task.version);
+        return false;
+      }
+      if (res.result === "CONFLICT") {
+        // ★黙って上書きしない★ 保持して画面に「競合」と出し、本人に選ばせる
+        x.state = "conflict"; x.server = res.canonical_task || null;
+        return true;
+      }
+      if (res.result === "DELETED_REJECTED") return false;   // 恒久エラー。再試行しても無駄
+      x.tries = (x.tries||0)+1;
+      return x.tries < 8;   // 無限再試行しない
+    });
+    saveTaskQueue(q2);
+    window.dispatchEvent(new CustomEvent("jiroku:taskflushed"));
+  } finally { __taskQueueFlushing = false; }
+}
+window.addEventListener("jiroku:authed", ()=>setTimeout(flushTaskQueue, 500));
+window.addEventListener("online", ()=>setTimeout(flushTaskQueue, 500));
+setTimeout(flushTaskQueue, 3000);
+setInterval(flushTaskQueue, 60000);
+
 // ── 認証が切れた時の預かりと再試行 ──
 // 「記録しようとしたらログインが切れていて、入力が消えた」を防ぐ。
 // 保存系の操作だけを預かる（読み取りはやり直せばよいので預からない）。
@@ -1121,6 +1194,19 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
   const [showStatusTip, setShowStatusTip] = useState(false);
   const [todayLogs, setTodayLogs] = useState([]);
   const [checked, setChecked] = useState(()=>JSON.parse(localStorage.getItem("today_actions")||"{}"));
+  // タスク同期キューの見える化（同期待ちN件・競合N件）
+  const [taskSync, setTaskSync] = useState(()=>({pending:0, conflict:0}));
+  const [conflictItem, setConflictItem] = useState(null);   // 競合解決モーダル
+  useEffect(()=>{
+    const update = () => {
+      const q = loadTaskQueue();
+      setTaskSync({ pending: q.filter(x=>x.state==="pending").length,
+                    conflict: q.filter(x=>x.state==="conflict").length });
+    };
+    update();
+    window.addEventListener("jiroku:taskqueue", update);
+    return () => window.removeEventListener("jiroku:taskqueue", update);
+  },[]);
   const todayKey = formatDateStr(new Date());
   // ★保存の形を [{id,title}] にする（Phase 1）★
   //   これまではタスク名の文字列配列だった。名前が識別子を兼ねていたため、
@@ -1229,7 +1315,16 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
       const merged = toStored([...actionItems, ...rows.map(r=>r.text)]);
       setCustomActions(merged);
       localStorage.setItem("jiroku_custom_actions_"+todayKey, JSON.stringify(merged));
-      gasPostJson("saveTodayActions", {actions: JSON.stringify(merged)});
+      gasPostJson("saveTodayActions", {actions: JSON.stringify(merged), noBridge: "1"});
+      // 新しく増えた分をTasksシートへ（キュー経由）
+      const prevIds2 = {}; (customActions||[]).forEach(t=>{ prevIds2[t.id]=1; });
+      merged.forEach(t=>{
+        if (!prevIds2[t.id]) {
+          const row = rows.find(r=>r.text===t.title);
+          enqueueTaskMutation("CREATE", t.id, { title: t.title, date: todayKey,
+            estimated_minutes: (row && row.min > 0) ? row.min : "" });
+        }
+      });
       // 想定時間（分）があれば、タスクの横に表示できるよう見積もりマップへ保存
       const est = {...taskEstimates};
       rows.forEach(r=>{ if(r.min>0) est[r.text]=r.min; });
@@ -1354,7 +1449,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
             setCustomActions(merged);
             localStorage.setItem("jiroku_custom_actions_"+todayStr, JSON.stringify(merged));
             // まとめた結果を相手にも伝える（両方が同じ一覧になるように）
-            gasPostJson("saveTodayActions", { actions: JSON.stringify(merged) });
+            gasPostJson("saveTodayActions", { actions: JSON.stringify(merged), noBridge: "1" });
           }
         }
         // ★設定（重要度・期限・想定時間・メモ・進捗）は常に受け取る★
@@ -1518,14 +1613,14 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
   },[actionItems, checked, todayKey, taskEstimates]);
 
   const toggleCheck = (key) => {
-    window.__jirokuTaskTouched = true;   // 以後、サーバー読みで上書きしない
     const idk = idOfTitle(key) || key;
     const cur = (checked[idk] !== undefined) ? checked[idk] : checked[key];
     const next = {...checked, [idk]: !cur};
     if (idk !== key) delete next[key];   // 旧形式（名前キー）の掃除
     setChecked(next);
     localStorage.setItem("today_actions", JSON.stringify(next));
-    gasPostJson("saveTodayActions", {checked: JSON.stringify(next)}); // 他端末にも同期
+    gasPostJson("saveTodayActions", {checked: JSON.stringify(next), noBridge: "1"}); // 他端末にも同期
+    enqueueTaskMutation("UPDATE", idk, { status: !cur ? "DONE" : "TODO" });
   };
 
   // ── タスクボード用ヘルパー ──
@@ -1545,8 +1640,11 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
     if(status==="done") nc[task]=true; else delete nc[task];
     setChecked(nc);
     localStorage.setItem("today_actions", JSON.stringify(nc));
-    gasPostJson("saveTodayActions", {checked: JSON.stringify(nc)});
+    gasPostJson("saveTodayActions", {checked: JSON.stringify(nc), noBridge: "1"});
     pushTaskMeta({ stt: next });
+    // Tasksシートへ直接（キュー経由でまとめ送り）
+    const stMap = { done: "DONE", doing: "IN_PROGRESS", todo: "TODO" };
+    enqueueTaskMutation("UPDATE", sKey, { status: stMap[status] || "TODO" });
   };
   // カードをタップ→タイマー画面へ。想定時間つきならその時間で、タイマー側が自動選択する。
   // タイマーに送ったタスクは「実行中」に進める（着手の可視化）
@@ -1564,7 +1662,10 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
     try { localStorage.setItem("jiroku_task_memo_"+todayKey, JSON.stringify(next)); } catch(e){}
     // メモは打つたびに送ると通信が多すぎるので、少し待ってからまとめて送る
     clearTimeout(window.__jirokuMemoTimer);
-    window.__jirokuMemoTimer = setTimeout(()=>pushTaskMeta({ memo: next }), 1200);
+    window.__jirokuMemoTimer = setTimeout(()=>{
+      pushTaskMeta({ memo: next });
+      enqueueTaskMutation("UPDATE", nKey, { memo: String(note || "") });
+    }, 1200);
   };
   // タスクの想定時間を更新（詳細画面）
   const setTaskTime = (task, min) => {
@@ -1576,14 +1677,13 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
     setTaskEstimates(next);
     try { localStorage.setItem("jiroku_task_estimates_"+todayKey, JSON.stringify(next)); } catch(e){}
     pushTaskMeta({ est: next });
+    enqueueTaskMutation("UPDATE", key, { estimated_minutes: (m>0 && m<=600) ? m : "" });
   };
   // タスクを削除（詳細画面）。関連する状態・時間・メモ・チェックも掃除する
   const deleteTask = (task) => {
-    window.__jirokuTaskTouched = true;
-    // ★Tasksシートにも「消えた」と伝える★
-    //   これがないと、シート側に行が残り、次の読み込みで復活する
+    // ★Tasksシートにも「消えた」と伝える★（キュー経由。残ると復活する）
     const delId = idOfTitle(task);
-    if (delId) gasApi("deleteTask", { task_id: delId });
+    if (delId) enqueueTaskMutation("DELETE", delId, {});
     const list = actionItems.filter(t=>t!==task);
     if(list.length===0){ setCustomActions(null); localStorage.removeItem("jiroku_custom_actions_"+todayKey); }
     else { const st=toStored(list); setCustomActions(st); localStorage.setItem("jiroku_custom_actions_"+todayKey, JSON.stringify(st)); }
@@ -1598,7 +1698,9 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
     const nt={...taskNotes}; delete nt[k2]; delete nt[task]; setTaskNotes(nt); localStorage.setItem("jiroku_task_memo_"+todayKey, JSON.stringify(nt));
     const cKey=idOfTitle(task); const nc={...checked}; delete nc[cKey]; delete nc[task];
     setChecked(nc); localStorage.setItem("today_actions", JSON.stringify(nc));
-    gasPostJson("saveTodayActions", {actions: list.length===0?"":JSON.stringify(list), checked: JSON.stringify(nc)});
+    // ★toStoredを通す★ タイトルだけの配列で保存すると、Journal.actionsが
+    //   id無しの旧形式へ退化する（実際にdry-runで退化が見つかった）
+    gasPostJson("saveTodayActions", {actions: list.length===0?"":JSON.stringify(toStored(list)), checked: JSON.stringify(nc), noBridge: "1"});
     setDetailTask(null);
   };
 
@@ -1613,6 +1715,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
     setTaskImportance(next);
     localStorage.setItem("jiroku_task_importance_"+todayKey, JSON.stringify(next));
     pushTaskMeta({ imp: next });
+    enqueueTaskMutation("UPDATE", key, { importance_level: v || "" });
   };
   // ★サーバー（Tasksシート）を正として画面へ反映する★
   //   これまで「端末の値を優先」で取り込んでいたため、端末間で
@@ -1620,13 +1723,19 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
   //   ただし、この端末で既に操作を始めていたら適用しない。
   //   読み込みが遅れて届いたとき、いま入力した内容を消してしまうため。
   const applyTasksFromServer = async () => {
-    if (window.__jirokuTaskTouched) return;
+    // ★守る範囲を絞る★（以前は「何か操作したら以後すべて適用しない」だった）
+    //   ・編集モーダルや詳細を開いている間 → 適用しない（入力中の値を消さないため）
+    //   ・送信待ち／競合のタスク → そのタスクだけ適用しない
+    //   ・それ以外 → サーバーの値へ更新する（古い端末が永久に残らないように）
+    if (editMode || detailTask) return;
     const r = await gasApi("getTasks", { includeDone: "1" });
     if (!r || !r.ok || !Array.isArray(r.data)) return;
-    if (window.__jirokuTaskTouched) return;   // 通信中に操作が始まったら適用しない
+    if (editMode || detailTask) return;   // 通信中に開いたら適用しない
+    const hold = {};   // 送信待ち・競合中のタスクは端末の値を保つ
+    loadTaskQueue().forEach(m => { hold[m.task_id] = 1; });
     // 今日の分だけ。ARCHIVED は画面に出さない
     const rows = r.data.filter(t => String(t.date).slice(0,10) === todayKey && t.status !== "ARCHIVED");
-    if (!rows.length) return;
+    if (!rows.length && !(customActions||[]).length) return;
     // サーバーの進捗語彙（大文字）を画面の語彙（小文字）へ
     const sttOf = s => s === "DONE" ? "done" : s === "IN_PROGRESS" ? "doing" : "todo";
     // 並び順はこの端末の今の並びを保つ（勝手に入れ替わると探せなくなる）。
@@ -1636,15 +1745,37 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
       const ia = curIds.indexOf(a.task_id), ib = curIds.indexOf(b.task_id);
       return (ia === -1 ? 1e9 : ia) - (ib === -1 ? 1e9 : ib);
     });
-    const list = rows.map(t => ({ id: t.task_id, title: t.title }));
+    // 版を控える（次の更新で base_version として送る）
+    rows.forEach(t => setTaskVersion(t.task_id, t.version));
+    // 送信待ちのタスクは端末の姿を保つ（サーバーにまだ届いていない変更を消さない）
+    const heldLocal = (customActions||[]).filter(t => hold[t.id] && !rows.some(x => x.task_id === t.id));
+    const list = rows.map(t => ({ id: t.task_id, title: t.title })).concat(
+      heldLocal.map(t => ({ id: t.id, title: t.title })));
     const imp = {}, due = {}, est = {}, memo = {}, stt = {}, chk = {};
     rows.forEach(t => {
+      if (hold[t.task_id]) {   // 端末の値を優先
+        if (taskImportance[t.task_id]) imp[t.task_id] = taskImportance[t.task_id];
+        if (taskDue[t.task_id]) due[t.task_id] = taskDue[t.task_id];
+        if (taskEstimates[t.task_id] !== undefined) est[t.task_id] = taskEstimates[t.task_id];
+        if (taskNotes[t.task_id]) memo[t.task_id] = taskNotes[t.task_id];
+        if (taskStatus[t.task_id]) stt[t.task_id] = taskStatus[t.task_id];
+        if (isDone(t.title)) chk[t.task_id] = true;
+        return;
+      }
       if (t.importance_level && !t.importance_is_suggestion) imp[t.task_id] = t.importance_level;
       if (t.due_at) due[t.task_id] = t.due_at;
       if (Number(t.estimated_minutes) > 0) est[t.task_id] = Number(t.estimated_minutes);
       if (t.memo) memo[t.task_id] = String(t.memo);
       stt[t.task_id] = sttOf(t.status);
       if (t.status === "DONE") chk[t.task_id] = true;
+    });
+    heldLocal.forEach(t => {
+      if (taskImportance[t.id]) imp[t.id] = taskImportance[t.id];
+      if (taskDue[t.id]) due[t.id] = taskDue[t.id];
+      if (taskEstimates[t.id] !== undefined) est[t.id] = taskEstimates[t.id];
+      if (taskNotes[t.id]) memo[t.id] = taskNotes[t.id];
+      if (taskStatus[t.id]) stt[t.id] = taskStatus[t.id];
+      if (isDone(t.title)) chk[t.id] = true;
     });
     setCustomActions(list); localStorage.setItem("jiroku_custom_actions_"+todayKey, JSON.stringify(list));
     setTaskImportance(imp); localStorage.setItem("jiroku_task_importance_"+todayKey, JSON.stringify(imp));
@@ -1655,13 +1786,19 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
     setChecked(chk);        localStorage.setItem("today_actions", JSON.stringify(chk));
   };
 
+  // 送信が済んだら最新を取り直す（他端末の変更もここで届く）
+  useEffect(()=>{
+    const onFlushed = () => { if (!loadTaskQueue().length) applyTasksFromServer(); };
+    window.addEventListener("jiroku:taskflushed", onFlushed);
+    return () => window.removeEventListener("jiroku:taskflushed", onFlushed);
+  });
+
   // ★設定を変えたら、その場でサーバーへ送る★
   //   これまでは localStorage に書くだけで、タスクの追加や編集をした
   //   ついでにしか送られていなかった。重要度や期限だけ変えても
   //   他の端末に届かない（実際にそうなった）。
   //   setState は非同期なので、変更後の値を引数で受け取る。
   const pushTaskMeta = (over) => {
-    window.__jirokuTaskTouched = true;   // 以後、サーバー読みで上書きしない
     const o = over || {};
     const imp = o.imp || taskImportance, due = o.due || taskDue;
     const est = o.est || taskEstimates, memo = o.memo || taskNotes, stt = o.stt || taskStatus;
@@ -1676,7 +1813,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
       const e = stt[t.id]  || stt[t.title];   if (e) x.stt = String(e);
       return x;
     });
-    gasPostJson("saveTodayActions", { actions: JSON.stringify(payload) });
+    gasPostJson("saveTodayActions", { actions: JSON.stringify(payload), noBridge: "1" });
   };
 
   // ★読み出しは必ずここを通す★
@@ -1704,6 +1841,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
     setTaskDue(next);
     localStorage.setItem("jiroku_task_due_"+todayKey, JSON.stringify(next));
     pushTaskMeta({ due: next });
+    enqueueTaskMutation("UPDATE", key, { due_at: v || "" });
   };
   // ★緊急度と4分類は保存しない★
   // 期限から都度出す。保存すると日付が変わっても古い判定が残る。
@@ -1777,7 +1915,6 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
     setEditMode(true);
   };
   const saveEdit = () => {
-    window.__jirokuTaskTouched = true;   // 以後、サーバー読みで上書きしない
     const rows = editItems.map(r=>({text:String(r.text||"").trim(), min:r.min, imp:r.imp, due:r.due})).filter(r=>r.text.length>0);
 
     // ★同じ名前のタスクを2件作らせない（暫定の防御）★
@@ -1821,14 +1958,35 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
     localStorage.setItem("today_actions", JSON.stringify(newChecked));
     // 空で保存したらAIアクションに戻す
     const storedList = toStored(finalList);
-    // ★編集で消えたタスクはTasksシートにも伝える★（残ると復活する）
-    const keptIds = {};
-    storedList.forEach(t=>{ keptIds[t.id]=1; });
-    (customActions||[]).forEach(t=>{ if(!keptIds[t.id]) gasApi("deleteTask", { task_id: t.id }); });
+    // ★編集の差分をTasksシートへ（キュー経由）★
+    //   新規=CREATE / 変更があったものだけUPDATE / 消えたものはDELETE。
+    //   変更のないタスクまで送ると、versionが無意味に増えて他端末と競合する。
+    const prevById = {};
+    (customActions||[]).forEach(t=>{ prevById[t.id] = t.title; });
+    storedList.forEach(t=>{
+      if (prevById[t.id] === undefined) {
+        enqueueTaskMutation("CREATE", t.id, {
+          title: t.title, date: todayKey,
+          importance_level: t.imp || "", due_at: t.due || "",
+          estimated_minutes: t.est || "", memo: t.memo || "" });
+        return;
+      }
+      const ch = {};
+      if (prevById[t.id] !== t.title) ch.title = t.title;
+      const oldImp = taskImportance[t.id] || "", oldDue = taskDue[t.id] || "";
+      const oldEst = taskEstimates[t.id] !== undefined ? taskEstimates[t.id] : "";
+      if (String(t.imp||"") !== String(oldImp)) ch.importance_level = t.imp || "";
+      if (String(t.due||"") !== String(oldDue)) ch.due_at = t.due || "";
+      if (String(t.est||"") !== String(oldEst)) ch.estimated_minutes = t.est || "";
+      if (Object.keys(ch).length) enqueueTaskMutation("UPDATE", t.id, ch);
+    });
+    (customActions||[]).forEach(t=>{
+      if (!storedList.some(x=>x.id===t.id)) enqueueTaskMutation("DELETE", t.id, {});
+    });
     if(finalList.length===0){ setCustomActions(null); localStorage.removeItem("jiroku_custom_actions_"+todayKey); }
     else { setCustomActions(storedList); localStorage.setItem("jiroku_custom_actions_"+todayKey, JSON.stringify(storedList)); }
     // 他端末にも同期
-    gasPostJson("saveTodayActions", {actions: finalList.length===0?"":JSON.stringify(storedList), checked: JSON.stringify(newChecked)});
+    gasPostJson("saveTodayActions", {actions: finalList.length===0?"":JSON.stringify(storedList), checked: JSON.stringify(newChecked), noBridge: "1"});
     setEditMode(false);
   };
 
@@ -2226,6 +2384,32 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
       `;
     })()}
 
+    ${conflictItem&&html`
+      <div onClick=${()=>setConflictItem(null)} style=${{position:"fixed",inset:0,background:"rgba(0,0,0,0.45)",zIndex:220,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
+        <div onClick=${e=>e.stopPropagation()} style=${{background:"var(--card)",borderRadius:16,padding:"20px 18px",maxWidth:420,width:"100%"}}>
+          <div style=${{fontSize:14.5,fontWeight:700,marginBottom:8}}>別の端末で更新されています</div>
+          <div style=${{fontSize:12.5,color:"var(--sub)",lineHeight:1.7,marginBottom:12}}>
+            「${(conflictItem.server&&conflictItem.server.title)||conflictItem.task_id}」が、この端末の知らないうちに変わっていました。<br/>
+            サーバー版: ${conflictItem.server ? `${conflictItem.server.title}（版${conflictItem.server.version}）` : "不明"}<br/>
+            この端末の変更: ${Object.keys(conflictItem.changes||{}).map(k=>`${k}=${conflictItem.changes[k]}`).join(" / ")||"（内容なし）"}
+          </div>
+          <button class="btn" style=${{marginBottom:8}} onClick=${()=>{
+            // サーバー版を使う: この端末の変更を捨てて、最新を取り直す
+            saveTaskQueue(loadTaskQueue().filter(x=>x.mid!==conflictItem.mid));
+            setConflictItem(null); applyTasksFromServer();
+          }}>サーバーの内容を使う</button>
+          <button class="btn" style=${{marginBottom:8,background:"var(--bg)",color:"var(--text)"}} onClick=${()=>{
+            // 自分の変更を再適用: サーバーの版に載せ直して送る
+            const q = loadTaskQueue();
+            const m = q.find(x=>x.mid===conflictItem.mid);
+            if (m) { m.base_version = conflictItem.server ? conflictItem.server.version : undefined;
+                     m.state = "pending"; saveTaskQueue(q); flushTaskQueue(); }
+            setConflictItem(null);
+          }}>自分の変更で更新する</button>
+          <button style=${{width:"100%",padding:"10px",background:"none",border:"none",color:"var(--sub)",fontSize:12.5,cursor:"pointer"}}
+            onClick=${()=>setConflictItem(null)}>あとで決める</button>
+        </div>
+      </div>`}
     <!-- タスクボード（予定/実行中/完了。PC=ドラッグ、スマホ=移動ボタン。カードタップでタイマー） -->
     <div style=${{margin:"0 16px 10px",background:"var(--card)",borderRadius:16,border:"1px solid var(--border)",overflow:"hidden"}}>
       <div style=${{padding:"14px 16px",borderBottom:"1px solid var(--border)",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
@@ -2237,6 +2421,12 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
             </div>`}
         </div>
         <div style=${{display:"flex",alignItems:"center",gap:10}}>
+          ${taskSync.conflict>0&&html`<button onClick=${()=>{
+              const c = loadTaskQueue().find(x=>x.state==="conflict");
+              if (c) setConflictItem(c);
+            }}
+            style=${{fontSize:11,background:"var(--red,#d33)",color:"#fff",border:"none",borderRadius:20,padding:"2px 9px",fontWeight:600,cursor:"pointer"}}>競合${taskSync.conflict}件</button>`}
+          ${taskSync.pending>0&&html`<span style=${{fontSize:11,background:"var(--bg)",color:"var(--sub)",borderRadius:20,padding:"2px 9px",fontWeight:600}}>同期待ち${taskSync.pending}件</span>`}
           ${boardWide&&html`<span style=${{fontSize:10.5,color:"var(--sub)"}}>カードをドラッグで移動</span>`}
           <button onClick=${openEdit} style=${{background:"none",border:"none",cursor:"pointer",color:"var(--accent)",fontSize:12,fontWeight:600,padding:"2px 6px"}}>編集</button>
         </div>
@@ -4007,7 +4197,8 @@ function TimerScreen({onToast, isActive}) {
         checked[tid] = true;
         if (tid !== t) delete checked[t];   // 旧形式の掃除
         localStorage.setItem("today_actions", JSON.stringify(checked));
-        gasPostJson("saveTodayActions", {checked: JSON.stringify(checked)}); // 他端末にも同期
+        gasPostJson("saveTodayActions", {checked: JSON.stringify(checked), noBridge: "1"}); // 他端末にも同期
+        if (tid !== t) enqueueTaskMutation("UPDATE", tid, { status: "DONE" });   // Tasksシートへも
       }
       // 共有リスト（タイマーの選択肢）からも即座に除外
       const shared = JSON.parse(localStorage.getItem("jiroku_today_actions_shared")||"null");
@@ -5471,7 +5662,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260802-125522";
+const APP_BUILD = "20260802-135752";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
