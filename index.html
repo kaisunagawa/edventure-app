@@ -594,7 +594,11 @@ async function flushTaskQueue(){
     if (!r || !r.ok || !Array.isArray(r.results)) {
       // 通信失敗: 残して後で再送（回数だけ数える）
       const q2 = loadTaskQueue();
-      q2.forEach(x=>{ if (pending.some(p=>p.mid===x.mid)) x.tries=(x.tries||0)+1; });
+      q2.forEach(x=>{
+        if (!pending.some(p=>p.mid===x.mid)) return;
+        x.tries=(x.tries||0)+1;
+        if (x.tries >= 5) { x.state = "failed"; x.error_code = "NETWORK"; }
+      });
       saveTaskQueue(q2);
       return;
     }
@@ -615,8 +619,19 @@ async function flushTaskQueue(){
         return true;
       }
       if (res.result === "DELETED_REJECTED") return false;   // 恒久エラー。再試行しても無駄
+      // ★直しようのないものは、すぐ諦める★
+      //   例: サーバーにそのタスクが無い（別端末で消された等）。
+      //   これを再試行し続けると「保存中…」が延々と消えない（実際にそうなった）。
+      const perm = String(res.error_code||"");
+      if (perm.indexOf("タスクが見つかりません") !== -1 || perm === "NOT_FOUND" ||
+          perm === "NO_MUTATION_ID" || perm === "UNKNOWN_OPERATION") {
+        console.warn("[JIROKU] 送れない操作を取り下げました:", res);
+        return false;
+      }
       x.tries = (x.tries||0)+1;
-      return x.tries < 8;   // 無限再試行しない
+      // ★何度も失敗したら「保存中」のままにせず、失敗として見せる★
+      if (x.tries >= 5) { x.state = "failed"; x.error_code = perm; }
+      return true;
     });
     saveTaskQueue(q2);
     window.dispatchEvent(new CustomEvent("jiroku:taskflushed"));
@@ -626,6 +641,18 @@ async function flushTaskQueue(){
 // ★同じ項目がサーバーで変わっていたものは自動再送しない★
 //   それを送り直すと、別端末の同じ項目の変更を黙って消すことになる。
 //   フィールド単位で止められたもの（field_name あり）はそのまま要確認に残す。
+// 起動時: いつまでも「保存中」に見えないよう、古い送信待ちは失敗として見せる
+(function ageOutPending(){
+  try {
+    const q = loadTaskQueue(); let changed = false;
+    const cutoff = Date.now() - 3600000;   // 1時間
+    q.forEach(x => {
+      const born = Number(String(x.mid||"").split("_")[1] || 0);
+      if (x.state === "pending" && born && born < cutoff) { x.state = "failed"; x.error_code = "TIMEOUT"; changed = true; }
+    });
+    if (changed) saveTaskQueue(q);
+  } catch (e) {}
+})();
 (function rescueStuckConflicts(){
   try {
     const q = loadTaskQueue();
@@ -1245,13 +1272,14 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
   const [ctxFilter, setCtxFilter] = useState("ALL");   // すべて/仕事/プライベート
   const [carryPick, setCarryPick] = useState(null);    // 持ち越しの確認表示 {date}
   // タスク同期キューの見える化（同期待ちN件・競合N件）
-  const [taskSync, setTaskSync] = useState(()=>({pending:0, conflict:0}));
+  const [taskSync, setTaskSync] = useState(()=>({pending:0, conflict:0, failed:0}));
   const [conflictItem, setConflictItem] = useState(null);   // 競合解決モーダル
   useEffect(()=>{
     const update = () => {
       const q = loadTaskQueue();
       setTaskSync({ pending: q.filter(x=>x.state==="pending").length,
-                    conflict: q.filter(x=>x.state==="conflict").length });
+                    conflict: q.filter(x=>x.state==="conflict").length,
+                    failed:   q.filter(x=>x.state==="failed").length });
     };
     update();
     window.addEventListener("jiroku:taskqueue", update);
@@ -2440,6 +2468,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
               ${undone.length>0&&chip("var(--bg)","var(--sub)",`残り${undone.length}件${restMin>0?` / 想定${fmtMin(restMin)}`:""}`)}
               ${noEst>0&&chip("var(--bg)","var(--sub)",`見積もり未設定 ${noEst}件`)}
               ${chip("var(--bg)","var(--sub)",`記録 ${slots}時間帯`)}
+              ${taskSync.failed>0&&chip("var(--amber,#BA7517)","#fff",`保存できず ${taskSync.failed}件`)}
               ${taskSync.pending>0&&chip("var(--bg)","var(--sub)","保存中…")}
               ${taskSync.conflict>0&&chip("var(--red,#d33)","#fff",`要確認 ${taskSync.conflict}件`)}
             </div>
@@ -2705,6 +2734,13 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
               if (c) setConflictItem(c);
             }}
             style=${{fontSize:11,background:"var(--red,#d33)",color:"#fff",border:"none",borderRadius:20,padding:"2px 9px",fontWeight:600,cursor:"pointer"}}>要確認 ${taskSync.conflict}件</button>`}
+          ${taskSync.failed>0&&html`<button onClick=${()=>{
+              const q = loadTaskQueue();
+              q.forEach(x=>{ if(x.state==="failed"){ x.state="pending"; x.tries=0; } });
+              saveTaskQueue(q); flushTaskQueue();
+            }}
+            style=${{fontSize:11,background:"var(--amber,#BA7517)",color:"#fff",border:"none",borderRadius:20,padding:"2px 9px",fontWeight:600,cursor:"pointer"}}
+            title="押すともう一度送ります">保存できず ${taskSync.failed}件・再試行</button>`}
           ${taskSync.pending>0&&html`<span style=${{fontSize:11,background:"var(--bg)",color:"var(--sub)",borderRadius:20,padding:"2px 9px",fontWeight:600}}>保存中…</span>`}
           ${boardWide&&html`<span style=${{fontSize:10.5,color:"var(--sub)"}}>カードをドラッグで移動</span>`}
           <button onClick=${openEdit} style=${{background:"none",border:"none",cursor:"pointer",color:"var(--accent)",fontSize:12,fontWeight:600,padding:"2px 6px"}}>編集</button>
@@ -6047,7 +6083,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260802-160409";
+const APP_BUILD = "20260802-161250";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
