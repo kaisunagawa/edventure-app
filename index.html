@@ -2147,50 +2147,6 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
 
     ${showCommunity&&html`<${CommunityOverlay} onClose=${()=>setShowCommunity(false)}/>`}
 
-    <!-- ★今日ブロック（自己経営OSホーム 段階1）★
-         ホームを「情報の一覧」ではなく「次に何をするか決める画面」にする。
-         開いて3秒で今日の動きが決まるよう、判断材料だけを1枚に集める。
-         データはすべて既存の状態から計算する（新しい通信はしない） -->
-    ${(()=>{
-      const items = actionItems || [];
-      const undone = items.filter(t=>!isDone(t));
-      const fmtMin = m => m>=60 ? `${Math.floor(m/60)}時間${m%60?`${m%60}分`:""}` : `${m}分`;
-      let overdue=0, dueToday=0, restMin=0, noEst=0;
-      undone.forEach(t=>{
-        const q = quadrantOf(t);
-        if (q.overdue) overdue++;
-        else if (dueOf(t) === todayKey) dueToday++;
-        const e2 = Number(estOf(t))||0;
-        if (e2>0) restMin+=e2; else noEst++;
-      });
-      // 今すぐやる1件: 期限超過 → 今すぐやる分類 → 先頭の未完了
-      const next = undone.find(t=>quadrantOf(t).overdue)
-                || undone.find(t=>quadrantOf(t).quadrant==="DO_NOW")
-                || undone[0];
-      const slots = new Set((todayLogs||[]).map(l=>String(l.time_block||"").slice(0,2)).filter(Boolean)).size;
-      const hasFocus = intent && intent.date === todayKey && intent.intent;
-      const chip = (bg,color,txt) => html`<span style=${{fontSize:11,fontWeight:600,background:bg,color:color,borderRadius:20,padding:"3px 9px",whiteSpace:"nowrap"}}>${txt}</span>`;
-      return html`
-      <div style=${{margin:"16px 16px 0",background:"var(--card)",borderRadius:16,border:"1.5px solid var(--accent)",padding:"14px 16px"}}>
-        <div style=${{fontSize:11,fontWeight:700,color:"var(--accent)",letterSpacing:"0.06em",marginBottom:8}}>今日 — まずこれ</div>
-        ${hasFocus
-          ? html`<div style=${{fontSize:15,fontWeight:800,color:"var(--text)",lineHeight:1.5,marginBottom:4,overflowWrap:"anywhere"}}>${intent.intent}
-              ${intent.hours>0&&html`<span style=${{fontSize:12,fontWeight:600,color:"var(--sub)"}}> / ${intent.hours}時間</span>`}</div>`
-          : html`<button onClick=${()=>{ setIntentEditMode(true); setShowIntentModal(true); }}
-              style=${{background:"none",border:"1.5px dashed var(--border)",borderRadius:10,padding:"9px 12px",width:"100%",textAlign:"left",fontSize:13,color:"var(--sub)",cursor:"pointer",fontFamily:"inherit",marginBottom:4}}>
-              ⭐ 今日いちばんやりたいことを決める</button>`}
-        ${next&&html`<div style=${{fontSize:12.5,color:"var(--sub)",marginBottom:8}}>次のタスク: <b style=${{color:"var(--text)"}}>${next}</b>${estOf(next)>0&&html` <span>（${estOf(next)}分）</span>`}</div>`}
-        <div style=${{display:"flex",gap:6,flexWrap:"wrap"}}>
-          ${overdue>0&&chip("var(--red,#d33)","#fff",`期限超過 ${overdue}件`)}
-          ${dueToday>0&&chip("var(--accent-l)","var(--accent)",`今日中 ${dueToday}件`)}
-          ${undone.length>0&&chip("var(--bg)","var(--sub)",`残り${undone.length}件${restMin>0?` / 想定${fmtMin(restMin)}`:""}`)}
-          ${chip("var(--bg)","var(--sub)",`記録 ${slots}時間帯`)}
-          ${taskSync.pending>0&&chip("var(--bg)","var(--sub)",`保存中…`)}
-          ${taskSync.conflict>0&&chip("var(--red,#d33)","#fff",`要確認 ${taskSync.conflict}件`)}
-        </div>
-      </div>`;
-    })()}
-
     <!-- 週次ふりかえり（今週のまとめ＋振り返り記入＋来週の一言）。週末（土日）に、未記入かつ未閉じの時だけ大きく出す -->
     ${weekly && !weekly.reflected && !weekDismissed && shouldShowWeeklyReview(weekly) && html`
       <div style=${{margin:"16px 16px 0",background:"var(--card)",borderRadius:16,border:"1.5px solid var(--accent)",overflow:"hidden"}}>
@@ -2232,9 +2188,11 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
       </div>
     `}
 
-    <!-- 今日のフォーカス（何を＋何時間、を融合。目標関連の記録時間で進捗を表示） -->
-    ${intent&&html`
-      <div style=${{margin:"16px 16px 0",background:"var(--card)",borderRadius:16,border:"1.5px solid var(--accent)",padding:"14px 16px"}}>
+    <!-- ★今日のフォーカス（自己経営OSホームの「今日」）★
+         ここを開いて数秒で今日の動きが決まるように、宣言・時間の進捗・
+         次にやるタスク・今日の状況を1枚にまとめる。
+         以前は別枠の「今日 — まずこれ」と二重になっていたので統合した。 -->
+    <div style=${{margin:"16px 16px 0",background:"var(--card)",borderRadius:16,border:"1.5px solid var(--accent)",padding:"14px 16px"}}>
         <div style=${{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
           <div style=${{fontSize:11,fontWeight:600,color:"var(--sub)"}}>⭐ 今日のフォーカス</div>
           <button onClick=${onGoTimer}
@@ -2242,6 +2200,13 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
             <${S} n="timer" s=${11}/>タイマーで測る
           </button>
         </div>
+        ${!intent&&html`
+          <button onClick=${()=>{ setIntentEditMode(true); setShowIntentModal(true); }}
+            style=${{width:"100%",background:"none",border:"1.5px dashed var(--border)",borderRadius:10,padding:"12px",textAlign:"left",fontSize:13.5,color:"var(--sub)",cursor:"pointer",fontFamily:"inherit",marginBottom:12,lineHeight:1.6}}>
+            今日いちばん達成したいことを決める<br/>
+            <span style=${{fontSize:11.5,opacity:0.8}}>決めておくと、迷ったときにここへ戻ってこられます</span>
+          </button>`}
+        ${intent&&html`<div>
         <!-- 左の丸＝達成トグル / 本文・右ラベル＝タップで編集、と挙動を分ける -->
         <div style=${{display:"flex",alignItems:"center",gap:12,marginBottom:12}}>
           <button onClick=${toggleIntentDone} aria-label="達成の切り替え"
@@ -2278,8 +2243,49 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
             </div>
           `;
         })()}
+        </div>`}
+        <!-- 今日の状況。次にやる1件と、判断に要る数だけ -->
+        ${(()=>{
+          const items = actionItems || [];
+          const undone = items.filter(t=>!isDone(t));
+          const fmtMin = m => m>=60 ? `${Math.floor(m/60)}時間${m%60?`${m%60}分`:""}` : `${m}分`;
+          let overdue=0, dueToday=0, restMin=0, noEst=0;
+          undone.forEach(t=>{
+            const q = quadrantOf(t);
+            if (q.overdue) overdue++;
+            else if (dueOf(t) === todayKey) dueToday++;
+            const e2 = Number(estOf(t))||0;
+            if (e2>0) restMin+=e2; else noEst++;
+          });
+          // 次にやる1件: 期限超過 → 今すぐやる分類 → 先頭の未完了
+          const next = undone.find(t=>quadrantOf(t).overdue)
+                    || undone.find(t=>quadrantOf(t).quadrant==="DO_NOW")
+                    || undone[0];
+          const slots = new Set((todayLogs||[]).map(l=>String(l.time_block||"").slice(0,2)).filter(Boolean)).size;
+          const chip = (bg,color,txt) => html`<span style=${{fontSize:11,fontWeight:600,background:bg,color:color,borderRadius:20,padding:"3px 9px",whiteSpace:"nowrap"}}>${txt}</span>`;
+          if (!next && !items.length && !slots) return "";
+          return html`
+          <div style=${{borderTop:"1px solid var(--border)",marginTop:12,paddingTop:11}}>
+            ${next&&html`
+              <button onClick=${()=>goToTimerWith(next)}
+                style=${{width:"100%",display:"flex",alignItems:"center",gap:8,background:"none",border:"none",padding:0,marginBottom:9,textAlign:"left",cursor:"pointer",fontFamily:"inherit"}}>
+                <span style=${{flexShrink:0,fontSize:10.5,fontWeight:700,color:"var(--sub)"}}>次にやる</span>
+                <span style=${{flex:1,minWidth:0,fontSize:13.5,fontWeight:700,color:"var(--text)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>${next}</span>
+                ${estOf(next)>0&&html`<span style=${{flexShrink:0,fontSize:11,fontWeight:600,color:"var(--accent)"}}>${estOf(next)}分</span>`}
+                <span style=${{flexShrink:0,fontSize:11,color:"var(--sub)"}}>▶ 始める</span>
+              </button>`}
+            <div style=${{display:"flex",gap:6,flexWrap:"wrap"}}>
+              ${overdue>0&&chip("var(--red,#d33)","#fff",`期限超過 ${overdue}件`)}
+              ${dueToday>0&&chip("var(--accent-l)","var(--accent)",`今日中 ${dueToday}件`)}
+              ${undone.length>0&&chip("var(--bg)","var(--sub)",`残り${undone.length}件${restMin>0?` / 想定${fmtMin(restMin)}`:""}`)}
+              ${noEst>0&&chip("var(--bg)","var(--sub)",`見積もり未設定 ${noEst}件`)}
+              ${chip("var(--bg)","var(--sub)",`記録 ${slots}時間帯`)}
+              ${taskSync.pending>0&&chip("var(--bg)","var(--sub)","保存中…")}
+              ${taskSync.conflict>0&&chip("var(--red,#d33)","#fff",`要確認 ${taskSync.conflict}件`)}
+            </div>
+          </div>`;
+        })()}
       </div>
-    `}
 
     ${showIntentModal&&ReactDOM.createPortal(html`
       <div style=${{position:"fixed",inset:0,height:"100dvh",background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"flex-end",zIndex:500}}>
@@ -2717,11 +2723,6 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
             <span style=${{fontSize:12.5,color:"var(--sub)"}}>分（タイマーがこの時間で始まります）</span>
           </div>
 
-          <label class="form-lbl">メモ</label>
-          <textarea class="inp" placeholder="このタスクのメモ・詳細・持ち物など" value=${taskNotes[idOfTitle(t)]||taskNotes[t]||""}
-            onInput=${e=>setTaskNote(t, e.target.value)}
-            style=${{minHeight:90,resize:"vertical",lineHeight:1.6,fontFamily:"inherit",marginBottom:16}}/>
-
           <label class="form-lbl">分類（仕事/プライベート）</label>
           <div style=${{display:"flex",gap:6,flexWrap:"wrap",marginBottom:16}}>
             ${[["UNSET","未設定"],["WORK","仕事"],["PERSONAL","プライベート"],["LEARNING","学び"],["HEALTH","健康"],["OTHER","その他"]].map(([v,lb])=>{
@@ -2766,7 +2767,17 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
               </div>`}
           `}
 
-          ${st!=="done"&&html`<button class="btn" style=${{marginBottom:10}} onClick=${()=>{ goToTimerWith(t); setDetailTask(null); }}>⏱ タイマーで計測する</button>`}
+          <label class="form-lbl">メモ</label>
+          <textarea class="inp" placeholder="このタスクのメモ・詳細・持ち物など" value=${taskNotes[idOfTitle(t)]||taskNotes[t]||""}
+            onInput=${e=>setTaskNote(t, e.target.value)}
+            style=${{minHeight:90,resize:"vertical",lineHeight:1.6,fontFamily:"inherit",marginBottom:16}}/>
+
+          <!-- ★保存ボタン★ 各項目は変えた時点で保存されているが、
+               「押して確定した」という手応えが無いと不安になる、という声を受けて置く。
+               押すと未送信ぶんをすぐ送って閉じる。 -->
+          <button class="btn" style=${{marginBottom:10}} onClick=${()=>{ flushTaskQueue(); setDetailTask(null); }}>保存する</button>
+          ${st!=="done"&&html`<button onClick=${()=>{ goToTimerWith(t); setDetailTask(null); }}
+            style=${{width:"100%",padding:"11px",marginBottom:10,background:"none",border:"1.5px solid var(--accent)",borderRadius:10,color:"var(--accent)",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>⏱ タイマーで計測する</button>`}
           <button onClick=${()=>{ if(confirm("このタスクを削除しますか？")) deleteTask(t); }}
             style=${{width:"100%",padding:"11px",background:"none",border:"1.5px solid var(--border)",borderRadius:10,color:"var(--red,#d33)",fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>削除する</button>
         </div>
@@ -5845,7 +5856,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260802-150427";
+const APP_BUILD = "20260802-154124";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
