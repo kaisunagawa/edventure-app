@@ -4550,8 +4550,8 @@ function ReportScreen() {
           <div style=${{fontSize:11,fontWeight:700,color:"var(--sub)",marginBottom:5}}>今日の経営状態</div>
           <div style=${{fontSize:20,fontWeight:800,color:"var(--text)",marginBottom:6}}>${x.operating_state_label}</div>
           <div style=${{fontSize:12.5,color:"var(--sub)",lineHeight:1.8}}>
-            ${(N&&N.operating_summary)
-              ? N.operating_summary
+            ${(N&&N.operating_summary&&N.operating_summary.text)
+              ? N.operating_summary.text
               : x.operating_score!==null
               ? "今日は決めたことを進められています。下の内訳で、どこが効いたかを確認できます。"
               : x.partial_score!==null
@@ -4590,16 +4590,20 @@ function ReportScreen() {
         ${(N&&(N.next_action||N.stop_action))&&html`
           <div class="card" style=${{marginBottom:12}}>
             <div class="card-label">明日の一手</div>
-            ${N.next_action&&html`<div style=${{fontSize:12.5,color:"var(--text)",lineHeight:1.8}}>${N.next_action}</div>`}
+            ${N.next_action&&html`
+              <div style=${{fontSize:12.5,color:"var(--text)",lineHeight:1.8}}>${N.next_action.text}</div>
+              ${N.next_action.measurable_condition&&html`
+                <div style=${{fontSize:11.5,color:"var(--sub)",lineHeight:1.8,marginTop:4}}>
+                  達成の目安：${N.next_action.measurable_condition}</div>`}`}
             ${N.stop_action&&html`
-              <div style=${{fontSize:12,color:"var(--sub)",lineHeight:1.8,marginTop:6}}>やめること：${N.stop_action}</div>`}
+              <div style=${{fontSize:12,color:"var(--sub)",lineHeight:1.8,marginTop:6}}>やめること：${N.stop_action.text}</div>`}
           </div>`}
 
         <div class="card" style=${{marginBottom:12}}>
           <div class="card-label">今日の立て直し</div>
           <div style=${{fontSize:12.5,color:"var(--sub)",lineHeight:1.8}}>
-            ${(N&&N.recovery_summary)
-              ? N.recovery_summary
+            ${(N&&N.recovery_summary&&N.recovery_summary.text)
+              ? N.recovery_summary.text
               : (f.carried_over||[]).length>0
               ? "崩れた予定を翌日へ移して整理しました。"
               : "本日は立て直しが必要な場面はありませんでした。"}
@@ -6771,7 +6775,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260802-231626";
+const APP_BUILD = "20260802-234606";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 

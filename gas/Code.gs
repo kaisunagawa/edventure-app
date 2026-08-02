@@ -1662,6 +1662,9 @@ function opsFallbackNarrative(cur, factList) {
   const prog = pick("f_important_done_").concat(byId.f_focus_done ? [byId.f_focus_done] : [])
                  .concat(byId.f_logs ? [byId.f_logs] : []).slice(0, 3);
   const carried = pick("f_carried_");
+  const catIds = (cur.components || []).map(function (c) {
+    return "f_cat_" + c.key + (c.state === "evaluated" ? "" : "_pending"); })
+    .filter(function (id) { return byId[id]; });
   const pending = (cur.components || []).filter(function (c) { return c.state !== "evaluated"; })
                                         .map(function (c) { return c.label; });
   const summary = cur.operating_score !== null
@@ -1671,45 +1674,87 @@ function opsFallbackNarrative(cur, factList) {
           + (pending.join("と") || "不足している項目") + "のデータを蓄積中です。"
         : "評価に必要なデータがまだ足りません。記録が増えると状態が出せるようになります。");
   return {
-    operating_summary: summary,
-    progress_items: prog.map(function (x) { return { text: x.text, fact_id: x.fact_id }; }),
+    operating_summary: { text: summary, fact_ids: catIds },
+    progress_items: prog.map(function (x) { return { text: x.text, fact_ids: [x.fact_id] }; }),
     primary_management_issue: carried.length
       ? { text: "予定していた" + carried.length + "件を翌日へ回しました。積み残しが増えると、明日の予定が入らなくなります。",
-          fact_id: carried[0].fact_id }
-      : { text: "", fact_id: "" },
-    next_action: "", stop_action: "",
-    recovery_summary: carried.length ? "崩れた予定を翌日へ移して整理しました。"
-                                     : "本日は立て直しが必要な場面はありませんでした。"
+          fact_ids: carried.map(function (c) { return c.fact_id; }).slice(0, 3) }
+      : null,
+    // 提案は事実ではないため、機械組み立てでは作らない（空にする）
+    next_action: null,
+    stop_action: null,
+    recovery_summary: { text: carried.length ? "崩れた予定を翌日へ移して整理しました。"
+                                             : "本日は立て直しが必要な場面はありませんでした。",
+                        fact_ids: carried.length ? [carried[0].fact_id] : [], template: !carried.length }
   };
 }
 
-// AI出力の形を検査する。事実IDが無いもの・知らないIDは採用しない
+// AI出力の形を検査する。
+//   ★事実を述べる文には、必ず有効な fact_id を1つ以上求める★
+//   知らないIDが1つでも混ざっていたら、その文ごと捨てる（部分的に本当らしい
+//   文が残るほうが危険なため）。提案（next_action / stop_action）は事実では
+//   ないので生成を許すが、何を根拠にしたのかは必ず持たせる。
 function opsValidateNarrative(obj, factList) {
   if (!obj || typeof obj !== "object") return { ok: false, reason: "NOT_OBJECT" };
   const ids = {};
   factList.forEach(function (x) { ids[x.fact_id] = 1; });
   const str = function (v, max) {
     return (typeof v === "string" && v.trim()) ? v.trim().slice(0, max) : ""; };
-  const summary = str(obj.operating_summary, 200);
+  // 事実IDの検査。1つでも知らないIDがあれば不採用
+  const refs = function (v) {
+    const a = Array.isArray(v) ? v : (typeof v === "string" && v ? [v] : []);
+    const out = [];
+    for (let i = 0; i < a.length; i++) {
+      const id = str(a[i], 64);
+      if (!id || !ids[id]) return null;      // 未知のIDが混ざった → この文は捨てる
+      if (out.indexOf(id) === -1) out.push(id);
+    }
+    return out.length ? out : null;          // 根拠ゼロの断定は許さない
+  };
+  const factual = function (o, max) {
+    if (!o || typeof o !== "object") return null;
+    const t = str(o.text, max);
+    const r = refs(o.fact_ids);
+    return (t && r) ? { text: t, fact_ids: r } : null;
+  };
+
+  const summary = factual(obj.operating_summary, 200);
   if (!summary) return { ok: false, reason: "NO_SUMMARY" };
+
   const items = Array.isArray(obj.progress_items) ? obj.progress_items : [];
   const prog = [];
   for (let i = 0; i < items.length && prog.length < 3; i++) {
-    const t = str(items[i] && items[i].text, 120);
-    const fid = str(items[i] && items[i].fact_id, 64);
-    if (!t || !ids[fid]) continue;      // 根拠のない文は捨てる
-    prog.push({ text: t, fact_id: fid });
+    const p = factual(items[i], 120);
+    if (p) prog.push(p);
   }
-  const issue = obj.primary_management_issue || {};
-  const issueText = str(issue.text, 200);
-  const issueId = str(issue.fact_id, 64);
+
+  const issue = factual(obj.primary_management_issue, 200);
+
+  // 提案：根拠ID＋測れる条件＋自分で決められること、が揃ったものだけ採用
+  let next = null;
+  const na = obj.next_action;
+  if (na && typeof na === "object") {
+    const t = str(na.text, 120);
+    const r = refs(na.based_on_fact_ids);
+    const cond = str(na.measurable_condition, 120);
+    const ctrl = (na.controllable_by_user === true || String(na.controllable_by_user) === "true");
+    if (t && r && cond && ctrl) next = { text: t, based_on_fact_ids: r, measurable_condition: cond, controllable_by_user: true };
+  }
+  let stop = null;
+  const sa = obj.stop_action;
+  if (sa && typeof sa === "object") {
+    const t = str(sa.text, 120);
+    const r = refs(sa.based_on_fact_ids);
+    if (t && r) stop = { text: t, based_on_fact_ids: r };
+  }
+
+  // 立て直し：事実があれば根拠必須、無い日は定型文
+  let rec = factual(obj.recovery_summary, 200);
+  if (!rec) rec = { text: "本日は立て直しが必要な場面はありませんでした。", fact_ids: [], template: true };
+
   return { ok: true, data: {
-    operating_summary: summary,
-    progress_items: prog,
-    primary_management_issue: (issueText && ids[issueId]) ? { text: issueText, fact_id: issueId } : { text: "", fact_id: "" },
-    next_action: str(obj.next_action, 120),
-    stop_action: str(obj.stop_action, 120),
-    recovery_summary: str(obj.recovery_summary, 200)
+    operating_summary: summary, progress_items: prog, primary_management_issue: issue,
+    next_action: next, stop_action: stop, recovery_summary: rec
   } };
 }
 
@@ -1730,17 +1775,23 @@ function opsBuildPrompt(cur, factList) {
     + JSON.stringify(view, null, 1) + "\n\n"
     + "【厳守】\n"
     + "・点数・状態・測定範囲・確からしさを、あなたが変えたり言い換えたりしないこと\n"
-    + "・「使える事実」に無いことを書かないこと。体調・感情・原因を推測しないこと\n"
-    + "・progress_items と primary_management_issue には、必ず使った事実の fact_id を付けること\n"
+    + "・「使える事実」に無いことを書かないこと。体調・感情・原因・成果を推測しないこと\n"
+    + "・事実を述べる文には、その根拠になった fact_id を必ず全て挙げること。\n"
+    + "　1つでも挙げられない内容が混じるなら、その文を書かないこと\n"
+    + "・「準備が整った」「意識が高まった」のような、事実から確認できない断定をしないこと\n"
     + "・総合スコアが null のときは、点数があるかのように書かないこと\n"
-    + "・日本語。やさしい言葉で、responsible な事実の要約として書くこと\n\n"
+    + "・next_action は本人が自分で決められて、達成したか測れる行動にすること\n"
+    + "・stop_action は「やめる・減らすこと」。思い当たらなければ null\n"
+    + "・日本語。やさしい言葉で書くこと\n\n"
     + "次のJSONだけを返してください（前後に文章を付けない）。\n"
-    + '{\n  "operating_summary": "<今日の経営状態の要約。2文以内>",\n'
-    + '  "progress_items": [ { "text": "<今日の前進。1文>", "fact_id": "<使った事実のid>" } ],\n'
-    + '  "primary_management_issue": { "text": "<今日の経営課題。2文以内。無ければ空文字>", "fact_id": "<事実のid。無ければ空文字>" },\n'
-    + '  "next_action": "<明日の一手。1文>",\n'
-    + '  "stop_action": "<明日やめる・減らすこと。1文。続けることを書かない。思い当たらなければ空文字>",\n'
-    + '  "recovery_summary": "<今日の立て直し。1〜2文>"\n}';
+    + '{\n  "operating_summary": { "text": "<今日の経営状態の要約。2文以内>", "fact_ids": ["<根拠のid>"] },\n'
+    + '  "progress_items": [ { "text": "<今日の前進。1文>", "fact_ids": ["<根拠のid>"] } ],\n'
+    + '  "primary_management_issue": { "text": "<今日の経営課題。2文以内>", "fact_ids": ["<根拠のid>"] } または null,\n'
+    + '  "next_action": { "text": "<明日の一手。1文>", "based_on_fact_ids": ["<根拠のid>"],\n'
+    + '    "measurable_condition": "<何をもって達成とするか。例: アポ2件の打診を送る>",\n'
+    + '    "controllable_by_user": true } または null,\n'
+    + '  "stop_action": { "text": "<明日やめる・減らすこと。1文>", "based_on_fact_ids": ["<根拠のid>"] } または null,\n'
+    + '  "recovery_summary": { "text": "<今日の立て直し。1〜2文>", "fact_ids": ["<根拠のid>"] } または null\n}';
 }
 
 // 保存済みがあれば使い、無ければ生成して保存する
@@ -1797,13 +1848,15 @@ function opsNarrative(studentEmail, cur, forceRefresh) {
   p1Upsert("DailyOpsReport", "row_id", {
     row_id: row ? row.row_id : ("ops_" + sha256Hex(studentEmail + "|" + cur.report_date + "|" + cur.report_version).slice(0, 16)),
     student_email: studentEmail, report_date: cur.report_date, report_version: cur.report_version,
-    operating_state_label: cur.operating_state_label, operating_summary: out.operating_summary,
+    operating_state_label: cur.operating_state_label, operating_summary: (out.operating_summary && out.operating_summary.text) || "",
     operating_score: cur.operating_score === null ? "" : cur.operating_score,
     previous_day_delta: cur.previous_day_delta === null ? "" : cur.previous_day_delta,
     seven_day_average_delta: cur.seven_day_average_delta === null ? "" : cur.seven_day_average_delta,
     progress_items: JSON.stringify(out.progress_items),
-    primary_management_issue: JSON.stringify(out.primary_management_issue),
-    next_action: out.next_action, stop_action: out.stop_action, recovery_summary: out.recovery_summary,
+    primary_management_issue: JSON.stringify(out.primary_management_issue || null),
+    next_action: JSON.stringify(out.next_action || null),
+    stop_action: JSON.stringify(out.stop_action || null),
+    recovery_summary: JSON.stringify(out.recovery_summary || null),
     evaluation_components: JSON.stringify((cur.components || []).map(function (c) {
       return { key: c.key, score: c.score, state: c.evaluation_state,
                weighted_coverage: c.weighted_coverage, confidence: c.confidence }; })),
@@ -1879,13 +1932,21 @@ function opsSelfTest(studentEmail, dateStr) {
     const cur = computeDailyOpsFacts(studentEmail, date);
     const fl = opsFactList(cur);
     const ids = fl.map(function (x) { return x.fact_id; });
-    const good = { operating_summary: "テスト", progress_items: [{ text: "本物の事実", fact_id: ids[0] }],
-                   primary_management_issue: { text: "課題", fact_id: ids[0] },
-                   next_action: "一手", stop_action: "", recovery_summary: "立て直し" };
+    const good = { operating_summary: { text: "テスト", fact_ids: [ids[0]] },
+                   progress_items: [{ text: "本物の事実", fact_ids: [ids[0]] }],
+                   primary_management_issue: { text: "課題", fact_ids: [ids[0]] },
+                   next_action: { text: "一手", based_on_fact_ids: [ids[0]],
+                                  measurable_condition: "2件送る", controllable_by_user: true },
+                   stop_action: null,
+                   recovery_summary: { text: "立て直し", fact_ids: [ids[0]] } };
     const bad1 = { progress_items: [] };                                   // 要約なし
-    const bad2 = { operating_summary: "テスト",
-                   progress_items: [{ text: "でっち上げ", fact_id: "f_not_exist" },
-                                    { text: "根拠なし" }] };               // 知らないID／ID無し
+    const bad2 = { operating_summary: { text: "テスト", fact_ids: [ids[0]] },
+                   progress_items: [{ text: "でっち上げ", fact_ids: ["f_not_exist"] },
+                                    { text: "根拠なし" },
+                                    { text: "半分だけ本当", fact_ids: [ids[0], "f_not_exist"] }] };
+    const bad3 = { operating_summary: { text: "根拠なしの断定", fact_ids: [] } };
+    const bad4 = { operating_summary: { text: "テスト", fact_ids: [ids[0]] },
+                   next_action: { text: "頑張る", based_on_fact_ids: [ids[0]] } };  // 条件なし
     out.narrative_tests = {
       fact_ids: ids,
       valid_ok: opsValidateNarrative(good, fl).ok,
@@ -1894,6 +1955,10 @@ function opsSelfTest(studentEmail, dateStr) {
         const v = opsValidateNarrative(bad2, fl);
         return v.ok && v.data.progress_items.length === 0; })(),
       not_object_rejected: !opsValidateNarrative(null, fl).ok,
+      no_fact_summary_rejected: !opsValidateNarrative(bad3, fl).ok,
+      unmeasurable_next_action_dropped: (function () {
+        const v = opsValidateNarrative(bad4, fl);
+        return v.ok && v.data.next_action === null; })(),
       fallback: opsFallbackNarrative(cur, fl),
       input_hash_stable: opsInputHash(cur, fl) === opsInputHash(cur, fl)
     };
