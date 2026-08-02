@@ -1265,6 +1265,11 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
   });
   const [mainGoalIdx, setMainGoalIdx] = useState(0);   // 主目標。他の目標へ切り替えられる
   const [homeGoalSheet, setHomeGoalSheet] = useState(false);   // ホームから目標編集を開く
+  const [sprints, setSprints] = useState(()=>{
+    try { return JSON.parse(localStorage.getItem("cache_sprints")||"null"); } catch(e){ return null; }
+  });
+  const [sprintSheet, setSprintSheet] = useState(null);   // null=閉 / {}=新規 / obj=編集
+  const [sprintIdx, setSprintIdx] = useState(0);
   const [goalQuick, setGoalQuick] = useState({current:"", start:"", end:""});   // 足りない値をその場で入れる
   const [goalQuickSaving, setGoalQuickSaving] = useState(false);
   const [taskWhy, setTaskWhy] = useState({});          // なぜ上に来ているかの理由（サーバー算出）
@@ -1605,6 +1610,11 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
       if(r && r.ok && r.data) applyHome(r.data);
       else legacyFetch();
     }).catch(legacyFetch);
+    // スプリント（2週間）。3か月目標と今日の間をつなぐ層
+    gasApi("getSprints").then(r=>{
+      if(r && r.ok){ setSprints(r);
+        try { localStorage.setItem("cache_sprints", JSON.stringify(r)); } catch(e){} }
+    }).catch(()=>{});
     // 3か月目標（数値とペース）。統合APIには乗っていないので別に取る
     gasApi("getGoalTree").then(r=>{
       if(r && r.ok && r.data){ setGoalTree(r.data);
@@ -2370,6 +2380,68 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
         </button>
       </div>`;
     })()}
+
+    <!-- ★2週間スプリント★ 3か月目標と今日の間をつなぐ。
+         いまの詰まりと、2週間後の到達状態を1枚で見せる -->
+    ${(()=>{
+      const all = (sprints&&sprints.data)||[];
+      const goals = ((goalTree&&goalTree.goals)||[]).filter(g=>String(g.status||"ACTIVE").toUpperCase()!=="ARCHIVED");
+      const cur = all.filter(x=>x.isCurrent && String(x.status).toUpperCase()!=="DONE");
+      const reload = ()=>gasApi("getSprints").then(r=>{ if(r&&r.ok){ setSprints(r);
+        try { localStorage.setItem("cache_sprints", JSON.stringify(r)); } catch(e){} } });
+      if (!all.length && !goals.length) return "";
+      if (!cur.length) return html`
+        <div style=${{margin:"16px 16px 0",background:"var(--card)",borderRadius:16,border:"1px solid var(--border)",padding:"14px 16px"}}>
+          <div style=${{fontSize:11,fontWeight:700,color:"var(--sub)",marginBottom:6}}>🏃 2週間スプリント</div>
+          <div style=${{fontSize:12.5,color:"var(--sub)",lineHeight:1.7,marginBottom:10}}>
+            いま進行中のスプリントはありません。<br/>
+            3か月は遠すぎて動けません。2週間で「何が変わっていれば前進か」を決めると、今日やることが決まります。
+          </div>
+          <button onClick=${()=>setSprintSheet({})} disabled=${!goals.length}
+            style=${{width:"100%",padding:"10px",borderRadius:10,border:"none",background:goals.length?"var(--accent)":"var(--border)",color:"#fff",fontSize:13,fontWeight:700,cursor:goals.length?"pointer":"default",fontFamily:"inherit"}}>
+            ${goals.length?"3か月目標から作る":"先に3か月目標を作ってください"}</button>
+        </div>`;
+      const i = Math.min(sprintIdx, cur.length-1);
+      const sp = cur[i];
+      const parent = goals.find(g=>g.quarterly_goal_id===sp.link_quarterly_goal_id);
+      const line = (label, v) => v ? html`<div style=${{marginBottom:3}}><span style=${{color:"var(--sub)"}}>${label}</span> ${v}</div>` : "";
+      return html`
+      <div style=${{margin:"16px 16px 0",background:"var(--card)",borderRadius:16,border:"1px solid var(--border)",padding:"14px 16px"}}>
+        <div style=${{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+          <div style=${{fontSize:11,fontWeight:700,color:"var(--sub)"}}>🏃 2週間スプリント</div>
+          <div style=${{display:"flex",alignItems:"center",gap:6}}>
+            ${cur.length>1&&cur.map((x,k)=>html`<button key=${k} onClick=${()=>setSprintIdx(k)}
+              style=${{width:22,height:22,borderRadius:"50%",cursor:"pointer",fontFamily:"inherit",fontSize:10.5,fontWeight:700,
+                       border:`1px solid ${k===i?"var(--accent)":"var(--border)"}`,background:k===i?"var(--accent)":"transparent",color:k===i?"#fff":"var(--sub)"}}>${k+1}</button>`)}
+            <button onClick=${()=>setSprintSheet(sp)} style=${{background:"none",border:"none",color:"var(--accent)",fontSize:11.5,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>編集</button>
+          </div>
+        </div>
+        ${sprints&&sprints.multipleCurrent&&html`
+          <div style=${{fontSize:11,color:"var(--amber,#BA7517)",marginBottom:6,lineHeight:1.6}}>
+            ⚠ 進行中のスプリントが${cur.length}本あります。1本に絞るほど進みます</div>`}
+        <div style=${{fontSize:15,fontWeight:800,color:"var(--text)",lineHeight:1.5,marginBottom:4}}>${sp.name}</div>
+        <div style=${{fontSize:11.5,color:"var(--sub)",marginBottom:8}}>
+          ${sp.dayIndex}日目 / 全${sp.totalDays}日・あと${Math.max(0,sp.daysLeft)}日
+          ${parent&&html` ・${parent.title}`}
+        </div>
+        ${(sp.bottleneck||sp.target_state||sp.action_metric||sp.result_metric)&&html`
+          <div style=${{fontSize:12,color:"var(--text)",lineHeight:1.8,background:"var(--bg)",borderRadius:10,padding:"10px 12px"}}>
+            ${line("詰まり:", sp.bottleneck)}
+            ${line("2週間後:", sp.target_state)}
+            ${line("行動:", sp.action_metric)}
+            ${line("結果:", sp.result_metric)}
+            ${line("もし〜なら:", sp.if_then)}
+          </div>`}
+      </div>`;
+    })()}
+
+    ${sprintSheet!==null&&html`<${SprintSheet}
+      goals=${((goalTree&&goalTree.goals)||[]).filter(g=>String(g.status||"ACTIVE").toUpperCase()!=="ARCHIVED")}
+      editing=${sprintSheet&&sprintSheet.sprint_id?sprintSheet:null}
+      onClose=${()=>setSprintSheet(null)}
+      onSaved=${()=>gasApi("getSprints").then(r=>{ if(r&&r.ok){ setSprints(r);
+        try { localStorage.setItem("cache_sprints", JSON.stringify(r)); } catch(e){} } })}
+      onToast=${onToast}/>`}
 
     ${homeGoalSheet&&html`<${GoalTreeSheet} onClose=${()=>{ setHomeGoalSheet(false);
       gasApi("getGoalTree").then(r=>{ if(r&&r.ok&&r.data){ setGoalTree(r.data);
@@ -5164,6 +5236,76 @@ function WeeklyGoalEditor({draft, setDraft, onSave, onCancel, saving}) {
     </div>`;
 }
 
+// 2週間スプリントの作成・編集。3か月目標を必ず親に選ばせる
+// （親のない目標は集計に載らず、あとで宙に浮くため）
+function SprintSheet({goals, editing, onClose, onSaved, onToast}) {
+  const today = formatDateStr(new Date());
+  const plus = (d,n)=>{ const x=new Date(d+"T00:00:00+09:00"); x.setDate(x.getDate()+n); return formatDateStr(x); };
+  const [d, setD] = useState(()=> editing ? {...editing} : {
+    name:"", link_quarterly_goal_id: (goals[0]&&goals[0].quarterly_goal_id)||"",
+    start_date: today, end_date: plus(today,13),
+    bottleneck:"", target_state:"", hypothesis:"", action_metric:"", result_metric:"",
+    try_actions:"", stop_actions:"", if_then:"", success_condition:"", coaching_note:"", status:"ACTIVE"
+  });
+  const [saving, setSaving] = useState(false);
+  const set = (k,v)=>setD(p=>({...p,[k]:v}));
+  const save = async () => {
+    if(!String(d.name||"").trim()){ onToast&&onToast("スプリント名を入れてください"); return; }
+    if(!String(d.link_quarterly_goal_id||"").trim()){ onToast&&onToast("どの3か月目標のためのスプリントか選んでください"); return; }
+    setSaving(true);
+    const r = await gasPostJson("saveSprint", d);
+    setSaving(false);
+    if(r&&r.ok){ onToast&&onToast("保存しました"); onSaved&&onSaved(); onClose(); }
+    else onToast&&onToast((r&&r.error)||"保存できませんでした");
+  };
+  const F = (label, key, ph, multi) => html`
+    <label class="form-lbl">${label}</label>
+    ${multi
+      ? html`<textarea class="inp" placeholder=${ph} value=${d[key]||""} onInput=${e=>set(key,e.target.value)}
+          style=${{minHeight:64,resize:"vertical",lineHeight:1.6,fontFamily:"inherit",marginBottom:14}}/>`
+      : html`<input class="inp" placeholder=${ph} value=${d[key]||""} onInput=${e=>set(key,e.target.value)}
+          style=${{marginBottom:14}}/>`}`;
+  return html`
+    <div style=${{position:"fixed",inset:0,zIndex:420,background:"var(--bg)",display:"flex",flexDirection:"column"}}>
+      <div style=${{display:"flex",alignItems:"center",gap:10,padding:"14px 16px",borderBottom:"1px solid var(--border)",flexShrink:0,paddingTop:"calc(14px + var(--safe-top, 0px))"}}>
+        <div style=${{fontSize:15,fontWeight:800,flex:1}}>${editing?"スプリントを編集":"2週間スプリントをつくる"}</div>
+        <button onClick=${onClose} style=${{background:"none",border:"none",color:"var(--sub)",fontSize:22,cursor:"pointer",lineHeight:1,padding:"0 4px"}}>×</button>
+      </div>
+      <div style=${{flex:1,overflowY:"auto",WebkitOverflowScrolling:"touch",padding:"14px 16px calc(28px + var(--safe-bottom, 0px))"}}>
+        <div style=${{fontSize:12,color:"var(--sub)",lineHeight:1.7,marginBottom:14}}>
+          3か月は遠すぎて動けず、1週間は短すぎて形になりません。2週間で「何が変わっていれば前進か」を決めます。
+        </div>
+
+        <label class="form-lbl">どの3か月目標のため？</label>
+        ${goals.length===0
+          ? html`<div style=${{fontSize:12.5,color:"var(--red,#d33)",lineHeight:1.7,marginBottom:14}}>
+              先に3か月目標をつくってください。スプリントは目標にぶら下げます。</div>`
+          : html`<select class="inp" value=${d.link_quarterly_goal_id} onInput=${e=>set("link_quarterly_goal_id",e.target.value)}
+              style=${{marginBottom:14}}>
+              ${goals.map(g=>html`<option key=${g.quarterly_goal_id} value=${g.quarterly_goal_id}>${g.title}</option>`)}
+            </select>`}
+
+        ${F("スプリント名","name","例：法人導入の型づくり")}
+        <div style=${{display:"flex",gap:10,marginBottom:14}}>
+          <label style=${{flex:1}}><span class="form-lbl">開始</span>
+            <input class="inp" type="date" value=${d.start_date} onInput=${e=>set("start_date",e.target.value)} style=${{margin:0}}/></label>
+          <label style=${{flex:1}}><span class="form-lbl">終了</span>
+            <input class="inp" type="date" value=${d.end_date} onInput=${e=>set("end_date",e.target.value)} style=${{margin:0}}/></label>
+        </div>
+        ${F("いま何が詰まっている？","bottleneck","例：提案資料がなく、面談の後が続かない",true)}
+        ${F("2週間後どうなっていたい？","target_state","例：3社へ同じ資料で提案できている",true)}
+        ${F("なぜそれで進むと思う？（仮説）","hypothesis","例：資料があれば面談から提案までの間が空かない",true)}
+        ${F("行動の指標（自分で動かせる数）","action_metric","例：架電70件 / 面談6件")}
+        ${F("結果の指標（相手が決める数）","result_metric","例：提案3社")}
+        ${F("やること","try_actions","例：資料を1本作る、毎朝2時間を架電に固定",true)}
+        ${F("やめること","stop_actions","例：夜の作り込み、返信待ちの手待ち",true)}
+        ${F("もし〜なら、こうする","if_then","例：面談が流れたら、その枠で資料を作る",true)}
+        ${F("これができたら成功と言える","success_condition","例：3社に提案が届いている",true)}
+        <button class="btn" disabled=${saving} onClick=${save} style=${{marginTop:4}}>${saving?"保存中…":"保存する"}</button>
+      </div>
+    </div>`;
+}
+
 function GoalTreeSheet({onClose, onToast}) {
   const [tree,setTree]=useState(null);
   const [loading,setLoading]=useState(true);
@@ -6128,7 +6270,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260802-162313";
+const APP_BUILD = "20260802-163120";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
