@@ -2388,12 +2388,13 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
              「腹筋をシックスパックにする / 12回」のように、何の12回か
              分からない目標が作れてしまう。数字だけ聞くのではなく、
              「できたと言える状態」から数えるものを決め直せるようにする -->
-        ${(!g.success_condition||!g.why)&&html`
+        <!-- ★催促は「達成条件が決まっていないとき」だけ★
+             「なぜ」は飛ばせる項目なので、書いていないことを催促しない。
+             終わった作業がいつまでも残っていると、片付かない感じになる -->
+        ${!g.success_condition&&html`
           <div style=${{background:"var(--accent-l)",borderRadius:10,padding:"10px 12px",marginTop:10}}>
             <div style=${{fontSize:12,color:"var(--text)",lineHeight:1.7,marginBottom:8}}>
-              ${!g.success_condition
-                ? html`この目標は「どうなったら達成か」が決まっていません。<br/>そこが決まると、数えるものと今週やることが決まります。`
-                : html`なぜやりたいのかを書いておくと、しんどい時に戻ってこられます。`}
+              この目標は「どうなったら達成か」が決まっていません。<br/>そこが決まると、数えるものと今週やることが決まります。
             </div>
             <button onClick=${()=>setDeepenGoal(g)}
               style=${{width:"100%",padding:"9px",borderRadius:9,border:"none",background:"var(--accent)",color:"#fff",fontSize:12.5,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
@@ -2403,14 +2404,10 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
           <div style=${{fontSize:11.5,color:"var(--sub)",lineHeight:1.7,marginTop:9,paddingTop:9,borderTop:"1px solid var(--border)"}}>
             <b style=${{color:"var(--text)"}}>できたと言える状態</b><br/>${g.success_condition}
           </div>`}
-        <div style=${{display:"flex",gap:8,marginTop:10}}>
-          <button onClick=${()=>setDeepenGoal(g)}
-            style=${{flex:1,padding:"9px",background:"none",border:"1px solid var(--border)",borderRadius:10,color:"var(--accent)",fontSize:12.5,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
-            深掘りする</button>
-          <button onClick=${()=>setHomeGoalSheet(true)}
-            style=${{flex:1,padding:"9px",background:"none",border:"1px solid var(--border)",borderRadius:10,color:"var(--sub)",fontSize:12.5,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
-            一覧・編集</button>
-        </div>
+        <!-- 決まったあとは、静かな「編集」1つだけにする -->
+        <button onClick=${()=>{ if(g.success_condition) setDeepenGoal(g); else setHomeGoalSheet(true); }}
+          style=${{marginTop:10,width:"100%",padding:"9px",background:"none",border:"1px solid var(--border)",borderRadius:10,color:"var(--sub)",fontSize:12.5,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
+          目標を編集する</button>
       </div>`;
     })()}
 
@@ -2485,12 +2482,14 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
           <div style=${{fontSize:12.5,color:"var(--sub)",lineHeight:1.7,marginBottom:10}}>
             今週の目標がまだありません。<br/>
             ${curSprints.length
-              ? "スプリントを、今週やる数字に落とすと進みます。"
-              : "先にスプリントを決めると、今週やる数字が決まります。"}
+              ? "スプリントの「行動の指標」を、今週やる数字に落とします。"
+              : "先に2週間スプリントを決めてください。順番に決めた方が、今週の数字が自然に出ます。"}
           </div>
-          <button onClick=${()=>setHomeGoalSheet(true)}
+          <!-- ★順番を飛ばさせない★ スプリントが無いのに週間目標を作ると、
+               親が無い（＝上位目標の集計に入らない）目標ができてしまう -->
+          <button onClick=${()=>curSprints.length ? setHomeGoalSheet(true) : setSprintSheet({})}
             style=${{width:"100%",padding:"10px",borderRadius:10,border:"none",background:"var(--accent)",color:"#fff",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
-            ${curSprints.length?"スプリントから作る":"3か月目標から作る"}</button>
+            ${curSprints.length?"スプリントから作る":"先に2週間スプリントを決める"}</button>
         </div>`;
       }
       const MT = { COUNT:"回数", DURATION:"分", DAYS:"日数", BOOLEAN:"やったか" };
@@ -6493,7 +6492,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260802-174144";
+const APP_BUILD = "20260802-174606";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
