@@ -134,6 +134,10 @@ function doGet(e) {
         result = adminPurgeTestUsers(String(e.parameter.confirm || "") === "yes");
         break;
       }
+      // 調査用の adminInspectTodayActions は 2026-08-02 に削除した。
+      // 同期しない原因を推測で4回追ってしまったため、サーバーの中身を
+      // 直接見る口を一時的に置いた。原因が分かったので消す。
+      // 読み取り専用ではあるが、他人の記録を引ける口を残さない。
       case "authCleanupTestData": {
         var _ac = verifyP1Admin(studentEmail, e.parameter.secret, e.parameter);
         if (!_ac.ok) { result = _ac; break; }
