@@ -1269,6 +1269,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
     try { return JSON.parse(localStorage.getItem("cache_sprints")||"null"); } catch(e){ return null; }
   });
   const [sprintSheet, setSprintSheet] = useState(null);   // null=閉 / {}=新規 / obj=編集
+  const [wgSheet, setWgSheet] = useState(false);          // 今週の目標をつくる
   const [sprintIdx, setSprintIdx] = useState(0);
   const [goalDetail, setGoalDetail] = useState(false);   // 数字の出どころ（普段は隠す）
   const [deepenGoal, setDeepenGoal] = useState(null);    // 目標の深掘り
@@ -2487,7 +2488,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
           </div>
           <!-- ★順番を飛ばさせない★ スプリントが無いのに週間目標を作ると、
                親が無い（＝上位目標の集計に入らない）目標ができてしまう -->
-          <button onClick=${()=>curSprints.length ? setHomeGoalSheet(true) : setSprintSheet({})}
+          <button onClick=${()=>curSprints.length ? setWgSheet(true) : setSprintSheet({})}
             style=${{width:"100%",padding:"10px",borderRadius:10,border:"none",background:"var(--accent)",color:"#fff",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
             ${curSprints.length?"スプリントから作る":"先に2週間スプリントを決める"}</button>
         </div>`;
@@ -2534,6 +2535,14 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
 
     ${deepenGoal&&html`<${GoalDeepenSheet} goal=${deepenGoal}
       onClose=${()=>setDeepenGoal(null)}
+      onSaved=${()=>gasApi("getGoalTree").then(r=>{ if(r&&r.ok&&r.data){ setGoalTree(r.data);
+        try { localStorage.setItem("cache_goaltree", JSON.stringify(r.data)); } catch(e){} } })}
+      onToast=${onToast}/>`}
+
+    ${wgSheet&&html`<${WeeklyGoalSheet}
+      sprints=${(sprints&&sprints.data)||[]}
+      goals=${((goalTree&&goalTree.goals)||[]).filter(g=>String(g.status||"ACTIVE").toUpperCase()!=="ARCHIVED")}
+      onClose=${()=>setWgSheet(false)}
       onSaved=${()=>gasApi("getGoalTree").then(r=>{ if(r&&r.ok&&r.data){ setGoalTree(r.data);
         try { localStorage.setItem("cache_goaltree", JSON.stringify(r.data)); } catch(e){} } })}
       onToast=${onToast}/>`}
@@ -5460,6 +5469,85 @@ function GoalDeepenSheet({goal, onClose, onSaved, onToast}) {
     </div>`;
 }
 
+// 今週の目標をつくる小さい画面。
+// これまでは「目標のつながり」全体を開き直していたため、
+//   ・通信が遅いと読み込み中のまま止まる（実際に止まった）
+//   ・「スプリントから作る」と言いながらスプリントを選べない
+// という2つの問題があった。手元にあるデータだけで動かす。
+function WeeklyGoalSheet({sprints, goals, onClose, onSaved, onToast}) {
+  const cur = (sprints||[]).filter(x=>x.isCurrent);
+  const [d, setD] = useState(()=>({
+    link_sprint_id: (cur[0]&&cur[0].sprint_id)||"",
+    link_quarterly_goal_id: (cur[0]&&cur[0].link_quarterly_goal_id)||((goals[0]&&goals[0].quarterly_goal_id)||""),
+    title:"", metric_type:"COUNT", unit:"件", target_total:"", status:"ACTIVE"
+  }));
+  const [saving,setSaving]=useState(false);
+  const set=(k,v)=>setD(p=>({...p,[k]:v}));
+  const pickSprint=(id)=>{
+    const sp=(sprints||[]).find(x=>x.sprint_id===id);
+    setD(p=>({...p, link_sprint_id:id,
+      link_quarterly_goal_id: (sp&&sp.link_quarterly_goal_id)||p.link_quarterly_goal_id}));
+  };
+  const MT=[["COUNT","回数","件"],["DURATION","時間","分"],["DAYS","日数","日"],["BOOLEAN","やったかどうか",""]];
+  const save=async()=>{
+    if(!String(d.title||"").trim()){ onToast&&onToast("今週やることを書いてください"); return; }
+    if(d.metric_type!=="BOOLEAN" && !String(d.target_total||"").trim()){ onToast&&onToast("いくつやるかを入れてください"); return; }
+    setSaving(true);
+    const r=await gasPostJson("saveWeeklyGoal", {...d, std_line:d.target_total});
+    setSaving(false);
+    if(r&&r.ok){ onToast&&onToast("今週の目標を決めました"); onSaved&&onSaved(); onClose(); }
+    else onToast&&onToast((r&&r.error)||"保存できませんでした");
+  };
+  const sp = cur.find(x=>x.sprint_id===d.link_sprint_id);
+  return html`
+    <div style=${{position:"fixed",inset:0,height:"100dvh",zIndex:420,background:"var(--bg)",display:"flex",flexDirection:"column"}}>
+      <div style=${{display:"flex",alignItems:"center",gap:10,padding:"14px 16px",borderBottom:"1px solid var(--border)",flexShrink:0,paddingTop:"calc(14px + var(--safe-top, 0px))"}}>
+        <div style=${{fontSize:15,fontWeight:800,flex:1}}>今週やることを決める</div>
+        <button onClick=${onClose} style=${{background:"none",border:"none",color:"var(--sub)",fontSize:22,cursor:"pointer",lineHeight:1,padding:"0 4px"}}>×</button>
+      </div>
+      <div style=${{flex:1,minHeight:0,overflowY:"auto",WebkitOverflowScrolling:"touch",padding:"14px 16px calc(28px + var(--safe-bottom, 0px))"}}>
+        ${sp&&html`
+          <div style=${{background:"var(--bg)",borderRadius:10,padding:"10px 12px",marginBottom:16,fontSize:12,color:"var(--sub)",lineHeight:1.7}}>
+            スプリント「<b style=${{color:"var(--text)"}}>${sp.name}</b>」の2週間のうち、<b style=${{color:"var(--text)"}}>今週ぶんの数字</b>を決めます。
+            ${sp.action_metric&&html`<br/>2週間ぶんの目安：${sp.action_metric}`}
+          </div>`}
+        ${cur.length>1&&html`
+          <label class="form-lbl">どのスプリント？</label>
+          <select class="inp" value=${d.link_sprint_id} onInput=${e=>pickSprint(e.target.value)} style=${{marginBottom:16}}>
+            ${cur.map(x=>html`<option key=${x.sprint_id} value=${x.sprint_id}>${x.name}</option>`)}
+          </select>`}
+
+        <label class="form-lbl">今週やること</label>
+        <input class="inp" placeholder="例：架電する" value=${d.title}
+          onInput=${e=>set("title",e.target.value)} style=${{marginBottom:16}}/>
+
+        <label class="form-lbl">どう数える？</label>
+        <div style=${{display:"flex",gap:6,flexWrap:"wrap",marginBottom:14}}>
+          ${MT.map(([v,lb,u])=>html`
+            <button key=${v} onClick=${()=>{ set("metric_type",v); if(u) set("unit",u); }}
+              style=${{padding:"8px 14px",borderRadius:20,fontSize:12.5,cursor:"pointer",fontFamily:"inherit",
+                       border:`1.5px solid ${d.metric_type===v?"var(--accent)":"var(--border)"}`,
+                       background:d.metric_type===v?"var(--accent-l)":"transparent",
+                       color:d.metric_type===v?"var(--accent)":"var(--sub)",fontWeight:d.metric_type===v?700:500}}>${lb}</button>`)}
+        </div>
+
+        ${d.metric_type!=="BOOLEAN"&&html`
+          <label class="form-lbl">今週いくつ？</label>
+          <div style=${{display:"flex",gap:8,alignItems:"center",marginBottom:6}}>
+            <input class="inp" type="number" inputmode="decimal" value=${d.target_total}
+              onInput=${e=>set("target_total",e.target.value)} style=${{width:110,margin:0,textAlign:"right"}}/>
+            <input class="inp" value=${d.unit} onInput=${e=>set("unit",e.target.value)}
+              style=${{width:80,margin:0}} placeholder="単位"/>
+          </div>
+          <div style=${{fontSize:11,color:"var(--sub)",lineHeight:1.6,marginBottom:16}}>
+            2週間ぶんの半分が目安です。届く数にしてください。届かない数を置くと、達成が遠のくだけです。
+          </div>`}
+
+        <button class="btn" disabled=${saving} onClick=${save}>${saving?"保存中…":"保存する"}</button>
+      </div>
+    </div>`;
+}
+
 function SprintSheet({goals, editing, onClose, onSaved, onToast}) {
   const today = formatDateStr(new Date());
   const plus = (d,n)=>{ const x=new Date(d+"T00:00:00+09:00"); x.setDate(x.getDate()+n); return formatDateStr(x); };
@@ -6513,7 +6601,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260802-180111";
+const APP_BUILD = "20260802-184115";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
