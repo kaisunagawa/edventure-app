@@ -204,6 +204,13 @@ PY
     ng "actions を文字列前提で読んでいる箇所がある（${bad}箇所中 ${norm} だけ正規化）"
   fi
 
+  # 表示ラベル（高・中・低で別の言葉になるか）
+  if python3 build_label_test.py >/dev/null 2>&1 || python3 ../gas/build_label_test.py >/dev/null 2>&1; then
+    ok "タスクの表示ラベル（高・中・低が別の言葉）"
+  else
+    ng "表示ラベルが重複している ─ 中を選ぶ意味が無くなる"
+  fi
+
   # 端末間の同期（スマホで設定した重要度・期限がPCへ届くか）
   if python3 build_sync_test.py >/dev/null 2>&1 || python3 ../gas/build_sync_test.py >/dev/null 2>&1; then
     ok "端末間の同期（重要度・期限・想定時間）"

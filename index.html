@@ -1471,13 +1471,16 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
   // 想定時間(min)も一緒に載せて、タイマーで選んだ時にその時間で始められるようにする
   useEffect(()=>{
     try {
-      const remaining = actionItems.filter(item=>!checked[item]).map(t=>({text:t, min:(estOf(t)||null)}));
+      const remaining = actionItems.filter(item=>!isDone(item)).map(t=>({text:t, min:(estOf(t)||null)}));
       localStorage.setItem("jiroku_today_actions_shared", JSON.stringify({date:todayKey, items:remaining}));
     } catch(e){}
   },[actionItems, checked, todayKey, taskEstimates]);
 
   const toggleCheck = (key) => {
-    const next = {...checked, [key]: !checked[key]};
+    const idk = idOfTitle(key) || key;
+    const cur = (checked[idk] !== undefined) ? checked[idk] : checked[key];
+    const next = {...checked, [idk]: !cur};
+    if (idk !== key) delete next[key];   // 旧形式（名前キー）の掃除
     setChecked(next);
     localStorage.setItem("today_actions", JSON.stringify(next));
     gasPostJson("saveTodayActions", {checked: JSON.stringify(next)}); // 他端末にも同期
@@ -1485,7 +1488,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
 
   // ── タスクボード用ヘルパー ──
   // 状態: "todo"=予定 / "doing"=実行中 / "done"=完了。未設定はchecked（完了フラグ）から導出
-  const statusOf = (task) => taskStatus[task] || (checked[task] ? "done" : "todo");
+  const statusOf = (task) => taskStatus[task] || (isDone(task) ? "done" : "todo");
   const setStatus = (task, status) => {
     const next = {...taskStatus, [task]: status};
     setTaskStatus(next);
@@ -1533,7 +1536,8 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
     setTaskDue(du); localStorage.setItem("jiroku_task_due_"+todayKey, JSON.stringify(du));
     const stt={...taskStatus}; delete stt[task]; setTaskStatus(stt); localStorage.setItem("jiroku_task_status_"+todayKey, JSON.stringify(stt));
     const nt={...taskNotes}; delete nt[task]; setTaskNotes(nt); localStorage.setItem("jiroku_task_memo_"+todayKey, JSON.stringify(nt));
-    const nc={...checked}; delete nc[task]; setChecked(nc); localStorage.setItem("today_actions", JSON.stringify(nc));
+    const cKey=idOfTitle(task); const nc={...checked}; delete nc[cKey]; delete nc[task];
+    setChecked(nc); localStorage.setItem("today_actions", JSON.stringify(nc));
     gasPostJson("saveTodayActions", {actions: list.length===0?"":JSON.stringify(list), checked: JSON.stringify(nc)});
     setDetailTask(null);
   };
@@ -1551,6 +1555,14 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
   };
   // ★読み出しは必ずここを通す★
   //   「idで引き、無ければ名前で引く」を11箇所に散らすと必ず書き漏らす。
+  // ★完了状態も id で引く★
+  //   checked は customActions より前に宣言されているので、
+  //   初期化の時点では付け替えられない。読むときに両方見て、
+  //   別途まとめて付け替える（下の useEffect）。
+  const isDone = (task) => {
+    const k = idOfTitle(task);
+    return !!((k && checked[k] !== undefined) ? checked[k] : checked[task]);
+  };
   const dueOf = (task) => taskDue[idOfTitle(task)] || taskDue[task] || "";
   // 想定時間も同じく1本化する。散らすと必ず書き漏らす
   const estOf = (task) => {
@@ -1607,7 +1619,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
   // 編集モーダルには「未完了のタスクだけ」を出す。完了済みは編集対象にしない
   // （完了フォルダにそのまま残す）。保存時に完了タスクは保持してマージする
   const openEdit = () => {
-    const incomplete = actionItems.filter(t=>!checked[t]);
+    const incomplete = actionItems.filter(t=>!isDone(t));
     setEditItems(incomplete.length===0 ? [{text:"",min:""}] : toEditRows(incomplete));
     setEditMode(true);
   };
@@ -1616,7 +1628,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
   useEffect(()=>{ if(editMode) setEditError(""); },[editMode]);
   // 「＋ タスクを追加」用。未完了タスクに空欄を1つ足した状態で編集モーダルを開き、すぐ入力できる
   const openAddTask = () => {
-    setEditItems([...toEditRows(actionItems.filter(t=>!checked[t])), {text:"",min:""}]);
+    setEditItems([...toEditRows(actionItems.filter(t=>!isDone(t))), {text:"",min:""}]);
     setEditMode(true);
   };
   const saveEdit = () => {
@@ -1637,7 +1649,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
     setEditError("");
     const editedTexts = rows.map(r=>r.text);
     // 完了済みタスクは編集画面に出していないので、ここで保持してマージする（未完了→完了の順）
-    const completed = actionItems.filter(t=>checked[t] && !editedTexts.includes(t));
+    const completed = actionItems.filter(t=>isDone(t) && !editedTexts.includes(t));
     const finalList = [...editedTexts, ...completed];
     // 想定時間マップを作り直す（編集分＋完了分の既存値を維持）
     const est = {};
@@ -1658,7 +1670,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
     }catch(e){}
     // 完了タスクのチェック状態は保持する
     const newChecked = {};
-    completed.forEach(c=>{ newChecked[c]=true; });
+    completed.forEach(c=>{ newChecked[idOfTitle(c)||c]=true; });
     setChecked(newChecked);
     localStorage.setItem("today_actions", JSON.stringify(newChecked));
     // 空で保存したらAIアクションに戻す
@@ -1676,11 +1688,11 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
 
   const hour = new Date().getHours();
   const greeting = hour < 12 ? "おはようございます" : hour < 18 ? "こんにちは" : "お疲れ様です";
-  const checkedCount = actionItems.filter(item=>checked[item]).length;
+  const checkedCount = actionItems.filter(item=>isDone(item)).length;
   // タスクを「未完了」「完了」で分けて表示する（完了は下に折りたたみ）。
   // 元の並び順を保ったまま、チェック状態でフォルダ分けする
-  const incompleteItems = actionItems.filter(item=>!checked[item]);
-  const completedItems = actionItems.filter(item=>checked[item]);
+  const incompleteItems = actionItems.filter(item=>!isDone(item));
+  const completedItems = actionItems.filter(item=>isDone(item));
   const doneCount = actionItems.filter(item=>statusOf(item)==="done").length;
 
   return html`<div style=${{paddingBottom:40}}>
@@ -2092,17 +2104,17 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
           //   ボタンの入れ子は無効なHTMLになるので、外側をdivにして分ける。
           const row = (item, showBorder) => html`
             <div key=${item}
-              style=${{display:"flex",alignItems:"flex-start",gap:12,width:"100%",background:checked[item]?"var(--bg)":"none",borderBottom:showBorder?"1px solid var(--border)":"none",transition:"background .15s"}}>
+              style=${{display:"flex",alignItems:"flex-start",gap:12,width:"100%",background:isDone(item)?"var(--bg)":"none",borderBottom:showBorder?"1px solid var(--border)":"none",transition:"background .15s"}}>
             <button onClick=${()=>toggleCheck(item)}
               style=${{display:"flex",alignItems:"flex-start",gap:12,flex:1,minWidth:0,background:"none",border:"none",padding:"13px 4px 13px 16px",cursor:"pointer",textAlign:"left",fontFamily:"inherit"}}>
-              <div style=${{width:20,height:20,borderRadius:6,border:`2px solid ${checked[item]?"var(--accent)":"var(--border)"}`,background:checked[item]?"var(--accent)":"transparent",flexShrink:0,marginTop:1,display:"flex",alignItems:"center",justifyContent:"center",transition:"all .15s"}}>
-                ${checked[item]&&html`<svg width="11" height="11" viewBox="0 0 10 10" fill="none"><path d="M2 5l2.5 2.5L8 3" stroke="white" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`}
+              <div style=${{width:20,height:20,borderRadius:6,border:`2px solid ${isDone(item)?"var(--accent)":"var(--border)"}`,background:isDone(item)?"var(--accent)":"transparent",flexShrink:0,marginTop:1,display:"flex",alignItems:"center",justifyContent:"center",transition:"all .15s"}}>
+                ${isDone(item)&&html`<svg width="11" height="11" viewBox="0 0 10 10" fill="none"><path d="M2 5l2.5 2.5L8 3" stroke="white" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`}
               </div>
-              <span style=${{flex:1,minWidth:0,fontSize:14,color:checked[item]?"var(--sub)":"var(--text)",textDecoration:checked[item]?"line-through":"none",lineHeight:1.6}}>${item}</span>
-              ${(()=>{ const q=quadrantOf(item); if(q.quadrant==="DEFER_OR_DELETE"&&!dueOf(item)) return ""; const L=QUADRANT_LABEL[q.quadrant];
+              <span style=${{flex:1,minWidth:0,fontSize:14,color:isDone(item)?"var(--sub)":"var(--text)",textDecoration:isDone(item)?"line-through":"none",lineHeight:1.6}}>${item}</span>
+              ${(()=>{ const q=quadrantOf(item); if(q.quadrant==="DEFER_OR_DELETE"&&!dueOf(item)&&q.isSuggestion) return ""; const L=taskLabel(q.importance,q.urgency);
                 return html`<span style=${{flexShrink:0,fontSize:10.5,fontWeight:700,color:L.color,border:"1px solid "+L.color,borderRadius:20,padding:"1px 7px"}} title=${L.hint}>${L.icon}${L.label}</span>`; })()}
               ${dueOf(item)&&html`<span style=${{flexShrink:0,fontSize:10.5,color:quadrantOf(item).overdue?"#dc2626":"var(--sub)",fontWeight:quadrantOf(item).overdue?700:400}}>${dueLabel(dueOf(item), quadrantOf(item).overdue)}</span>`}
-              ${estOf(item)>0&&html`<span style=${{flexShrink:0,fontSize:11,fontWeight:600,color:checked[item]?"var(--sub)":"var(--accent)",background:checked[item]?"var(--bg)":"var(--accent-l)",borderRadius:20,padding:"2px 8px",marginTop:1}}>⏱${estOf(item)}分</span>`}
+              ${estOf(item)>0&&html`<span style=${{flexShrink:0,fontSize:11,fontWeight:600,color:isDone(item)?"var(--sub)":"var(--accent)",background:isDone(item)?"var(--bg)":"var(--accent-l)",borderRadius:20,padding:"2px 8px",marginTop:1}}>⏱${estOf(item)}分</span>`}
 
             </button>
             <button onClick=${()=>setDetailTask(item)} aria-label="詳細を開く"
@@ -2136,7 +2148,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
               onClick=${()=>setDetailTask(item)}
               style=${{background:"var(--card)",border:`1px solid ${st==="doing"?"var(--accent)":"var(--border)"}`,borderRadius:10,padding:"10px 11px",marginBottom:8,cursor:"pointer",boxShadow:dragTask===item?"0 4px 14px rgba(0,0,0,0.15)":"none",opacity:dragTask===item?0.5:1,transition:"box-shadow .15s",display:"flex",alignItems:"center",gap:8}}>
               <span style=${{flex:1,minWidth:0,fontSize:13.5,color:st==="done"?"var(--sub)":"var(--text)",textDecoration:st==="done"?"line-through":"none",lineHeight:1.5,overflowWrap:"anywhere"}}>${item}</span>
-              ${(()=>{ const q=quadrantOf(item); if(q.quadrant==="DEFER_OR_DELETE"&&!dueOf(item)) return ""; const L=QUADRANT_LABEL[q.quadrant];
+              ${(()=>{ const q=quadrantOf(item); if(q.quadrant==="DEFER_OR_DELETE"&&!dueOf(item)&&q.isSuggestion) return ""; const L=taskLabel(q.importance,q.urgency);
                 return html`<span style=${{flexShrink:0,fontSize:10.5,fontWeight:700,color:L.color,border:"1px solid "+L.color,borderRadius:20,padding:"1px 7px"}} title=${L.hint}>${L.icon}${L.label}</span>`; })()}
               ${dueOf(item)&&html`<span style=${{flexShrink:0,fontSize:10.5,color:quadrantOf(item).overdue?"#dc2626":"var(--sub)",fontWeight:quadrantOf(item).overdue?700:400}}>${dueLabel(dueOf(item), quadrantOf(item).overdue)}</span>`}
               ${estOf(item)>0&&html`<span style=${{flexShrink:0,fontSize:10.5,fontWeight:600,color:"var(--accent)",background:"var(--accent-l)",borderRadius:20,padding:"2px 7px"}}>⏱${estOf(item)}分</span>`}
@@ -2221,7 +2233,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
               style=${{background:"none",border:"none",color:"var(--sub)",fontSize:12.5,cursor:"pointer",fontFamily:"inherit"}}>期限なしに戻す</button>`}
           </div>
           <div style=${{fontSize:11.5,color:"var(--sub)",marginBottom:16,lineHeight:1.8}}>
-            ${(()=>{ const q=quadrantOf(t); const L=QUADRANT_LABEL[q.quadrant];
+            ${(()=>{ const q=quadrantOf(t); const L=taskLabel(q.importance,q.urgency);
               return html`いまの分類：<b style=${{color:L.color}}>${L.icon} ${L.label}</b>（${L.hint}）<br/>
                 緊急度は期限から自動で決まります。`; })()}
           </div>
@@ -3824,9 +3836,21 @@ function TimerScreen({onToast, isActive}) {
     if(!t) return;
     if(!todayActionOptions.some(o=>o.text===t)) return; // 今日のタスク由来でなければ対象外
     try {
+      // ★完了状態は task_id をキーにする★
+      //   ホーム画面側が id キーで持つようになったので、ここだけ名前で
+      //   書くと「タイマーで終わらせたのにホームで未完了のまま」になる。
+      const d0 = new Date();
+      const dayKey = d0.getFullYear()+"-"+String(d0.getMonth()+1).padStart(2,"0")+"-"+String(d0.getDate()).padStart(2,"0");
+      let tid = t;
+      try {
+        const raw = JSON.parse(localStorage.getItem("jiroku_custom_actions_"+dayKey)||"[]")||[];
+        const hit = normalizeTaskList(raw).find(x=>x.title===t);
+        if (hit) tid = hit.id;
+      } catch(e){}
       const checked = JSON.parse(localStorage.getItem("today_actions")||"{}");
-      if(!checked[t]){
-        checked[t] = true;
+      if(!checked[tid] && !checked[t]){
+        checked[tid] = true;
+        if (tid !== t) delete checked[t];   // 旧形式の掃除
         localStorage.setItem("today_actions", JSON.stringify(checked));
         gasPostJson("saveTodayActions", {checked: JSON.stringify(checked)}); // 他端末にも同期
       }
@@ -5218,12 +5242,32 @@ function remapByTaskId(oldMap, list) {
 // ★色だけで区別しない★
 // 色覚には個人差があり、屋外の明るい画面でも色は判別しにくい。
 // 必ず文字とアイコンでも分かるようにする。
+// 集計に使う4分類。★これは変えない★
+// サーバー側の classifyTask と同じ区分で、自己経営指標の母数になる。
 const QUADRANT_LABEL = {
-  DO_NOW:            { icon:"🔥", label:"今すぐ",       hint:"重要かつ緊急", color:"#dc2626" },
-  SCHEDULE:          { icon:"📌", label:"予定する",     hint:"重要だが急がない", color:"#0891b2" },
-  DELEGATE_OR_LIMIT: { icon:"⏩", label:"手短に",       hint:"急ぎだが重要ではない", color:"#d97706" },
-  DEFER_OR_DELETE:   { icon:"🗂", label:"後回し",       hint:"重要でも緊急でもない", color:"#6b7280" }
+  DO_NOW:            { icon:"🔥", label:"今すぐ",   hint:"重要かつ緊急", color:"#dc2626" },
+  SCHEDULE:          { icon:"📌", label:"予定する", hint:"重要だが急がない", color:"#0891b2" },
+  DELEGATE_OR_LIMIT: { icon:"⏩", label:"任せる・手短に", hint:"急ぎだが重要ではない", color:"#d97706" },
+  DEFER_OR_DELETE:   { icon:"🗂", label:"後回し",   hint:"重要でも緊急でもない", color:"#6b7280" }
 };
+
+// ★画面に出す言葉は6通りにする★
+//   4分類は「重要か / 緊急か」の2×2なので、重要度の「中」と「低」が
+//   同じ表示になる。中を選んでも低と変わらないなら、選ぶ意味がない
+//   （Kaiの指摘）。集計の区分は変えず、表示だけ細かくする。
+//   高の表示は従来どおり。
+const TASK_LABEL = {
+  HIGH:   { urgent:{ icon:"🔥", label:"今すぐ",         hint:"重要かつ緊急",           color:"#dc2626" },
+            other: { icon:"📌", label:"予定を決める",   hint:"重要だが急がない。先に時間を取る", color:"#0891b2" } },
+  MEDIUM: { urgent:{ icon:"⚡", label:"早めに片付ける", hint:"急ぎだが、最重要ではない", color:"#ea580c" },
+            other: { icon:"📋", label:"順番に進める",   hint:"通常の仕事。空いた時間で",  color:"#0d9488" } },
+  LOW:    { urgent:{ icon:"⏩", label:"任せる・手短に", hint:"急ぎだが重要ではない。依頼するか短時間で", color:"#d97706" },
+            other: { icon:"🗂", label:"後回し・削除",   hint:"やらない選択も含めて見直す", color:"#6b7280" } }
+};
+function taskLabel(importance, urgency){
+  const imp = TASK_LABEL[String(importance||"MEDIUM").toUpperCase()] || TASK_LABEL.MEDIUM;
+  return String(urgency).toUpperCase()==="HIGH" ? imp.urgent : imp.other;
+}
 const IMPORTANCE_LABEL = { HIGH:"高", MEDIUM:"中", LOW:"低" };
 // 期限の表示。何日後かが一目で分かるようにする
 function dueLabel(dueAt, overdue){
