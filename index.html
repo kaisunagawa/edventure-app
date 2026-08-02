@@ -1271,6 +1271,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
   const [sprintSheet, setSprintSheet] = useState(null);   // null=閉 / {}=新規 / obj=編集
   const [wgSheet, setWgSheet] = useState(false);          // 今週の目標をつくる
   const [sprintIdx, setSprintIdx] = useState(0);
+  const [openRow, setOpenRow] = useState("");   // 目標のつながりで開いている行
   const [goalDetail, setGoalDetail] = useState(false);   // 数字の出どころ（普段は隠す）
   const [deepenGoal, setDeepenGoal] = useState(null);    // 目標の深掘り
   const [goalQuick, setGoalQuick] = useState({current:"", start:"", end:""});   // 足りない値をその場で入れる
@@ -2272,264 +2273,136 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
 
     ${showCommunity&&html`<${CommunityOverlay} onClose=${()=>setShowCommunity(false)}/>`}
 
-    <!-- ★3か月目標（自己経営OSホーム）★
-         文言だけの旧「目標1/2」と違い、数値・進捗・ペース・予測を出す。
-         判定できないときは数字を作らず、なぜ出せないかを書く。 -->
-    ${(()=>{
-      const gs = ((goalTree&&goalTree.goals)||[]).filter(g=>String(g.status||"ACTIVE").toUpperCase()!=="ARCHIVED");
-      if (!gs.length) return "";
-      const i = Math.min(mainGoalIdx, gs.length-1);
-      const g = gs[i];
-      const p = g.pace || {};
-      const num = v => (v===null||v===undefined||v==="") ? null : Number(v);
-      const fmt = v => { const n=num(v); return n===null ? "—" : (Math.round(n*10)/10).toLocaleString(); };
-      const STATUS = { ON_TRACK:["順調","var(--green,#1D9E75)"], SLIGHTLY_BEHIND:["やや遅れ","var(--amber,#BA7517)"],
-                       BEHIND:["遅れ","var(--red,#d33)"], ACHIEVED:["達成🎉","var(--accent)"],
-                       ENDED_SHORT:["期間終了・未達","var(--red,#d33)"], UNKNOWN:["まだ判断できません","var(--sub)"] };
-      const st = STATUS[p.status] || STATUS.UNKNOWN;
-      const CONF = { HIGH:"高", MEDIUM:"中", LOW:"低" };
-      const pct = num(p.progressPct);
-      return html`
-      <div style=${{margin:"16px 16px 0",background:"var(--card)",borderRadius:16,border:"1px solid var(--border)",padding:"14px 16px"}}>
-        <div style=${{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
-          <div style=${{fontSize:11,fontWeight:700,color:"var(--sub)"}}>🎯 3か月目標</div>
-          ${gs.length>1&&html`
-            <div style=${{display:"flex",gap:4}}>
-              ${gs.map((x,k)=>html`<button key=${k} onClick=${()=>setMainGoalIdx(k)}
-                aria-label=${`目標${k+1}へ切り替え`}
-                style=${{width:22,height:22,borderRadius:"50%",cursor:"pointer",fontFamily:"inherit",fontSize:10.5,fontWeight:700,
-                         border:`1px solid ${k===i?"var(--accent)":"var(--border)"}`,
-                         background:k===i?"var(--accent)":"transparent",color:k===i?"#fff":"var(--sub)"}}>${k+1}</button>`)}
-            </div>`}
-        </div>
-        <div style=${{fontSize:15,fontWeight:800,color:"var(--text)",lineHeight:1.5,marginBottom:8}}>${g.title}</div>
-        ${num(p.target)!==null
-          ? html`
-            <div style=${{display:"flex",alignItems:"baseline",gap:6,marginBottom:6}}>
-              <span style=${{fontSize:20,fontWeight:800,color:"var(--text)",lineHeight:1}}>${fmt(p.current)}</span>
-              <span style=${{fontSize:12.5,color:"var(--sub)",fontWeight:600}}>/ ${fmt(p.target)}${p.unit||""}</span>
-              ${pct!==null&&html`<span style=${{fontSize:12.5,color:"var(--sub)"}}>（${Math.round(pct)}%）</span>`}
-            </div>
-            <div style=${{height:7,background:"var(--bg)",borderRadius:99,overflow:"hidden",marginBottom:9}}>
-              <div style=${{height:"100%",width:Math.min(100,Math.max(0,pct||0))+"%",background:"var(--accent)",borderRadius:99,transition:"width .5s ease"}}/>
-            </div>
-            <div style=${{display:"flex",flexWrap:"wrap",gap:"3px 14px",fontSize:11.5,color:"var(--sub)",lineHeight:1.7,marginBottom:7}}>
-              <span>残り <b style=${{color:"var(--text)"}}>${fmt(p.remaining)}${p.unit||""}</b></span>
-              ${p.remainingDays!==undefined&&html`<span>あと <b style=${{color:"var(--text)"}}>${p.remainingDays}日</b>（${p.elapsedDays}/${p.totalDays}日経過）</span>`}
-              ${num(p.requiredPerWeek)!==null&&html`<span>必要 <b style=${{color:"var(--text)"}}>${fmt(p.requiredPerWeek)}${p.unit||""}/週</b></span>`}
-              ${num(p.actualPerWeek)!==null
-                ? html`<span>実績 <b style=${{color:"var(--text)"}}>${fmt(p.actualPerWeek)}${p.unit||""}/週</b></span>`
-                : html`<span>実績ペース <b style=${{color:"var(--text)"}}>—</b></span>`}
-            </div>
-            <div style=${{fontSize:11.5,lineHeight:1.7}}>
-              <span style=${{color:st[1],fontWeight:700}}>${st[0]}</span>
-              ${num(p.forecast)!==null&&html`<span style=${{color:"var(--sub)"}}> ・このままなら <b style=${{color:"var(--text)"}}>${fmt(p.forecast)}${p.unit||""}</b> で着地</span>`}
-            </div>
-            ${p.note&&html`<div style=${{fontSize:11,color:"var(--sub)",marginTop:5,lineHeight:1.6}}>${p.note}</div>`}
-            ${p.forecastWarning&&html`<div style=${{fontSize:11,color:"var(--amber,#BA7517)",marginTop:5,lineHeight:1.6}}>⚠ ${p.forecastWarning}</div>`}
-            <!-- ★内部の言葉は普段は隠す★「確からしさ」「集計期間」「自己申告」は
-                 開発側の言葉で、毎回見せると画面が読みにくくなる。知りたい人だけ開く -->
-            <button onClick=${()=>setGoalDetail(v=>!v)}
-              style=${{background:"none",border:"none",padding:"4px 0 0",color:"var(--sub)",fontSize:10.5,cursor:"pointer",fontFamily:"inherit"}}>
-              ${goalDetail?"数字の出どころを閉じる ▲":"この数字はどこから？ ▼"}</button>
-            ${goalDetail&&html`
-              <div style=${{fontSize:10.5,color:"var(--sub)",lineHeight:1.8,marginTop:4}}>
-                現在値：あなたが入力した値<br/>
-                ${p.period&&html`集計した期間：${p.period}<br/>`}
-                ${p.confidence&&html`予測の確からしさ：${CONF[p.confidence]||p.confidence}（記録が増えるほど上がります）`}
-              </div>`}`
-          : html`
-            <div style=${{fontSize:12,color:"var(--sub)",lineHeight:1.7,marginBottom:8}}>
-              ${p.note || "目標の数値がまだ入っていないので、進み具合を出せません。"}
-            </div>`}
-        ${num(p.target)!==null&&(p.missing||[]).length>0&&html`
-          <!-- ★その場で埋められるようにする★ 何が足りないかを言うだけだと、
-               設定画面まで辿り着かずに終わる -->
-          <div style=${{background:"var(--bg)",borderRadius:10,padding:"10px 12px",marginTop:8}}>
-            <div style=${{fontSize:11.5,color:"var(--sub)",marginBottom:8,lineHeight:1.6}}>
-              ${(p.missing||[]).join("と")}を入れると、必要なペースと着地の予測が出ます。
-            </div>
-            <div style=${{display:"flex",flexWrap:"wrap",gap:8,alignItems:"center"}}>
-              ${(p.missing||[]).indexOf("現在値")>=0&&html`
-                <label style=${{fontSize:11.5,color:"var(--sub)",display:"flex",alignItems:"center",gap:5}}>いま
-                  <input class="inp" type="number" inputmode="decimal" style=${{width:90,margin:0,textAlign:"right"}}
-                    value=${goalQuick.current} onInput=${e=>setGoalQuick({...goalQuick, current:e.target.value})}/>
-                  ${g.unit||""}</label>`}
-              ${(p.missing||[]).indexOf("開始日")>=0&&html`
-                <label style=${{fontSize:11.5,color:"var(--sub)",display:"flex",alignItems:"center",gap:5}}>開始
-                  <input class="inp" type="date" style=${{width:150,margin:0}}
-                    value=${goalQuick.start} onInput=${e=>setGoalQuick({...goalQuick, start:e.target.value})}/></label>`}
-              ${(p.missing||[]).indexOf("終了日")>=0&&html`
-                <label style=${{fontSize:11.5,color:"var(--sub)",display:"flex",alignItems:"center",gap:5}}>期限
-                  <input class="inp" type="date" style=${{width:150,margin:0}}
-                    value=${goalQuick.end} onInput=${e=>setGoalQuick({...goalQuick, end:e.target.value})}/></label>`}
-              <button disabled=${goalQuickSaving} onClick=${async()=>{
-                const body = {...g};
-                if (goalQuick.current !== "") body.current_value = goalQuick.current;
-                if (goalQuick.start) body.start_date = goalQuick.start;
-                if (goalQuick.end) body.end_date = goalQuick.end;
-                delete body.pace; delete body.paceLabel; delete body.weeklyGoals;
-                delete body.current_value_source;
-                setGoalQuickSaving(true);
-                const r = await gasPostJson("saveGoal", body);
-                setGoalQuickSaving(false);
-                if (r && r.ok) {
-                  setGoalQuick({current:"",start:"",end:""});
-                  const t = await gasApi("getGoalTree");
-                  if (t && t.ok && t.data) { setGoalTree(t.data);
-                    try { localStorage.setItem("cache_goaltree", JSON.stringify(t.data)); } catch(e){} }
-                  onToast && onToast("保存しました");
-                } else onToast && onToast((r&&r.error)||"保存できませんでした");
-              }}
-                style=${{padding:"8px 14px",borderRadius:10,border:"none",background:"var(--accent)",color:"#fff",fontSize:12.5,fontWeight:700,cursor:"pointer",fontFamily:"inherit",opacity:goalQuickSaving?0.6:1}}>
-                ${goalQuickSaving?"保存中…":"保存"}</button>
-            </div>
-          </div>`}
-        <!-- ★目標そのものを深掘りする導線★
-             「腹筋をシックスパックにする / 12回」のように、何の12回か
-             分からない目標が作れてしまう。数字だけ聞くのではなく、
-             「できたと言える状態」から数えるものを決め直せるようにする -->
-        <!-- ★催促は「達成条件が決まっていないとき」だけ★
-             「なぜ」は飛ばせる項目なので、書いていないことを催促しない。
-             終わった作業がいつまでも残っていると、片付かない感じになる -->
-        ${!g.success_condition&&html`
-          <div style=${{background:"var(--accent-l)",borderRadius:10,padding:"10px 12px",marginTop:10}}>
-            <div style=${{fontSize:12,color:"var(--text)",lineHeight:1.7,marginBottom:8}}>
-              この目標は「どうなったら達成か」が決まっていません。<br/>そこが決まると、数えるものと今週やることが決まります。
-            </div>
-            <button onClick=${()=>setDeepenGoal(g)}
-              style=${{width:"100%",padding:"9px",borderRadius:9,border:"none",background:"var(--accent)",color:"#fff",fontSize:12.5,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
-              5つの質問で深掘りする</button>
-          </div>`}
-        ${g.success_condition&&html`
-          <div style=${{fontSize:11.5,color:"var(--sub)",lineHeight:1.7,marginTop:9,paddingTop:9,borderTop:"1px solid var(--border)"}}>
-            <b style=${{color:"var(--text)"}}>できたと言える状態</b><br/>${g.success_condition}
-          </div>`}
-        <!-- 決まったあとは、静かな「編集」1つだけにする -->
-        <button onClick=${()=>{ if(g.success_condition) setDeepenGoal(g); else setHomeGoalSheet(true); }}
-          style=${{marginTop:10,width:"100%",padding:"9px",background:"none",border:"1px solid var(--border)",borderRadius:10,color:"var(--sub)",fontSize:12.5,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
-          目標を編集する</button>
-      </div>`;
-    })()}
-
-    <!-- ★2週間スプリント★ 3か月目標と今日の間をつなぐ。
-         いまの詰まりと、2週間後の到達状態を1枚で見せる -->
-    ${(()=>{
-      const all = (sprints&&sprints.data)||[];
-      const goals = ((goalTree&&goalTree.goals)||[]).filter(g=>String(g.status||"ACTIVE").toUpperCase()!=="ARCHIVED");
-      const cur = all.filter(x=>x.isCurrent && String(x.status).toUpperCase()!=="DONE");
-      const reload = ()=>gasApi("getSprints").then(r=>{ if(r&&r.ok){ setSprints(r);
-        try { localStorage.setItem("cache_sprints", JSON.stringify(r)); } catch(e){} } });
-      if (!all.length && !goals.length) return "";
-      if (!cur.length) return html`
-        <div style=${{margin:"16px 16px 0",background:"var(--card)",borderRadius:16,border:"1px solid var(--border)",padding:"14px 16px"}}>
-          <div style=${{fontSize:11,fontWeight:700,color:"var(--sub)",marginBottom:6}}>🏃 2週間スプリント</div>
-          <div style=${{fontSize:12.5,color:"var(--sub)",lineHeight:1.7,marginBottom:10}}>
-            いま進行中のスプリントはありません。<br/>
-            3か月は遠すぎて動けません。2週間で「何が変わっていれば前進か」を決めると、今日やることが決まります。
-          </div>
-          <button onClick=${()=>setSprintSheet({})} disabled=${!goals.length}
-            style=${{width:"100%",padding:"10px",borderRadius:10,border:"none",background:goals.length?"var(--accent)":"var(--border)",color:"#fff",fontSize:13,fontWeight:700,cursor:goals.length?"pointer":"default",fontFamily:"inherit"}}>
-            ${goals.length?"3か月目標から作る":"先に3か月目標を作ってください"}</button>
-        </div>`;
-      const i = Math.min(sprintIdx, cur.length-1);
-      const sp = cur[i];
-      const parent = goals.find(g=>g.quarterly_goal_id===sp.link_quarterly_goal_id);
-      const line = (label, v) => v ? html`<div style=${{marginBottom:3}}><span style=${{color:"var(--sub)"}}>${label}</span> ${v}</div>` : "";
-      return html`
-      <div style=${{margin:"16px 16px 0",background:"var(--card)",borderRadius:16,border:"1px solid var(--border)",padding:"14px 16px"}}>
-        <div style=${{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
-          <div style=${{fontSize:11,fontWeight:700,color:"var(--sub)"}}>🏃 2週間スプリント</div>
-          <div style=${{display:"flex",alignItems:"center",gap:6}}>
-            ${cur.length>1&&cur.map((x,k)=>html`<button key=${k} onClick=${()=>setSprintIdx(k)}
-              style=${{width:22,height:22,borderRadius:"50%",cursor:"pointer",fontFamily:"inherit",fontSize:10.5,fontWeight:700,
-                       border:`1px solid ${k===i?"var(--accent)":"var(--border)"}`,background:k===i?"var(--accent)":"transparent",color:k===i?"#fff":"var(--sub)"}}>${k+1}</button>`)}
-            <button onClick=${()=>setSprintSheet(sp)} style=${{background:"none",border:"none",color:"var(--accent)",fontSize:11.5,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>編集</button>
-          </div>
-        </div>
-        ${sprints&&sprints.multipleCurrent&&html`
-          <div style=${{fontSize:11,color:"var(--amber,#BA7517)",marginBottom:6,lineHeight:1.6}}>
-            ⚠ 進行中のスプリントが${cur.length}本あります。1本に絞るほど進みます</div>`}
-        <div style=${{fontSize:15,fontWeight:800,color:"var(--text)",lineHeight:1.5,marginBottom:4}}>${sp.name}</div>
-        <div style=${{fontSize:11.5,color:"var(--sub)",marginBottom:8}}>
-          ${sp.dayIndex}日目 / 全${sp.totalDays}日・あと${Math.max(0,sp.daysLeft)}日
-          ${parent&&html` ・${parent.title}`}
-        </div>
-        ${(sp.bottleneck||sp.target_state||sp.action_metric||sp.result_metric)&&html`
-          <div style=${{fontSize:12,color:"var(--text)",lineHeight:1.8,background:"var(--bg)",borderRadius:10,padding:"10px 12px"}}>
-            ${line("詰まり:", sp.bottleneck)}
-            ${line("2週間後:", sp.target_state)}
-            ${line("行動:", sp.action_metric)}
-            ${line("結果:", sp.result_metric)}
-            ${line("もし〜なら:", sp.if_then)}
-          </div>`}
-      </div>`;
-    })()}
-
-    <!-- ★今週の目標★ スプリントと今日の間。数字と残り日数で「あと何をすれば届くか」を出す。
-         記録が無いものを0件達成として扱わない -->
+    <!-- ★目標のつながり（3か月 → 2週間 → 今週）★
+         以前は3枚のカードに分かれていて、縦に長すぎた（Kai指摘）。
+         普段は1行ずつの要約だけ。押した行だけ中身を開く。 -->
     ${(()=>{
       const goals = ((goalTree&&goalTree.goals)||[]).filter(g=>String(g.status||"ACTIVE").toUpperCase()!=="ARCHIVED");
+      const allSp = (sprints&&sprints.data)||[];
+      const curSp = allSp.filter(x=>x.isCurrent && String(x.status).toUpperCase()!=="DONE");
       const ws = [];
       goals.forEach(g=>(g.weeklyGoals||[]).forEach(w=>ws.push({...w, parentTitle:g.title})));
       ((goalTree&&goalTree.orphanWeeklyGoals)||[]).forEach(w=>ws.push({...w, parentTitle:""}));
-      const active = ws.filter(w=>String(w.status||"ACTIVE").toUpperCase()==="ACTIVE");
-      const curSprints = ((sprints&&sprints.data)||[]).filter(x=>x.isCurrent);
-      if (!active.length) {
-        if (!goals.length) return "";
-        return html`
-        <div style=${{margin:"16px 16px 0",background:"var(--card)",borderRadius:16,border:"1px solid var(--border)",padding:"14px 16px"}}>
-          <div style=${{fontSize:11,fontWeight:700,color:"var(--sub)",marginBottom:6}}>📅 今週の目標</div>
-          <div style=${{fontSize:12.5,color:"var(--sub)",lineHeight:1.7,marginBottom:10}}>
-            今週の目標がまだありません。<br/>
-            ${curSprints.length
-              ? "スプリントの「行動の指標」を、今週やる数字に落とします。"
-              : "先に2週間スプリントを決めてください。順番に決めた方が、今週の数字が自然に出ます。"}
-          </div>
-          <!-- ★順番を飛ばさせない★ スプリントが無いのに週間目標を作ると、
-               親が無い（＝上位目標の集計に入らない）目標ができてしまう -->
-          <button onClick=${()=>curSprints.length ? setWgSheet(true) : setSprintSheet({})}
-            style=${{width:"100%",padding:"10px",borderRadius:10,border:"none",background:"var(--accent)",color:"#fff",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
-            ${curSprints.length?"スプリントから作る":"先に2週間スプリントを決める"}</button>
+      const wg = ws.filter(w=>String(w.status||"ACTIVE").toUpperCase()==="ACTIVE");
+      if (!goals.length && !allSp.length) return "";
+
+      const gi = Math.min(mainGoalIdx, Math.max(0,goals.length-1));
+      const g = goals[gi];
+      const p = (g && g.pace) || {};
+      const num = v => (v===null||v===undefined||v==="") ? null : Number(v);
+      const fmt = v => { const n=num(v); return n===null ? "—" : (Math.round(n*10)/10).toLocaleString(); };
+      const si = Math.min(sprintIdx, Math.max(0,curSp.length-1));
+      const sp = curSp[si];
+
+      // 1行ぶんの見た目。左に細い色帯、右に数字、下に細いバー
+      const Row = ({label, title, right, pct, open, onToggle, onAdd, addLabel, children}) => html`
+        <div style=${{borderTop:"1px solid var(--border)"}}>
+          <button onClick=${title?onToggle:onAdd}
+            style=${{width:"100%",display:"flex",alignItems:"center",gap:10,background:"none",border:"none",
+                     padding:"11px 14px",cursor:"pointer",textAlign:"left",fontFamily:"inherit"}}>
+            <span style=${{flexShrink:0,fontSize:10,fontWeight:700,color:"var(--sub)",width:52}}>${label}</span>
+            <span style=${{flex:1,minWidth:0}}>
+              <span style=${{display:"block",fontSize:13,fontWeight:700,color:title?"var(--text)":"var(--accent)",
+                             overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>${title||addLabel}</span>
+              ${pct!==null&&pct!==undefined&&html`
+                <span style=${{display:"block",height:4,background:"var(--bg)",borderRadius:99,marginTop:5,overflow:"hidden"}}>
+                  <span style=${{display:"block",height:"100%",width:Math.min(100,Math.max(0,pct))+"%",background:"var(--accent)",borderRadius:99}}/>
+                </span>`}
+            </span>
+            ${right&&html`<span style=${{flexShrink:0,fontSize:11.5,color:"var(--sub)",whiteSpace:"nowrap"}}>${right}</span>`}
+            ${title&&html`<span style=${{flexShrink:0,fontSize:10,color:"var(--sub)"}}>${open?"▲":"▼"}</span>`}
+          </button>
+          ${open&&children&&html`<div style=${{padding:"0 14px 12px 76px"}}>${children}</div>`}
         </div>`;
-      }
-      const MT = { COUNT:"回数", DURATION:"分", DAYS:"日数", BOOLEAN:"やったか" };
+
+      const wgTotal = wg.reduce((a2,w)=>{ const t=Number(w.std_line)>0?Number(w.std_line):Number(w.target_total);
+        return (!isNaN(t)&&t>0) ? a2+Math.min(100, w.actual_value/t*100) : a2; }, 0);
+      const wgPct = wg.length ? Math.round(wgTotal/wg.length) : null;
+
       return html`
-      <div style=${{margin:"16px 16px 0",background:"var(--card)",borderRadius:16,border:"1px solid var(--border)",padding:"14px 16px"}}>
-        <div style=${{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
-          <div style=${{fontSize:11,fontWeight:700,color:"var(--sub)"}}>📅 今週の目標</div>
-          <button onClick=${()=>setHomeGoalSheet(true)} style=${{background:"none",border:"none",color:"var(--accent)",fontSize:11.5,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>編集</button>
+      <div style=${{margin:"16px 16px 0",background:"var(--card)",borderRadius:16,border:"1px solid var(--border)",overflow:"hidden"}}>
+        <div style=${{padding:"11px 14px 9px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <span style=${{fontSize:11,fontWeight:700,color:"var(--sub)"}}>🎯 目標のつながり</span>
+          <button onClick=${()=>setHomeGoalSheet(true)}
+            style=${{background:"none",border:"none",color:"var(--accent)",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>一覧</button>
         </div>
-        ${active.map((w,k)=>{
-          const tgt = Number(w.std_line) > 0 ? Number(w.std_line) : Number(w.target_total);
-          const hasTgt = !isNaN(tgt) && tgt > 0;
-          const pct = hasTgt ? Math.min(100, Math.round(w.actual_value / tgt * 100)) : null;
-          const u = w.unit || (w.metric_type==="DURATION" ? "分" : "");
-          return html`
-          <div key=${w.weekly_goal_id} style=${{paddingTop:k?11:0,marginTop:k?11:0,borderTop:k?"1px solid var(--border)":"none"}}>
-            <div style=${{display:"flex",justifyContent:"space-between",alignItems:"baseline",gap:8,marginBottom:5}}>
-              <span style=${{fontSize:13.5,fontWeight:700,color:"var(--text)",lineHeight:1.5,overflowWrap:"anywhere"}}>${w.title}</span>
-              ${hasTgt&&html`<span style=${{flexShrink:0,fontSize:12.5,color:"var(--sub)"}}>
-                <b style=${{color:"var(--text)",fontSize:15}}>${w.actual_value}</b> / ${tgt}${u}</span>`}
-            </div>
-            ${w.link_state==="UNLINKED"&&html`
-              <div style=${{fontSize:10.5,color:"var(--amber,#BA7517)",marginBottom:4}}>未接続（設定未完了・上位目標の集計に入りません）</div>`}
-            ${hasTgt&&html`
-              <div style=${{height:6,background:"var(--bg)",borderRadius:99,overflow:"hidden",marginBottom:6}}>
-                <div style=${{height:"100%",width:(pct||0)+"%",background:"var(--accent)",borderRadius:99,transition:"width .5s ease"}}/>
+
+        <!-- 3か月 -->
+        ${Row({ label:"3か月", title: g && g.title,
+          addLabel:"＋ 3か月後どうなりたいかを決める",
+          onAdd: ()=>setHomeGoalSheet(true),
+          right: g && (num(p.target)!==null ? `${fmt(p.current)}/${fmt(p.target)}${p.unit||""}` : "数値なし"),
+          pct: g && num(p.progressPct)!==null ? Math.round(num(p.progressPct)) : null,
+          open: openRow==="goal", onToggle: ()=>setOpenRow(openRow==="goal"?"":"goal"),
+          children: g && html`
+            <div style=${{fontSize:11.5,color:"var(--sub)",lineHeight:1.8}}>
+              ${goals.length>1&&html`<div style=${{display:"flex",gap:5,marginBottom:6}}>
+                ${goals.map((x,k)=>html`<button key=${k} onClick=${()=>setMainGoalIdx(k)}
+                  style=${{padding:"2px 9px",borderRadius:20,fontSize:10.5,cursor:"pointer",fontFamily:"inherit",fontWeight:700,
+                           border:`1px solid ${k===gi?"var(--accent)":"var(--border)"}`,
+                           background:k===gi?"var(--accent-l)":"transparent",color:k===gi?"var(--accent)":"var(--sub)"}}>${k+1}</button>`)}
               </div>`}
-            <div style=${{fontSize:11,color:"var(--sub)",lineHeight:1.7}}>
-              ${!w.has_records
-                ? html`まだ今週の記録がありません（0ではなく、未記録という意味です）`
-                : html`
-                  ${w.remaining_to_std!==null&&html`<span>あと <b style=${{color:"var(--text)"}}>${w.remaining_to_std}${u}</b>　</span>`}
-                  <span>残り <b style=${{color:"var(--text)"}}>${w.days_left}日</b>　</span>
-                  ${w.required_per_day!==null&&w.required_per_day>0&&html`<span>必要 <b style=${{color:"var(--text)"}}>${w.required_per_day}${u}/日</b>　</span>`}
-                  ${w.actual_per_day!==null&&html`<span>実績 <b style=${{color:"var(--text)"}}>${w.actual_per_day}${u}/日</b></span>`}`}
-              ${w.parentTitle&&html`<br/><span style=${{opacity:0.8}}>${w.parentTitle}</span>`}
-            </div>
-          </div>`;
-        })}
+              ${num(p.target)!==null?html`
+                残り <b style=${{color:"var(--text)"}}>${fmt(p.remaining)}${p.unit||""}</b>
+                ${p.remainingDays!==undefined&&html` ・あと <b style=${{color:"var(--text)"}}>${p.remainingDays}日</b>`}
+                ${num(p.requiredPerWeek)!==null&&html` ・必要 <b style=${{color:"var(--text)"}}>${fmt(p.requiredPerWeek)}${p.unit||""}/週</b>`}
+                ${num(p.actualPerWeek)!==null&&html` ・実績 <b style=${{color:"var(--text)"}}>${fmt(p.actualPerWeek)}${p.unit||""}/週</b>`}
+                ${num(p.forecast)!==null&&html`<br/>このままなら <b style=${{color:"var(--text)"}}>${fmt(p.forecast)}${p.unit||""}</b> で着地`}
+                ${p.note&&html`<br/>${p.note}`}
+                ${p.forecastWarning&&html`<br/><span style=${{color:"var(--amber,#BA7517)"}}>⚠ ${p.forecastWarning}</span>`}
+              `:html`${p.note||"数値がまだ入っていません"}`}
+              ${g.success_condition&&html`<br/><b style=${{color:"var(--text)"}}>できたと言える状態</b>：${g.success_condition}`}
+              <div style=${{display:"flex",gap:8,marginTop:8}}>
+                <button onClick=${()=>setDeepenGoal(g)}
+                  style=${{padding:"7px 14px",borderRadius:8,border:"1px solid var(--border)",background:"none",color:"var(--accent)",fontSize:11.5,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
+                  ${g.success_condition?"編集":"5つの質問で深掘りする"}</button>
+              </div>
+            </div>` })}
+
+        <!-- 2週間 -->
+        ${Row({ label:"2週間", title: sp && sp.name,
+          addLabel: goals.length ? "＋ 2週間でやることを決める" : "先に3か月目標を決めてください",
+          onAdd: ()=>{ if(goals.length) setSprintSheet({}); },
+          right: sp && `${sp.dayIndex}/${sp.totalDays}日`,
+          pct: sp && sp.totalDays ? Math.round(sp.dayIndex/sp.totalDays*100) : null,
+          open: openRow==="sprint", onToggle: ()=>setOpenRow(openRow==="sprint"?"":"sprint"),
+          children: sp && html`
+            <div style=${{fontSize:11.5,color:"var(--sub)",lineHeight:1.8}}>
+              あと <b style=${{color:"var(--text)"}}>${Math.max(0,sp.daysLeft)}日</b>
+              ${sp.action_metric&&html`<br/>自分でやる：<b style=${{color:"var(--text)"}}>${sp.action_metric}</b>`}
+              ${sp.target_state&&html`<br/>2週間後：${sp.target_state}`}
+              ${sp.bottleneck&&html`<br/>詰まり：${sp.bottleneck}`}
+              ${sp.if_then&&html`<br/>もし〜なら：${sp.if_then}`}
+              ${curSp.length>1&&html`<br/><span style=${{color:"var(--amber,#BA7517)"}}>⚠ 進行中が${curSp.length}本あります。1本に絞るほど進みます</span>`}
+              <div style=${{marginTop:8}}>
+                <button onClick=${()=>setSprintSheet(sp)}
+                  style=${{padding:"7px 14px",borderRadius:8,border:"1px solid var(--border)",background:"none",color:"var(--accent)",fontSize:11.5,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>編集</button>
+              </div>
+            </div>` })}
+
+        <!-- 今週 -->
+        ${Row({ label:"今週", title: wg.length ? (wg.length===1 ? wg[0].title : `${wg.length}件`) : "",
+          addLabel: curSp.length ? "＋ 今週やる数字を決める" : "先に2週間スプリントを決めてください",
+          onAdd: ()=>{ if(curSp.length) setWgSheet(true); else if(goals.length) setSprintSheet({}); },
+          right: wg.length===1 ? (()=>{ const w=wg[0]; const t=Number(w.std_line)>0?Number(w.std_line):Number(w.target_total);
+            return (!isNaN(t)&&t>0) ? `${w.actual_value}/${t}${w.unit||""}` : "数値なし"; })() : null,
+          pct: wgPct,
+          open: openRow==="week", onToggle: ()=>setOpenRow(openRow==="week"?"":"week"),
+          children: html`
+            <div style=${{fontSize:11.5,color:"var(--sub)",lineHeight:1.8}}>
+              ${wg.map((w,k)=>{ const t=Number(w.std_line)>0?Number(w.std_line):Number(w.target_total);
+                const u=w.unit||(w.metric_type==="DURATION"?"分":"");
+                return html`<div key=${k} style=${{marginBottom:6}}>
+                  <b style=${{color:"var(--text)"}}>${w.title}</b>
+                  ${(!isNaN(t)&&t>0)&&html` ${w.actual_value}/${t}${u}`}
+                  ${w.link_state==="UNLINKED"&&html` <span style=${{color:"var(--amber,#BA7517)"}}>未接続</span>`}
+                  <br/>${!w.has_records
+                    ? "まだ今週の記録がありません（0ではなく、未記録という意味です）"
+                    : html`残り ${w.days_left}日${w.required_per_day>0?` ・必要 ${w.required_per_day}${u}/日`:""}${w.actual_per_day!==null?` ・実績 ${w.actual_per_day}${u}/日`:""}`}
+                </div>`; })}
+              <button onClick=${()=>setWgSheet(true)}
+                style=${{padding:"7px 14px",borderRadius:8,border:"1px solid var(--border)",background:"none",color:"var(--accent)",fontSize:11.5,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>＋ 追加</button>
+            </div>` })}
       </div>`;
     })()}
 
@@ -6601,7 +6474,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260802-184115";
+const APP_BUILD = "20260802-185522";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
