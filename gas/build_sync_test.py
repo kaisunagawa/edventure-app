@@ -15,7 +15,7 @@ j = s.index("// \u2500\u2500 \u30bf\u30b9\u30af\u306e\u91cd\u8981\u5ea6\u00d7\u7
 a = s.index("  const toStored = function(titles){")
 b = s.index("\n  };", a) + 4
 head = (s[i:j] + "\nlet customActions=null;\n"
-        + "let taskImportance={},taskDue={},taskEstimates={};\n"
+        + "let taskImportance={},taskDue={},taskEstimates={},taskNotes={},taskStatus={};\n"
         + s[a:b].replace("const toStored", "var toStored") + "\n")
 open("/tmp/_sync.js", "w").write(head + open(os.path.join(root, "gas/sync_cases.js")).read())
 node = os.path.expanduser("~/.local/node-v22.17.0-darwin-arm64/bin/node")

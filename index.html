@@ -1179,14 +1179,22 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
   // タスクの進捗状態（ボード用）。"todo"=予定 / "doing"=実行中 / "done"=完了。
   // 未設定なら既存のchecked（完了フラグ）から導出する（後方互換）
   const [taskStatus, setTaskStatus] = useState(()=>{
-    try { return JSON.parse(localStorage.getItem("jiroku_task_status_"+formatDateStr(new Date()))||"{}"); } catch(e){ return {}; }
+    // ★id をキーにする（Phase 2）★
+    try {
+      const raw = JSON.parse(localStorage.getItem("jiroku_task_status_"+formatDateStr(new Date()))||"{}");
+      return migrateMapKeysToId(raw, customActions);
+    } catch(e){ return {}; }
   });
   const [editError, setEditError] = useState("");  // 編集画面で保存できない理由
   const [dragTask, setDragTask] = useState(null); // PCのドラッグ中タスク
   const [detailTask, setDetailTask] = useState(null); // タスク詳細画面で開いているタスク名（Trello風カード詳細）
   // タスクごとのメモ（詳細画面で編集）。日付キーで保持
   const [taskNotes, setTaskNotes] = useState(()=>{
-    try { return JSON.parse(localStorage.getItem("jiroku_task_memo_"+formatDateStr(new Date()))||"{}"); } catch(e){ return {}; }
+    // ★id をキーにする（Phase 2）★
+    try {
+      const raw = JSON.parse(localStorage.getItem("jiroku_task_memo_"+formatDateStr(new Date()))||"{}");
+      return migrateMapKeysToId(raw, customActions);
+    } catch(e){ return {}; }
   });
   // 画面幅でボードのレイアウトを切替（PC=横3列Trello風ドラッグ / スマホ=縦積みタップ操作）
   const [boardWide, setBoardWide] = useState(()=> typeof window!=="undefined" && window.innerWidth>=900);
@@ -1350,6 +1358,10 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
           if (nd) { setTaskDue(nd); localStorage.setItem("jiroku_task_due_"+todayStr, JSON.stringify(nd)); }
           const ne = takeIn(taskEstimates, t=>t.est);
           if (ne) { setTaskEstimates(ne); localStorage.setItem("jiroku_task_estimates_"+todayStr, JSON.stringify(ne)); }
+          const nm = takeIn(taskNotes, t=>t.memo);
+          if (nm) { setTaskNotes(nm); localStorage.setItem("jiroku_task_memo_"+todayStr, JSON.stringify(nm)); }
+          const ns = takeIn(taskStatus, t=>t.stt);
+          if (ns) { setTaskStatus(ns); localStorage.setItem("jiroku_task_status_"+todayStr, JSON.stringify(ns)); }
         }
         if(d.todayActions.checked && Object.keys(d.todayActions.checked).length > 0){
           setChecked(prev=>{
@@ -1454,9 +1466,13 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
       const imp = taskImportance[id] || taskImportance[title];
       const due = taskDue[id] || taskDue[title];
       const est = taskEstimates[id] !== undefined ? taskEstimates[id] : taskEstimates[title];
+      const memo = taskNotes[id] || taskNotes[title];
+      const stt  = taskStatus[id] || taskStatus[title];
       if (imp) o.imp = imp;
       if (due) o.due = due;
       if (est > 0) o.est = Number(est);
+      if (memo) o.memo = String(memo);
+      if (stt)  o.stt  = String(stt);
       return o;
     });
   };
@@ -1488,9 +1504,14 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
 
   // ── タスクボード用ヘルパー ──
   // 状態: "todo"=予定 / "doing"=実行中 / "done"=完了。未設定はchecked（完了フラグ）から導出
-  const statusOf = (task) => taskStatus[task] || (isDone(task) ? "done" : "todo");
+  const statusOf = (task) => {
+    const k = idOfTitle(task);
+    return (k && taskStatus[k]) || taskStatus[task] || (isDone(task) ? "done" : "todo");
+  };
   const setStatus = (task, status) => {
-    const next = {...taskStatus, [task]: status};
+    const sKey = idOfTitle(task) || task;
+    const next = {...taskStatus, [sKey]: status};
+    if (sKey !== task) delete next[task];
     setTaskStatus(next);
     try { localStorage.setItem("jiroku_task_status_"+todayKey, JSON.stringify(next)); } catch(e){}
     // 完了状態は既存のchecked(today_actions)とも同期し、レポート・完了フォルダ等の互換を保つ
@@ -1509,7 +1530,9 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
   };
   // タスクのメモを保存（詳細画面）
   const setTaskNote = (task, note) => {
-    const next = {...taskNotes, [task]: note};
+    const nKey = idOfTitle(task) || task;
+    const next = {...taskNotes, [nKey]: note};
+    if (nKey !== task) delete next[task];
     setTaskNotes(next);
     try { localStorage.setItem("jiroku_task_memo_"+todayKey, JSON.stringify(next)); } catch(e){}
   };
@@ -1534,8 +1557,9 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
     setTaskImportance(imp); localStorage.setItem("jiroku_task_importance_"+todayKey, JSON.stringify(imp));
     const duKey=idOfTitle(task); const du={...taskDue}; delete du[duKey]; delete du[task];
     setTaskDue(du); localStorage.setItem("jiroku_task_due_"+todayKey, JSON.stringify(du));
-    const stt={...taskStatus}; delete stt[task]; setTaskStatus(stt); localStorage.setItem("jiroku_task_status_"+todayKey, JSON.stringify(stt));
-    const nt={...taskNotes}; delete nt[task]; setTaskNotes(nt); localStorage.setItem("jiroku_task_memo_"+todayKey, JSON.stringify(nt));
+    const k2=idOfTitle(task);
+    const stt={...taskStatus}; delete stt[k2]; delete stt[task]; setTaskStatus(stt); localStorage.setItem("jiroku_task_status_"+todayKey, JSON.stringify(stt));
+    const nt={...taskNotes}; delete nt[k2]; delete nt[task]; setTaskNotes(nt); localStorage.setItem("jiroku_task_memo_"+todayKey, JSON.stringify(nt));
     const cKey=idOfTitle(task); const nc={...checked}; delete nc[cKey]; delete nc[task];
     setChecked(nc); localStorage.setItem("today_actions", JSON.stringify(nc));
     gasPostJson("saveTodayActions", {actions: list.length===0?"":JSON.stringify(list), checked: JSON.stringify(nc)});
@@ -2246,7 +2270,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
           </div>
 
           <label class="form-lbl">メモ</label>
-          <textarea class="inp" placeholder="このタスクのメモ・詳細・持ち物など" value=${taskNotes[t]||""}
+          <textarea class="inp" placeholder="このタスクのメモ・詳細・持ち物など" value=${taskNotes[idOfTitle(t)]||taskNotes[t]||""}
             onInput=${e=>setTaskNote(t, e.target.value)}
             style=${{minHeight:90,resize:"vertical",lineHeight:1.6,fontFamily:"inherit",marginBottom:16}}/>
 
@@ -5186,6 +5210,8 @@ function normalizeTaskList(raw) {
       if (v.imp) o.imp = String(v.imp);
       if (v.due) o.due = String(v.due);
       if (v.est !== undefined && v.est !== "" && v.est !== null) o.est = Number(v.est);
+      if (v.memo) o.memo = String(v.memo);
+      if (v.stt)  o.stt  = String(v.stt);
       return o;
     }
     const title = String(v || "").trim();

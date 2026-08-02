@@ -21,7 +21,7 @@ cases = open(os.path.join(root, "gas/roundtrip_cases.js")).read()
 # 往復そのものを確かめる。
 # ★Phase 2 でマップが増えるたびにここへ足す。足し忘れれば落ちる★
 code = (body + "\nlet customActions = null;\n"
-        + "const taskImportance={}, taskDue={}, taskEstimates={};\n"
+        + "const taskImportance={}, taskDue={}, taskEstimates={}, taskNotes={}, taskStatus={};\n"
         + stored + "\n" + cases)
 open("/tmp/_rt.js", "w").write(code)
 node = os.path.expanduser("~/.local/node-v22.17.0-darwin-arm64/bin/node")
