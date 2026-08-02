@@ -80,6 +80,7 @@ function doGet(e) {
     switch (action) {
       case "getUser":      result = getUser(studentEmail); break;
       // ── Phase 1: 自己経営OS の基盤（管理者のみ実行可能なセットアップ）──
+      case "adminPhase4DryRun": return jsonResponse(phase4DryRun());
       case "adminSetupPhase1": {
         // シート構造を変える操作。共有シークレットを必須にする
         var _a1 = verifyP1Admin(studentEmail, e.parameter.secret, e.parameter);
@@ -596,6 +597,7 @@ function doPost(e) {
       case "migrateTasksToSheet": return jsonResponse(migrateTasksToSheet(studentEmail, body));
       case "getTasks":    return jsonResponse(getTasks(studentEmail, body));
       case "saveTask":    return jsonResponse(saveTask(studentEmail, body));
+      case "saveTaskMutations": return jsonResponse(saveTaskMutations(studentEmail, body));
       case "deleteTask":  return jsonResponse(deleteTask(studentEmail, body));
       case "carryOverTask": return jsonResponse(carryOverTask(studentEmail, body));
       // ── Auth CP1 ──
@@ -5475,7 +5477,10 @@ function saveTodayActions(studentEmail, body) {
   //   写しておかないと、移行済みの4件だけが古いまま取り残される。
   //   画面を Tasks に繋ぎ替えるまでの間だけの処理で、Phase 4 で外す。
   //   失敗しても本体の保存は成功させる（記録が消える方がずっと困る）。
-  if (body.actions !== undefined) {
+  //   新方式（saveTaskMutations直接書き込み）の端末は noBridge="1" を送ってくる。
+  //   その場合はTasksへ二重に書かない（直接書き込みとの競走でversionが乱れるため）。
+  //   Journal.actionsへの保存は続ける（業務レポート等がまだそこを読むため）。
+  if (body.actions !== undefined && String(body.noBridge || "") !== "1") {
     try { bridgeActionsToTasks(studentEmail, today, String(body.actions), body.checked); }
     catch (err) { console.error("bridgeActionsToTasks", err); }
   }
@@ -9791,7 +9796,7 @@ const ACTION_POLICIES = {
 const ACTION_POLICIES_WRITE = {
   saveLog:{}, saveLogMulti:{}, quickLog:{}, deleteLog:{}, saveSettings:{}, saveOnboarding:{},
   saveTodayActions:{}, saveGoal:{}, saveWeeklyGoal:{}, archiveGoalItem:{}, migrateLocalTasks:{},
-  saveTask:{}, deleteTask:{}, carryOverTask:{}, saveSprint:{}, migrateTasksToSheet:{},
+  saveTask:{}, deleteTask:{}, carryOverTask:{}, saveTaskMutations:{}, saveSprint:{}, migrateTasksToSheet:{},
   submitSurvey:{}, syncCalendar:{}, sendMessage:{}, saveWeeklyReflection:{}, saveContentProfile:{},
   generateWorkReport:{}, snsSaveAccount:{}, snsSaveMetrics:{}, snsSavePost:{}
 };
@@ -9945,7 +9950,7 @@ const ADMIN_SECRET_ALLOWLIST = {
   // 一斉送信（Kaiの明示的な要望により残す）
   adminBroadcastLine:1, adminBroadcastLinePending:1, adminSendStudentCampaign:1,
   // セットアップ・保守
-  adminSetupTriggers:1, adminInstallTrigger:1, adminSetupPhase1:1, adminSetupAuth:1,
+  adminSetupTriggers:1, adminInstallTrigger:1, adminSetupPhase1:1, adminSetupAuth:1, adminPhase4DryRun:1,
   authSetMode:1, authSetEnforce:1, authRoleApply:1, authRoleDryRun:1, authRevokeAll:1,
   authCleanupTestData:1, adminPurgeTestUsers:1, adminMigrateTasks:1, authBreakerReset:1, rotateSessionSecret:1,
   p1Backup:1, p1BackupInfo:1, p1PurgeArchived:1, weeklyBackup:1
@@ -10608,6 +10613,84 @@ function saveSprint(studentEmail, body) {
 //   同じ task_id で内容が食い違ったら、直さずに数えて報告する。
 //   どちらが正しいかは、こちらでは判断できない。
 // ══════════════════════════════════════════════════════════════════
+// Phase 4 の移行前調査。全ユーザーの Journal.actions と Tasks シートを突き合わせ、
+// 「何件がどうなるか」を数えるだけで、1行も書かない。
+// 停止条件（conflict / task_id重複 / user不明 / 件数不一致）の判定材料になる。
+function phase4DryRun() {
+  const users = {};
+  sheetToObjects(getSheet("Users")).forEach(function (u) {
+    if (String(u.is_active).toUpperCase() === "TRUE") users[String(u.student_email).trim()] = 1;
+  });
+
+  // Journal.actions 全行を走査（日付は問わない: 過去の分も移行対象になり得るため全体像を出す）
+  const journal = sheetToObjects(getJournalSheet());
+  let jTotal = 0, jNoId = 0, jNoTitle = 0, jUnknownUser = 0, legacyRows = 0;
+  const jById = {};            // task_id -> {email, title, date} 最後に見たもの
+  const jIdOwners = {};        // task_id -> {email:1} 同じidを複数ユーザーが持つ検出
+  const titleIds = {};         // email+"|"+title -> {id:1} 同名別idの検出
+  journal.forEach(function (r) {
+    const raw = String(r.actions || "").trim();
+    if (!raw) return;
+    let items;
+    try { items = JSON.parse(raw); } catch (e) { legacyRows++; return; }
+    if (!Array.isArray(items)) return;
+    const em = String(r.student_email || "").trim();
+    const rd = r.date instanceof Date ? Utilities.formatDate(r.date, "Asia/Tokyo", "yyyy-MM-dd") : String(r.date).slice(0, 10);
+    items.forEach(function (it) {
+      jTotal++;
+      if (typeof it !== "object" || !it) { jNoId++; return; }   // 旧形式（文字列）
+      const id = String(it.id || it.task_id || "").trim();
+      const title = String(it.title || "").trim();
+      if (!id) { jNoId++; return; }
+      if (!title) { jNoTitle++; return; }
+      if (!users[em]) { jUnknownUser++; return; }
+      jById[em + "|" + id] = { email: em, id: id, title: title, date: rd };
+      (jIdOwners[id] = jIdOwners[id] || {})[em] = 1;
+      (titleIds[em + "|" + title] = titleIds[em + "|" + title] || {})[id] = 1;
+    });
+  });
+  const jUnique = Object.keys(jById).length;
+  const crossUserIds = Object.keys(jIdOwners).filter(function (k) { return Object.keys(jIdOwners[k]).length > 1; }).length;
+  const sameTitleDiffId = Object.keys(titleIds).filter(function (k) { return Object.keys(titleIds[k]).length > 1; }).length;
+
+  // Tasks シート側
+  const tasks = sheetToObjects(getSheet("Tasks"));
+  let tActive = 0, tTombstone = 0;
+  const tById = {}, tDupIds = [];
+  tasks.forEach(function (t) {
+    if (String(t.deleted_at || "").trim()) tTombstone++; else tActive++;
+    const key = String(t.student_email).trim() + "|" + String(t.task_id).trim();
+    if (tById[key]) tDupIds.push(String(t.task_id)); else tById[key] = t;
+  });
+
+  // 突き合わせ（Journal → Tasks 方向）
+  let willCreate = 0, willUpdate = 0, alreadySame = 0, conflict = 0, skipped = 0;
+  Object.keys(jById).forEach(function (k) {
+    const j = jById[k];
+    const t = tById[j.email + "|" + j.id];
+    if (!t) { willCreate++; return; }
+    if (String(t.deleted_at || "").trim()) { skipped++; return; }   // 墓標は復活させない
+    if (String(t.title) === j.title) { alreadySame++; return; }
+    // タイトルが違う＝どちらが正か機械では決められない
+    conflict++;
+  });
+
+  return {
+    ok: true,
+    journal: { taskTotal: jTotal, uniqueTaskKeys: jUnique, noId: jNoId, noTitle: jNoTitle,
+               unknownUser: jUnknownUser, legacyRows: legacyRows,
+               crossUserSameId: crossUserIds, sameTitleDiffId: sameTitleDiffId },
+    tasksSheet: { active: tActive, tombstone: tTombstone, dupIds: tDupIds },
+    plan: { willCreate: willCreate, willUpdate: willUpdate, alreadySame: alreadySame,
+            conflict: conflict, skipped: skipped },
+    stopConditions: {
+      conflict: conflict > 0,
+      taskIdDup: tDupIds.length > 0,
+      unknownUser: jUnknownUser > 0
+    }
+  };
+}
+
 function migrateTasksToSheet(studentEmail, body) {
   const chk = p1RequireUser(studentEmail);
   if (!chk.ok) return chk;
@@ -10759,12 +10842,82 @@ function getTasks(studentEmail, body) {
 
 // タスクの作成・更新。最小入力は「タスク名」のみ。
 // 重要度・期限・週間目標との紐づけ・想定時間は任意。
+// ★まとめ送りAPI★ タスク操作1回ごとに1リクエストを送ると、
+//   GASの同時実行制限（全ユーザー共有）をすぐ食い潰す。
+//   端末は操作をキューに貯め、まとめて送る。
+//   各mutationは独立に判定する（1件の競合で他の正常な操作を道連れにしない）。
+//   ただし配列の順序どおりに適用する（作成→編集→完了の依存を守るため）。
+function saveTaskMutations(studentEmail, body) {
+  const chk = p1RequireUser(studentEmail);
+  if (!chk.ok) return chk;
+  let muts;
+  try { muts = JSON.parse(String((body && body.mutations) || "[]")); }
+  catch (e) { return { ok: false, error: "mutations を読めませんでした" }; }
+  if (!Array.isArray(muts)) return { ok: false, error: "mutations が配列ではありません" };
+  if (muts.length > 50) return { ok: false, error: "1回50件までです" };
+
+  const results = muts.map(function (m) {
+    const mid = String((m && m.client_mutation_id) || "").trim();
+    const op = String((m && m.operation) || "").toUpperCase();
+    const out = { client_mutation_id: mid, task_id: String((m && m.task_id) || ""), result: "ERROR" };
+    if (!mid) { out.error_code = "NO_MUTATION_ID"; return out; }
+    try {
+      let r;
+      if (op === "CREATE" || op === "UPDATE") {
+        const req = Object.assign({}, m.changes || {});
+        req.task_id = m.task_id;
+        req.mutation_id = mid;
+        if (op === "CREATE") req.create = "1";
+        if (m.base_version !== undefined && m.base_version !== null) req.base_version = m.base_version;
+        r = saveTask(studentEmail, req);
+      } else if (op === "DELETE") {
+        r = deleteTask(studentEmail, { task_id: m.task_id, mutation_id: mid });
+      } else if (op === "CARRY_OVER") {
+        r = carryOverTask(studentEmail, { task_id: m.task_id, mutation_id: mid,
+                                          to_date: (m.changes && m.changes.to_date) || "" });
+      } else {
+        out.error_code = "UNKNOWN_OPERATION";
+        return out;
+      }
+      if (r.ok) {
+        out.result = r.duplicate ? "DUPLICATE" : "APPLIED";
+        out.task_id = String(r.id || r.task_id || out.task_id);
+        if (r.data) { out.new_version = r.data.version; out.canonical_task = r.data; }
+        return out;
+      }
+      if (r.error === "TASK_CONFLICT") {
+        out.result = "CONFLICT";
+        out.canonical_task = r.server;   // サーバーの最新版。端末が判断材料に使う
+        out.error_code = "TASK_CONFLICT";
+        return out;
+      }
+      if (r.error === "TASK_DELETED") {
+        out.result = "DELETED_REJECTED";  // 恒久エラー。再試行しても無駄
+        out.error_code = "TASK_DELETED";
+        return out;
+      }
+      out.error_code = String(r.error || "UNKNOWN");
+      return out;
+    } catch (err) {
+      out.error_code = "EXCEPTION: " + String(err && err.message || err).slice(0, 120);
+      return out;
+    }
+  });
+  return { ok: true, results: results };
+}
+
 function saveTask(studentEmail, body) {
   const chk = p1RequireUser(studentEmail);
   if (!chk.ok) return chk;
   const id = String((body && body.task_id) || "").trim();
   const existing = id ? p1OwnedRow("Tasks", "task_id", id, studentEmail) : null;
-  if (id && !existing) return { ok: false, error: "タスクが見つかりません" };
+  // ★create="1" はクライアント採番のidを持ち込む新規作成★
+  //   オフラインの操作キューでは、作成→編集→完了が同じidで並ぶ。
+  //   サーバー採番にすると後続の操作が迷子になるため、idごと受け取る。
+  //   他ユーザーとのid衝突はp1Upsertが持ち主で行を分けるので安全。
+  if (id && !existing && String((body && body.create) || "") !== "1") {
+    return { ok: false, error: "タスクが見つかりません" };
+  }
 
   // ★同じ操作の再送を二重に実行しない★
   //   オフラインで貯めた操作を送り直したとき、carryover_count が2回増えたり
