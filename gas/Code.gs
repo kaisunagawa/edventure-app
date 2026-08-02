@@ -11018,15 +11018,34 @@ function getTasks(studentEmail, body) {
     return true;
   }).map(function (t) { return decorateTask(t, now); });
 
-  const rank = function (t) {
-    if (t.overdue) return 0;
-    if (t.quadrant === "DO_NOW") return 1;
-    if (t.link_daily_focus_id) return 2;
-    if (t.importance_level === "HIGH" && t.urgency_level === "MEDIUM") return 3;
-    if (t.quadrant === "DEFER_OR_DELETE") return 5;
-    return 4;
+  // ★自動順位と、その理由★
+  //   なぜ上に来ているのかを画面で言えるようにする（システムの判断を隠さない）
+  const rankOf = function (t) {
+    if (t.overdue) return { rank: 0, reason: "OVERDUE", label: "期限が過ぎています" };
+    if (t.quadrant === "DO_NOW") return { rank: 1, reason: "IMPORTANT_URGENT", label: "重要かつ急ぎ" };
+    if (t.link_daily_focus_id) return { rank: 2, reason: "DAILY_FOCUS", label: "今日のフォーカスに直結" };
+    if (t.importance_level === "HIGH" && t.urgency_level === "MEDIUM")
+      return { rank: 3, reason: "IMPORTANT_SOON", label: "重要で期限が近い" };
+    if (t.quadrant === "DEFER_OR_DELETE") return { rank: 5, reason: "DEFER", label: "後回しでよさそう" };
+    return { rank: 4, reason: "NORMAL", label: "通常" };
   };
+  rows.forEach(function (t) {
+    const r = rankOf(t);
+    t.priority_rank = r.rank;
+    t.priority_reason = r.reason;
+    t.priority_label = r.label;
+    // 本人が並べ替えたか。並べ替えていれば sort_order を尊重する
+    t.manual_order = (t.sort_order !== null && t.sort_order !== undefined);
+  });
+  const rank = function (t) { return t.priority_rank; };
   rows.sort(function (a, b) {
+    // ★期限超過は手動並び替えでも下に隠さない★
+    //   自分で下へ動かした結果、締切を過ぎたものが見えなくなるのは事故になる
+    if (!!a.overdue !== !!b.overdue) return a.overdue ? -1 : 1;
+    // ★本人が並べ替えたものは、その順を尊重する★（自動順位より優先）
+    const ma = a.manual_order, mb = b.manual_order;
+    if (ma && mb) return Number(a.sort_order) - Number(b.sort_order);
+    if (ma !== mb) return ma ? -1 : 1;   // 手で置いたものを先に
     const ra = rank(a), rb = rank(b);
     if (ra !== rb) return ra - rb;
     // 同じ段の中では期限が近いものを先に。期限なしは最後

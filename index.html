@@ -1227,6 +1227,10 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
   const [taskCarry, setTaskCarry] = useState(()=>{
     try { return JSON.parse(localStorage.getItem("jiroku_task_carry_"+formatDateStr(new Date()))||"{}")||{}; } catch(e){ return {}; }
   });
+  const [taskWhy, setTaskWhy] = useState({});          // なぜ上に来ているかの理由（サーバー算出）
+  const [taskOrder, setTaskOrder] = useState(()=>{     // 本人が並べ替えた順（sort_order）
+    try { return JSON.parse(localStorage.getItem("jiroku_task_order_"+formatDateStr(new Date()))||"{}")||{}; } catch(e){ return {}; }
+  });
   const [ctxFilter, setCtxFilter] = useState("ALL");   // すべて/仕事/プライベート
   const [carryPick, setCarryPick] = useState(null);    // 持ち越しの確認表示 {date}
   // タスク同期キューの見える化（同期待ちN件・競合N件）
@@ -1725,6 +1729,29 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
     enqueueTaskMutation("UPDATE", key, { estimated_minutes: (m>0 && m<=600) ? m : "" },
                         { estimated_minutes: (taskEstimates[key] !== undefined ? taskEstimates[key] : "") });
   };
+  // ★手動並び替え★ 自動順位（priority_rank）とは別に、本人の並びを持つ。
+  //   期限超過だけは、下へ動かしても一覧の先頭に出す（サーバー側で保証）。
+  const moveTask = (task, dir) => {
+    const list = incompleteItems.slice();
+    const i = list.indexOf(task);
+    const j = i + dir;
+    if (i < 0 || j < 0 || j >= list.length) return;
+    list.splice(j, 0, list.splice(i, 1)[0]);
+    // 並べ替え後の位置を10刻みで振り直す（間に挿し込めるように）
+    const next = {...taskOrder};
+    list.forEach((t, k) => { const id = idOfTitle(t); if (id) next[id] = (k + 1) * 10; });
+    setTaskOrder(next);
+    try { localStorage.setItem("jiroku_task_order_"+todayKey, JSON.stringify(next)); } catch(e){}
+    list.forEach(t => {
+      const id = idOfTitle(t);
+      if (!id) return;
+      const before = taskOrder[id];
+      if (before === next[id]) return;
+      enqueueTaskMutation("UPDATE", id, { sort_order: next[id] },
+                          { sort_order: (before === undefined ? "" : before) });
+    });
+  };
+
   // タスクの文脈（仕事/プライベート等）。初期値はUNSET。タイトルから推測しない
   const setTaskCtx = (task, v) => {
     const key = idOfTitle(task) || task;
@@ -1820,8 +1847,10 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
     const heldLocal = (customActions||[]).filter(t => hold[t.id] && !rows.some(x => x.task_id === t.id));
     const list = rows.map(t => ({ id: t.task_id, title: t.title })).concat(
       heldLocal.map(t => ({ id: t.id, title: t.title })));
-    const imp = {}, due = {}, est = {}, memo = {}, stt = {}, chk = {}, ctx = {}, cry = {};
+    const imp = {}, due = {}, est = {}, memo = {}, stt = {}, chk = {}, ctx = {}, cry = {}, why = {}, ord = {};
     rows.forEach(t => {
+      if (t.priority_label) why[t.task_id] = t.manual_order ? "自分で上に置いた" : t.priority_label;
+      if (t.sort_order !== null && t.sort_order !== undefined) ord[t.task_id] = Number(t.sort_order);
       if (t.context && t.context !== "UNSET") ctx[t.task_id] = t.context;
       cry[t.task_id] = Number(t.carryover_count || 0);
       if (hold[t.task_id]) {   // 端末の値を優先
@@ -1857,6 +1886,8 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
     setChecked(chk);        localStorage.setItem("today_actions", JSON.stringify(chk));
     setTaskContextMap(ctx); localStorage.setItem("jiroku_task_context_"+todayKey, JSON.stringify(ctx));
     setTaskCarry(cry);      localStorage.setItem("jiroku_task_carry_"+todayKey, JSON.stringify(cry));
+    setTaskWhy(why);
+    setTaskOrder(ord);      localStorage.setItem("jiroku_task_order_"+todayKey, JSON.stringify(ord));
   };
 
   // 送信が済んだら最新を取り直す（他端末の変更もここで届く）
@@ -2098,7 +2129,18 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
     const c = (k && taskContext[k]) || taskContext[item] || "UNSET";
     return c === ctxFilter || c === "UNSET";
   };
-  const incompleteItems = actionItems.filter(item=>!isDone(item)&&ctxVisible(item));
+  // 手動で並べ替えた分は、その順で表示する（期限超過は必ず先頭）。
+  // サーバーの再取得を待たずに、押した直後から反映されるようにする
+  const orderKey = (item) => {
+    const id = idOfTitle(item);
+    const o = (id && taskOrder[id] !== undefined) ? Number(taskOrder[id]) : null;
+    return o === null ? Infinity : o;
+  };
+  const incompleteItems = actionItems.filter(item=>!isDone(item)&&ctxVisible(item)).sort((a,b)=>{
+    const oa = quadrantOf(a).overdue, ob = quadrantOf(b).overdue;
+    if (oa !== ob) return oa ? -1 : 1;
+    return orderKey(a) - orderKey(b);
+  });
   const completedItems = actionItems.filter(item=>isDone(item)&&ctxVisible(item));
   const doneCount = actionItems.filter(item=>statusOf(item)==="done").length;
 
@@ -2294,7 +2336,11 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
               <button onClick=${()=>goToTimerWith(next)}
                 style=${{width:"100%",display:"flex",alignItems:"center",gap:8,background:"none",border:"none",padding:0,marginBottom:9,textAlign:"left",cursor:"pointer",fontFamily:"inherit"}}>
                 <span style=${{flexShrink:0,fontSize:10.5,fontWeight:700,color:"var(--sub)"}}>次にやる</span>
-                <span style=${{flex:1,minWidth:0,fontSize:13.5,fontWeight:700,color:"var(--text)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>${next}</span>
+                <span style=${{flex:1,minWidth:0,overflow:"hidden"}}>
+                  <span style=${{display:"block",fontSize:13.5,fontWeight:700,color:"var(--text)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>${next}</span>
+                  <span style=${{display:"block",fontSize:10.5,color:"var(--sub)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>${
+                    taskWhy[idOfTitle(next)] || (quadrantOf(next).overdue ? "期限が過ぎています" : "上から順番に")}</span>
+                </span>
                 ${estOf(next)>0&&html`<span style=${{flexShrink:0,fontSize:11,fontWeight:600,color:"var(--accent)"}}>${estOf(next)}分</span>`}
                 <span style=${{flexShrink:0,fontSize:11,color:"var(--sub)"}}>▶ 始める</span>
               </button>`}
@@ -2631,13 +2677,27 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
             </button>
             <!-- ★それ以外を押したら詳細が開く★ -->
             <button onClick=${()=>setDetailTask(item)}
-              style=${{display:"flex",alignItems:"flex-start",gap:8,flex:1,minWidth:0,background:"none",border:"none",padding:"13px 16px 13px 4px",cursor:"pointer",textAlign:"left",fontFamily:"inherit"}}>
-              <span style=${{flex:1,minWidth:0,fontSize:14,color:isDone(item)?"var(--sub)":"var(--text)",textDecoration:isDone(item)?"line-through":"none",lineHeight:1.6}}>${item}</span>
+              style=${{display:"flex",alignItems:"flex-start",flexWrap:"wrap",gap:"4px 8px",flex:1,minWidth:0,background:"none",border:"none",padding:"13px 16px 13px 4px",cursor:"pointer",textAlign:"left",fontFamily:"inherit"}}>
+              <!-- ★タイトルに最低幅を持たせる★ 並び替えボタンを足したぶん幅が減り、
+                   長い名前が1文字ずつ縦に折り返されてしまったため。
+                   入りきらないラベルは下の行へ回す（flexWrap） -->
+              <span style=${{flex:"1 1 60%",minWidth:"8em",fontSize:14,color:isDone(item)?"var(--sub)":"var(--text)",textDecoration:isDone(item)?"line-through":"none",lineHeight:1.6,overflowWrap:"anywhere"}}>${item}</span>
               ${(()=>{ const q=quadrantOf(item); if(q.quadrant==="DEFER_OR_DELETE"&&!dueOf(item)&&q.isSuggestion) return ""; const L=taskLabel(q.importance,q.urgency);
                 return html`<span style=${{flexShrink:0,fontSize:10.5,fontWeight:700,color:L.color,border:"1px solid "+L.color,borderRadius:20,padding:"1px 7px"}} title=${L.hint}>${L.icon}${L.label}</span>`; })()}
               ${dueOf(item)&&html`<span style=${{flexShrink:0,fontSize:10.5,color:quadrantOf(item).overdue?"#dc2626":"var(--sub)",fontWeight:quadrantOf(item).overdue?700:400}}>${dueLabel(dueOf(item), quadrantOf(item).overdue)}</span>`}
               ${estOf(item)>0&&html`<span style=${{flexShrink:0,fontSize:11,fontWeight:600,color:isDone(item)?"var(--sub)":"var(--accent)",background:isDone(item)?"var(--bg)":"var(--accent-l)",borderRadius:20,padding:"2px 8px",marginTop:1}}>⏱${estOf(item)}分</span>`}
             </button>
+            <!-- ★手動並び替え★ 自動の順位とは別に、本人の順を持たせる。
+                 期限超過だけは下へ動かしても先頭に出る（サーバー側で保証） -->
+            ${!isDone(item)&&incompleteItems.length>1&&html`
+              <span style=${{flexShrink:0,display:"flex",flexDirection:"column",gap:1,paddingRight:10,paddingTop:8}}>
+                <button onClick=${()=>moveTask(item,-1)} aria-label="上へ移動" disabled=${incompleteItems.indexOf(item)===0}
+                  style=${{background:"none",border:"none",padding:"1px 4px",cursor:"pointer",fontSize:11,lineHeight:1.1,
+                           color:incompleteItems.indexOf(item)===0?"var(--border)":"var(--sub)",fontFamily:"inherit"}}>▲</button>
+                <button onClick=${()=>moveTask(item,1)} aria-label="下へ移動" disabled=${incompleteItems.indexOf(item)===incompleteItems.length-1}
+                  style=${{background:"none",border:"none",padding:"1px 4px",cursor:"pointer",fontSize:11,lineHeight:1.1,
+                           color:incompleteItems.indexOf(item)===incompleteItems.length-1?"var(--border)":"var(--sub)",fontFamily:"inherit"}}>▼</button>
+              </span>`}
             </div>`;
           return html`
             ${incompleteItems.length>0
@@ -5896,7 +5956,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260802-154554";
+const APP_BUILD = "20260802-155625";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
