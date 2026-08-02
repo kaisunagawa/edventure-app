@@ -632,6 +632,11 @@ async function flushTaskQueue(){
     let changed = false;
     q.forEach(x => {
       if (x.state !== "conflict") return;
+      // 並び替えは確認不要（中身ではない）。溜まっていたら流す
+      if (x.field_name === "sort_order" || (x.changes && x.changes.sort_order !== undefined)) {
+        delete x.base_values; delete x.field_name; delete x.server_value; delete x.base_value;
+        delete x.base_version; x.state = "pending"; delete x.server; changed = true; return;
+      }
       if (x.field_name) return;                 // 同じ項目の衝突。本人に選ばせる
       delete x.base_version; x.state = "pending"; delete x.server; changed = true;
     });
@@ -1210,7 +1215,7 @@ const getTimeBlocks = () => { const {start,end}=getLogHours(); return ALL_TIME_B
 const TIME_BLOCKS = getTimeBlocks();
 
 // ── Home ──
-function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, studentCohort, recordDays, onGoTimer}) {
+function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, studentCohort, recordDays, onGoTimer, onToast}) {
   const [report, setReport] = useState(null);
   const [schedule, setSchedule] = useState([]);
   const [game, setGame] = useState(null);
@@ -1227,6 +1232,12 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
   const [taskCarry, setTaskCarry] = useState(()=>{
     try { return JSON.parse(localStorage.getItem("jiroku_task_carry_"+formatDateStr(new Date()))||"{}")||{}; } catch(e){ return {}; }
   });
+  // 3か月目標（数値・ペース付き）。旧「目標1/目標2」は文言と期限だけなので別物
+  const [goalTree, setGoalTree] = useState(()=>{
+    try { return JSON.parse(localStorage.getItem("cache_goaltree")||"null"); } catch(e){ return null; }
+  });
+  const [mainGoalIdx, setMainGoalIdx] = useState(0);   // 主目標。他の目標へ切り替えられる
+  const [homeGoalSheet, setHomeGoalSheet] = useState(false);   // ホームから目標編集を開く
   const [taskWhy, setTaskWhy] = useState({});          // なぜ上に来ているかの理由（サーバー算出）
   const [taskOrder, setTaskOrder] = useState(()=>{     // 本人が並べ替えた順（sort_order）
     try { return JSON.parse(localStorage.getItem("jiroku_task_order_"+formatDateStr(new Date()))||"{}")||{}; } catch(e){ return {}; }
@@ -1564,6 +1575,11 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
       if(r && r.ok && r.data) applyHome(r.data);
       else legacyFetch();
     }).catch(legacyFetch);
+    // 3か月目標（数値とペース）。統合APIには乗っていないので別に取る
+    gasApi("getGoalTree").then(r=>{
+      if(r && r.ok && r.data){ setGoalTree(r.data);
+        try { localStorage.setItem("cache_goaltree", JSON.stringify(r.data)); } catch(e){} }
+    }).catch(()=>{});
 
     // カレンダー連携済みなら本人権限で直接取得（GAS経由はスクリプト所有者しか読めないためのフォールバック）
     if(localStorage.getItem("cal_linked")){
@@ -1747,8 +1763,8 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
       if (!id) return;
       const before = taskOrder[id];
       if (before === next[id]) return;
-      enqueueTaskMutation("UPDATE", id, { sort_order: next[id] },
-                          { sort_order: (before === undefined ? "" : before) });
+      // 並び替えは中身ではないので、確認を求めず後勝ちにする（base_valuesを送らない）
+      enqueueTaskMutation("UPDATE", id, { sort_order: next[id] });
     });
   };
 
@@ -2213,6 +2229,80 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
 
     ${showCommunity&&html`<${CommunityOverlay} onClose=${()=>setShowCommunity(false)}/>`}
 
+    <!-- ★3か月目標（自己経営OSホーム）★
+         文言だけの旧「目標1/2」と違い、数値・進捗・ペース・予測を出す。
+         判定できないときは数字を作らず、なぜ出せないかを書く。 -->
+    ${(()=>{
+      const gs = ((goalTree&&goalTree.goals)||[]).filter(g=>String(g.status||"ACTIVE").toUpperCase()!=="ARCHIVED");
+      if (!gs.length) return "";
+      const i = Math.min(mainGoalIdx, gs.length-1);
+      const g = gs[i];
+      const p = g.pace || {};
+      const num = v => (v===null||v===undefined||v==="") ? null : Number(v);
+      const fmt = v => { const n=num(v); return n===null ? "—" : (Math.round(n*10)/10).toLocaleString(); };
+      const STATUS = { ON_TRACK:["順調","var(--green,#1D9E75)"], SLIGHTLY_BEHIND:["やや遅れ","var(--amber,#BA7517)"],
+                       BEHIND:["遅れ","var(--red,#d33)"], ACHIEVED:["達成🎉","var(--accent)"],
+                       ENDED_SHORT:["期間終了・未達","var(--red,#d33)"], UNKNOWN:["まだ判断できません","var(--sub)"] };
+      const st = STATUS[p.status] || STATUS.UNKNOWN;
+      const CONF = { HIGH:"高", MEDIUM:"中", LOW:"低" };
+      const pct = num(p.progressPct);
+      return html`
+      <div style=${{margin:"16px 16px 0",background:"var(--card)",borderRadius:16,border:"1px solid var(--border)",padding:"14px 16px"}}>
+        <div style=${{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+          <div style=${{fontSize:11,fontWeight:700,color:"var(--sub)"}}>🎯 3か月目標</div>
+          ${gs.length>1&&html`
+            <div style=${{display:"flex",gap:4}}>
+              ${gs.map((x,k)=>html`<button key=${k} onClick=${()=>setMainGoalIdx(k)}
+                aria-label=${`目標${k+1}へ切り替え`}
+                style=${{width:22,height:22,borderRadius:"50%",cursor:"pointer",fontFamily:"inherit",fontSize:10.5,fontWeight:700,
+                         border:`1px solid ${k===i?"var(--accent)":"var(--border)"}`,
+                         background:k===i?"var(--accent)":"transparent",color:k===i?"#fff":"var(--sub)"}}>${k+1}</button>`)}
+            </div>`}
+        </div>
+        <div style=${{fontSize:15,fontWeight:800,color:"var(--text)",lineHeight:1.5,marginBottom:8}}>${g.title}</div>
+        ${num(p.target)!==null
+          ? html`
+            <div style=${{display:"flex",alignItems:"baseline",gap:6,marginBottom:6}}>
+              <span style=${{fontSize:20,fontWeight:800,color:"var(--text)",lineHeight:1}}>${fmt(p.current)}</span>
+              <span style=${{fontSize:12.5,color:"var(--sub)",fontWeight:600}}>/ ${fmt(p.target)}${p.unit||""}</span>
+              ${pct!==null&&html`<span style=${{fontSize:12.5,color:"var(--sub)"}}>（${Math.round(pct)}%）</span>`}
+            </div>
+            <div style=${{height:7,background:"var(--bg)",borderRadius:99,overflow:"hidden",marginBottom:9}}>
+              <div style=${{height:"100%",width:Math.min(100,Math.max(0,pct||0))+"%",background:"var(--accent)",borderRadius:99,transition:"width .5s ease"}}/>
+            </div>
+            <div style=${{display:"flex",flexWrap:"wrap",gap:"3px 14px",fontSize:11.5,color:"var(--sub)",lineHeight:1.7,marginBottom:7}}>
+              <span>残り <b style=${{color:"var(--text)"}}>${fmt(p.remaining)}${p.unit||""}</b></span>
+              ${p.remainingDays!==undefined&&html`<span>あと <b style=${{color:"var(--text)"}}>${p.remainingDays}日</b>（${p.elapsedDays}/${p.totalDays}日経過）</span>`}
+              ${num(p.requiredPerWeek)!==null&&html`<span>必要 <b style=${{color:"var(--text)"}}>${fmt(p.requiredPerWeek)}${p.unit||""}/週</b></span>`}
+              ${num(p.actualPerWeek)!==null
+                ? html`<span>実績 <b style=${{color:"var(--text)"}}>${fmt(p.actualPerWeek)}${p.unit||""}/週</b></span>`
+                : html`<span>実績ペース <b style=${{color:"var(--text)"}}>—</b></span>`}
+            </div>
+            <div style=${{fontSize:11.5,lineHeight:1.7}}>
+              <span style=${{color:st[1],fontWeight:700}}>${st[0]}</span>
+              ${num(p.forecast)!==null&&html`<span style=${{color:"var(--sub)"}}> ・このままなら <b style=${{color:"var(--text)"}}>${fmt(p.forecast)}${p.unit||""}</b> で着地</span>`}
+              ${p.confidence&&html`<span style=${{color:"var(--sub)"}}> ・確からしさ ${CONF[p.confidence]||p.confidence}</span>`}
+              ${p.period&&html`<span style=${{color:"var(--sub)"}}> ・集計 ${p.period}</span>`}
+            </div>
+            ${p.note&&html`<div style=${{fontSize:11,color:"var(--sub)",marginTop:5,lineHeight:1.6}}>${p.note}</div>`}
+            <div style=${{fontSize:10.5,color:"var(--sub)",marginTop:5}}>現在値は自己申告（本人が入力した値）です</div>`
+          : html`
+            <div style=${{fontSize:12,color:"var(--sub)",lineHeight:1.7,marginBottom:8}}>
+              目標の数値がまだ入っていないので、進み具合を出せません。<br/>
+              「いくつまで」を決めると、必要なペースと着地の予測が出せるようになります。
+            </div>`}
+        <button onClick=${()=>setHomeGoalSheet(true)}
+          style=${{marginTop:10,width:"100%",padding:"9px",background:"none",border:"1px solid var(--border)",borderRadius:10,color:"var(--accent)",fontSize:12.5,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
+          ${num(p.target)!==null?"目標を編集する":"数値を設定する"}
+        </button>
+      </div>`;
+    })()}
+
+    ${homeGoalSheet&&html`<${GoalTreeSheet} onClose=${()=>{ setHomeGoalSheet(false);
+      gasApi("getGoalTree").then(r=>{ if(r&&r.ok&&r.data){ setGoalTree(r.data);
+        try { localStorage.setItem("cache_goaltree", JSON.stringify(r.data)); } catch(e){} } });
+    }} onToast=${onToast}/>`}
+
     <!-- 週次ふりかえり（今週のまとめ＋振り返り記入＋来週の一言）。週末（土日）に、未記入かつ未閉じの時だけ大きく出す -->
     ${weekly && !weekly.reflected && !weekDismissed && shouldShowWeeklyReview(weekly) && html`
       <div style=${{margin:"16px 16px 0",background:"var(--card)",borderRadius:16,border:"1.5px solid var(--accent)",overflow:"hidden"}}>
@@ -2548,7 +2638,8 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
           ${(()=>{
             // 変更内容を日本語で読めるようにする（status=IN_PROGRESS のような表示をしない）
             const FIELD = { title:"名前", status:"進捗", importance_level:"重要度", due_at:"期限",
-                            estimated_minutes:"想定時間", memo:"メモ", context:"分類", date:"日付" };
+                            estimated_minutes:"想定時間", memo:"メモ", context:"分類", date:"日付",
+                            sort_order:"並び順", completion_condition:"完了の条件" };
             const VAL = { TODO:"予定", IN_PROGRESS:"実行中", DONE:"完了", CARRIED_OVER:"持ち越し",
                           HIGH:"高", MEDIUM:"中", LOW:"低",
                           UNSET:"未設定", WORK:"仕事", PERSONAL:"プライベート", LEARNING:"学び", HEALTH:"健康", OTHER:"その他" };
@@ -5956,7 +6047,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260802-155625";
+const APP_BUILD = "20260802-160409";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
@@ -7237,7 +7328,7 @@ function App() {
       ${!calLinked && !calBannerDismissed && !isServerCalendar() && html`<${CalendarLinkBanner} onGoToSettings=${()=>setTab("settings")} onDismiss=${()=>setCalBannerDismissed(true)}/>`}
       <div style=${{position:"relative",flex:1,minHeight:0}}>
         <div class="screen">
-          <div style=${{display:tab==="home"?"block":"none"}}><${HomeScreen} goalData=${goalData} onGoalSaved=${setGoalData} profile=${profile} isActive=${tab==="home"} showInCommunity=${user.showInCommunity!==false} studentCohort=${user.cohort||""} recordDays=${user.recordDays} onGoTimer=${()=>setTab("timer")}/></div>
+          <div style=${{display:tab==="home"?"block":"none"}}><${HomeScreen} goalData=${goalData} onGoalSaved=${setGoalData} profile=${profile} isActive=${tab==="home"} showInCommunity=${user.showInCommunity!==false} studentCohort=${user.cohort||""} recordDays=${user.recordDays} onGoTimer=${()=>setTab("timer")} onToast=${setToast}/></div>
           <div style=${{display:tab==="log"?"block":"none"}}><${LogScreen} onToast=${setToast} isActive=${tab==="log"}/></div>
           <div style=${{display:tab==="report"?"block":"none"}}><${ReportScreen}/></div>
           <div style=${{display:tab==="brain"?"block":"none"}}><${SecondBrainScreen} isActive=${tab==="brain"}/></div>

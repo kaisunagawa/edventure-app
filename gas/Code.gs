@@ -11182,11 +11182,19 @@ function saveTask(studentEmail, body) {
         if (k === "status") return normalizeTaskStatus(v);
         return String(v).trim();
       };
-      const keys = Object.keys(bv);
+      // ★並び替え（sort_order）では確認を求めない★
+      //   並び順は本人が見て決め直せるもので、中身ではない。
+      //   しかも並べ替えは複数タスクをまとめて送るため、自分の送信同士で
+      //   ぶつかって「確認してください」が出てしまう（実際に出た）。後勝ちでよい。
+      const NEVER_ASK = { sort_order: 1 };
+      const keys = Object.keys(bv).filter(function (k) { return !NEVER_ASK[k]; });
       for (let i = 0; i < keys.length; i++) {
         const f = keys[i];
         const serverVal = norm(f, existing[f]);
         const baseVal = norm(f, bv[f]);
+        // ★同じ値になるなら聞かない★ 結果が変わらない確認は手間なだけ
+        const wantVal = norm(f, body[f]);
+        if (serverVal === wantVal) continue;
         if (serverVal !== baseVal) {
           authAudit("TASK_FIELD_CONFLICT", { result: "DENY", action: "saveTask",
                     failureReason: "task=" + id + " field=" + f });
