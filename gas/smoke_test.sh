@@ -204,6 +204,25 @@ PY
     ng "actions を文字列前提で読んでいる箇所がある（${bad}箇所中 ${norm} だけ正規化）"
   fi
 
+  # ★設定の受け取りが、タスク一覧の条件に閉じ込められていないこと★
+  # 取り込み処理を「端末にタスクが無いとき」の中に入れていたため、
+  # 既にタスクがある端末では一度も動かなかった。
+  # PCにはタスクがあるので、スマホの設定が永久に届かなかった（Kaiの指摘）。
+  if python3 -c "
+import sys
+s=open('../index.html').read()
+i=s.index('if(d.todayActions){')
+seg=s[i:i+4000]
+# 一覧を受け取る if の中に takeIn が入っていたら閉じ込められている
+k=seg.index('localStorage.getItem(\"jiroku_custom_actions_\"+todayStr) === null')
+end=seg.index('        }', k)
+sys.exit(1 if 'takeIn' in seg[k:end] else 0)
+" 2>/dev/null; then
+    ok "設定の受け取りが一覧の条件に閉じ込められていない"
+  else
+    ng "設定の受け取りが「端末にタスクが無いとき」の中にある ─ 既存端末に届かない"
+  fi
+
   # ★設定を変えたらサーバーへ送ること★
   # 重要度・期限・想定時間・メモは localStorage に書くだけで、
   # タスクの追加や編集をしたついでにしか送られていなかった。

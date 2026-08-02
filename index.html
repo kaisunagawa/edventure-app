@@ -1333,18 +1333,27 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
       }
       // 今日のアクションの端末間同期
       if(d.todayActions){
+        // ★タスク一覧は「端末に無いときだけ」受け取る★
+        //   端末で編集中の一覧をサーバーの内容で置き換えると、
+        //   いま足したタスクが消える。
         if(d.todayActions.actions !== null && localStorage.getItem("jiroku_custom_actions_"+todayStr) === null){
           const fromServer = normalizeTaskList(d.todayActions.actions);
           setCustomActions(fromServer);
           localStorage.setItem("jiroku_custom_actions_"+todayStr, JSON.stringify(fromServer));
-          // ★他の端末で設定した重要度・期限・想定時間を取り込む★
-          //   ただし、この端末で既に設定してある値は上書きしない。
+        }
+        // ★設定（重要度・期限・想定時間・メモ・進捗）は常に受け取る★
+        //   以前はこの処理を上の if の中に入れていたため、
+        //   端末にタスクがあると一度も動かなかった。
+        //   PCには既にタスクがあるので、スマホの設定が永久に届かなかった。
+        //   一覧を受け取るかどうかと、設定を受け取るかどうかは別の話。
+        if(d.todayActions.actions !== null){
+          const meta = normalizeTaskList(d.todayActions.actions);
+          //   この端末で既に設定してある値は上書きしない。
           //   上書きすると「さっき変えたのに戻った」になる。
-          //   まだ持っていないものだけ足す。
           const takeIn = (cur, pick) => {
             const next = {...cur};
             let changed = false;
-            fromServer.forEach(t=>{
+            meta.forEach(t=>{
               const v = pick(t);
               if (v === undefined || v === "" || v === null) return;
               if (next[t.id] !== undefined) return;   // この端末の値を優先
@@ -5367,7 +5376,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260802-104515";
+const APP_BUILD = "20260802-105307";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
