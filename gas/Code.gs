@@ -1055,7 +1055,9 @@ function computeSelfMgmtPower(studentEmail, weekStart) {
   const tasks = p1List("Tasks", studentEmail).filter(function (t) { return !String(t.deleted_at || "").trim(); });
   const weekTasks = tasks.filter(function (t) { return inWeek(p1DateOut_(t.date)); });
   const logs = sheetToObjects(getSheet("DailyLog")).filter(function (l) {
-    return String(l.student_email) === studentEmail && inWeek(l.date); });
+    // 論理削除された記録は数えない
+    return String(l.student_email) === studentEmail && inWeek(l.date) &&
+           !String(l.deleted_at || "").trim(); });
   const goals = p1List("Goals", studentEmail).filter(function (g) { return p1Status_(g.status, "ACTIVE") !== "ARCHIVED"; });
   const wgs = p1List("WeeklyGoals", studentEmail).filter(function (w) { return p1Status_(w.status, "ACTIVE") === "ACTIVE"; });
 
@@ -1325,7 +1327,9 @@ function computeDailyOpsFacts(studentEmail, dateStr, fixture) {
   const date = String(dateStr || formatDate(new Date())).slice(0, 10);
   const fx = fixture || null;
   const logs = fx ? (fx.logs || []) : sheetToObjects(getSheet("DailyLog")).filter(function (l) {
-    return String(l.student_email) === studentEmail && String(l.date).slice(0, 10) === date; });
+    // 論理削除された記録は数えない（消したのに評価へ残るのを防ぐ）
+    return String(l.student_email) === studentEmail && String(l.date).slice(0, 10) === date &&
+           !String(l.deleted_at || "").trim(); });
   const tasks = fx ? (fx.tasks || []) : p1List("Tasks", studentEmail).filter(function (t) {
     return !String(t.deleted_at || "").trim() && p1DateOut_(t.date) === date; });
   const journal = fx ? (fx.journal || {}) : (sheetToObjects(getJournalSheet()).find(function (r) {
