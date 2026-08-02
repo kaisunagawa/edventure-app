@@ -578,6 +578,7 @@ function doPost(e) {
       // ── Checkpoint 3: タスク（重要度・緊急度）──
       case "getSprints":  return jsonResponse(getSprints(studentEmail, body));
       case "saveSprint":  return jsonResponse(saveSprint(studentEmail, body));
+      case "migrateTasksToSheet": return jsonResponse(migrateTasksToSheet(studentEmail, body));
       case "getTasks":    return jsonResponse(getTasks(studentEmail, body));
       case "saveTask":    return jsonResponse(saveTask(studentEmail, body));
       case "deleteTask":  return jsonResponse(deleteTask(studentEmail, body));
@@ -9680,7 +9681,7 @@ const ACTION_POLICIES = {
 const ACTION_POLICIES_WRITE = {
   saveLog:{}, saveLogMulti:{}, quickLog:{}, deleteLog:{}, saveSettings:{}, saveOnboarding:{},
   saveTodayActions:{}, saveGoal:{}, saveWeeklyGoal:{}, archiveGoalItem:{}, migrateLocalTasks:{},
-  saveTask:{}, deleteTask:{}, saveSprint:{},
+  saveTask:{}, deleteTask:{}, saveSprint:{}, migrateTasksToSheet:{},
   submitSurvey:{}, syncCalendar:{}, sendMessage:{}, saveWeeklyReflection:{}, saveContentProfile:{},
   generateWorkReport:{}, snsSaveAccount:{}, snsSaveMetrics:{}, snsSavePost:{}
 };
@@ -10438,6 +10439,107 @@ function saveSprint(studentEmail, body) {
 
   const r = p1Upsert("Sprints", "sprint_id", rec);
   return { ok: true, id: r.id, created: r.created };
+}
+
+// ══════════════════════════════════════════════════════════════════
+// Journal.actions → Tasks シートへの移行（Phase 3）
+//
+// いまタスクは Journal の1列にJSONで入っている。Tasksシート（23列）は空。
+// Tasksシートを正にすると、日をまたいだ持ち越しや着手時刻を追える。
+// いまは保存キーが日付ごとなので、翌日は別のタスクになってしまう。
+//
+// ★冪等にする★
+//   同じ task_id は何度実行しても1件のまま。
+//   既にサーバーにある値を、クライアントの値で上書きしない
+//   （別の端末で編集された内容を、古い端末が巻き戻してしまう）。
+//
+// ★競合は勝手に解決しない★
+//   同じ task_id で内容が食い違ったら、直さずに数えて報告する。
+//   どちらが正しいかは、こちらでは判断できない。
+// ══════════════════════════════════════════════════════════════════
+function migrateTasksToSheet(studentEmail, body) {
+  const chk = p1RequireUser(studentEmail);
+  if (!chk.ok) return chk;
+
+  let items;
+  try { items = JSON.parse(String((body && body.items) || "[]")); }
+  catch (e) { return { ok: false, error: "items を読めませんでした" }; }
+  if (!Array.isArray(items)) return { ok: false, error: "items が配列ではありません" };
+  if (items.length > 500) return { ok: false, error: "件数が多すぎます（500件まで）" };
+
+  const date = String((body && body.date) || formatDate(new Date())).slice(0, 10);
+  const confirm = String((body && body.confirm) || "") === "yes";
+
+  const existing = p1List("Tasks", studentEmail);
+  const byId = {};
+  existing.forEach(function (t) { byId[String(t.task_id)] = t; });
+
+  const plan = { create: [], alreadySame: [], conflict: [], skipped: [] };
+
+  items.forEach(function (it) {
+    const id = String((it && (it.id || it.task_id)) || "").trim();
+    const title = String((it && it.title) || "").trim();
+    if (!id || !title) { plan.skipped.push({ reason: "id か title が無い" }); return; }
+
+    const cur = byId[id];
+    if (!cur) {
+      plan.create.push({ id: id, title: title });
+      return;
+    }
+    // 既にある。内容が違えば競合として数えるだけ（直さない）
+    const diffs = [];
+    if (String(cur.title || "") !== title) diffs.push("title");
+    const impNew = String(it.imp || ""), impCur = String(cur.importance_level || "");
+    if (impNew && impCur && impNew !== impCur) diffs.push("importance_level");
+    const dueNew = String(it.due || ""), dueCur = String(cur.due_at || "").slice(0, 10);
+    if (dueNew && dueCur && dueNew !== dueCur) diffs.push("due_at");
+    if (diffs.length) plan.conflict.push({ id: id, title: title, fields: diffs, server: {
+      title: cur.title, importance_level: cur.importance_level, due_at: cur.due_at } });
+    else plan.alreadySame.push({ id: id });
+  });
+
+  const counts = {
+    before: existing.length,
+    incoming: items.length,
+    willCreate: plan.create.length,
+    alreadySame: plan.alreadySame.length,
+    conflict: plan.conflict.length,
+    skipped: plan.skipped.length
+  };
+
+  if (!confirm) {
+    return { ok: true, dryRun: true, date: date, counts: counts,
+             conflicts: plan.conflict.slice(0, 20),
+             note: "confirm=yes で実行します。競合があるものは作成しません（報告のみ）" };
+  }
+
+  // ★競合しているものは触らない★ 新規だけ作る
+  let created = 0;
+  plan.create.forEach(function (c) {
+    const src = items.find(function (x) { return String(x.id || x.task_id) === c.id; }) || {};
+    p1Upsert("Tasks", "task_id", {
+      task_id: c.id,
+      student_email: studentEmail,
+      date: date,
+      title: c.title,
+      importance_level: String(src.imp || ""),
+      due_at: String(src.due || ""),
+      estimated_minutes: (Number(src.est) > 0 ? Number(src.est) : ""),
+      memo: String(src.memo || ""),
+      status: normalizeTaskStatus(src.stt === "done" ? "DONE" : src.stt)
+    });
+    created++;
+  });
+
+  const after = p1List("Tasks", studentEmail).length;
+  authAudit("TASK_MIGRATE", { result: "SUCCESS", action: "migrateTasksToSheet",
+            failureReason: "before=" + counts.before + " created=" + created +
+                           " conflict=" + counts.conflict + " after=" + after });
+
+  return { ok: true, dryRun: false, date: date,
+           counts: Object.assign({}, counts, { created: created, after: after }),
+           conflicts: plan.conflict.slice(0, 20),
+           rollback: "作成された task_id を deleteTask で論理削除するか、Tasksシートの該当行を削除する" };
 }
 
 // タスク一覧。並び順は「期限超過 → 重要かつ緊急 → 今日のフォーカス直結 →

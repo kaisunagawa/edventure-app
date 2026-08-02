@@ -1650,6 +1650,24 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
   // ★編集画面を開くたびに前回の警告を消す★
   // 残っていると、直したのに怒られ続けているように見える
   useEffect(()=>{ if(editMode) setEditError(""); },[editMode]);
+  // ★Tasksシートへの移行（Phase 3）の下見★
+  //   いまタスクは Journal の1列にJSONで入っており、Tasksシートは空。
+  //   移すと日をまたいだ持ち越しを追えるようになる。
+  //   まず「何件どうなるか」だけを出す。実行はしない。
+  //   window から呼べるようにしておく（画面には出さない。運用者用）。
+  useEffect(()=>{
+    window.jirokuTaskMigrationDryRun = async () => {
+      const items = (customActions||[]).map(t=>({
+        id:t.id, title:t.title,
+        imp:taskImportance[t.id]||"", due:taskDue[t.id]||"",
+        est:taskEstimates[t.id]||"", memo:taskNotes[t.id]||"", stt:taskStatus[t.id]||""
+      }));
+      const r = await gasApi("migrateTasksToSheet", { items: JSON.stringify(items), date: todayKey });
+      console.log("[JIROKU] タスク移行の下見:", r);
+      return r;
+    };
+  },[customActions, taskImportance, taskDue, taskEstimates, taskNotes, taskStatus, todayKey]);
+
   // 「＋ タスクを追加」用。未完了タスクに空欄を1つ足した状態で編集モーダルを開き、すぐ入力できる
   const openAddTask = () => {
     setEditItems([...toEditRows(actionItems.filter(t=>!isDone(t))), {text:"",min:""}]);
