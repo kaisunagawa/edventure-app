@@ -1265,6 +1265,8 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
   });
   const [mainGoalIdx, setMainGoalIdx] = useState(0);   // 主目標。他の目標へ切り替えられる
   const [homeGoalSheet, setHomeGoalSheet] = useState(false);   // ホームから目標編集を開く
+  const [goalQuick, setGoalQuick] = useState({current:"", start:"", end:""});   // 足りない値をその場で入れる
+  const [goalQuickSaving, setGoalQuickSaving] = useState(false);
   const [taskWhy, setTaskWhy] = useState({});          // なぜ上に来ているかの理由（サーバー算出）
   const [taskOrder, setTaskOrder] = useState(()=>{     // 本人が並べ替えた順（sort_order）
     try { return JSON.parse(localStorage.getItem("jiroku_task_order_"+formatDateStr(new Date()))||"{}")||{}; } catch(e){ return {}; }
@@ -2313,12 +2315,55 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
               ${p.period&&html`<span style=${{color:"var(--sub)"}}> ・集計 ${p.period}</span>`}
             </div>
             ${p.note&&html`<div style=${{fontSize:11,color:"var(--sub)",marginTop:5,lineHeight:1.6}}>${p.note}</div>`}
+            ${p.forecastWarning&&html`<div style=${{fontSize:11,color:"var(--amber,#BA7517)",marginTop:5,lineHeight:1.6}}>⚠ ${p.forecastWarning}</div>`}
             <div style=${{fontSize:10.5,color:"var(--sub)",marginTop:5}}>現在値は自己申告（本人が入力した値）です</div>`
           : html`
             <div style=${{fontSize:12,color:"var(--sub)",lineHeight:1.7,marginBottom:8}}>
-              目標の数値がまだ入っていないので、進み具合を出せません。<br/>
-              「いくつまで」を決めると、必要なペースと着地の予測が出せるようになります。
+              ${p.note || "目標の数値がまだ入っていないので、進み具合を出せません。"}
             </div>`}
+        ${num(p.target)!==null&&(p.missing||[]).length>0&&html`
+          <!-- ★その場で埋められるようにする★ 何が足りないかを言うだけだと、
+               設定画面まで辿り着かずに終わる -->
+          <div style=${{background:"var(--bg)",borderRadius:10,padding:"10px 12px",marginTop:8}}>
+            <div style=${{fontSize:11.5,color:"var(--sub)",marginBottom:8,lineHeight:1.6}}>
+              ${(p.missing||[]).join("と")}を入れると、必要なペースと着地の予測が出ます。
+            </div>
+            <div style=${{display:"flex",flexWrap:"wrap",gap:8,alignItems:"center"}}>
+              ${(p.missing||[]).indexOf("現在値")>=0&&html`
+                <label style=${{fontSize:11.5,color:"var(--sub)",display:"flex",alignItems:"center",gap:5}}>いま
+                  <input class="inp" type="number" inputmode="decimal" style=${{width:90,margin:0,textAlign:"right"}}
+                    value=${goalQuick.current} onInput=${e=>setGoalQuick({...goalQuick, current:e.target.value})}/>
+                  ${g.unit||""}</label>`}
+              ${(p.missing||[]).indexOf("開始日")>=0&&html`
+                <label style=${{fontSize:11.5,color:"var(--sub)",display:"flex",alignItems:"center",gap:5}}>開始
+                  <input class="inp" type="date" style=${{width:150,margin:0}}
+                    value=${goalQuick.start} onInput=${e=>setGoalQuick({...goalQuick, start:e.target.value})}/></label>`}
+              ${(p.missing||[]).indexOf("終了日")>=0&&html`
+                <label style=${{fontSize:11.5,color:"var(--sub)",display:"flex",alignItems:"center",gap:5}}>期限
+                  <input class="inp" type="date" style=${{width:150,margin:0}}
+                    value=${goalQuick.end} onInput=${e=>setGoalQuick({...goalQuick, end:e.target.value})}/></label>`}
+              <button disabled=${goalQuickSaving} onClick=${async()=>{
+                const body = {...g};
+                if (goalQuick.current !== "") body.current_value = goalQuick.current;
+                if (goalQuick.start) body.start_date = goalQuick.start;
+                if (goalQuick.end) body.end_date = goalQuick.end;
+                delete body.pace; delete body.paceLabel; delete body.weeklyGoals;
+                delete body.current_value_source;
+                setGoalQuickSaving(true);
+                const r = await gasPostJson("saveGoal", body);
+                setGoalQuickSaving(false);
+                if (r && r.ok) {
+                  setGoalQuick({current:"",start:"",end:""});
+                  const t = await gasApi("getGoalTree");
+                  if (t && t.ok && t.data) { setGoalTree(t.data);
+                    try { localStorage.setItem("cache_goaltree", JSON.stringify(t.data)); } catch(e){} }
+                  onToast && onToast("保存しました");
+                } else onToast && onToast((r&&r.error)||"保存できませんでした");
+              }}
+                style=${{padding:"8px 14px",borderRadius:10,border:"none",background:"var(--accent)",color:"#fff",fontSize:12.5,fontWeight:700,cursor:"pointer",fontFamily:"inherit",opacity:goalQuickSaving?0.6:1}}>
+                ${goalQuickSaving?"保存中…":"保存"}</button>
+            </div>
+          </div>`}
         <button onClick=${()=>setHomeGoalSheet(true)}
           style=${{marginTop:10,width:"100%",padding:"9px",background:"none",border:"1px solid var(--border)",borderRadius:10,color:"var(--accent)",fontSize:12.5,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
           ${num(p.target)!==null?"目標を編集する":"数値を設定する"}
@@ -6083,7 +6128,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260802-161250";
+const APP_BUILD = "20260802-162313";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 

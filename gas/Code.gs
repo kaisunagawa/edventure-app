@@ -8255,6 +8255,14 @@ function getGoalTree(studentEmail) {
         start_date: g.start_date, end_date: g.end_date,
         why: g.why, success_condition: g.success_condition, guardrails: g.guardrails,
         priority: g.priority, status: p1Status_(g.status, "ACTIVE"),
+        evidence: g.evidence,
+        // ★進捗とペース★ 上で計算していたのに、ここで拾い忘れていて
+        //   画面には何も出せていなかった（数字が消えるだけで理由も出なかった）
+        pace: g.pace, paceLabel: g.paceLabel,
+        // 現在値の出どころ。本人が入れた値なのか、記録から集計した値なのかを区別する。
+        // いまは本人入力のみ。DailyLog集計や外部連携を足すときにここを分ける
+        current_value_source: (g.current_value === "" || g.current_value === null ||
+                               g.current_value === undefined) ? "NONE" : "USER_ENTERED",
         weeklyGoals: (byGoal[String(g.quarterly_goal_id)] || []).map(withProgress)
       })),
       orphanWeeklyGoals: orphans.map(withProgress)
@@ -10504,7 +10512,13 @@ function computePace(startDate, endDate, current, target, unit, todayStr) {
 
   if (!hasTarget || !sd || !ed) {
     out.status = "UNKNOWN";
-    out.note = !hasTarget ? "目標値が未入力のため判定できません" : "期間が未設定のため判定できません";
+    // ★何を入れれば出せるのかまで言う★ 「判定できません」だけだと直しようがない
+    const missing = [];
+    if (!hasTarget) missing.push("目標値");
+    if (!sd) missing.push("開始日");
+    if (!ed) missing.push("終了日");
+    out.missing = missing;
+    out.note = missing.join("と") + "が未入力のため、必要なペースと着地の予測を出せません";
     return out;
   }
   const d1 = new Date(sd + "T00:00:00+09:00").getTime();
@@ -10520,7 +10534,8 @@ function computePace(startDate, endDate, current, target, unit, todayStr) {
 
   if (!hasCurrent) {
     out.status = "UNKNOWN";
-    out.note = "現在値が未入力のため判定できません（0ではなく、記録がないという意味です）";
+    out.missing = ["現在値"];
+    out.note = "現在値が未入力のため判定できません（0ではなく、まだ記録していないという意味です）";
     return out;
   }
 
@@ -10528,14 +10543,19 @@ function computePace(startDate, endDate, current, target, unit, todayStr) {
   out.remaining = paceRound(Math.max(tgt - cur, 0));
   out.progressPct = tgt > 0 ? paceRound(cur / tgt * 100) : null;
 
-  // 実績ペース。経過が短すぎるとブレるので、日数が足りないときは出さない。
-  // 「1日で全体の1%進んだから週7%」は、判断材料として危ない。
-  if (elapsedDays >= 3) {
+  // ★実績ペースは、経過が十分あるときだけ出す★
+  //   現在値は「開始日からの積み上げ」として扱うが、本人が入力するのは
+  //   多くの場合そのときの累計で、開始前のぶんも含む。経過3日で
+  //   「128万 ÷ 3日 × 7 = 週299万」「着地3,968万」のような、
+  //   実際に出た数字を出してしまう（目標400万に対して10倍）。
+  //   短い期間から長期を占わない。7日未満は出さない。
+  if (elapsedDays >= 7) {
     out.actualPerWeek = paceRound(cur / elapsedDays * 7);
-    out.confidence = elapsedDays >= 14 ? "HIGH" : "MEDIUM";
+    out.confidence = elapsedDays >= 21 ? "HIGH" : "MEDIUM";
   } else {
     out.actualPerWeek = null;
-    out.note = "経過日数が少ないため、実績ペースはまだ出せません";
+    out.confidence = "LOW";
+    out.note = "始めてから" + elapsedDays + "日なので、実績ペースと着地の予測はまだ出せません（7日を過ぎると出ます）";
   }
   // 必要ペース
   out.requiredPerWeek = remainingDays > 0
@@ -10549,6 +10569,12 @@ function computePace(startDate, endDate, current, target, unit, todayStr) {
     //   最初は8割を境にしていたが、それだと目標を2割落としても
     //   「やや遅れ」と表示される。手遅れになるまで「まあ大丈夫」と
     //   思わせてしまう。あと一息（95%以上）だけを「やや遅れ」にする。
+    // 予測が目標を大きく超えるのは、たいてい現在値が開始前のぶんを含んでいる。
+    // 「順調」と言い切らず、確認を促す
+    if (out.forecast > tgt * 2) {
+      out.forecastWarning = "現在値に開始日より前のぶんが含まれていないか確認してください（予測が目標の2倍を超えています）";
+      out.confidence = "LOW";
+    }
     if (out.forecast >= tgt) out.status = "ON_TRACK";
     else if (out.forecast >= tgt * 0.95) out.status = "SLIGHTLY_BEHIND";
     else out.status = "BEHIND";
