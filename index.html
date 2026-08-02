@@ -1250,6 +1250,10 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
   const [showCommunity, setShowCommunity] = useState(false);
   const [statusSummary, setStatusSummary] = useState(null);
   const [showStatusTip, setShowStatusTip] = useState(false);
+  // 自己経営力（feature: self_mgmt_power_v1）。取れなければ従来のステータスを出す
+  const [smp, setSmp] = useState(null);
+  const [smpDetail, setSmpDetail] = useState(false);
+  const [smpWeek, setSmpWeek] = useState("cur");
   const [todayLogs, setTodayLogs] = useState([]);
   const [checked, setChecked] = useState(()=>JSON.parse(localStorage.getItem("today_actions")||"{}"));
   // タスクの文脈（仕事/プライベート等）と持ち越し回数。Tasksシートが正
@@ -1615,6 +1619,9 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
       if(r && r.ok && r.data) applyHome(r.data);
       else legacyFetch();
     }).catch(legacyFetch);
+    // 自己経営力。featureが無い人には feature not enabled が返るので、その時は出さない
+    gasApi("getSelfMgmtPower", { withPrev: "1" }).then(r=>{
+      if(r && r.ok && r.data) setSmp(r); }).catch(()=>{});
     // スプリント（2週間）。3か月目標と今日の間をつなぐ層
     gasApi("getSprints").then(r=>{
       if(r && r.ok){ setSprints(r);
@@ -2517,7 +2524,6 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
         const hh=Math.floor(goalMins/60), mm=goalMins%60;
         const goals2=((goalTree&&goalTree.goals)||[]).filter(g=>String(g.status||"ACTIVE").toUpperCase()!=="ARCHIVED");
         const parent=goals2[Math.min(mainGoalIdx,Math.max(0,goals2.length-1))];
-        const relCount=(actionItems||[]).length;
         // 円形の進捗リング
         const R=26, C=2*Math.PI*R;
         return html`
@@ -2532,16 +2538,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
                              textDecoration:intent.done?"line-through":"none",opacity:intent.done?0.6:1,overflowWrap:"anywhere"}}>
                 ${intent.intent}${intent.done?" 達成🎉":""}</span>
             </button>
-            ${relCount>0&&html`
-              <!-- ★押した先を一致させる★ 「関連タスク」で3か月目標が開くのは
-                   期待と違う。今日のタスク一覧まで運ぶ -->
-              <button onClick=${()=>{
-                  const el=[].slice.call(document.querySelectorAll("div"))
-                    .find(function(x){ return x.children.length===0 && x.textContent.trim()==="今日のタスク"; });
-                  if(el) el.scrollIntoView({behavior:"smooth",block:"start"});
-                }}
-                style=${{background:"none",border:"none",padding:"5px 0 0",cursor:"pointer",fontFamily:"inherit",
-                         fontSize:11.5,color:"var(--accent)",fontWeight:700}}>関連タスク ${relCount}件 ›</button>`}
+
           </div>
           <div style=${{flexShrink:0,textAlign:"center"}}>
             <svg width="62" height="62" viewBox="0 0 62 62">
@@ -3064,8 +3061,142 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
       </div>`;
     })(), document.body)}
 
-    <!-- ステータス -->
-    ${statusSummary&&html`
+    <!-- ★自己経営力の詳細★ 内部キーや英語の状態コード、JSONは出さない -->
+    ${smpDetail&&smp&&smp.data&&(()=>{
+      const src = smpWeek==="prev" && smp.prev ? smp.prev : smp.data;
+      const M = src.metrics || [];
+      const CONF = { HIGH:"高", MEDIUM:"中", LOW:"低", NONE:"—" };
+      const view = (m) => {
+        if (m.evaluation_state === "evaluated") return m.status_label;
+        if (m.evaluation_state === "not_evaluable") return "今週は評価対象なし";
+        if (m.evaluation_state === "excluded_by_exception") return "今回は評価しない";
+        const c = m.reason_code || "";
+        if (c === "TIME_CLASSIFICATION_UNAVAILABLE" || c === "AVAILABLE_TIME_MISSING") return "準備中";
+        if (c === "OBSERVATION_PERIOD_TOO_SHORT" || c === "NO_RECORDS_YET" || c === "NOT_ENOUGH_DAYS") return "データ蓄積中";
+        return "データ不足";
+      };
+      const HINT = {
+        result_power: "今週の目標に、今日の行動を1つ結びつけてみましょう。",
+        time_allocation_power: "大事な仕事から先に時間を取りましょう。",
+        execution_power: "期限内に終えられる量へ、予定を少し絞りましょう。",
+        continuity_power: "1日に詰め込みすぎず、日をまたいで分けましょう。",
+        recovery_power: "崩れた翌日に、小さく1つだけ再開してみましょう。"
+      };
+      return html`
+      <div style=${{position:"fixed",inset:0,height:"100dvh",zIndex:430,background:"var(--bg)",display:"flex",flexDirection:"column"}}>
+        <div style=${{display:"flex",alignItems:"center",gap:10,padding:"14px 16px",borderBottom:"1px solid var(--border)",flexShrink:0,paddingTop:"calc(14px + var(--safe-top, 0px))"}}>
+          <div style=${{fontSize:15,fontWeight:800,flex:1}}>自己経営力の詳細</div>
+          <button onClick=${()=>setSmpDetail(false)} style=${{background:"none",border:"none",color:"var(--sub)",fontSize:22,cursor:"pointer",lineHeight:1,padding:"0 4px"}}>×</button>
+        </div>
+        <div style=${{flex:1,minHeight:0,overflowY:"auto",WebkitOverflowScrolling:"touch",padding:"14px 16px calc(28px + var(--safe-bottom, 0px))"}}>
+          <div style=${{display:"flex",gap:6,marginBottom:12}}>
+            ${[["cur","今週"],["prev","先週"]].map(([v,lb])=>html`
+              <button key=${v} onClick=${()=>setSmpWeek(v)} disabled=${v==="prev"&&!smp.prev}
+                style=${{flex:1,padding:"9px 4px",borderRadius:10,fontSize:12.5,cursor:"pointer",fontFamily:"inherit",fontWeight:700,
+                         border:`1.5px solid ${smpWeek===v?"var(--accent)":"var(--border)"}`,
+                         background:smpWeek===v?"var(--accent-l)":"transparent",
+                         color:smpWeek===v?"var(--accent)":"var(--sub)",opacity:(v==="prev"&&!smp.prev)?0.4:1}}>${lb}</button>`)}
+          </div>
+          <div style=${{fontSize:13,fontWeight:800,color:"var(--text)",marginBottom:3}}>
+            ${smpWeek==="prev"?"先週":"今週"}の自己経営の状態</div>
+          <div style=${{fontSize:11,color:"var(--sub)",marginBottom:14}}>対象期間 ${src.period_start} 〜 ${src.period_end}</div>
+
+          ${M.map(m=>html`
+            <div key=${m.key} style=${{background:"var(--card)",borderRadius:12,border:"1px solid var(--border)",padding:"13px 14px",marginBottom:10}}>
+              <div style=${{display:"flex",alignItems:"baseline",gap:8,marginBottom:3}}>
+                <span style=${{fontSize:14,fontWeight:800,color:"var(--text)"}}>${m.label}</span>
+                ${m.score!==null&&html`<span style=${{fontSize:17,fontWeight:800,color:"var(--text)"}}>${m.score}</span>`}
+                <span style=${{marginLeft:"auto",fontSize:11.5,color:"var(--sub)"}}>${view(m)}</span>
+              </div>
+              <div style=${{fontSize:11.5,color:"var(--sub)",lineHeight:1.7,marginBottom:9}}>${m.description}</div>
+              ${(m.components||[]).length>0&&html`
+                <div style=${{fontSize:11,fontWeight:700,color:"var(--sub)",marginBottom:5}}>主な内訳</div>
+                ${(m.components||[]).map((c,i)=>html`
+                  <div key=${i} style=${{display:"flex",alignItems:"center",gap:8,fontSize:11.5,lineHeight:1.9}}>
+                    <span style=${{flex:1,minWidth:0,color:c.state==="evaluated"?"var(--text)":"var(--sub)"}}>${c.label}</span>
+                    <span style=${{flexShrink:0,color:"var(--sub)"}}>
+                      ${c.state==="evaluated" ? `${c.value}${c.detail?`（${c.detail}）`:""}` : "—"}</span>
+                  </div>`)}`}
+              ${m.incomplete_reason&&html`
+                <div style=${{fontSize:11,color:"var(--sub)",lineHeight:1.7,marginTop:7,paddingTop:7,borderTop:"1px solid var(--border)"}}>
+                  ${m.incomplete_reason}</div>`}
+              <div style=${{fontSize:10.5,color:"var(--sub)",marginTop:7,lineHeight:1.7}}>
+                評価できた要素 ${Math.round((m.coverage||0)*100)}% ・確からしさ ${CONF[m.confidence]||m.confidence} ・件数 ${m.sample_count}
+              </div>
+              ${m.evaluation_state==="evaluated"&&html`
+                <div style=${{fontSize:11.5,color:"var(--text)",lineHeight:1.7,marginTop:7,background:"var(--bg)",borderRadius:9,padding:"8px 10px"}}>
+                  <b style=${{color:"var(--sub)",fontSize:10.5}}>改善のヒント</b><br/>${HINT[m.key]||""}</div>`}
+            </div>`)}
+        </div>
+      </div>`;
+    })()}
+
+    <!-- ★今週の自己経営の状態★（feature: self_mgmt_power_v1）
+         featureがONの人には従来の「ステータス」を出さず、ここへ置き換える。
+         人の能力ではなく「この期間の状態」として見せる。 -->
+    ${smp&&smp.data&&(()=>{
+      const M = smp.data.metrics || [];
+      // 状態ごとに言葉を変える。全部を「データ不足」にまとめない
+      const view = (m) => {
+        if (m.evaluation_state === "evaluated") return { kind:"num", label:m.status_label };
+        if (m.evaluation_state === "not_evaluable") return { kind:"txt", label:"今週は評価対象なし" };
+        if (m.evaluation_state === "excluded_by_exception") return { kind:"txt", label:"今回は評価しない" };
+        const c = m.reason_code || "";
+        if (c === "TIME_CLASSIFICATION_UNAVAILABLE" || c === "AVAILABLE_TIME_MISSING")
+          return { kind:"txt", label:"準備中" };
+        if (c === "OBSERVATION_PERIOD_TOO_SHORT" || c === "NO_RECORDS_YET" || c === "NOT_ENOUGH_DAYS")
+          return { kind:"txt", label:"データ蓄積中" };
+        return { kind:"txt", label:"データ不足" };
+      };
+      // 改善提案は evaluated の中からいちばん低いものだけ
+      const evald = M.filter(m=>m.evaluation_state==="evaluated" && m.score!==null);
+      const weak = evald.slice().sort((a,b)=>a.score-b.score)[0];
+      const HINT = {
+        result_power: "今週の目標に、今日の行動を1つ結びつけてみましょう。",
+        time_allocation_power: "大事な仕事から先に時間を取りましょう。",
+        execution_power: "期限内に終えられる量へ、予定を少し絞りましょう。",
+        continuity_power: "1日に詰め込みすぎず、日をまたいで分けましょう。",
+        recovery_power: "崩れた翌日に、小さく1つだけ再開してみましょう。"
+      };
+      return html`
+      <div style=${{margin:"12px 16px 0",background:"var(--card)",borderRadius:16,border:"1px solid var(--border)",padding:"14px 16px"}}>
+        <div style=${{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8,marginBottom:12}}>
+          <span style=${{flex:1,minWidth:0}}>
+            <span style=${{display:"block",fontSize:13,fontWeight:800,color:"var(--text)"}}>今週の自己経営の状態</span>
+            <span style=${{display:"block",fontSize:10.5,color:"var(--sub)",marginTop:3}}>5つの自己経営力から、今の状態を確認します</span>
+          </span>
+          <button onClick=${()=>setSmpDetail(true)}
+            style=${{flexShrink:0,whiteSpace:"nowrap",background:"none",border:"none",color:"var(--accent)",fontSize:11.5,fontWeight:700,cursor:"pointer",fontFamily:"inherit",padding:0}}>詳細を見る</button>
+        </div>
+
+        ${M.map((m,i)=>{ const v=view(m); return html`
+          <div key=${m.key} style=${{display:"flex",alignItems:"center",gap:10,padding:"9px 0",
+                                     borderTop:i?"1px solid var(--border)":"none"}}>
+            <span style=${{flex:1,minWidth:0,fontSize:12.5,fontWeight:700,color:"var(--text)"}}>${m.label}</span>
+            ${v.kind==="num"
+              ? html`
+                <span style=${{flexShrink:0,display:"flex",alignItems:"center",gap:8}}>
+                  <span style=${{width:64,height:4,background:"var(--bg)",borderRadius:99,overflow:"hidden",display:"block"}}>
+                    <span style=${{display:"block",height:"100%",width:Math.max(0,Math.min(100,m.score))+"%",background:"var(--accent)",borderRadius:99}}/>
+                  </span>
+                  <span style=${{fontSize:14,fontWeight:800,color:"var(--text)",minWidth:26,textAlign:"right"}}>${m.score}</span>
+                  <span style=${{fontSize:11,color:"var(--sub)",minWidth:52,textAlign:"right"}}>${v.label}</span>
+                </span>`
+              : html`<span style=${{flexShrink:0,fontSize:11.5,color:"var(--sub)"}}>${v.label}</span>`}
+          </div>`; })}
+
+        ${weak&&html`
+          <div style=${{borderTop:"1px solid var(--border)",marginTop:4,paddingTop:11}}>
+            <div style=${{fontSize:11,fontWeight:700,color:"var(--sub)",marginBottom:4}}>今週の改善ポイント</div>
+            <div style=${{fontSize:12.5,color:"var(--text)",lineHeight:1.7}}>
+              今週は<b>${weak.label}</b>に改善の余地があります。${HINT[weak.key]||""}
+            </div>
+          </div>`}
+      </div>`;
+    })()}
+
+    <!-- ステータス（自己経営力がONの人には出さない。二重表示にしない）-->
+    ${statusSummary&&!(smp&&smp.data)&&html`
       <button onClick=${()=>setShowStatusTip(v=>!v)}
         style=${{display:"block",width:"calc(100% - 32px)",margin:"12px 16px 0",background:"var(--card)",borderRadius:16,border:"1px solid var(--border)",overflow:"hidden",textAlign:"left",cursor:"pointer",fontFamily:"inherit",padding:0}}>
         <div style=${{padding:"14px 16px 4px",display:"flex",justifyContent:"space-between",alignItems:"baseline"}}>
@@ -6491,7 +6622,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260802-214555";
+const APP_BUILD = "20260802-221741";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 

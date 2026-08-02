@@ -1045,7 +1045,10 @@ function computeSelfMgmtPower(studentEmail, weekStart) {
   const wgs = p1List("WeeklyGoals", studentEmail).filter(function (w) { return p1Status_(w.status, "ACTIVE") === "ACTIVE"; });
 
   const out = {};
-  const na = function (reason) { return { value: null, state: "insufficient_data", reason: reason, sample: 0 }; };
+  // 表示文だけで状態を判断させない。機械で読める理由コードを必ず添える
+  const na = function (reason, code) {
+    return { value: null, state: "insufficient_data", reason: reason, reason_code: code || "INSUFFICIENT_DATA", sample: 0 };
+  };
 
   // ── 実行力: 決めたことを進められたか ────────────────────────────
   (function () {
@@ -1119,7 +1122,8 @@ function computeSelfMgmtPower(studentEmail, weekStart) {
       parts.push({ value: Math.round(acc / n), state: "evaluated", weight: 2, sample: n, label: "週間目標の達成率" });
     } else parts.push(Object.assign(
       na(wgs.length ? "今週の週間目標にまだ記録がありません（0件という意味ではありません）"
-                    : "数値のある週間目標がありません"),
+                    : "数値のある週間目標がありません",
+         wgs.length ? "NO_RECORDS_YET" : "NO_EVALUABLE_GOAL"),
       { weight: 2, label: "週間目標の達成率" }));
 
     // ★status を除外条件に使わない★
@@ -1146,10 +1150,10 @@ function computeSelfMgmtPower(studentEmail, weekStart) {
     } else if (gWithNum.length) {
       parts.push(Object.assign(
         na("3か月目標を始めてから" + Math.max.apply(null, gWithNum.map(function (x) { return x.p.elapsedDays; })) +
-           "日なので、進み具合はまだ評価できません（7日を過ぎると出ます）"),
+           "日なので、進み具合はまだ評価できません（7日を過ぎると出ます）", "OBSERVATION_PERIOD_TOO_SHORT"),
         { weight: 2, label: "3か月目標の進み具合" }));
     } else {
-      parts.push(Object.assign(na("3か月目標に現在値・目標値・期間のいずれかが入っていません"),
+      parts.push(Object.assign(na("3か月目標に現在値・目標値・期間のいずれかが入っていません", "CURRENT_VALUE_MISSING"),
                                { weight: 2, label: "3か月目標の進み具合" }));
     }
 
@@ -1165,33 +1169,49 @@ function computeSelfMgmtPower(studentEmail, weekStart) {
 
   // ── 時間配分力: 5分類が未実装のため算出しない（推測で埋めない）──
   out.time_allocation_power = { score: null, coverage: 0, sample_count: 0, components: [],
-    state: "insufficient_data",
-    reason: "時間の5分類（GOAL_DIRECT等）がまだ記録されていないため算出できません" };
+    state: "insufficient_data", reason_code: "TIME_CLASSIFICATION_UNAVAILABLE",
+    reason: "時間の使い方を分類する機能を準備しています" };
 
-  // ── 継続力: 無理なく続けられたか（連続日数だけで決めない）──
+  // ── 継続力: 無理なく続けられたか ──
+  //   ★sample_count は日単位★ 同じ日に何回記録しても件数が増えるだけで、
+  //   「続けられている」ことの根拠にはならない。日で数える。
+  //   ★休息・回復・予定量は今は測れない★ その分 coverage を下げ、
+  //   confidence も上げない（測れていないものを測れたことにしない）。
   (function () {
     const parts = [];
-    const days = {};
-    logs.forEach(function (l) { days[String(l.date).slice(0, 10)] = 1; });
-    const acted = Object.keys(days).length;
-    const elapsed = Math.min(7, Math.max(1, Math.round((new Date(today + "T00:00:00+09:00") - new Date(monday + "T00:00:00+09:00")) / 86400000) + 1));
-    parts.push({ value: Math.min(100, Math.round(acted / elapsed * 100)), state: "evaluated", weight: 2, sample: acted, label: "行動した日数" });
-    // 偏りの少なさ。1日に詰め込みすぎていないか（長時間ほど高得点にしない）
     const perDay = {};
     logs.forEach(function (l) { const d = String(l.date).slice(0, 10); perDay[d] = (perDay[d] || 0) + 1; });
-    const counts = Object.keys(perDay).map(function (k) { return perDay[k]; });
+    const dayKeys = Object.keys(perDay);
+    const acted = dayKeys.length;
+    const elapsed = Math.min(7, Math.max(1, Math.round((new Date(today + "T00:00:00+09:00") - new Date(monday + "T00:00:00+09:00")) / 86400000) + 1));
+    parts.push({ value: Math.min(100, Math.round(acted / elapsed * 100)), state: "evaluated",
+                 weight: 2, sample: acted, label: "行動した日数",
+                 detail: acted + "日 / 経過" + elapsed + "日" });
+    // 日ごとの偏り。1日に詰め込みすぎていないか（長く働くほど高得点にしない）
+    const counts = dayKeys.map(function (k) { return perDay[k]; });
     if (counts.length >= 3) {
       const avg = counts.reduce(function (a, b) { return a + b; }, 0) / counts.length;
       const max = Math.max.apply(null, counts);
       parts.push({ value: Math.max(0, Math.round(100 - (max - avg) / Math.max(1, avg) * 50)),
-                   state: "evaluated", weight: 1, sample: counts.length, label: "日ごとの偏りの少なさ" });
-    } else parts.push(Object.assign(na("記録が3日に満たないため、偏りは測れません"), { weight: 1, label: "日ごとの偏りの少なさ" }));
+                   state: "evaluated", weight: 1, sample: counts.length, label: "日ごとの偏りの少なさ",
+                   detail: "最も多い日 " + max + "件 / 平均 " + (Math.round(avg * 10) / 10) + "件" });
+    } else parts.push(Object.assign(na("記録が3日に満たないため、偏りは測れません", "NOT_ENOUGH_DAYS"),
+                                    { weight: 1, label: "日ごとの偏りの少なさ" }));
+    // ★測れていないものを明示して分母に入れる★ これを省くと coverage が
+    //   1.0 になり、休息や予定量を見ていないのに「確からしさ 高」と出る
+    parts.push(Object.assign(na("休息・回復の時間を分類する機能を準備しています", "TIME_CLASSIFICATION_UNAVAILABLE"),
+                             { weight: 1, label: "休息と回復のバランス" }));
+    parts.push(Object.assign(na("1日に使える時間の設定がないため、予定の詰めすぎを判定できません", "AVAILABLE_TIME_MISSING"),
+                             { weight: 1, label: "予定量の適切さ" }));
     const r = smpRoll(parts);
-    out.continuity_power = { score: r.score, coverage: r.coverage, sample_count: r.sample, components: parts,
+    const missing = parts.filter(function (p) { return p.state !== "evaluated" && p.reason; })
+                         .map(function (p) { return p.reason; });
+    // ★継続力の件数は「評価対象になった日数」★ 構成要素の合算にすると
+    //   同じ日を二重に数えてしまい、記録回数が多い人ほど確からしさが上がる
+    out.continuity_power = { score: r.score, coverage: r.coverage, sample_count: acted, components: parts,
       state: r.score === null ? "insufficient_data" : "evaluated",
-      reason: r.score === null
-        ? (parts.filter(function (p) { return p.state !== "evaluated" && p.reason; })
-                .map(function (p) { return p.reason; }).join(" / ") || "今週の記録がまだありません") : "" };
+      // 算出できていても、何を見ていないかは必ず伝える
+      reason: missing.join(" / ") };
   })();
 
   // ── 立て直し力: 崩れた後に戻れたか（崩れていない人を満点にしない）──
@@ -1219,9 +1239,16 @@ function computeSelfMgmtPower(studentEmail, weekStart) {
       score: (o.score === undefined ? null : o.score),
       evaluation_state: o.state || "insufficient_data",
       status_label: (o.state === "not_evaluable") ? "評価対象外" : smpBand(o.score),
+      // ★確からしさの決め方★ 件数ではなく「評価できた要素の割合(coverage)」で決める。
+      //   0.8以上=高 / 0.5以上=中 / それ未満=低 / 算出できない=なし。
+      //   測れていない要素を分母に入れているので、機能が未実装のうちは
+      //   自動的に低〜中に落ちる（過大評価を防ぐ）
       confidence: o.score === null ? "NONE" : (o.coverage >= 0.8 ? "HIGH" : o.coverage >= 0.5 ? "MEDIUM" : "LOW"),
       coverage: o.coverage || 0, sample_count: o.sample_count || 0,
       components: o.components || [], incomplete_reason: o.reason || "",
+      reason_code: o.reason_code || (function () {
+        const f = (o.components || []).find(function (c) { return c.reason_code; });
+        return f ? f.reason_code : ""; })(),
       period_start: monday, period_end: sunday,
       calculation_version: SMP_VERSION, calculated_at: calculatedAt
     };
