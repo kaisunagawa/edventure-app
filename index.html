@@ -1714,7 +1714,8 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
   // 想定時間(min)も一緒に載せて、タイマーで選んだ時にその時間で始められるようにする
   useEffect(()=>{
     try {
-      const remaining = actionItems.filter(item=>!isDone(item)).map(t=>({text:t, min:(estOf(t)||null)}));
+      const remaining = actionItems.filter(item=>!isDone(item))
+        .map(t=>({text:t, min:(estOf(t)||null), id:(idOfTitle(t)||null)}));
       localStorage.setItem("jiroku_today_actions_shared", JSON.stringify({date:todayKey, items:remaining}));
     } catch(e){}
   },[actionItems, checked, todayKey, taskEstimates]);
@@ -1758,7 +1759,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
   // カードをタップ→タイマー画面へ。想定時間つきならその時間で、タイマー側が自動選択する。
   // タイマーに送ったタスクは「実行中」に進める（着手の可視化）
   const goToTimerWith = (task) => {
-    try { localStorage.setItem("jiroku_timer_pending_task", JSON.stringify({text:task, min:(estOf(task)||null), date:todayKey})); } catch(e){}
+    try { localStorage.setItem("jiroku_timer_pending_task", JSON.stringify({text:task, min:(estOf(task)||null), id:(idOfTitle(task)||null), date:todayKey})); } catch(e){}
     if(statusOf(task)==="todo") setStatus(task, "doing");
     onGoTimer && onGoTimer();
   };
@@ -4840,10 +4841,16 @@ function TimerScreen({onToast, isActive}) {
   // 今回のセッションの実測結果（予定◯分に対して実際◯分集中したか）。
   // 途中で終えた場合も分単位で記録できるよう、モーダルを開く時点で確定させる
   const [sessionResult, setSessionResult] = useState(null); // {planned, actual} | null
+  // ★1セッション＝1つの実行ID★
+  //   開始時に決めて、保存に成功するまで変えない。再送・重複送信・
+  //   一時停止からの再開でも、サーバー側は同じ1行を更新する。
+  const [execId, setExecId] = useState(saved?.execId || null);
+  const [linkTaskId, setLinkTaskId] = useState(saved?.linkTaskId || null);
+  const newExecId = () => "exec_c_" + (crypto.randomUUID ? crypto.randomUUID() : String(Date.now())+Math.random().toString(36).slice(2));
 
   // ホーム画面の「今日のタスク」を、タイマーの集中対象としてもワンタップで選べるようにする。
   // 各項目は {text, min}（minは想定時間・分）。古い形式（ただの文字列）にも後方互換で対応する
-  const normTaskOpts = (items) => (items||[]).map(it => (typeof it==="string" ? {text:it, min:null} : {text:String(it.text||""), min:(it.min||null)})).filter(o=>o.text);
+  const normTaskOpts = (items) => (items||[]).map(it => (typeof it==="string" ? {text:it, min:null, id:null} : {text:String(it.text||""), min:(it.min||null), id:(it.id||null)})).filter(o=>o.text);
   const readTodayActions = () => {
     try {
       const s = JSON.parse(localStorage.getItem("jiroku_today_actions_shared")||"null");
@@ -4861,6 +4868,7 @@ function TimerScreen({onToast, isActive}) {
       localStorage.removeItem("jiroku_timer_pending_task");
       if(p && p.date===formatDateStr(new Date()) && p.text && !isRunning){
         setTask(p.text);
+        setLinkTaskId(p.id||null);
         const m = Number(p.min);
         if(m>0){ setSelectedMin(m); setTimeLeft(m*60); }
       }
@@ -4870,10 +4878,10 @@ function TimerScreen({onToast, isActive}) {
   // 状態をlocalStorageに保存
   useEffect(()=>{
     localStorage.setItem("jiroku_timer_state", JSON.stringify({
-      selectedMin, timeLeft, isRunning, mode, sessionCount,
+      selectedMin, timeLeft, isRunning, mode, sessionCount, execId, linkTaskId,
       task, startTime: startTime?.toISOString()||null, savedAt: Date.now()
     }));
-  },[selectedMin, timeLeft, isRunning, mode, sessionCount, task, startTime]);
+  },[selectedMin, timeLeft, isRunning, mode, sessionCount, task, startTime, execId, linkTaskId]);
 
   // タブに戻った時にプリセット設定を再読込
   const [presets, setPresets] = useState(getPresets);
@@ -5011,6 +5019,7 @@ function TimerScreen({onToast, isActive}) {
   const start = () => {
     primeAudio();
     if(!startTime) setStartTime(new Date());
+    if(!execId) setExecId(newExecId());
     setIsRunning(true);
     scheduleEndNotify(timeLeft, mode);
   };
@@ -5019,17 +5028,19 @@ function TimerScreen({onToast, isActive}) {
     primeAudio();
     setSelectedMin(min); setTimeLeft(min*60); setMode("focus");
     setStartTime(new Date()); setIsRunning(true);
+    setExecId(newExecId());
     scheduleEndNotify(min*60, "focus");
   };
   // 今日のタスクを選んだ時の挙動：ラベルをセットし、想定時間があればその時間でタイマー開始
   const selectTaskOption = (opt) => {
     if(isRunning) return;
-    if(task===opt.text){ setTask(""); return; } // もう一度タップで選択解除
-    setTask(opt.text);
+    if(task===opt.text){ setTask(""); setLinkTaskId(null); return; } // もう一度タップで選択解除
+    setTask(opt.text); setLinkTaskId(opt.id||null);
     if(opt.min && Number(opt.min)>0) startWithMinutes(Number(opt.min));
   };
   const pause = () => { primeAudio(); setIsRunning(false); cancelEndNotify(); };
-  const reset = () => { setIsRunning(false); setTimeLeft(selectedMin*60); setStartTime(null); setMode("focus"); setTask(""); setSessionResult(null); localStorage.removeItem("jiroku_timer_state"); cancelEndNotify(); };
+  // キャンセル：0分の実績を残さない。実行IDも捨てる（次は別セッション扱い）
+  const reset = () => { setIsRunning(false); setTimeLeft(selectedMin*60); setStartTime(null); setMode("focus"); setTask(""); setSessionResult(null); setExecId(null); setLinkTaskId(null); localStorage.removeItem("jiroku_timer_state"); cancelEndNotify(); };
 
   const saveLog = async () => {
     setSaving(true);
@@ -5046,12 +5057,24 @@ function TimerScreen({onToast, isActive}) {
     // メモが長くなるとURLの長さ制限に引っかかる可能性があるため、GETのURL
     // パラメータではなくPOSTのボディで送る（gasPostJson）
     const calTitle = task.trim()||`ポモドーロ${sessionResult?sessionResult.actual:selectedMin}分集中`;
+    // ★実測を構造化して送る★ memoの文字列だけに頼らない。
+    //   actual_minutes は「設定した予定時間」ではなく、実際に測れた経過時間。
+    const measured = sessionResult ? Number(sessionResult.actual) : selectedMin;
+    if(!(measured>0)){ onToast("記録できる時間がありません"); setSaving(false); return; }
+    const eid = execId || newExecId();
+    if(!execId) setExecId(eid);
     const res = await gasPostJson("saveLog", {
+      action_execution_id: eid,          // 冪等キー。再送しても行は増えない
+      date: formatDateStr(st),
       time_block: timeBlock,
       task: calTitle,
       focus_level: logFocus,
       memo: memoToSave,
       goal_related: logGoalRelated?"true":"false",
+      actual_minutes: measured,
+      duration_confirmed: "true",        // タイマーで測った値なので確定扱い
+      link_task_id: linkTaskId || "",
+      // 分類はサーバーのルールに任せる（本人が選ぶUIはB6で追加）
     });
     if(!res.ok){ onToast("記録に失敗しました。もう一度お試しください"); setSaving(false); return; }
     if(res.xp_gained){ const lv=res.level_up?` → Lv.${res.level}！`:""; onToast(`+${res.xp_gained} XP 獲得${lv}`); }
@@ -5060,6 +5083,7 @@ function TimerScreen({onToast, isActive}) {
     // （同じ時間帯キーを使うので、手動記録側で作ったイベントがあれば実測時刻に更新される）
     upsertCalendarEvent(formatDateStr(st), timeBlock, st.toISOString(), endDt.toISOString(), calTitle);
     setSaving(false); setShowModal(false); setLogMemo(""); setTask(""); setSessionResult(null);
+    setExecId(null); setLinkTaskId(null);   // 保存できたので、このセッションは終わり
     goToBreakOrReset();
   };
   const skipLog = () => { setShowModal(false); setTask(""); setSessionResult(null); goToBreakOrReset(); };
@@ -5152,11 +5176,18 @@ function TimerScreen({onToast, isActive}) {
       ${startTime&&!showModal&&html`
         <button onClick=${()=>{
             pause();
-            // 途中終了でも実際に集中した時間を分単位で確定させる（最低1分）。
+            // 途中終了。実際に集中した時間を分単位で確定させる。
             // 休憩中に押した場合は、直前の集中セッションは完走済みなので予定＝実測
-            const actual = mode==="focus"
-              ? Math.max(1, Math.round((selectedMin*60 - timeLeft)/60))
-              : selectedMin;
+            const elapsedSec = selectedMin*60 - timeLeft;
+            // ★1分未満は実績として保存しない★
+            //   押し間違いや開始直後の停止を「集中1分」として残すと、
+            //   実績時間も記録件数も水増しされてしまう
+            if(mode==="focus" && elapsedSec < 60){
+              onToast("1分未満のため記録しません");
+              reset();
+              return;
+            }
+            const actual = mode==="focus" ? Math.max(1, Math.round(elapsedSec/60)) : selectedMin;
             setSessionResult({planned:selectedMin, actual});
             setShowModal(true);
           }}
@@ -6775,7 +6806,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260802-234606";
+const APP_BUILD = "20260803-000848";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 

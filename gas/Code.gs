@@ -81,6 +81,9 @@ function doGet(e) {
       case "getUser":      result = getUser(studentEmail); break;
       // ── Phase 1: 自己経営OS の基盤（管理者のみ実行可能なセットアップ）──
       case "adminPhase4DryRun": return jsonResponse(phase4DryRun());
+      case "adminActualMinutesAudit":
+        return jsonResponse(verifyAdmin(e.parameter.coachEmail)
+          ? actualMinutesAudit() : { ok: false, error: "not admin" });
       case "adminOpsSelfTest":
         return jsonResponse(verifyAdmin(e.parameter.coachEmail)
           ? opsSelfTest(e.parameter.studentEmail, e.parameter.date) : { ok: false, error: "not admin" });
@@ -1870,6 +1873,53 @@ function opsNarrative(studentEmail, cur, forceRefresh) {
                                   prompt_version: OPS_PROMPT_VERSION, input_hash: hash, reused: false });
 }
 
+// ── Phase B1: actual_minutes の実データ調査（読むだけ・何も書かない）──
+//   Tasks と DailyLog のどちらが正か決める前に、いま何が入っているかを見る。
+function actualMinutesAudit() {
+  const tasks = sheetToObjects(getSheet("Tasks"));
+  const logs = sheetToObjects(getSheet("DailyLog"));
+  const logsByTask = {};      // link_task_id → 分の合計
+  let logRowsWithAm = 0, logAmTotal = 0, logRowsLinked = 0;
+  logs.forEach(function (l) {
+    if (String(l.deleted_at || "").trim()) return;
+    const am = Number(l.actual_minutes);
+    if (am > 0) { logRowsWithAm++; logAmTotal += am; }
+    const tid = String(l.link_task_id || "").trim();
+    if (tid) { logRowsLinked++; logsByTask[tid] = (logsByTask[tid] || 0) + (am > 0 ? am : 0); }
+  });
+  let tHas = 0, tNonZero = 0, matched = 0, mismatch = 0, onlyTask = 0, onlyLog = 0;
+  const samples = [];
+  tasks.forEach(function (t) {
+    const raw = t.actual_minutes;
+    const has = !(raw === "" || raw === null || raw === undefined);
+    const v = Number(raw) || 0;
+    if (has) tHas++;
+    if (v > 0) tNonZero++;
+    const lm = logsByTask[String(t.task_id)] ;
+    if (v > 0 && lm > 0) { (v === lm ? matched++ : mismatch++);
+      if (v !== lm && samples.length < 10)
+        samples.push({ task_id: String(t.task_id), title: String(t.title).slice(0, 20), task: v, log: lm }); }
+    else if (v > 0 && !lm) onlyTask++;
+  });
+  Object.keys(logsByTask).forEach(function (tid) {
+    if (!logsByTask[tid]) return;
+    const t = tasks.find(function (x) { return String(x.task_id) === tid; });
+    if (!t || !(Number(t.actual_minutes) > 0)) onlyLog++;
+  });
+  // 由来の手がかり（タイマーはmemoへ「⏱ 集中n分」を書いていた）
+  const timerMemoLogs = logs.filter(function (l) { return /⏱\s*集中\d+分/.test(String(l.memo || "")); }).length;
+  const migrated = tasks.filter(function (t) { return String(t.migrated_from || "").trim(); }).length;
+  const migratedWithAm = tasks.filter(function (t) {
+    return String(t.migrated_from || "").trim() && Number(t.actual_minutes) > 0; }).length;
+  return { ok: true,
+    tasks_total: tasks.length, tasks_actual_minutes_present: tHas, tasks_actual_minutes_nonzero: tNonZero,
+    logs_total: logs.length, logs_actual_minutes_nonzero: logRowsWithAm, logs_actual_minutes_sum: logAmTotal,
+    logs_with_link_task_id: logRowsLinked,
+    matched: matched, mismatched: mismatch, only_in_tasks: onlyTask, only_in_logs: onlyLog,
+    mismatch_samples: samples,
+    timer_memo_logs: timerMemoLogs, migrated_tasks: migrated, migrated_tasks_with_actual_minutes: migratedWithAm };
+}
+
 // ── Phase R1 の検証用 ───────────────────────────────
 //   実データに触らず、作った入力で評価エンジンの挙動を確かめる。
 function opsSelfTest(studentEmail, dateStr) {
@@ -2063,6 +2113,12 @@ function getLogs(studentEmail, body) {
     focus_level: headers.indexOf("focus_level"),
     memo: headers.indexOf("memo"),
     goal_related: headers.indexOf("goal_related"),
+    actual_minutes: headers.indexOf("actual_minutes"),
+    duration_confirmed: headers.indexOf("duration_confirmed"),
+    link_task_id: headers.indexOf("link_task_id"),
+    time_classification: headers.indexOf("time_classification"),
+    classification_method: headers.indexOf("classification_method"),
+    classification_reason_code: headers.indexOf("classification_reason_code"),
   };
   const targetDate = (body && body.date) ? body.date : formatDate(new Date());
 
@@ -2081,6 +2137,13 @@ function getLogs(studentEmail, body) {
       focus_level: String(data[i][idx.focus_level] || ""),
       memo: String(data[i][idx.memo] || ""),
       goal_related: String(data[i][idx.goal_related] || "false"),
+      // 時間の内訳・分類チップ用（列が無い環境では空で返る）
+      actual_minutes: idx.actual_minutes === -1 ? "" : String(data[i][idx.actual_minutes] || ""),
+      duration_confirmed: idx.duration_confirmed === -1 ? "" : String(data[i][idx.duration_confirmed] || ""),
+      link_task_id: idx.link_task_id === -1 ? "" : String(data[i][idx.link_task_id] || ""),
+      time_classification: idx.time_classification === -1 ? "" : String(data[i][idx.time_classification] || ""),
+      classification_method: idx.classification_method === -1 ? "" : String(data[i][idx.classification_method] || ""),
+      classification_reason_code: idx.classification_reason_code === -1 ? "" : String(data[i][idx.classification_reason_code] || ""),
     });
   }
   logs.sort((a, b) => a.time_block > b.time_block ? 1 : -1);
@@ -2498,14 +2561,28 @@ function saveLog(studentEmail, body) {
     if (rowDate === today) todaysLogCount++;
   }
 
+  // ★同じタイマーセッションを2行にしない★
+  //   クライアントが開始時に決めた action_execution_id を冪等キーとして使う。
+  //   再送・重複送信・一時停止後の再開（終了時刻が変わる）でも1行に収める。
+  const execIdIn = String(body.action_execution_id || "").trim();
+  const execIdx = headers.indexOf("action_execution_id");
+  let matchRow = -1;
+  if (execIdIn && execIdx !== -1) {
+    for (let i = 1; i < data.length; i++) {
+      if (String(data[i][emailIdx]) !== studentEmail) continue;
+      if (String(data[i][execIdx]) === execIdIn) { matchRow = i; break; }
+    }
+  }
+
   for (let i = 1; i < data.length; i++) {
     const rawDate = data[i][dateIdx];
     const rowDate = rawDate instanceof Date
       ? Utilities.formatDate(rawDate, "Asia/Tokyo", "yyyy-MM-dd")
       : String(rawDate);
-    if (String(data[i][emailIdx]) === studentEmail &&
+    if (i === matchRow ||
+        (matchRow === -1 && String(data[i][emailIdx]) === studentEmail &&
         rowDate === targetDate &&
-        String(data[i][timeIdx]) === String(body.time_block)) {
+        String(data[i][timeIdx]) === String(body.time_block))) {
       const focusIdx = headers.indexOf("focus_level");
       let awardedIdx = headers.indexOf("xp_awarded");
       if (awardedIdx === -1) { awardedIdx = headers.length; sheet.getRange(1, awardedIdx + 1).setValue("xp_awarded"); }
@@ -2515,6 +2592,9 @@ function saveLog(studentEmail, body) {
       // xp_awardedフラグが未設定の古い記録は、既に評価が入っていれば「付与済み」とみなす
       // （デプロイ前からある記録が、編集で二重にXPをもらわないための移行措置）
       const prevAwarded = flagRaw === "TRUE" || (flagRaw === "" && !!prevFocus);
+      if (i === matchRow && String(data[i][timeIdx]) !== String(body.time_block)) {
+        sheet.getRange(i + 1, timeIdx + 1).setNumberFormat("@").setValue(String(body.time_block));
+      }
       sheet.getRange(i+1, headers.indexOf("task")+1).setValue(body.task);
       sheet.getRange(i+1, focusIdx+1).setValue(body.focus_level);
       sheet.getRange(i+1, headers.indexOf("memo")+1).setValue(body.memo || "");
@@ -9033,8 +9113,14 @@ const P1_ADDED_COLUMNS = {
   // actual_minutes … タイマー等で実際に測った分数。DURATIONの第1優先
   // duration_confirmed … time_block から出した候補を本人が確認して確定したか
   //   （確定していない候補を勝手に足さないための印）
+  // time_classification … その時間が経営上どの役割だったか（5分類）。1記録1分類のみ。
+  //   Tasks.context（WORK/PERSONAL…＝活動領域）とは別の軸。変換しない。
+  // classification_method … USER / RULE / AI。USERはルールで上書きしない
+  // classification_reason_code … なぜその分類になったか（LINKED_WEEKLY_GOAL 等）
   DailyLog: ["action_execution_id","quantity","unit","primary_weekly_goal_id","related_goal_ids",
-    "link_task_id","deleted_at","actual_minutes","duration_confirmed"],
+    "link_task_id","deleted_at","actual_minutes","duration_confirmed",
+    "time_classification","classification_method","classification_version",
+    "classification_reason_code","user_corrected_at"],
   Journal: ["daily_focus_id","focus_completion_condition","focus_min_line","focus_planned_time",
     "focus_if_then","link_weekly_goal_id","focus_achievement_state","focus_miss_reason"],
   Users: ["features","task_migrated_at"]
@@ -9590,6 +9676,65 @@ function resolvePrimaryWeeklyGoal(studentEmail, wanted) {
 
 // saveLog / saveLogMulti から呼ぶ。Phase 1 で足した列だけを埋める。
 // 既存の列には一切触らない（万一この処理が失敗しても、記録そのものは残る）。
+// ══════════════════════════════════════════════════════════════════
+// 時間の5分類
+//   GOAL_DIRECT           目標に直結
+//   OPERATIONS            日常業務
+//   ASSET_BUILD           将来への投資
+//   RECOVERY_RELATIONSHIP 回復・人間関係
+//   UNPLANNED_LEAKAGE     計画外の時間
+//
+// ★Tasks.context（WORK/PERSONAL/LEARNING/HEALTH/OTHER）は「活動領域」で、
+//   5分類は「経営上どの役割の時間か」。別の軸なので変換しない★
+//   同じ仕事でも、売上に直結する営業=GOAL_DIRECT、経理=OPERATIONS、
+//   営業資料の仕組み化=ASSET_BUILD に分かれる。
+//
+// 決め方の優先順位
+//   1. 本人が選んだもの（USER）… 以後ルールで上書きしない
+//   2. 明示された休息モード
+//   3. 強いリンク（週間目標／今日のフォーカスに直接つながっている）
+//   4. 決められなければ未分類（勝手に埋めない）
+// UNPLANNED_LEAKAGE は本人が選んだときだけ。
+// 「計画外だった」と「無駄だった」は別のことなので、機械が決めない。
+// ══════════════════════════════════════════════════════════════════
+const TIME_CLASS_VERSION = "time_classification_v1";
+const TIME_CLASSES = { GOAL_DIRECT:1, OPERATIONS:1, ASSET_BUILD:1, RECOVERY_RELATIONSHIP:1, UNPLANNED_LEAKAGE:1 };
+
+function classifyLogTime_(studentEmail, targetDate, body, current) {
+  // 1. 本人の選択（保存時でも、あとからの修正でも最優先）
+  const want = String(body.time_classification || "").toUpperCase();
+  if (want && TIME_CLASSES[want]) {
+    return { classification: want, method: "USER", reason_code: "USER_SELECTED" };
+  }
+  // 本人がすでに決めている記録は、ルールで触らない
+  if (current && String(current.method || "").toUpperCase() === "USER") return null;
+
+  // 2. 明示された休息（タイマーの休憩モードなど）
+  if (String(body.rest_mode || "") === "true") {
+    return { classification: "RECOVERY_RELATIONSHIP", method: "RULE", reason_code: "REST_MODE" };
+  }
+
+  // 3. 強いリンクだけを根拠にする
+  if (resolvePrimaryWeeklyGoal(studentEmail, body.primary_weekly_goal_id)) {
+    return { classification: "GOAL_DIRECT", method: "RULE", reason_code: "LINKED_WEEKLY_GOAL" };
+  }
+  const tid = String(body.link_task_id || "").trim();
+  if (tid) {
+    const t = p1OwnedRow("Tasks", "task_id", tid, studentEmail);
+    if (t) {
+      if (String(t.link_daily_focus_id || "").trim())
+        return { classification: "GOAL_DIRECT", method: "RULE", reason_code: "LINKED_DAILY_FOCUS" };
+      if (resolvePrimaryWeeklyGoal(studentEmail, t.link_weekly_goal_id))
+        return { classification: "GOAL_DIRECT", method: "RULE", reason_code: "LINKED_TASK_TO_WEEKLY_GOAL" };
+    }
+  }
+  // 4. goal_related だけでは確定しない（本人に選んでもらう）
+  if (String(body.goal_related || "") === "true") {
+    return { classification: "", method: "RULE", reason_code: "GOAL_RELATED_ONLY_NEEDS_USER" };
+  }
+  return { classification: "", method: "RULE", reason_code: "RULE_UNCERTAIN" };
+}
+
 function writeP1LogFields(sheet, rowNum, studentEmail, targetDate, timeBlock, body) {
   try {
     const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
@@ -9597,7 +9742,11 @@ function writeP1LogFields(sheet, rowNum, studentEmail, targetDate, timeBlock, bo
       const i = headers.indexOf(col);
       if (i !== -1) sheet.getRange(rowNum, i + 1).setValue(val);
     };
-    set("action_execution_id", makeExecutionId(studentEmail, targetDate, timeBlock));
+    // ★冪等キー★ クライアントが送ってきたIDを優先する。
+    //   タイマーは開始時にIDを決めるので、再送・重複送信でも同じ行を更新する。
+    //   送られてこない場合だけ、日付＋時間帯から作った従来のIDを使う。
+    const execId = p1Text_(body.action_execution_id, 80).replace(/[^A-Za-z0-9_\-]/g, "");
+    set("action_execution_id", execId || makeExecutionId(studentEmail, targetDate, timeBlock));
     if (body.quantity !== undefined) set("quantity", p1Num_(body.quantity));
     if (body.actual_minutes !== undefined) set("actual_minutes", p1Num_(body.actual_minutes));
     if (body.duration_confirmed !== undefined) set("duration_confirmed", String(body.duration_confirmed) === "true" ? "TRUE" : "FALSE");
@@ -9608,6 +9757,23 @@ function writeP1LogFields(sheet, rowNum, studentEmail, targetDate, timeBlock, bo
     if (body.link_task_id !== undefined) {
       const t = p1OwnedRow("Tasks", "task_id", body.link_task_id, studentEmail);
       set("link_task_id", t ? String(body.link_task_id) : "");
+    }
+    // ── 時間の5分類 ──────────────────────────────
+    //   本人が選んだ分類は、あとからルールで上書きしない
+    const iCls = headers.indexOf("time_classification");
+    if (iCls !== -1) {
+      const cur = {
+        cls: String(sheet.getRange(rowNum, iCls + 1).getValue() || ""),
+        method: String(sheet.getRange(rowNum, headers.indexOf("classification_method") + 1).getValue() || "")
+      };
+      const decided = classifyLogTime_(studentEmail, targetDate, body, cur);
+      if (decided) {
+        set("time_classification", decided.classification);
+        set("classification_method", decided.method);
+        set("classification_version", TIME_CLASS_VERSION);
+        set("classification_reason_code", decided.reason_code);
+        if (decided.method === "USER") set("user_corrected_at", new Date().toISOString());
+      }
     }
   } catch (e) {
     Logger.log("writeP1LogFields 失敗（記録本体は保存済み）: " + e);
@@ -11067,7 +11233,7 @@ const ADMIN_SECRET_ALLOWLIST = {
   // 一斉送信（Kaiの明示的な要望により残す）
   adminBroadcastLine:1, adminBroadcastLinePending:1, adminSendStudentCampaign:1,
   // セットアップ・保守
-  adminSetupTriggers:1, adminInstallTrigger:1, adminSetupPhase1:1, adminSetupAuth:1, adminPhase4DryRun:1, adminLegacyBackfill:1, adminWritePathStats:1, adminIssueTestSession:1, adminDropTestSessions:1, adminOpsSelfTest:1,
+  adminSetupTriggers:1, adminInstallTrigger:1, adminSetupPhase1:1, adminSetupAuth:1, adminPhase4DryRun:1, adminLegacyBackfill:1, adminWritePathStats:1, adminIssueTestSession:1, adminDropTestSessions:1, adminOpsSelfTest:1, adminActualMinutesAudit:1,
   authSetMode:1, authSetEnforce:1, authRoleApply:1, authRoleDryRun:1, authRevokeAll:1,
   authCleanupTestData:1, adminPurgeTestUsers:1, adminMigrateTasks:1, authBreakerReset:1, rotateSessionSecret:1,
   p1Backup:1, p1BackupInfo:1, p1PurgeArchived:1, weeklyBackup:1

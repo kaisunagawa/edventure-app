@@ -278,10 +278,10 @@ sys.exit(1 if missing else 0)
   #   task_idはクライアント採番（旧lt_はタイトルのハッシュ）のため
   #   別ユーザー間で衝突し得る。idだけで行を引くと他人の行に当たる。
   #   行の特定は p1OwnedRow / p1List（持ち主で絞る）だけに限定する。
-  #   直接 getSheet("Tasks") を触ってよいのは phase4DryRun / legacyBackfill
-  #   （管理者専用の全体集計）だけ。
+  #   直接 getSheet("Tasks") を触ってよいのは phase4DryRun / legacyBackfill /
+  #   actualMinutesAudit（いずれも管理者専用の全体集計。書き込みはしない）だけ。
   direct_reads=$(grep -c 'getSheet("Tasks")' Code.gs)
-  if [ "$direct_reads" -le 2 ]; then ok "Tasksの直接読みは管理者集計のみ（${direct_reads}箇所）"
+  if [ "$direct_reads" -le 3 ]; then ok "Tasksの直接読みは管理者集計のみ（${direct_reads}箇所）"
   else ng "Tasksを直接読む箇所が増えた（${direct_reads}箇所）─ 持ち主なしの行特定は禁止"; fi
   #   各呼び出しの直前60行以内で rec に student_email を入れているか
   upsert_bad=$(python3 - <<'PYEOF'
