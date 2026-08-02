@@ -2790,7 +2790,11 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
             title="押すともう一度送ります">保存できず ${taskSync.failed}件・再試行</button>`}
           ${taskSync.pending>0&&html`<span style=${{fontSize:11,background:"var(--bg)",color:"var(--sub)",borderRadius:20,padding:"2px 9px",fontWeight:600}}>保存中…</span>`}
           ${boardWide&&html`<span style=${{fontSize:10.5,color:"var(--sub)"}}>カードをドラッグで移動</span>`}
-          <button onClick=${openEdit} style=${{background:"none",border:"none",cursor:"pointer",color:"var(--accent)",fontSize:12,fontWeight:600,padding:"2px 6px"}}>編集</button>
+          <!-- ★追加は右上に置く★ 一覧の下だと、タスクが増えるほど遠くなる -->
+          <button onClick=${openAddTask}
+            style=${{display:"inline-flex",alignItems:"center",gap:3,background:"var(--accent)",border:"none",borderRadius:99,cursor:"pointer",color:"#fff",fontSize:11.5,fontWeight:700,padding:"4px 11px",fontFamily:"inherit",whiteSpace:"nowrap"}}>
+            <span style=${{fontSize:13,lineHeight:1}}>＋</span>追加</button>
+          <button onClick=${openEdit} style=${{background:"none",border:"none",cursor:"pointer",color:"var(--accent)",fontSize:12,fontWeight:600,padding:"2px 4px"}}>編集</button>
         </div>
       </div>
       ${actionItems.length>0&&html`
@@ -2931,10 +2935,6 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
             ${COLS.map(column)}
           </div>`;
         })()}
-      <button onClick=${openAddTask}
-        style=${{display:"flex",alignItems:"center",justifyContent:"center",gap:6,width:"100%",background:"none",border:"none",borderTop:"1px solid var(--border)",padding:"13px 16px",cursor:"pointer",color:"var(--accent)",fontSize:13,fontWeight:600,fontFamily:"inherit"}}>
-        <span style=${{fontSize:16,lineHeight:1}}>＋</span> タスクを追加
-      </button>
     </div>
 
     <!-- タスク詳細画面（Trello風カード詳細。状態変更・時間・メモ・計測・削除） -->
@@ -6416,7 +6416,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260802-210138";
+const APP_BUILD = "20260802-212516";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
