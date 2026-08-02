@@ -2205,7 +2205,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
   const completedItems = actionItems.filter(item=>isDone(item)&&ctxVisible(item));
   const doneCount = actionItems.filter(item=>statusOf(item)==="done").length;
 
-  return html`<div style=${{paddingBottom:40}}>
+  return html`<div style=${{paddingBottom:52}}>
 
     ${showInCommunity!==false && html`<${AchievementBanner} onOpenCommunity=${()=>setShowCommunity(true)}/>`}
 
@@ -2335,7 +2335,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
       const val = (cur, tgt, unit) => html`<span><b style=${{color:"var(--text)",fontWeight:700}}>${cur}</b> <span style=${{opacity:0.7}}>/ ${tgt}${unit||""}</span></span>`;
 
       return html`
-      <div style=${{margin:"16px 16px 0",background:"var(--card)",borderRadius:16,border:"1px solid var(--border)",overflow:"hidden"}}>
+      <div style=${{margin:"12px 16px 0",background:"var(--card)",borderRadius:16,border:"1px solid var(--border)",overflow:"hidden"}}>
         <div style=${{padding:"14px 14px 2px",display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
           <span style=${{flex:1,minWidth:0}}>
             <span style=${{display:"block",fontSize:14,fontWeight:800,color:"var(--text)"}}>目標ロードマップ</span>
@@ -2461,7 +2461,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
 
     <!-- 週次ふりかえり（今週のまとめ＋振り返り記入＋来週の一言）。週末（土日）に、未記入かつ未閉じの時だけ大きく出す -->
     ${weekly && !weekly.reflected && !weekDismissed && shouldShowWeeklyReview(weekly) && html`
-      <div style=${{margin:"16px 16px 0",background:"var(--card)",borderRadius:16,border:"1.5px solid var(--accent)",overflow:"hidden"}}>
+      <div style=${{margin:"12px 16px 0",background:"var(--card)",borderRadius:16,border:"1.5px solid var(--accent)",overflow:"hidden"}}>
         <div style=${{background:"linear-gradient(135deg, var(--hero1) 0%, var(--hero2) 100%)",padding:"16px 18px"}}>
           <div style=${{fontSize:11,fontWeight:700,color:"rgba(255,255,255,0.75)",letterSpacing:"0.08em",marginBottom:3}}>WEEKLY REVIEW</div>
           <div style=${{fontSize:17,fontWeight:800,color:"#fff"}}>今週をふりかえろう</div>
@@ -2493,7 +2493,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
     <!-- ★今日のフォーカス★
          3か月目標のどれに効くのか、今日どれだけ進んだかを1枚で見せる。
          関連タスクの件数から、今日の行動へ降りられるようにする。 -->
-    <div style=${{margin:"16px 16px 0",background:"var(--card)",borderRadius:16,border:"1px solid var(--border)",padding:"14px 16px"}}>
+    <div style=${{margin:"12px 16px 0",background:"var(--card)",borderRadius:16,border:"1px solid var(--border)",padding:"14px 16px"}}>
       <div style=${{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:intent?10:8}}>
         <span style=${{fontSize:13,fontWeight:800,color:"var(--text)"}}>今日のフォーカス</span>
         ${intent
@@ -2625,7 +2625,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
          3か月目標（数値・ペース付き）を持っている人には二重表示になるので出さない。
          まだ移行していない人のためだけに残す（消すと目標が画面から消えてしまう） -->
     ${goalsArr.length>0&&!((goalTree&&goalTree.goals)||[]).some(g=>String(g.status||"ACTIVE").toUpperCase()!=="ARCHIVED")&&html`
-      <div style=${{margin:"16px 16px 10px",background:"var(--card)",borderRadius:16,border:"1px solid var(--border)",overflow:"hidden"}}>
+      <div style=${{margin:"12px 16px 0",background:"var(--card)",borderRadius:16,border:"1px solid var(--border)",overflow:"hidden"}}>
         ${!intent&&(()=>{
           const goalMins=todayLogs.filter(l=>l.goal_related==="true"||l.goal_related===true).length*60;
           const targetHours=dailyGoalHours;
@@ -2688,7 +2688,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
       const pct = Math.min(100, Math.round(days/goalDays*100));
       const ready = days >= goalDays;
       return html`
-        <div style=${{margin:"0 16px 10px",background:"var(--card)",borderRadius:16,border:"1px solid var(--border)",padding:"14px 16px"}}>
+        <div style=${{margin:"12px 16px 0",background:"var(--card)",borderRadius:16,border:"1px solid var(--border)",padding:"14px 16px"}}>
           <div style=${{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
             <div style=${{fontSize:12,fontWeight:700,color:"var(--text)"}}>🎓 就活の武器を育て中</div>
             ${ready&&html`<span style=${{fontSize:10.5,fontWeight:700,color:"#fff",background:"var(--accent)",borderRadius:20,padding:"2px 8px"}}>条件クリア🎉</span>`}
@@ -2766,7 +2766,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
         </div>
       </div>`}
     <!-- タスクボード（予定/実行中/完了。PC=ドラッグ、スマホ=移動ボタン。カードタップでタイマー） -->
-    <div style=${{margin:"0 16px 10px",background:"var(--card)",borderRadius:16,border:"1px solid var(--border)",overflow:"hidden"}}>
+    <div style=${{margin:"12px 16px 0",background:"var(--card)",borderRadius:16,border:"1px solid var(--border)",overflow:"hidden"}}>
       <div style=${{padding:"14px 16px",borderBottom:"1px solid var(--border)",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
         <div style=${{display:"flex",alignItems:"center",gap:8}}>
           <div style=${{fontSize:12,fontWeight:700,color:"var(--text)"}}>${boardWide?"タスクボード":"今日のタスク"}</div>
@@ -3061,7 +3061,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
     <!-- ステータス -->
     ${statusSummary&&html`
       <button onClick=${()=>setShowStatusTip(v=>!v)}
-        style=${{display:"block",width:"calc(100% - 32px)",margin:"0 16px 10px",background:"var(--card)",borderRadius:16,border:"1px solid var(--border)",overflow:"hidden",textAlign:"left",cursor:"pointer",fontFamily:"inherit",padding:0}}>
+        style=${{display:"block",width:"calc(100% - 32px)",margin:"12px 16px 0",background:"var(--card)",borderRadius:16,border:"1px solid var(--border)",overflow:"hidden",textAlign:"left",cursor:"pointer",fontFamily:"inherit",padding:0}}>
         <div style=${{padding:"14px 16px 4px",display:"flex",justifyContent:"space-between",alignItems:"baseline"}}>
           <div style=${{fontSize:12,fontWeight:700,color:"var(--text)",letterSpacing:".02em"}}>ステータス</div>
           <div style=${{fontSize:11,color:"var(--sub)"}}>合計 <b style=${{color:"var(--text)",fontSize:14}}>${statusSummary.score}</b> / 100点</div>
@@ -3138,7 +3138,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
 
     <!-- Schedule -->
     ${schedule.length>0&&html`
-      <div style=${{margin:"0 16px 10px",background:"var(--card)",borderRadius:16,border:"1px solid var(--border)",overflow:"hidden"}}>
+      <div style=${{margin:"12px 16px 0",background:"var(--card)",borderRadius:16,border:"1px solid var(--border)",overflow:"hidden"}}>
         <div style=${{padding:"14px 16px",borderBottom:"1px solid var(--border)"}}>
           <div style=${{fontSize:12,fontWeight:700,color:"var(--text)"}}>今日の予定</div>
         </div>
@@ -6416,7 +6416,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260802-205949";
+const APP_BUILD = "20260802-210138";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
