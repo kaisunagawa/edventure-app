@@ -2435,6 +2435,71 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
       </div>`;
     })()}
 
+    <!-- ★今週の目標★ スプリントと今日の間。数字と残り日数で「あと何をすれば届くか」を出す。
+         記録が無いものを0件達成として扱わない -->
+    ${(()=>{
+      const goals = ((goalTree&&goalTree.goals)||[]).filter(g=>String(g.status||"ACTIVE").toUpperCase()!=="ARCHIVED");
+      const ws = [];
+      goals.forEach(g=>(g.weeklyGoals||[]).forEach(w=>ws.push({...w, parentTitle:g.title})));
+      ((goalTree&&goalTree.orphanWeeklyGoals)||[]).forEach(w=>ws.push({...w, parentTitle:""}));
+      const active = ws.filter(w=>String(w.status||"ACTIVE").toUpperCase()==="ACTIVE");
+      const curSprints = ((sprints&&sprints.data)||[]).filter(x=>x.isCurrent);
+      if (!active.length) {
+        if (!goals.length) return "";
+        return html`
+        <div style=${{margin:"16px 16px 0",background:"var(--card)",borderRadius:16,border:"1px solid var(--border)",padding:"14px 16px"}}>
+          <div style=${{fontSize:11,fontWeight:700,color:"var(--sub)",marginBottom:6}}>📅 今週の目標</div>
+          <div style=${{fontSize:12.5,color:"var(--sub)",lineHeight:1.7,marginBottom:10}}>
+            今週の目標がまだありません。<br/>
+            ${curSprints.length
+              ? "スプリントを、今週やる数字に落とすと進みます。"
+              : "先にスプリントを決めると、今週やる数字が決まります。"}
+          </div>
+          <button onClick=${()=>setHomeGoalSheet(true)}
+            style=${{width:"100%",padding:"10px",borderRadius:10,border:"none",background:"var(--accent)",color:"#fff",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
+            ${curSprints.length?"スプリントから作る":"3か月目標から作る"}</button>
+        </div>`;
+      }
+      const MT = { COUNT:"回数", DURATION:"分", DAYS:"日数", BOOLEAN:"やったか" };
+      return html`
+      <div style=${{margin:"16px 16px 0",background:"var(--card)",borderRadius:16,border:"1px solid var(--border)",padding:"14px 16px"}}>
+        <div style=${{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+          <div style=${{fontSize:11,fontWeight:700,color:"var(--sub)"}}>📅 今週の目標</div>
+          <button onClick=${()=>setHomeGoalSheet(true)} style=${{background:"none",border:"none",color:"var(--accent)",fontSize:11.5,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>編集</button>
+        </div>
+        ${active.map((w,k)=>{
+          const tgt = Number(w.std_line) > 0 ? Number(w.std_line) : Number(w.target_total);
+          const hasTgt = !isNaN(tgt) && tgt > 0;
+          const pct = hasTgt ? Math.min(100, Math.round(w.actual_value / tgt * 100)) : null;
+          const u = w.unit || (w.metric_type==="DURATION" ? "分" : "");
+          return html`
+          <div key=${w.weekly_goal_id} style=${{paddingTop:k?11:0,marginTop:k?11:0,borderTop:k?"1px solid var(--border)":"none"}}>
+            <div style=${{display:"flex",justifyContent:"space-between",alignItems:"baseline",gap:8,marginBottom:5}}>
+              <span style=${{fontSize:13.5,fontWeight:700,color:"var(--text)",lineHeight:1.5,overflowWrap:"anywhere"}}>${w.title}</span>
+              ${hasTgt&&html`<span style=${{flexShrink:0,fontSize:12.5,color:"var(--sub)"}}>
+                <b style=${{color:"var(--text)",fontSize:15}}>${w.actual_value}</b> / ${tgt}${u}</span>`}
+            </div>
+            ${w.link_state==="UNLINKED"&&html`
+              <div style=${{fontSize:10.5,color:"var(--amber,#BA7517)",marginBottom:4}}>未接続（設定未完了・上位目標の集計に入りません）</div>`}
+            ${hasTgt&&html`
+              <div style=${{height:6,background:"var(--bg)",borderRadius:99,overflow:"hidden",marginBottom:6}}>
+                <div style=${{height:"100%",width:(pct||0)+"%",background:"var(--accent)",borderRadius:99,transition:"width .5s ease"}}/>
+              </div>`}
+            <div style=${{fontSize:11,color:"var(--sub)",lineHeight:1.7}}>
+              ${!w.has_records
+                ? html`まだ今週の記録がありません（0ではなく、未記録という意味です）`
+                : html`
+                  ${w.remaining_to_std!==null&&html`<span>あと <b style=${{color:"var(--text)"}}>${w.remaining_to_std}${u}</b>　</span>`}
+                  <span>残り <b style=${{color:"var(--text)"}}>${w.days_left}日</b>　</span>
+                  ${w.required_per_day!==null&&w.required_per_day>0&&html`<span>必要 <b style=${{color:"var(--text)"}}>${w.required_per_day}${u}/日</b>　</span>`}
+                  ${w.actual_per_day!==null&&html`<span>実績 <b style=${{color:"var(--text)"}}>${w.actual_per_day}${u}/日</b></span>`}`}
+              ${w.parentTitle&&html`<br/><span style=${{opacity:0.8}}>${w.parentTitle}</span>`}
+            </div>
+          </div>`;
+        })}
+      </div>`;
+    })()}
+
     ${sprintSheet!==null&&html`<${SprintSheet}
       goals=${((goalTree&&goalTree.goals)||[]).filter(g=>String(g.status||"ACTIVE").toUpperCase()!=="ARCHIVED")}
       editing=${sprintSheet&&sprintSheet.sprint_id?sprintSheet:null}
@@ -6270,7 +6335,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260802-163120";
+const APP_BUILD = "20260802-164245";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 

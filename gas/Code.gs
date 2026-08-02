@@ -8236,11 +8236,36 @@ function getGoalTree(studentEmail) {
     const a = agg[String(w.weekly_goal_id)] || { actual: 0, logCount: 0 };
     const target = Number(w.target_total);
     const min = Number(w.min_line);
+    // ★今週のペース★ 残り日数と、1日あたりあとどれだけ要るか。
+    //   未入力と0を区別する（未入力なら「まだ記録がない」と言う）
+    const today = formatDate(new Date());
+    const sunday = (function(){ const d=new Date(weekStart+"T00:00:00Z"); d.setUTCDate(d.getUTCDate()+6);
+                                return d.toISOString().substring(0,10); })();
+    const daysLeft = Math.max(0, Math.round(
+      (new Date(sunday+"T00:00:00+09:00") - new Date(today+"T00:00:00+09:00")) / 86400000) + 1);
+    const elapsed = 7 - daysLeft + 1;
+    const std = Number(w.std_line);
+    const goalLine = (!isNaN(std) && std > 0) ? std : target;
+    const hasGoal = !isNaN(goalLine) && goalLine > 0;
     return Object.assign({}, w, {
       actual_value: a.actual,
       log_count: a.logCount,
       percent: (!isNaN(target) && target > 0) ? Math.min(999, Math.round(a.actual / target * 100)) : null,
-      met_min: (!isNaN(min) && min > 0) ? a.actual >= min : null
+      met_min: (!isNaN(min) && min > 0) ? a.actual >= min : null,
+      week_start: weekStart, week_end: sunday,
+      days_left: daysLeft, days_elapsed: Math.max(1, Math.min(7, elapsed)),
+      remaining_to_std: hasGoal ? Math.max(0, Math.round((goalLine - a.actual) * 10) / 10) : null,
+      remaining_to_stretch: (!isNaN(Number(w.stretch_line)) && Number(w.stretch_line) > 0)
+        ? Math.max(0, Math.round((Number(w.stretch_line) - a.actual) * 10) / 10) : null,
+      required_per_day: (hasGoal && daysLeft > 0)
+        ? Math.round((goalLine - a.actual) / daysLeft * 10) / 10 : null,
+      actual_per_day: a.logCount > 0
+        ? Math.round(a.actual / Math.max(1, Math.min(7, elapsed)) * 10) / 10 : null,
+      // 記録が1件も無い＝未入力。0件達成として扱わない
+      has_records: a.logCount > 0,
+      confidence: a.logCount === 0 ? "NONE" : (elapsed >= 4 ? "MEDIUM" : "LOW"),
+      link_state: (String(w.link_sprint_id||"").trim() || String(w.link_quarterly_goal_id||"").trim())
+        ? "LINKED" : "UNLINKED"
     });
   };
 
@@ -8319,9 +8344,18 @@ function saveWeeklyGoal(studentEmail, body) {
   if (!title) return { ok: false, error: "週間目標のタイトルを入力してください" };
 
   // 紐づけ先の3か月目標。他人の目標にはぶら下げられない
-  const link = String(body.link_quarterly_goal_id || "").trim();
+  let link = String(body.link_quarterly_goal_id || "").trim();
   if (link && !p1OwnedRow("Goals", "quarterly_goal_id", link, studentEmail)) {
     return { ok: false, error: "紐づけ先の3か月目標が見つかりません" };
+  }
+  // ★親のスプリント★ Sprint UI ができたので繋げる。
+  //   スプリントを選んだら、その親の3か月目標を自動で引き継ぐ
+  //   （画面で2回選ばせない。取り違えも防ぐ）
+  const sprintId = String(body.link_sprint_id || "").trim();
+  if (sprintId) {
+    const sp = p1OwnedRow("Sprints", "sprint_id", sprintId, studentEmail);
+    if (!sp) return { ok: false, error: "紐づけ先のスプリントが見つかりません" };
+    if (!link) link = String(sp.link_quarterly_goal_id || "");
   }
   if (!id && p1List("WeeklyGoals", studentEmail).filter(w => p1Status_(w.status, "ACTIVE") === "ACTIVE").length >= 30) {
     return { ok: false, error: "週間目標は30件までです" };
@@ -8339,7 +8373,7 @@ function saveWeeklyGoal(studentEmail, body) {
     weekly_goal_id: id || makeP1Id("wg"),
     student_email: studentEmail, // ★常にリクエスト本人
     link_quarterly_goal_id: link,
-    link_sprint_id: "", // スプリントは後回しのため空のまま
+    link_sprint_id: sprintId,
     title: title,
     metric_type: mt,
     unit: p1Text_(body.unit, 20),
@@ -8351,7 +8385,12 @@ function saveWeeklyGoal(studentEmail, body) {
     status: p1Status_(body.status, "ACTIVE")
   };
   const r = p1Upsert("WeeklyGoals", "weekly_goal_id", rec);
-  return { ok: true, id: r.id, created: r.created };
+  // ★親がないものは黙って通さない★ 保存はするが「未接続」と伝え、
+  //   上位目標への集計対象外であることを画面で言えるようにする
+  const unlinked = !sprintId && !link;
+  return { ok: true, id: r.id, created: r.created,
+           linkState: unlinked ? "UNLINKED" : "LINKED",
+           note: unlinked ? "3か月目標にもスプリントにも紐づいていません（設定未完了・上位目標の進捗集計の対象外です）" : "" };
 }
 
 // 削除は行を消さず status を変えるだけ（記録から参照されているIDが宙に浮かないように）。
