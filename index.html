@@ -1271,7 +1271,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
   const [sprintSheet, setSprintSheet] = useState(null);   // null=閉 / {}=新規 / obj=編集
   const [wgSheet, setWgSheet] = useState(false);          // 今週の目標をつくる
   const [sprintIdx, setSprintIdx] = useState(0);
-  const [openRow, setOpenRow] = useState("");   // 目標のつながりで開いている行
+  const [openRow, setOpenRow] = useState("");   // 目標ロードマップで開いている行
   const [goalDetail, setGoalDetail] = useState(false);   // 数字の出どころ（普段は隠す）
   const [deepenGoal, setDeepenGoal] = useState(null);    // 目標の深掘り
   const [goalQuick, setGoalQuick] = useState({current:"", start:"", end:""});   // 足りない値をその場で入れる
@@ -2273,7 +2273,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
 
     ${showCommunity&&html`<${CommunityOverlay} onClose=${()=>setShowCommunity(false)}/>`}
 
-    <!-- ★目標のつながり（3か月 → 2週間 → 今週）★
+    <!-- ★目標ロードマップ（3か月 → 2週間 → 今週）★
          以前は3枚のカードに分かれていて、縦に長すぎた（Kai指摘）。
          普段は1行ずつの要約だけ。押した行だけ中身を開く。 -->
     ${(()=>{
@@ -2321,10 +2321,13 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
 
       return html`
       <div style=${{margin:"16px 16px 0",background:"var(--card)",borderRadius:16,border:"1px solid var(--border)",overflow:"hidden"}}>
-        <div style=${{padding:"11px 14px 9px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-          <span style=${{fontSize:11,fontWeight:700,color:"var(--sub)"}}>🎯 目標のつながり</span>
+        <div style=${{padding:"11px 14px 9px",display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
+          <span style=${{flex:1,minWidth:0}}>
+            <span style=${{display:"block",fontSize:11,fontWeight:700,color:"var(--sub)"}}>🎯 目標ロードマップ</span>
+            <span style=${{display:"block",fontSize:10,color:"var(--sub)",opacity:0.85,marginTop:2,lineHeight:1.5}}>3か月の目標を、今週の行動まで落とし込みます</span>
+          </span>
           <button onClick=${()=>setHomeGoalSheet(true)}
-            style=${{background:"none",border:"none",color:"var(--accent)",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>一覧</button>
+            style=${{flexShrink:0,whiteSpace:"nowrap",background:"none",border:"none",color:"var(--accent)",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit",padding:0}}>一覧</button>
         </div>
 
         <!-- 3か月 -->
@@ -5343,7 +5346,7 @@ function GoalDeepenSheet({goal, onClose, onSaved, onToast}) {
 }
 
 // 今週の目標をつくる小さい画面。
-// これまでは「目標のつながり」全体を開き直していたため、
+// これまでは「目標ロードマップ」全体を開き直していたため、
 //   ・通信が遅いと読み込み中のまま止まる（実際に止まった）
 //   ・「スプリントから作る」と言いながらスプリントを選べない
 // という2つの問題があった。手元にあるデータだけで動かす。
@@ -5553,7 +5556,7 @@ function GoalTreeSheet({onClose, onToast}) {
   return html`
     <div style=${{position:"fixed",inset:0,height:"100dvh",zIndex:400,background:"var(--bg)",display:"flex",flexDirection:"column"}}>
       <div style=${{display:"flex",alignItems:"center",gap:10,padding:"14px 16px",borderBottom:"1px solid var(--border)",flexShrink:0,paddingTop:"calc(14px + var(--safe-top, 0px))"}}>
-        <div style=${{fontSize:15,fontWeight:800,color:"var(--text)",flex:1}}>目標のつながり</div>
+        <div style=${{fontSize:15,fontWeight:800,color:"var(--text)",flex:1}}>目標ロードマップ</div>
         <button onClick=${onClose} style=${{background:"none",border:"none",color:"var(--sub)",fontSize:22,cursor:"pointer",lineHeight:1,padding:"0 4px"}}>×</button>
       </div>
 
@@ -6474,7 +6477,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260802-185522";
+const APP_BUILD = "20260802-200234";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
