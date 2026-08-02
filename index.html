@@ -1331,6 +1331,10 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
         if(d.weekly.reflection) setWeekReflection(d.weekly.reflection);
         if(d.weekly.nextIntention) setWeekIntention(d.weekly.nextIntention);
       }
+      // ★Tasksシートを正とした反映（Phase 3）★
+      //   下の Journal.actions 同期より後に走らせる（あとに適用した方が勝つため、
+      //   Tasksシートの内容が最終的な画面になる）。
+      setTimeout(applyTasksFromServer, 0);
       // 今日のアクションの端末間同期
       if(d.todayActions){
         // ★タスク一覧はサーバーと突き合わせて1つにまとめる★
@@ -1514,6 +1518,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
   },[actionItems, checked, todayKey, taskEstimates]);
 
   const toggleCheck = (key) => {
+    window.__jirokuTaskTouched = true;   // 以後、サーバー読みで上書きしない
     const idk = idOfTitle(key) || key;
     const cur = (checked[idk] !== undefined) ? checked[idk] : checked[key];
     const next = {...checked, [idk]: !cur};
@@ -1574,6 +1579,11 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
   };
   // タスクを削除（詳細画面）。関連する状態・時間・メモ・チェックも掃除する
   const deleteTask = (task) => {
+    window.__jirokuTaskTouched = true;
+    // ★Tasksシートにも「消えた」と伝える★
+    //   これがないと、シート側に行が残り、次の読み込みで復活する
+    const delId = idOfTitle(task);
+    if (delId) gasApi("deleteTask", { task_id: delId });
     const list = actionItems.filter(t=>t!==task);
     if(list.length===0){ setCustomActions(null); localStorage.removeItem("jiroku_custom_actions_"+todayKey); }
     else { const st=toStored(list); setCustomActions(st); localStorage.setItem("jiroku_custom_actions_"+todayKey, JSON.stringify(st)); }
@@ -1604,12 +1614,54 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
     localStorage.setItem("jiroku_task_importance_"+todayKey, JSON.stringify(next));
     pushTaskMeta({ imp: next });
   };
+  // ★サーバー（Tasksシート）を正として画面へ反映する★
+  //   これまで「端末の値を優先」で取り込んでいたため、端末間で
+  //   食い違いが残り続けた。今後はTasksシートが正。
+  //   ただし、この端末で既に操作を始めていたら適用しない。
+  //   読み込みが遅れて届いたとき、いま入力した内容を消してしまうため。
+  const applyTasksFromServer = async () => {
+    if (window.__jirokuTaskTouched) return;
+    const r = await gasApi("getTasks", { includeDone: "1" });
+    if (!r || !r.ok || !Array.isArray(r.data)) return;
+    if (window.__jirokuTaskTouched) return;   // 通信中に操作が始まったら適用しない
+    // 今日の分だけ。ARCHIVED は画面に出さない
+    const rows = r.data.filter(t => String(t.date).slice(0,10) === todayKey && t.status !== "ARCHIVED");
+    if (!rows.length) return;
+    // サーバーの進捗語彙（大文字）を画面の語彙（小文字）へ
+    const sttOf = s => s === "DONE" ? "done" : s === "IN_PROGRESS" ? "doing" : "todo";
+    // 並び順はこの端末の今の並びを保つ（勝手に入れ替わると探せなくなる）。
+    // この端末に無いタスクは後ろへ足す
+    const curIds = (customActions || []).map(t => t.id);
+    rows.sort((a, b) => {
+      const ia = curIds.indexOf(a.task_id), ib = curIds.indexOf(b.task_id);
+      return (ia === -1 ? 1e9 : ia) - (ib === -1 ? 1e9 : ib);
+    });
+    const list = rows.map(t => ({ id: t.task_id, title: t.title }));
+    const imp = {}, due = {}, est = {}, memo = {}, stt = {}, chk = {};
+    rows.forEach(t => {
+      if (t.importance_level && !t.importance_is_suggestion) imp[t.task_id] = t.importance_level;
+      if (t.due_at) due[t.task_id] = t.due_at;
+      if (Number(t.estimated_minutes) > 0) est[t.task_id] = Number(t.estimated_minutes);
+      if (t.memo) memo[t.task_id] = String(t.memo);
+      stt[t.task_id] = sttOf(t.status);
+      if (t.status === "DONE") chk[t.task_id] = true;
+    });
+    setCustomActions(list); localStorage.setItem("jiroku_custom_actions_"+todayKey, JSON.stringify(list));
+    setTaskImportance(imp); localStorage.setItem("jiroku_task_importance_"+todayKey, JSON.stringify(imp));
+    setTaskDue(due);        localStorage.setItem("jiroku_task_due_"+todayKey, JSON.stringify(due));
+    setTaskEstimates(est);  localStorage.setItem("jiroku_task_estimates_"+todayKey, JSON.stringify(est));
+    setTaskNotes(memo);     localStorage.setItem("jiroku_task_memo_"+todayKey, JSON.stringify(memo));
+    setTaskStatus(stt);     localStorage.setItem("jiroku_task_status_"+todayKey, JSON.stringify(stt));
+    setChecked(chk);        localStorage.setItem("today_actions", JSON.stringify(chk));
+  };
+
   // ★設定を変えたら、その場でサーバーへ送る★
   //   これまでは localStorage に書くだけで、タスクの追加や編集をした
   //   ついでにしか送られていなかった。重要度や期限だけ変えても
   //   他の端末に届かない（実際にそうなった）。
   //   setState は非同期なので、変更後の値を引数で受け取る。
   const pushTaskMeta = (over) => {
+    window.__jirokuTaskTouched = true;   // 以後、サーバー読みで上書きしない
     const o = over || {};
     const imp = o.imp || taskImportance, due = o.due || taskDue;
     const est = o.est || taskEstimates, memo = o.memo || taskNotes, stt = o.stt || taskStatus;
@@ -1725,6 +1777,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
     setEditMode(true);
   };
   const saveEdit = () => {
+    window.__jirokuTaskTouched = true;   // 以後、サーバー読みで上書きしない
     const rows = editItems.map(r=>({text:String(r.text||"").trim(), min:r.min, imp:r.imp, due:r.due})).filter(r=>r.text.length>0);
 
     // ★同じ名前のタスクを2件作らせない（暫定の防御）★
@@ -1768,6 +1821,10 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
     localStorage.setItem("today_actions", JSON.stringify(newChecked));
     // 空で保存したらAIアクションに戻す
     const storedList = toStored(finalList);
+    // ★編集で消えたタスクはTasksシートにも伝える★（残ると復活する）
+    const keptIds = {};
+    storedList.forEach(t=>{ keptIds[t.id]=1; });
+    (customActions||[]).forEach(t=>{ if(!keptIds[t.id]) gasApi("deleteTask", { task_id: t.id }); });
     if(finalList.length===0){ setCustomActions(null); localStorage.removeItem("jiroku_custom_actions_"+todayKey); }
     else { setCustomActions(storedList); localStorage.setItem("jiroku_custom_actions_"+todayKey, JSON.stringify(storedList)); }
     // 他端末にも同期
@@ -5414,7 +5471,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260802-112416";
+const APP_BUILD = "20260802-125522";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 

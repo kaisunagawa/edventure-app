@@ -10347,17 +10347,32 @@ function suggestImportance(task) {
 }
 
 // タスク1件に、算出した値を足して返す（保存はしない）
+// ★シートは日付らしい文字列を勝手にDate型へ変える★
+//   "2026-08-05" と書いても読むとDateオブジェクトが返る。そのままJSONにすると
+//   UTCのISO文字列（前日の15:00）になり、期限の日付が1日ずれる。
+//   時刻が0:00なら「日付だけの期限」、そうでなければ「時刻つき」として戻す。
+function p1DateOut_(v) {
+  if (v instanceof Date) {
+    const hm = Utilities.formatDate(v, "Asia/Tokyo", "HH:mm:ss");
+    return hm === "00:00:00"
+      ? Utilities.formatDate(v, "Asia/Tokyo", "yyyy-MM-dd")
+      : Utilities.formatDate(v, "Asia/Tokyo", "yyyy-MM-dd'T'HH:mm");
+  }
+  return String(v || "");
+}
+
 function decorateTask(t, nowMs) {
   const imp = IMPORTANCE_LEVELS.indexOf(String(t.importance_level || "").toUpperCase()) !== -1
     ? String(t.importance_level).toUpperCase() : "";
-  const u = computeUrgency(t.due_at, t.urgency_override, nowMs);
+  const dueOut = p1DateOut_(t.due_at);
+  const u = computeUrgency(dueOut, t.urgency_override, nowMs);
   const effectiveImportance = imp || suggestImportance(t);
   return {
-    task_id: t.task_id, title: t.title, date: t.date, status: normalizeTaskStatus(t.status),
+    task_id: t.task_id, title: t.title, date: p1DateOut_(t.date), status: normalizeTaskStatus(t.status),
     link_weekly_goal_id: t.link_weekly_goal_id || "",
     link_daily_focus_id: t.link_daily_focus_id || "",
     estimated_minutes: t.estimated_minutes || "", actual_minutes: t.actual_minutes || "",
-    due_at: t.due_at || "", memo: t.memo || "",
+    due_at: dueOut, memo: t.memo || "",
     completed_at: t.completed_at || "", first_started_at: t.first_started_at || "",
     carryover_count: Number(t.carryover_count || 0),
     // 同期に使う。端末はこれを見て「自分が持っている版」と比べる
