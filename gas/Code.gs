@@ -394,6 +394,7 @@ function doGet(e) {
         var _cols = {};
         Object.keys(P1_ADDED_COLUMNS).forEach(function (n) {
           var s = getSheet(n); if (!s) { _cols[n] = null; return; }
+          if (s.getLastColumn() < 1) { _cols[n] = []; return; }   // 見出し行が無いシート
           var h = s.getRange(1, 1, 1, s.getLastColumn()).getValues()[0];
           _cols[n] = P1_ADDED_COLUMNS[n].filter(function (c) { return h.indexOf(c) !== -1; });
         });
@@ -1492,7 +1493,9 @@ function computeDailyOpsFacts(studentEmail, dateStr, fixture) {
       memo_count: logs.filter(function (l) { return String(l.memo || "").trim(); }).length,
       tasks_total: tasks.length,
       tasks_done: tasks.filter(function (t) { return normalizeTaskStatus(t.status) === "DONE"; }).length,
-      tasks_started: tasks.filter(function (t) { return String(t.first_started_at || "").trim(); }).length,
+      // 着手＝始めたが終わっていないもの（内訳の「着手n件」と数を合わせる）
+      tasks_started: tasks.filter(function (t) { return String(t.first_started_at || "").trim() &&
+                                                        normalizeTaskStatus(t.status) !== "DONE"; }).length,
       important_done: tasks.filter(function (t) { return String(t.importance_level).toUpperCase() === "HIGH" &&
                                                           normalizeTaskStatus(t.status) === "DONE"; })
                            .map(function (t) { return String(t.title); }),
@@ -1594,7 +1597,224 @@ function getDailyOpsReport(studentEmail, body) {
   cur.previous_day_delta = prevDelta;
   cur.seven_day_average_delta = avgDelta;
   cur.comparison_unavailable_reason = cmpReason;
+  // Phase R2: 文章はAIが書く。数値・状態・充足度はここで確定済みで、AIは触れない
+  const nar = opsNarrative(studentEmail, cur, body && String(body.refresh) === "1");
+  cur.narrative = nar;
   return { ok: true, data: cur };
+}
+
+// ══════════════════════════════════════════════════════════════════
+// Phase R2: AIは「文章だけ」書く
+//   ・点数/状態/充足度/確からしさ/版はAIに渡すだけで、書き換えさせない
+//   ・文章の材料は fact_id 付きの事実に限る。無い事実は書けない
+//   ・同じ入力なら生成し直さない（input_hash）
+//   ・schema検証に落ちたら機械組み立ての文章へ落とす
+// ══════════════════════════════════════════════════════════════════
+const OPS_PROMPT_VERSION = "self_management_daily_prompt_v1_1";
+const OPS_MAX_REGENERATE = 8;   // 1日あたりの再生成の上限（編集のたびに課金しない）
+
+// 文章の材料。ここに無い事実をAIが書いたら落とす
+function opsFactList(cur) {
+  const f = cur.facts || {};
+  const L = [];
+  (f.important_done || []).forEach(function (t, i) {
+    L.push({ fact_id: "f_important_done_" + i, text: "重要タスク「" + t + "」を完了した" }); });
+  if (f.daily_focus && f.daily_focus_done)
+    L.push({ fact_id: "f_focus_done", text: "今日のフォーカス「" + f.daily_focus + "」を達成した" });
+  if (f.daily_focus && !f.daily_focus_done)
+    L.push({ fact_id: "f_focus_open", text: "今日のフォーカス「" + f.daily_focus + "」は達成に至らなかった" });
+  if (f.tasks_total) L.push({ fact_id: "f_tasks", text: "今日のタスク" + f.tasks_total + "件のうち" + f.tasks_done + "件を完了し、" + f.tasks_started + "件に着手した" });
+  if (f.logged_blocks) L.push({ fact_id: "f_logs", text: f.logged_blocks + "時間帯を記録し、" + f.memo_count + "件の振り返りを残した" });
+  (f.carried_over || []).forEach(function (t, i) {
+    L.push({ fact_id: "f_carried_" + i, text: "「" + t + "」を翌日へ回した" }); });
+  (f.weekly_goals || []).forEach(function (w, i) {
+    L.push({ fact_id: "f_weekly_goal_" + i, text: "今週の目標「" + w.title + "」は " + w.actual + " / " + w.target + w.unit }); });
+  (cur.components || []).forEach(function (c) {
+    if (c.state === "evaluated")
+      L.push({ fact_id: "f_cat_" + c.key, text: c.label + "は" + c.score + "点（測定範囲" + Math.round((c.weighted_coverage || 0) * 100) + "%）" });
+    else
+      L.push({ fact_id: "f_cat_" + c.key + "_pending", text: c.label + "は" + (c.incomplete_reason || "評価できていない") });
+  });
+  return L;
+}
+
+// 同じ入力なら同じ結果。日付や乱数は混ぜない
+function opsInputHash(cur, factList) {
+  const src = {
+    date: cur.report_date, email: cur.student_email,
+    score: cur.operating_score, partial: cur.partial_score,
+    state: cur.evaluation_state, coverage: cur.coverage, confidence: cur.confidence,
+    blocked: cur.score_blocked_by,
+    cats: (cur.components || []).map(function (c) {
+      return [c.key, c.state, c.score, c.weighted_coverage].join(":"); }),
+    facts: factList.map(function (x) { return x.fact_id + "=" + x.text; }),
+    calc: cur.calculation_version, report: cur.report_version, prompt: OPS_PROMPT_VERSION
+  };
+  return sha256Hex(JSON.stringify(src));
+}
+
+// 機械組み立て（AIが使えない/信用できないときの土台）
+function opsFallbackNarrative(cur, factList) {
+  const byId = {};
+  factList.forEach(function (x) { byId[x.fact_id] = x; });
+  const pick = function (pre) {
+    return factList.filter(function (x) { return x.fact_id.indexOf(pre) === 0; }); };
+  const prog = pick("f_important_done_").concat(byId.f_focus_done ? [byId.f_focus_done] : [])
+                 .concat(byId.f_logs ? [byId.f_logs] : []).slice(0, 3);
+  const carried = pick("f_carried_");
+  const pending = (cur.components || []).filter(function (c) { return c.state !== "evaluated"; })
+                                        .map(function (c) { return c.label; });
+  const summary = cur.operating_score !== null
+    ? "今日は決めたことを進められています。下の内訳で、どこが効いたかを確認できます。"
+    : (cur.partial_score !== null
+        ? (cur.evaluated_categories || []).join("と") + "は「" + cur.partial_label + "」です。総合スコアは、"
+          + (pending.join("と") || "不足している項目") + "のデータを蓄積中です。"
+        : "評価に必要なデータがまだ足りません。記録が増えると状態が出せるようになります。");
+  return {
+    operating_summary: summary,
+    progress_items: prog.map(function (x) { return { text: x.text, fact_id: x.fact_id }; }),
+    primary_management_issue: carried.length
+      ? { text: "予定していた" + carried.length + "件を翌日へ回しました。積み残しが増えると、明日の予定が入らなくなります。",
+          fact_id: carried[0].fact_id }
+      : { text: "", fact_id: "" },
+    next_action: "", stop_action: "",
+    recovery_summary: carried.length ? "崩れた予定を翌日へ移して整理しました。"
+                                     : "本日は立て直しが必要な場面はありませんでした。"
+  };
+}
+
+// AI出力の形を検査する。事実IDが無いもの・知らないIDは採用しない
+function opsValidateNarrative(obj, factList) {
+  if (!obj || typeof obj !== "object") return { ok: false, reason: "NOT_OBJECT" };
+  const ids = {};
+  factList.forEach(function (x) { ids[x.fact_id] = 1; });
+  const str = function (v, max) {
+    return (typeof v === "string" && v.trim()) ? v.trim().slice(0, max) : ""; };
+  const summary = str(obj.operating_summary, 200);
+  if (!summary) return { ok: false, reason: "NO_SUMMARY" };
+  const items = Array.isArray(obj.progress_items) ? obj.progress_items : [];
+  const prog = [];
+  for (let i = 0; i < items.length && prog.length < 3; i++) {
+    const t = str(items[i] && items[i].text, 120);
+    const fid = str(items[i] && items[i].fact_id, 64);
+    if (!t || !ids[fid]) continue;      // 根拠のない文は捨てる
+    prog.push({ text: t, fact_id: fid });
+  }
+  const issue = obj.primary_management_issue || {};
+  const issueText = str(issue.text, 200);
+  const issueId = str(issue.fact_id, 64);
+  return { ok: true, data: {
+    operating_summary: summary,
+    progress_items: prog,
+    primary_management_issue: (issueText && ids[issueId]) ? { text: issueText, fact_id: issueId } : { text: "", fact_id: "" },
+    next_action: str(obj.next_action, 120),
+    stop_action: str(obj.stop_action, 120),
+    recovery_summary: str(obj.recovery_summary, 200)
+  } };
+}
+
+function opsBuildPrompt(cur, factList) {
+  const view = {
+    日付: cur.report_date,
+    総合スコア: cur.operating_score,
+    総合の状態: cur.operating_state_label,
+    総合を出せない理由: cur.score_blocked_by || "",
+    評価できた割合: cur.coverage, 確からしさ: cur.confidence,
+    項目: (cur.components || []).map(function (c) {
+      return { 名前: c.label, 配点: c.weight, 点数: c.score, 状態: c.evaluation_state,
+               測定範囲: c.weighted_coverage, 不足: c.incomplete_reason || "" }; }),
+    使える事実: factList
+  };
+  return "あなたは自己経営の記録アプリの日次レポートを書きます。\n"
+    + "以下は、すでに確定した評価結果と、その日の事実です。\n\n"
+    + JSON.stringify(view, null, 1) + "\n\n"
+    + "【厳守】\n"
+    + "・点数・状態・測定範囲・確からしさを、あなたが変えたり言い換えたりしないこと\n"
+    + "・「使える事実」に無いことを書かないこと。体調・感情・原因を推測しないこと\n"
+    + "・progress_items と primary_management_issue には、必ず使った事実の fact_id を付けること\n"
+    + "・総合スコアが null のときは、点数があるかのように書かないこと\n"
+    + "・日本語。やさしい言葉で、responsible な事実の要約として書くこと\n\n"
+    + "次のJSONだけを返してください（前後に文章を付けない）。\n"
+    + '{\n  "operating_summary": "<今日の経営状態の要約。2文以内>",\n'
+    + '  "progress_items": [ { "text": "<今日の前進。1文>", "fact_id": "<使った事実のid>" } ],\n'
+    + '  "primary_management_issue": { "text": "<今日の経営課題。2文以内。無ければ空文字>", "fact_id": "<事実のid。無ければ空文字>" },\n'
+    + '  "next_action": "<明日の一手。1文>",\n'
+    + '  "stop_action": "<明日やめる・減らすこと。1文。続けることを書かない。思い当たらなければ空文字>",\n'
+    + '  "recovery_summary": "<今日の立て直し。1〜2文>"\n}';
+}
+
+// 保存済みがあれば使い、無ければ生成して保存する
+function opsNarrative(studentEmail, cur, forceRefresh) {
+  const factList = opsFactList(cur);
+  const hash = opsInputHash(cur, factList);
+  const rows = p1List("DailyOpsReport", studentEmail).filter(function (r) {
+    return String(r.report_date).slice(0, 10) === cur.report_date &&
+           String(r.report_version) === cur.report_version; });
+  const row = rows[0] || null;
+  const regen = row ? Number(row.regenerate_count || 0) : 0;
+  if (row && !forceRefresh && String(row.input_hash) === hash) {
+    let stored = null;
+    try { stored = JSON.parse(row.narrative_json || "null"); } catch (e) { stored = null; }
+    if (stored) return Object.assign(stored, { generated_by: row.generated_by || "stored",
+                                               prompt_version: row.prompt_version, input_hash: hash, reused: true });
+  }
+  // 入力が変わりすぎる日に何度も生成しない
+  if (row && regen >= OPS_MAX_REGENERATE && !forceRefresh) {
+    let stored = null;
+    try { stored = JSON.parse(row.narrative_json || "null"); } catch (e) { stored = null; }
+    if (stored) return Object.assign(stored, { generated_by: "stored_capped", prompt_version: row.prompt_version,
+                                               input_hash: row.input_hash, reused: true,
+                                               note: "本日の再生成の上限に達しました" });
+  }
+
+  const fb = opsFallbackNarrative(cur, factList);
+  let out = fb, by = "fallback", fbReason = "AI_NOT_CALLED";
+  const apiKey = PropertiesService.getScriptProperties().getProperty("CLAUDE_API_KEY");
+  if (apiKey) {
+    try {
+      const res = UrlFetchApp.fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
+        payload: JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: 1200,
+                                  messages: [{ role: "user", content: opsBuildPrompt(cur, factList) }] }),
+        muteHttpExceptions: true
+      });
+      const result = JSON.parse(res.getContentText());
+      logAiUsage(result, "自己経営 日次レポート");
+      const text = result && result.content && result.content[0] ? result.content[0].text : "";
+      const parsed = text ? parseAiJson(text) : null;
+      const v = opsValidateNarrative(parsed, factList);
+      if (v.ok) { out = v.data; by = "ai"; fbReason = ""; }
+      else fbReason = "SCHEMA_" + v.reason;
+    } catch (e) { fbReason = "AI_ERROR"; }
+  } else fbReason = "NO_API_KEY";
+  // AIが前進を1つも根拠付きで書けなかったときは、機械組み立てで補う
+  if (by === "ai" && !out.progress_items.length && fb.progress_items.length) {
+    out.progress_items = fb.progress_items;
+  }
+
+  const now = new Date().toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" });
+  p1Upsert("DailyOpsReport", "row_id", {
+    row_id: row ? row.row_id : ("ops_" + sha256Hex(studentEmail + "|" + cur.report_date + "|" + cur.report_version).slice(0, 16)),
+    student_email: studentEmail, report_date: cur.report_date, report_version: cur.report_version,
+    operating_state_label: cur.operating_state_label, operating_summary: out.operating_summary,
+    operating_score: cur.operating_score === null ? "" : cur.operating_score,
+    previous_day_delta: cur.previous_day_delta === null ? "" : cur.previous_day_delta,
+    seven_day_average_delta: cur.seven_day_average_delta === null ? "" : cur.seven_day_average_delta,
+    progress_items: JSON.stringify(out.progress_items),
+    primary_management_issue: JSON.stringify(out.primary_management_issue),
+    next_action: out.next_action, stop_action: out.stop_action, recovery_summary: out.recovery_summary,
+    evaluation_components: JSON.stringify((cur.components || []).map(function (c) {
+      return { key: c.key, score: c.score, state: c.evaluation_state,
+               weighted_coverage: c.weighted_coverage, confidence: c.confidence }; })),
+    evaluation_state: cur.evaluation_state, coverage: cur.coverage, confidence: cur.confidence,
+    calculation_version: cur.calculation_version, prompt_version: OPS_PROMPT_VERSION,
+    input_hash: hash, generated_at: now,
+    narrative_json: JSON.stringify(out), generated_by: by, fallback_reason: fbReason,
+    regenerate_count: row ? regen + 1 : 0
+  });
+  return Object.assign({}, out, { generated_by: by, fallback_reason: fbReason,
+                                  prompt_version: OPS_PROMPT_VERSION, input_hash: hash, reused: false });
 }
 
 // ── Phase R1 の検証用 ───────────────────────────────
@@ -1654,6 +1874,30 @@ function opsSelfTest(studentEmail, dateStr) {
                     coverage: f.coverage, confidence: f.confidence, label: f.operating_state_label,
                     blocked_by: f.score_blocked_by });
   }
+  // 文章まわりの検査（AIを呼ばずに、schema検証とフォールバックだけ確かめる）
+  (function () {
+    const cur = computeDailyOpsFacts(studentEmail, date);
+    const fl = opsFactList(cur);
+    const ids = fl.map(function (x) { return x.fact_id; });
+    const good = { operating_summary: "テスト", progress_items: [{ text: "本物の事実", fact_id: ids[0] }],
+                   primary_management_issue: { text: "課題", fact_id: ids[0] },
+                   next_action: "一手", stop_action: "", recovery_summary: "立て直し" };
+    const bad1 = { progress_items: [] };                                   // 要約なし
+    const bad2 = { operating_summary: "テスト",
+                   progress_items: [{ text: "でっち上げ", fact_id: "f_not_exist" },
+                                    { text: "根拠なし" }] };               // 知らないID／ID無し
+    out.narrative_tests = {
+      fact_ids: ids,
+      valid_ok: opsValidateNarrative(good, fl).ok,
+      missing_summary_rejected: !opsValidateNarrative(bad1, fl).ok,
+      unknown_fact_dropped: (function () {
+        const v = opsValidateNarrative(bad2, fl);
+        return v.ok && v.data.progress_items.length === 0; })(),
+      not_object_rejected: !opsValidateNarrative(null, fl).ok,
+      fallback: opsFallbackNarrative(cur, fl),
+      input_hash_stable: opsInputHash(cur, fl) === opsInputHash(cur, fl)
+    };
+  })();
   const scored = out.week.filter(function (w) { return w.score !== null; }).map(function (w) { return w.score; });
   const parts = out.week.filter(function (w) { return w.partial !== null; }).map(function (w) { return w.partial; });
   const stat = function (a) {
@@ -8695,18 +8939,7 @@ const P1_SHEETS = {
     "carried_from","source_type","requested_by","requested_at",
     // 旧形式（Journal.actionsのid無しタスク）からの移行の出どころ。
     // 何をどこから移したかを行ごとに残す。監査と巻き戻しに使う
-    "migrated_from","source_journal_id","source_action_index","migration_id","migrated_at"]
-};
-// 既存シートへ追加する列（削除・改名は一切しない）
-const P1_ADDED_COLUMNS = {
-  // actual_minutes … タイマー等で実際に測った分数。DURATIONの第1優先
-  // duration_confirmed … time_block から出した候補を本人が確認して確定したか
-  //   （確定していない候補を勝手に足さないための印）
-  DailyLog: ["action_execution_id","quantity","unit","primary_weekly_goal_id","related_goal_ids",
-    "link_task_id","deleted_at","actual_minutes","duration_confirmed"],
-  Journal: ["daily_focus_id","focus_completion_condition","focus_min_line","focus_planned_time",
-    "focus_if_then","link_weekly_goal_id","focus_achievement_state","focus_miss_reason"],
-  Users: ["features","task_migrated_at"],
+    "migrated_from","source_journal_id","source_action_index","migration_id","migrated_at"],
   // ★AI日次レポート（self_management_daily_v1）★
   //   既存の Reports には手を触れない。列順が固定配列で書かれており、
   //   ランキングもそこを直接読むため、増やすと壊れる危険がある。
@@ -8717,6 +8950,7 @@ const P1_ADDED_COLUMNS = {
     "primary_management_issue","next_action","stop_action","recovery_summary",
     "evaluation_components","evaluation_state","coverage","confidence",
     "calculation_version","prompt_version","input_hash","generated_at",
+    "narrative_json","generated_by","fallback_reason","regenerate_count",
     "created_at","updated_at"],
   // ★自己経営力（self_mgmt_power_v1）★
   //   1ユーザー × 1週間 × 1指標 ＝ 1行（1人1週で最大5行）
@@ -8728,6 +8962,17 @@ const P1_ADDED_COLUMNS = {
     "score","evaluation_state","status_label","confidence","coverage","sample_count",
     "calculation_version","calculated_at","input_hash","components","incomplete_reason",
     "created_at","updated_at"]
+};
+// 既存シートへ追加する列（削除・改名は一切しない）
+const P1_ADDED_COLUMNS = {
+  // actual_minutes … タイマー等で実際に測った分数。DURATIONの第1優先
+  // duration_confirmed … time_block から出した候補を本人が確認して確定したか
+  //   （確定していない候補を勝手に足さないための印）
+  DailyLog: ["action_execution_id","quantity","unit","primary_weekly_goal_id","related_goal_ids",
+    "link_task_id","deleted_at","actual_minutes","duration_confirmed"],
+  Journal: ["daily_focus_id","focus_completion_condition","focus_min_line","focus_planned_time",
+    "focus_if_then","link_weekly_goal_id","focus_achievement_state","focus_miss_reason"],
+  Users: ["features","task_migrated_at"]
 };
 
 // 新規シートを取得（無ければ列付きで作る）。既存のgetXxxSheet()と同じ流儀
@@ -8746,6 +8991,11 @@ function getP1Sheet(name) {
   // 末尾へ足すだけ。並べ替えも改名も削除も一切しない。
   try {
     const want = P1_SHEETS[name] || [];
+    // 見出し行が無いまま作られてしまったシートを直す（列0のまま読むと例外になる）
+    if (want.length && sheet.getLastColumn() < 1) {
+      sheet.getRange(1, 1, 1, want.length).setValues([want]);
+      return sheet;
+    }
     if (want.length) {
       const last = sheet.getLastColumn();
       const headers = last ? sheet.getRange(1, 1, 1, last).getValues()[0] : [];

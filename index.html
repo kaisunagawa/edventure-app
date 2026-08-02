@@ -4535,18 +4535,24 @@ function ReportScreen() {
         const x=ops.data;
         const CONF={HIGH:"高",MEDIUM:"中",LOW:"低",NONE:"—"};
         const f=x.facts||{};
-        // 前進は事実から組み立てる（AI文章はPhase R2で足す）
-        const prog=[];
-        (f.important_done||[]).slice(0,2).forEach(t=>prog.push("重要タスク「"+t+"」を完了した"));
-        if(f.daily_focus_done&&f.daily_focus) prog.push("今日のフォーカス「"+f.daily_focus+"」を達成した");
-        else if(f.tasks_started>0) prog.push("予定していたタスクに"+f.tasks_started+"件着手した");
-        if(f.memo_count>0) prog.push(f.logged_blocks+"時間帯を記録し、"+f.memo_count+"件の振り返りを残した");
+        // 文章はサーバー（AI or 機械組み立て）が確定させたものを使う。
+        // 画面側で作文しない ── 事実と食い違わせないため
+        const N=x.narrative||null;
+        const prog=N?(N.progress_items||[]).map(p=>p.text):(()=>{
+          const a=[];
+          (f.important_done||[]).slice(0,2).forEach(t=>a.push("重要タスク「"+t+"」を完了した"));
+          if(f.daily_focus_done&&f.daily_focus) a.push("今日のフォーカス「"+f.daily_focus+"」を達成した");
+          else if(f.tasks_started>0) a.push("予定していたタスクに"+f.tasks_started+"件着手した");
+          if(f.memo_count>0) a.push(f.logged_blocks+"時間帯を記録し、"+f.memo_count+"件の振り返りを残した");
+          return a; })();
         return html`
         <div class="card" style=${{marginBottom:12}}>
           <div style=${{fontSize:11,fontWeight:700,color:"var(--sub)",marginBottom:5}}>今日の経営状態</div>
           <div style=${{fontSize:20,fontWeight:800,color:"var(--text)",marginBottom:6}}>${x.operating_state_label}</div>
           <div style=${{fontSize:12.5,color:"var(--sub)",lineHeight:1.8}}>
-            ${x.operating_score!==null
+            ${(N&&N.operating_summary)
+              ? N.operating_summary
+              : x.operating_score!==null
               ? "今日は決めたことを進められています。下の内訳で、どこが効いたかを確認できます。"
               : x.partial_score!==null
                 ? (x.partial_scope||"評価できた項目")+"は「"+x.partial_label+"」です。総合スコアは、"
@@ -4571,19 +4577,30 @@ function ReportScreen() {
                 <span style=${{color:"var(--accent)"}}>・</span><span>${p}</span></div>`)}
           </div>`}
 
-        ${(f.carried_over||[]).length>0&&html`
+        ${(()=>{const t=(N&&N.primary_management_issue&&N.primary_management_issue.text)||
+            ((f.carried_over||[]).length>0
+              ? "予定していた"+(f.carried_over||[]).length+"件を翌日へ回しました（"+(f.carried_over||[]).slice(0,2).join("、")+"）。積み残しが増えると、明日の予定が入らなくなります。"
+              : "");
+          return t?html`
           <div class="card" style=${{marginBottom:12}}>
             <div class="card-label">今日の経営課題</div>
-            <div style=${{fontSize:12.5,color:"var(--text)",lineHeight:1.8}}>
-              予定していた${(f.carried_over||[]).length}件を翌日へ回しました（${(f.carried_over||[]).slice(0,2).join("、")}）。
-              積み残しが増えると、明日の予定が入らなくなります。
-            </div>
+            <div style=${{fontSize:12.5,color:"var(--text)",lineHeight:1.8}}>${t}</div>
+          </div>`:"";})()}
+
+        ${(N&&(N.next_action||N.stop_action))&&html`
+          <div class="card" style=${{marginBottom:12}}>
+            <div class="card-label">明日の一手</div>
+            ${N.next_action&&html`<div style=${{fontSize:12.5,color:"var(--text)",lineHeight:1.8}}>${N.next_action}</div>`}
+            ${N.stop_action&&html`
+              <div style=${{fontSize:12,color:"var(--sub)",lineHeight:1.8,marginTop:6}}>やめること：${N.stop_action}</div>`}
           </div>`}
 
         <div class="card" style=${{marginBottom:12}}>
           <div class="card-label">今日の立て直し</div>
           <div style=${{fontSize:12.5,color:"var(--sub)",lineHeight:1.8}}>
-            ${(f.carried_over||[]).length>0
+            ${(N&&N.recovery_summary)
+              ? N.recovery_summary
+              : (f.carried_over||[]).length>0
               ? "崩れた予定を翌日へ移して整理しました。"
               : "本日は立て直しが必要な場面はありませんでした。"}
           </div>
@@ -6754,7 +6771,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260802-231214";
+const APP_BUILD = "20260802-231626";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
