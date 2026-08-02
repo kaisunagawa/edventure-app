@@ -1333,13 +1333,25 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
       }
       // 今日のアクションの端末間同期
       if(d.todayActions){
-        // ★タスク一覧は「端末に無いときだけ」受け取る★
-        //   端末で編集中の一覧をサーバーの内容で置き換えると、
-        //   いま足したタスクが消える。
-        if(d.todayActions.actions !== null && localStorage.getItem("jiroku_custom_actions_"+todayStr) === null){
+        // ★タスク一覧はサーバーと突き合わせて1つにまとめる★
+        //   以前は「端末に無いときだけ」受け取っていたため、
+        //   両方にタスクがあると一生混ざらなかった。
+        if(d.todayActions.actions !== null){
           const fromServer = normalizeTaskList(d.todayActions.actions);
-          setCustomActions(fromServer);
-          localStorage.setItem("jiroku_custom_actions_"+todayStr, JSON.stringify(fromServer));
+          let localList = [];
+          try {
+            const raw = localStorage.getItem("jiroku_custom_actions_"+todayStr);
+            localList = raw ? normalizeTaskList(JSON.parse(raw)) : [];
+          } catch(e){}
+          const merged = mergeTaskLists(localList, fromServer);
+          const changed = merged.length !== localList.length ||
+                          merged.some((t,i)=>!localList[i] || localList[i].id !== t.id);
+          if (changed) {
+            setCustomActions(merged);
+            localStorage.setItem("jiroku_custom_actions_"+todayStr, JSON.stringify(merged));
+            // まとめた結果を相手にも伝える（両方が同じ一覧になるように）
+            gasPostJson("saveTodayActions", { actions: JSON.stringify(merged) });
+          }
         }
         // ★設定（重要度・期限・想定時間・メモ・進捗）は常に受け取る★
         //   以前はこの処理を上の if の中に入れていたため、
@@ -5293,6 +5305,32 @@ function makeLocalTaskId(title, i) {
   return "lt_" + (h >>> 0).toString(36);
 }
 
+// 2つのタスク一覧を、task_id を頼りに1つにまとめる。
+//
+// ★これが無いと一覧が同期しない★
+//   以前は「端末にタスクが無いときだけサーバーの一覧を受け取る」作りだった。
+//   両方の端末にタスクがあると、一生混ざらない。
+//   実際、PCには「朝食」だけ、スマホには「AI研究」「読書」があり、
+//   どちらも相手のタスクを知らないままだった。
+//
+// ★消したタスクが復活する問題★
+//   単純に足し合わせると、片方で消したタスクがもう片方から戻ってくる。
+//   完全に防ぐには「消した記録」が要る（Tasksシートへ移す Phase 3 の仕事）。
+//   いまは「消したら即座にサーバーへ送る」ことで、次に相手が読むときには
+//   消えた状態になっている、という形にしている。
+//   同時に別々の編集をした場合は、足し合わせになる。消えるよりは良い。
+function mergeTaskLists(local, server) {
+  const out = [], seen = {};
+  (local || []).forEach(function (t) { if (!seen[t.id]) { seen[t.id] = 1; out.push(t); } });
+  (server || []).forEach(function (t) {
+    if (seen[t.id]) return;
+    // 同じ名前が既にあるなら、別idでも同じタスクとみなす（重複表示を避ける）
+    if (out.some(function (x) { return x.title === t.title; })) return;
+    seen[t.id] = 1; out.push(t);
+  });
+  return out;
+}
+
 // 保存済みのマップを id キーへ付け替える（Phase 2 の移行）。
 // ★取りこぼしても消さない★
 //   キーが既に id ならそのまま。名前なら id へ移す。
@@ -5376,7 +5414,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260802-105307";
+const APP_BUILD = "20260802-112416";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
