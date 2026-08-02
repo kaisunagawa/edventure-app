@@ -4735,7 +4735,8 @@ function ReportScreen() {
               </div>`;
             })}
           </div>
-          <!-- ★なぜこの点数なのか★ AIではなく計算そのものを言葉にする（必ず数字と一致する） -->
+          <!-- ★なぜこの点数なのか★ 何を足してこの点になったのかを言葉にする。
+               AIには書かせない（計算そのものなので、必ず画面の数字と一致する） -->
           ${(()=>{
             const ev=(x.components||[]).filter(c=>c.state==="evaluated"&&c.score!==null);
             const pend=(x.components||[]).filter(c=>c.state!=="evaluated");
@@ -4744,7 +4745,7 @@ function ReportScreen() {
             const evW=ev.reduce((a,c)=>a+c.weight,0);
             const got=ev.reduce((a,c)=>a+c.score*c.weight/100,0);
             return html`<div style=${{fontSize:11.5,color:"var(--sub)",lineHeight:1.85,marginTop:14,paddingTop:12,borderTop:"1px solid var(--border)"}}>
-              <b style=${{color:"var(--text)",fontWeight:700}}>この点数の出し方</b><br/>
+              <b style=${{color:"var(--text)",fontWeight:700}}>点数の内訳</b><br/>
               ${parts.join(" ＋ ")} ＝ ${Math.round(got)}点 / ${evW}点。
               ${evW===100
                 ? "4項目すべてを合計した点数です。"
@@ -6937,7 +6938,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260803-051731";
+const APP_BUILD = "20260803-085317";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
