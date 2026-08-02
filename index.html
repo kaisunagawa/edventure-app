@@ -2300,7 +2300,19 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
       goals.forEach(g=>(g.weeklyGoals||[]).forEach(w=>ws.push({...w, parentTitle:g.title})));
       ((goalTree&&goalTree.orphanWeeklyGoals)||[]).forEach(w=>ws.push({...w, parentTitle:""}));
       const wg = ws.filter(w=>String(w.status||"ACTIVE").toUpperCase()==="ACTIVE");
-      if (!goals.length && !allSp.length) return "";
+      // ★目標がまだ無い人にも入口を残す★
+      //   以前はカードごと消えていたため、「あとで決める」を選ぶと
+      //   目標を決める導線がどこにも無くなっていた。
+      if (!goals.length && !allSp.length) return html`
+        <div style=${{margin:"12px 16px 0",background:"var(--card)",borderRadius:16,border:"1px solid var(--border)",padding:"14px 16px"}}>
+          <div style=${{fontSize:14,fontWeight:800,color:"var(--text)"}}>目標ロードマップ</div>
+          <div style=${{fontSize:11,color:"var(--sub)",marginTop:3,lineHeight:1.7}}>
+            3か月の目標を決めると、2週間・今週・今日にやることが順に決まります。</div>
+          <button onClick=${()=>setHomeGoalSheet(true)}
+            style=${{width:"100%",marginTop:11,padding:"12px",borderRadius:10,border:"none",background:"var(--accent)",
+                     color:"#fff",fontSize:13.5,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
+            3か月後どうなりたいかを決める</button>
+        </div>`;
 
       const gi = Math.min(mainGoalIdx, Math.max(0,goals.length-1));
       const g = goals[gi];
@@ -6806,7 +6818,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260803-000848";
+const APP_BUILD = "20260803-013403";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
@@ -7523,7 +7535,10 @@ function detectDevice(){
 //   ・保存に失敗したら、その場で理由を出してやり直せるようにする
 //     （閉じ込めて記録できなくするのが一番まずい）
 //   ・数字を先に聞かない。「どうなったら達成か」を決めてから数えるものを選ぶ
-function FirstGoalGate({onDone, onToast}) {
+// 3か月目標がまだ無い人に、最初に1つ決めてもらう画面。
+// ★閉じ込めない★ 「あとで決める」で記録画面へ進める。決めていない人には
+//   ホームの目標ロードマップから、いつでも同じ流れに入れる導線を残す。
+function FirstGoalGate({onDone, onToast, onSkip}) {
   const today = formatDateStr(new Date());
   const plusM = (n)=>{ const x=new Date(today+"T00:00:00+09:00"); x.setMonth(x.getMonth()+n); return formatDateStr(x); };
   const [step, setStep] = useState(0);
@@ -7635,6 +7650,12 @@ function FirstGoalGate({onDone, onToast}) {
         ${step===1&&html`<button onClick=${()=>{setErr("");setStep(step+1);}}
           style=${{width:"100%",marginTop:10,background:"none",border:"none",color:"var(--sub)",fontSize:12,cursor:"pointer",fontFamily:"inherit"}}>
           ここは飛ばす</button>`}
+        ${onSkip&&html`
+          <button onClick=${onSkip}
+            style=${{width:"100%",marginTop:14,background:"none",border:"none",color:"var(--sub)",fontSize:12.5,cursor:"pointer",fontFamily:"inherit",textDecoration:"underline"}}>
+            あとで決める（先に記録をはじめる）</button>
+          <div style=${{fontSize:11,color:"var(--sub)",lineHeight:1.7,marginTop:6,textAlign:"center"}}>
+            ホームの「目標ロードマップ」から、いつでも決められます</div>`}
       </div>
     </div>`;
 }
@@ -8110,7 +8131,15 @@ function App() {
   const [setupSkipped,setSetupSkipped]=useState(false);
   // 3か月目標があるか。null=未確認（この間はゲートを出さない）
   const [goalsProbe,setGoalsProbe]=useState(null);
-  const [firstGoalDone,setFirstGoalDone]=useState(false);
+  // 「あとで決める」を選んだ人には、しばらく出さない（7日）。
+  // 閉じ込めないための猶予であって、目標が要らないという意味ではない
+  const [firstGoalDone,setFirstGoalDone]=useState(()=>{
+    try{
+      const d=localStorage.getItem("first_goal_skipped");
+      if(!d) return false;
+      return (Date.now()-new Date(d+"T00:00:00+09:00").getTime()) < 7*86400000;
+    }catch(e){ return false; }
+  });
   // LINE連携できたかをその場で再確認して、ゲートを進めるための再取得
   const recheckUser = async () => {
     try {
@@ -8232,7 +8261,8 @@ function App() {
   //   ★分からないうちは絶対に出さない★ 通信が不安定なだけの人を
   //   記録できない状態に閉じ込めてしまうため
   if (goalsProbe === 0 && !firstGoalDone) {
-    return html`<${FirstGoalGate} onDone=${()=>{ setFirstGoalDone(true); setGoalsProbe(1); }} onToast=${setToast}/>`;
+    return html`<${FirstGoalGate} onDone=${()=>{ setFirstGoalDone(true); setGoalsProbe(1); }} onToast=${setToast}
+      onSkip=${()=>{ try{ localStorage.setItem("first_goal_skipped", formatDateStr(new Date())); }catch(e){} setFirstGoalDone(true); }}/>`;
   }
   // 学生（cohort付き）は、ホーム画面追加＋LINE連携が両方済むまで必須セットアップ画面を出す
   if(!!user.cohort && !setupSkipped && (!isStandaloneDisplay() || user.lineLinked===false)){

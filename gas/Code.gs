@@ -81,6 +81,83 @@ function doGet(e) {
       case "getUser":      result = getUser(studentEmail); break;
       // ── Phase 1: 自己経営OS の基盤（管理者のみ実行可能なセットアップ）──
       case "adminPhase4DryRun": return jsonResponse(phase4DryRun());
+      case "adminXpCorrection": {
+        if (!verifyAdmin(e.parameter.coachEmail)) return jsonResponse({ ok: false, error: "not admin" });
+        const em = String(e.parameter.email || "").trim();
+        const delta = Number(e.parameter.delta || 0);
+        const why = String(e.parameter.reason || "TEST_DATA_ROLLBACK");
+        const refs = String(e.parameter.refs || "");
+        if (!em) return jsonResponse({ ok: false, error: "no email" });
+        const applied = xpApplyDelta_(em, delta);
+        if (applied) {
+          xpLedgerAdd_(em, "ADMIN", "adj_" + Date.now(), delta, why + (refs ? (" refs=" + refs) : ""));
+          authAudit("XP_CORRECTION", { result: "APPLIED", action: "adminXpCorrection",
+            failureReason: em + " " + applied.before + "->" + applied.after + " (" + delta + ") " + why + " refs=" + refs });
+        }
+        const st = recomputeStreak_(em, String(e.parameter.fixStreak || "") !== "1");
+        authAudit("STREAK_RECALC", { result: st.dry_run ? "DRY_RUN" : "APPLIED", action: "adminXpCorrection",
+          failureReason: em + " streak " + st.before + "->" + st.after + " last=" + st.last_log_date });
+        return jsonResponse({ ok: true, xp: applied, streak: st, reason: why });
+      }
+      // 機能フラグの一括付与。dry=1 で件数だけ確認（既定はdry）
+      case "adminGrantFeature": {
+        if (!verifyAdmin(e.parameter.coachEmail)) return jsonResponse({ ok: false, error: "not admin" });
+        const key = String(e.parameter.key || "").trim();
+        const dryG = String(e.parameter.dry || "1") === "1";
+        const onlyActive = String(e.parameter.activeOnly || "1") === "1";
+        if (!/^[a-z0-9_]+$/.test(key)) return jsonResponse({ ok: false, error: "bad key" });
+        const sh = getSheet("Users");
+        const d = sh.getDataRange().getValues();
+        const h = d[0];
+        const iEm = h.indexOf("student_email");
+        const iAct = h.indexOf("is_active");
+        let iF = h.indexOf("features");
+        if (iF === -1) { iF = h.length; if (!dryG) sh.getRange(1, iF + 1).setValue("features"); }
+        let already = 0, target = 0, skipped = 0;
+        const changed = [];
+        for (let i = 1; i < d.length; i++) {
+          const em = String(d[i][iEm] || "").trim();
+          if (!em) continue;
+          if (onlyActive && iAct !== -1 && String(d[i][iAct] || "").toUpperCase() !== "TRUE") { skipped++; continue; }
+          const cur = String((iF < d[i].length ? d[i][iF] : "") || "");
+          const list = cur.split(",").map(function (x) { return x.trim(); }).filter(Boolean);
+          if (list.indexOf(key) !== -1) { already++; continue; }
+          target++;
+          list.push(key);
+          changed.push(em);
+          if (!dryG) sh.getRange(i + 1, iF + 1).setValue(list.join(","));
+        }
+        if (!dryG) authAudit("FEATURE_GRANT", { result: "APPLIED", action: "adminGrantFeature",
+          failureReason: key + " granted=" + target + " already=" + already + " skipped=" + skipped });
+        return jsonResponse({ ok: true, key: key, dry_run: dryG, granted: target,
+                              already_had: already, skipped_inactive: skipped, emails: changed.slice(0, 50) });
+      }
+      case "adminStreakRecalc": {
+        if (!verifyAdmin(e.parameter.coachEmail)) return jsonResponse({ ok: false, error: "not admin" });
+        const em2 = String(e.parameter.email || "").trim();
+        const dry = String(e.parameter.dry || "1") === "1";
+        const r = recomputeStreak_(em2, dry);
+        // 検証で減ってしまったフリーズを戻すなど、明示指定で書き戻す用（監査に残す）
+        const setFreeze = String(e.parameter.setFreeze || "");
+        if (!dry && setFreeze !== "" && !isNaN(Number(setFreeze))) {
+          const uSheet = getSheet("Users");
+          const uData = uSheet.getDataRange().getValues();
+          const uH = uData[0];
+          const iEm = uH.indexOf("student_email"), iFz = uH.indexOf("streak_freeze");
+          for (let k = 1; k < uData.length; k++) {
+            if (String(uData[k][iEm]) !== em2 || iFz === -1) continue;
+            const bf = Number(uData[k][iFz] || 0);
+            uSheet.getRange(k + 1, iFz + 1).setValue(Number(setFreeze));
+            authAudit("STREAK_FREEZE_SET", { result: "APPLIED", action: "adminStreakRecalc",
+              failureReason: em2 + " freeze " + bf + "->" + setFreeze });
+            r.freeze_after = Number(setFreeze);
+            break;
+          }
+        }
+        if (!dry) authAudit("STREAK_RECALC", { result: "APPLIED", action: "adminStreakRecalc",
+          failureReason: em2 + " " + r.before + "->" + r.after + " freeze " + r.freeze_before + "->" + r.freeze_after });
+        return jsonResponse({ ok: true, result: r });
+      }
       case "adminActualMinutesAudit":
         return jsonResponse(verifyAdmin(e.parameter.coachEmail)
           ? actualMinutesAudit() : { ok: false, error: "not admin" });
@@ -447,6 +524,7 @@ function doGet(e) {
       case "getStudents":  result = getStudents(studentEmail); break;
       case "saveLog":      result = saveLog(studentEmail, e.parameter); break;
       case "deleteLog":    result = deleteLog(studentEmail, e.parameter); break;
+      case "setLogClassification": result = setLogClassification(studentEmail, e.parameter); break;
       case "quickLog":     result = quickLog(studentEmail, e.parameter); break;
       case "saveLogMulti": result = saveLogMulti(studentEmail, e.parameter); break;
       case "coachGetStudents":      result = coachGetStudents(e.parameter.coachEmail); break;
@@ -628,6 +706,7 @@ function doPost(e) {
     switch (action) {
       case "saveLog":      return jsonResponse(saveLog(studentEmail, body));
       case "deleteLog":    return jsonResponse(deleteLog(studentEmail, body));
+      case "setLogClassification": return jsonResponse(setLogClassification(studentEmail, body));
       case "quickLog":     return jsonResponse(quickLog(studentEmail, body));
       case "saveLogMulti": return jsonResponse(saveLogMulti(studentEmail, body));
       case "sendMessage":  return jsonResponse(sendMessage(studentEmail, body));
@@ -1096,12 +1175,22 @@ function computeSelfMgmtPower(studentEmail, weekStart) {
       ? { value: Math.round((1 - weekTasks.filter(function (t) { return Number(t.carryover_count || 0) > 0; }).length / weekTasks.length) * 100),
           state: "evaluated", weight: 1, sample: weekTasks.length, label: "持ち越しの少なさ" }
       : Object.assign(na("今週のタスクがありません"), { weight: 1, label: "持ち越しの少なさ" }));
-    // 見積もり精度は actual_minutes が入っている場合だけ。未入力を0分にしない
-    const est = weekTasks.filter(function (t) { return Number(t.estimated_minutes) > 0 && Number(t.actual_minutes) > 0; });
+    // 見積もり精度。実績時間の正は DailyLog（link_task_id 別に合計）。
+    //   Tasks.actual_minutes は集計キャッシュなので、ここでは参照しない。
+    //   測っていないタスクを0分として扱わない。
+    const minutesByTask = {};
+    logs.forEach(function (l) {
+      const tid = String(l.link_task_id || "").trim();
+      const am = Number(l.actual_minutes);
+      if (!tid || !(am > 0)) return;
+      minutesByTask[tid] = (minutesByTask[tid] || 0) + am;
+    });
+    const est = weekTasks.filter(function (t) {
+      return Number(t.estimated_minutes) > 0 && Number(minutesByTask[String(t.task_id)]) > 0; });
     parts.push(est.length >= 3
       ? { value: (function () {
             let acc = 0; est.forEach(function (t) {
-              const e = Number(t.estimated_minutes), a = Number(t.actual_minutes);
+              const e = Number(t.estimated_minutes), a = Number(minutesByTask[String(t.task_id)]);
               acc += Math.max(0, 100 - Math.abs(a - e) / e * 100); });
             return Math.round(acc / est.length); })(),
           state: "evaluated", weight: 1, sample: est.length, label: "見積もりの精度" }
@@ -2615,7 +2704,7 @@ function saveLog(studentEmail, body) {
         if (String(body.goal_related) === "true") incrementGoalBlocksAndNotify(studentEmail, 1);
         const xpResult = addXP(studentEmail, body.memo, todaysLogCount, {
           totalLogs, memoCount: memoCount + ((body.memo || "").trim() ? 1 : 0)
-        });
+        }, String(data[i][0]));
         writeP1LogFields(sheet, i + 1, studentEmail, targetDate, String(body.time_block), body);
         return { ok: true, log_id: String(data[i][0]), updated: true, ...xpResult };
       }
@@ -2647,7 +2736,7 @@ function saveLog(studentEmail, body) {
   const xpResult = addXP(studentEmail, body.memo, todaysLogCount + 1, {
     totalLogs: totalLogs + 1,
     memoCount: memoCount + ((body.memo || "").trim() ? 1 : 0)
-  });
+  }, logId);
   return { ok: true, log_id: logId, ...xpResult };
 }
 
@@ -2669,9 +2758,19 @@ function deleteLog(studentEmail, body) {
     const rawDate = data[i][dateIdx];
     const rowDate = rawDate instanceof Date ? Utilities.formatDate(rawDate, "Asia/Tokyo", "yyyy-MM-dd") : String(rawDate);
     if (String(data[i][emailIdx]) === studentEmail && rowDate === targetDate && String(data[i][timeIdx]) === timeBlock) {
+      const logId = String(data[i][headers.indexOf("log_id")] || "");
       sheet.deleteRow(i + 1);
+      // ★消した記録で入ったXPだけを戻し、ストリークも実記録から計算し直す★
+      //   「記録して XP をもらってから消す」で数字だけ残せてしまう問題への対処。
+      //   台帳に無い（この仕組みより前の）XPには手を触れない ＝ 過剰に減らさない。
+      const linkIdx = headers.indexOf("link_task_id");
+      const linkedTask = linkIdx === -1 ? "" : String(data[i][linkIdx] || "");
+      let xpRev = { reversed: 0, amount: 0 }, st = null;
+      if (linkedTask) { try { recomputeTaskActualMinutes_(studentEmail, linkedTask); } catch (e) {} }
+      try { xpRev = xpReverseForSource_(studentEmail, logId, "LOG_DELETED"); } catch (e) {}
+      try { st = recomputeStreak_(studentEmail); } catch (e) {}
       try { invalidateStatusCache(); } catch (e) { /* ignore */ }
-      return { ok: true, deleted: true };
+      return { ok: true, deleted: true, xp_reversed: xpRev.amount, streak: st ? st.after : null };
     }
   }
   return { ok: true, deleted: false };
@@ -2794,14 +2893,133 @@ function saveLogMulti(studentEmail, body) {
   invalidateStatusCache();
   // 今回どの記録も新たにXP対象にならなかった（評価済みの再編集だけ等）場合はXPを与えない
   if (awardedBlockCount === 0) return { ok: true, xp_gained: 0, updated: updatedAny, count: blocks.length };
-  const xpResult = addXP(studentEmail, body.memo, todaysLogCount, { totalLogs, memoCount }); // DailyLogの再読み込みなし
+  // 一括保存は「このリクエスト」を1つの出どころとして台帳に残す
+  const xpResult = addXP(studentEmail, body.memo, todaysLogCount, { totalLogs, memoCount },
+                         "multi_" + studentEmail.slice(0, 3) + "_" + Date.now()); // DailyLogの再読み込みなし
   if (awardedGoalBlockCount > 0) incrementGoalBlocksAndNotify(studentEmail, awardedGoalBlockCount);
   return { ok: true, xp_gained: xpResult.xp_gained, level_up: xpResult.level_up, level: xpResult.level, updated: updatedAny, count: blocks.length };
 }
 
 // todaysLogCount: 呼び出し元（saveLog/saveLogMulti）がこのリクエストで確定させた
 // 「今日この生徒が記録した件数」。ここでDailyLogを再度読み込まずに済ませるための引数
-function addXP(studentEmail, memo, todaysLogCount, logSummary) {
+// XPを足した記録を台帳へ残す。sourceId が同じものが既にあれば足さない
+function xpLedgerHas_(studentEmail, sourceId) {
+  if (!sourceId) return false;
+  return p1List("XpEvents", studentEmail).some(function (e) {
+    return String(e.source_id) === String(sourceId) && !String(e.reversed_at || "").trim(); });
+}
+function xpLedgerAdd_(studentEmail, sourceType, sourceId, amount, reason) {
+  if (!sourceId) return;
+  p1Upsert("XpEvents", "event_id", {
+    event_id: "xpe_" + Date.now() + "_" + Math.random().toString(36).slice(2, 6),
+    student_email: studentEmail, source_type: sourceType, source_id: String(sourceId),
+    amount: Number(amount) || 0, reason: reason || "",
+    created_at: new Date().toISOString(), reversed_at: "", reversal_reason: ""
+  });
+}
+// Users.xp を増減する（台帳とセットで使う）
+function xpApplyDelta_(studentEmail, delta) {
+  if (!delta) return null;
+  const sheet = getSheet("Users");
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0];
+  const emailIdx = headers.indexOf("student_email");
+  const xpIdx = headers.indexOf("xp");
+  if (xpIdx === -1) return null;
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][emailIdx]) !== studentEmail) continue;
+    const before = Number(data[i][xpIdx] || 0);
+    const after = Math.max(0, before + Number(delta));
+    sheet.getRange(i + 1, xpIdx + 1).setValue(after);
+    return { before: before, after: after };
+  }
+  return null;
+}
+// 記録を消したときに、その記録で入ったXPだけを戻す
+function xpReverseForSource_(studentEmail, sourceId, reason) {
+  if (!sourceId) return { reversed: 0, amount: 0 };
+  const rows = p1List("XpEvents", studentEmail).filter(function (e) {
+    return String(e.source_id) === String(sourceId) && !String(e.reversed_at || "").trim(); });
+  let total = 0;
+  rows.forEach(function (e) {
+    total += Number(e.amount) || 0;
+    p1Upsert("XpEvents", "event_id", { event_id: e.event_id, student_email: studentEmail,
+      reversed_at: new Date().toISOString(), reversal_reason: reason || "LOG_DELETED" });
+  });
+  if (total) xpApplyDelta_(studentEmail, -total);
+  return { reversed: rows.length, amount: total };
+}
+// 実記録からストリークを計算し直す（消した記録は数えない）。
+// ★フリーズ（🧊）を含めて再現する★
+//   単純に「連続した日数」を数えると、フリーズで橋渡しした日が切れ目に見え、
+//   本来続いているストリークを短く壊してしまう。
+//   計算方法は adminRepairStreaksFreeze と同じにそろえている。
+function recomputeStreak_(studentEmail, dryRun) {
+  const set = {};
+  sheetToObjects(getSheet("DailyLog")).forEach(function (l) {
+    if (String(l.student_email) !== studentEmail) return;
+    if (String(l.deleted_at || "").trim()) return;
+    const d = l.date instanceof Date ? Utilities.formatDate(l.date, "Asia/Tokyo", "yyyy-MM-dd")
+                                     : String(l.date).slice(0, 10);
+    if (d) set[d] = 1;
+  });
+  const dates = Object.keys(set).sort();
+  const daysBetween = function (a, b) {
+    return Math.round((new Date(b + "T00:00:00") - new Date(a + "T00:00:00")) / 86400000); };
+  const today = formatDate(new Date());
+  const yesterday = formatDate(new Date(Date.now() - 86400000));
+  let streak = 0, freeze = 0, prev = null;
+  dates.forEach(function (d) {
+    if (prev === null) streak = 1;
+    else {
+      const gap = daysBetween(prev, d);
+      if (gap === 1) streak += 1;
+      else if (gap === 2 && freeze > 0) { freeze -= 1; streak += 1; }
+      else streak = 1;
+    }
+    if (streak > 0 && streak % 7 === 0 && freeze < 2) freeze += 1;
+    prev = d;
+  });
+  let finalStreak = 0, finalFreeze = freeze, finalLast = prev || "";
+  if (prev) {
+    const gapToToday = daysBetween(prev, today);
+    if (gapToToday <= 1) { finalStreak = streak; finalLast = prev; }
+    else if (gapToToday === 2 && freeze > 0) { finalStreak = streak; finalFreeze = freeze - 1; finalLast = yesterday; }
+    else { finalStreak = 0; finalLast = prev; }
+  }
+  const sheet = getSheet("Users");
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0];
+  const emailIdx = headers.indexOf("student_email");
+  const sIdx = headers.indexOf("streak");
+  const lIdx = headers.indexOf("last_log_date");
+  const fIdx = headers.indexOf("streak_freeze");
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][emailIdx]) !== studentEmail) continue;
+    const before = { streak: Number(data[i][sIdx] || 0),
+                     freeze: fIdx === -1 ? 0 : Number(data[i][fIdx] || 0),
+                     last_log_date: lIdx === -1 ? "" : String(data[i][lIdx] || "") };
+    if (!dryRun) {
+      if (sIdx !== -1) sheet.getRange(i + 1, sIdx + 1).setValue(finalStreak);
+      if (lIdx !== -1) sheet.getRange(i + 1, lIdx + 1).setValue(finalLast);
+      // ★フリーズ（🧊）は減らさない★
+      //   本人が貯めた残数を、再計算のたびに取り上げてしまわないため。
+      //   増える方向（獲得の取りこぼし）だけ反映する。
+      if (fIdx !== -1 && finalFreeze > before.freeze) sheet.getRange(i + 1, fIdx + 1).setValue(finalFreeze);
+    }
+    return { before: before.streak, after: finalStreak, freeze_before: before.freeze,
+             freeze_after: Math.max(before.freeze, finalFreeze), freeze_simulated: finalFreeze,
+             last_log_date: finalLast, dry_run: !!dryRun,
+             recorded_days: dates.length };
+  }
+  return { before: null, after: finalStreak, last_log_date: finalLast, dry_run: !!dryRun };
+}
+
+function addXP(studentEmail, memo, todaysLogCount, logSummary, sourceId) {
+  // 同じ記録で二重にXPを出さない（再送・重複送信の保険）
+  if (sourceId && xpLedgerHas_(studentEmail, sourceId)) {
+    return { xp_gained: 0, total_xp: 0, level: 1, level_up: false, badges: "", duplicate: true };
+  }
   const usersSheet = getSheet("Users");
   const data = usersSheet.getDataRange().getValues();
   const headers = data[0];
@@ -2832,6 +3050,7 @@ function addXP(studentEmail, memo, todaysLogCount, logSummary) {
     const levelUp = newLevel > oldLevel;
 
     usersSheet.getRange(i+1, xpIdx+1).setValue(newXP);
+    xpLedgerAdd_(studentEmail, "LOG", sourceId, gained, memo && memo.trim() ? "log_with_memo" : "log");
 
     // バッジ判定
     const newBadges = checkBadges(studentEmail, currentBadges, newXP, streak, logSummary);
@@ -9107,6 +9326,11 @@ const P1_SHEETS = {
   //   所有者キーは student_email（既存のp1List/p1OwnedRow/p1Upsertが
   //   この列名で所有権を絞っているため。owner_emailを新設すると
   //   所有権の仕組みを二重化してしまう）
+  // ★XP台帳★ どの記録で何点入ったかを1行ずつ残す。
+  //   記録を消したときに、その分だけを正確に戻せるようにするため。
+  //   同じ source_id では二重に加算しない。
+  XpEvents: ["event_id","student_email","source_type","source_id","amount","reason",
+    "created_at","reversed_at","reversal_reason"],
   SelfMgmtPower: ["row_id","student_email","period_start","period_end","key","label",
     "score","evaluation_state","status_label","confidence","coverage","sample_count",
     "calculation_version","calculated_at","input_hash","components","incomplete_reason",
@@ -9739,6 +9963,59 @@ function classifyLogTime_(studentEmail, targetDate, body, current) {
   return { classification: "", method: "RULE", reason_code: "RULE_UNCERTAIN" };
 }
 
+// 記録カードから分類を変え��（B6）。本人の行だけ、正しい値だけを書く。
+//   ・classification_method はサーバーが決める（クライアントが USER/RULE/AI を名乗れない）
+//   ・許可された5値以外は保存しない
+//   ・他人の log_id では何も起きない
+function setLogClassification(studentEmail, body) {
+  const logId = String((body && body.log_id) || "").trim();
+  const want = String((body && body.time_classification) || "").toUpperCase();
+  if (!logId) return { ok: false, error: "no log_id" };
+  if (!TIME_CLASSES[want]) return { ok: false, error: "invalid classification" };
+  const sheet = getSheet("DailyLog");
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0];
+  const iEm = headers.indexOf("student_email"), iId = headers.indexOf("log_id");
+  const iCls = headers.indexOf("time_classification");
+  if (iCls === -1) return { ok: false, error: "column missing" };
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][iId]) !== logId) continue;
+    if (String(data[i][iEm]) !== studentEmail) return { ok: false, error: "not found" }; // 他人の行は「無い」と返す
+    const iDel = headers.indexOf("deleted_at");
+    if (iDel !== -1 && String(data[i][iDel] || "").trim()) return { ok: false, error: "not found" };
+    const set = function (col, v) { const k = headers.indexOf(col); if (k !== -1) sheet.getRange(i + 1, k + 1).setValue(v); };
+    set("time_classification", want);
+    set("classification_method", "USER");          // ★サーバーが決める★
+    set("classification_version", TIME_CLASS_VERSION);
+    set("classification_reason_code", "USER_SELECTED");
+    set("user_corrected_at", new Date().toISOString());
+    return { ok: true, log_id: logId, time_classification: want, classification_method: "USER" };
+  }
+  return { ok: false, error: "not found" };
+}
+
+// タスクの実績時間を DailyLog から作り直す（Tasks側はキャッシュ）。
+//   ・消した記録は数えない
+//   ・duration_confirmed=TRUE（測った値）を優先し、それが1件でもあれば確定分だけで合計
+//   ・1件も無ければ空のままにする（未確認を0分にしない）
+function recomputeTaskActualMinutes_(studentEmail, taskId) {
+  const tid = String(taskId || "").trim();
+  if (!tid) return null;
+  const t = p1OwnedRow("Tasks", "task_id", tid, studentEmail);
+  if (!t) return null;                                  // 他人のタスクには触らない
+  const logs = sheetToObjects(getSheet("DailyLog")).filter(function (l) {
+    return String(l.student_email) === studentEmail &&
+           String(l.link_task_id || "") === tid &&
+           !String(l.deleted_at || "").trim(); });
+  const confirmed = logs.filter(function (l) {
+    return String(l.duration_confirmed || "").toUpperCase() === "TRUE" && Number(l.actual_minutes) > 0; });
+  const use = confirmed.length ? confirmed : logs.filter(function (l) { return Number(l.actual_minutes) > 0; });
+  if (!use.length) return null;                          // 未確認は0分にしない
+  const sum = use.reduce(function (a, l) { return a + Number(l.actual_minutes); }, 0);
+  p1Upsert("Tasks", "task_id", { task_id: tid, student_email: studentEmail, actual_minutes: sum });
+  return { task_id: tid, actual_minutes: sum, from_logs: use.length, confirmed_only: !!confirmed.length };
+}
+
 function writeP1LogFields(sheet, rowNum, studentEmail, targetDate, timeBlock, body) {
   try {
     const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
@@ -9778,6 +10055,11 @@ function writeP1LogFields(sheet, rowNum, studentEmail, targetDate, timeBlock, bo
         set("classification_reason_code", decided.reason_code);
         if (decided.method === "USER") set("user_corrected_at", new Date().toISOString());
       }
+    }
+    // 紐づいたタスクの実績時間を作り直す（同じ行を更新しても二重に増えない：
+    // 足し算ではなく、DailyLog を読み直して合計を出し直しているため）
+    if (body.link_task_id !== undefined && String(body.link_task_id || "").trim()) {
+      try { recomputeTaskActualMinutes_(studentEmail, body.link_task_id); } catch (e2) {}
     }
   } catch (e) {
     Logger.log("writeP1LogFields 失敗（記録本体は保存済み）: " + e);
@@ -11081,7 +11363,7 @@ const ACTION_POLICIES = {
 // いずれも scope="SELF"。セッションから確定した本人の行だけを書き換えられる。
 // クライアントが送る studentEmail は無視して、必ず本人で上書きする。
 const ACTION_POLICIES_WRITE = {
-  saveLog:{}, saveLogMulti:{}, quickLog:{}, deleteLog:{}, saveSettings:{}, saveOnboarding:{},
+  saveLog:{}, saveLogMulti:{}, quickLog:{}, deleteLog:{}, setLogClassification:{}, saveDayPlan:{}, saveSettings:{}, saveOnboarding:{},
   saveTodayActions:{}, saveGoal:{}, saveWeeklyGoal:{}, archiveGoalItem:{}, migrateLocalTasks:{},
   saveTask:{}, deleteTask:{}, carryOverTask:{}, saveTaskMutations:{}, saveSprint:{}, migrateTasksToSheet:{},
   submitSurvey:{}, syncCalendar:{}, sendMessage:{}, saveWeeklyReflection:{}, saveContentProfile:{},
@@ -11237,7 +11519,7 @@ const ADMIN_SECRET_ALLOWLIST = {
   // 一斉送信（Kaiの明示的な要望により残す）
   adminBroadcastLine:1, adminBroadcastLinePending:1, adminSendStudentCampaign:1,
   // セットアップ・保守
-  adminSetupTriggers:1, adminInstallTrigger:1, adminSetupPhase1:1, adminSetupAuth:1, adminPhase4DryRun:1, adminLegacyBackfill:1, adminWritePathStats:1, adminIssueTestSession:1, adminDropTestSessions:1, adminOpsSelfTest:1, adminActualMinutesAudit:1,
+  adminSetupTriggers:1, adminInstallTrigger:1, adminSetupPhase1:1, adminSetupAuth:1, adminPhase4DryRun:1, adminLegacyBackfill:1, adminWritePathStats:1, adminIssueTestSession:1, adminDropTestSessions:1, adminOpsSelfTest:1, adminActualMinutesAudit:1, adminXpCorrection:1, adminStreakRecalc:1, adminGrantFeature:1,
   authSetMode:1, authSetEnforce:1, authRoleApply:1, authRoleDryRun:1, authRevokeAll:1,
   authCleanupTestData:1, adminPurgeTestUsers:1, adminMigrateTasks:1, authBreakerReset:1, rotateSessionSecret:1,
   p1Backup:1, p1BackupInfo:1, p1PurgeArchived:1, weeklyBackup:1
@@ -12486,7 +12768,10 @@ function saveTask(studentEmail, body) {
   if (body.link_weekly_goal_id !== undefined) rec.link_weekly_goal_id = wg;
   if (body.link_daily_focus_id !== undefined) rec.link_daily_focus_id = p1Text_(body.link_daily_focus_id, 40);
   if (body.estimated_minutes !== undefined) rec.estimated_minutes = p1Num_(body.estimated_minutes);
-  if (body.actual_minutes !== undefined) rec.actual_minutes = p1Num_(body.actual_minutes);
+  // ★actual_minutes はクライアントから書かせない★
+  //   実績時間の正は DailyLog.actual_minutes。Tasks 側はそこから作る集計キャッシュ。
+  //   両方を独立して書けると、どちらが本当か分からなくなる（二重の正）。
+  //   互換のため、送られてきても黙って無視する（エラーにはしない）。
   if (body.memo !== undefined) rec.memo = p1Text_(body.memo, 1000);
   if (body.completion_condition !== undefined) rec.completion_condition = p1Text_(body.completion_condition, 500);
 
@@ -12537,6 +12822,7 @@ function saveTask(studentEmail, body) {
   rec.version = Number((existing && existing.version) || 0) + 1;
   rec.updated_at = new Date().toISOString();
   if (mutationId) rec.last_mutation_id = mutationId;
+  rec.student_email = studentEmail;   // 持ち主を必ず入れて書く（他人の行を触らない）
 
   const r = p1Upsert("Tasks", "task_id", rec);
   const saved = p1OwnedRow("Tasks", "task_id", r.id, studentEmail);
