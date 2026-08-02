@@ -4700,8 +4700,8 @@ function ReportScreen() {
               const got=ev?Math.round(c.score*c.weight/100):null;
               return html`<div key=${c.key}>
                 <button onClick=${()=>setExpandedBreakdown(isOpen?null:c.key)}
-                  style=${{display:"flex",alignItems:"center",gap:10,width:"100%",background:"none",border:"none",padding:0,cursor:"pointer",fontFamily:"inherit",textAlign:"left"}}>
-                  <div style=${{width:34,height:34,borderRadius:11,background:"var(--bg)",display:"flex",alignItems:"center",justifyContent:"center",color:"var(--accent)",flexShrink:0}}><${S} n=${CATICON[c.key]||"target"} s=${17}/></div>
+                  style=${{display:"flex",alignItems:"flex-start",gap:10,width:"100%",background:"none",border:"none",padding:0,cursor:"pointer",fontFamily:"inherit",textAlign:"left"}}>
+                  <div style=${{width:34,height:34,borderRadius:11,background:"var(--bg)",display:"flex",alignItems:"center",justifyContent:"center",color:"var(--accent)",flexShrink:0,marginTop:1}}><${S} n=${CATICON[c.key]||"target"} s=${17}/></div>
                   <div style=${{flex:1,minWidth:0}}>
                     <div style=${{display:"flex",justifyContent:"space-between",alignItems:"baseline",fontSize:12.5,color:"var(--text)",fontWeight:600,marginBottom:5}}>
                       <span>${c.label}</span>
@@ -6937,7 +6937,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260803-050804";
+const APP_BUILD = "20260803-051731";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
