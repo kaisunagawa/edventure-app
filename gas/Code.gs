@@ -138,6 +138,17 @@ function doGet(e) {
       // 同期しない原因を推測で4回追ってしまったため、サーバーの中身を
       // 直接見る口を一時的に置いた。原因が分かったので消す。
       // 読み取り専用ではあるが、他人の記録を引ける口を残さない。
+      // ★移行は署名付きで実行できるようにする★
+      //   本人セッションだと、こちらで検証できない。
+      //   移行は「何件どうなるか」を確かめてから実行する必要があるため、
+      //   運用コマンドから叩ける経路を用意する。
+      //   target を省略すると管理者自身が対象。
+      case "adminMigrateTasks": {
+        var _amt = verifyP1Admin(studentEmail, e.parameter.secret, e.parameter);
+        if (!_amt.ok) { result = _amt; break; }
+        result = migrateTasksToSheet(String(e.parameter.target || adminEmail()), e.parameter);
+        break;
+      }
       case "authCleanupTestData": {
         var _ac = verifyP1Admin(studentEmail, e.parameter.secret, e.parameter);
         if (!_ac.ok) { result = _ac; break; }
@@ -586,6 +597,7 @@ function doPost(e) {
       case "getTasks":    return jsonResponse(getTasks(studentEmail, body));
       case "saveTask":    return jsonResponse(saveTask(studentEmail, body));
       case "deleteTask":  return jsonResponse(deleteTask(studentEmail, body));
+      case "carryOverTask": return jsonResponse(carryOverTask(studentEmail, body));
       // ── Auth CP1 ──
       case "login":  return jsonResponse(authLogin(body));
       case "loginAccess": return jsonResponse(authLoginAccess(body));
@@ -7858,7 +7870,18 @@ const P1_SHEETS = {
     "estimated_minutes","actual_minutes","status","completed_at","completion_condition","memo",
     "created_at","updated_at",
     "importance_level","due_at","urgency_override","urgency_override_reason",
-    "first_started_at","carryover_count","deleted_at","sort_order"]
+    "first_started_at","carryover_count","deleted_at","sort_order",
+    // ★2026-08-02 追加（Phase 3の同期契約）★
+    // version           更新のたびに1増える。競合を黙って上書きしないため
+    // updated_at        いつ変わったか
+    // last_mutation_id  同じ操作の再送を二重に実行しないため
+    // context           何の文脈のタスクか（UNSET/WORK/PERSONAL/LEARNING/HEALTH/OTHER）
+    // carried_from      持ち越し元の日付。新しいタスクを複製しない
+    // source_type       誰の依頼か（SELF/MANAGER/COLLEAGUE/CLIENT/SYSTEM/OTHER）
+    // requested_by      依頼者
+    // requested_at      依頼された日時
+    "version","last_mutation_id","context",
+    "carried_from","source_type","requested_by","requested_at"]
 };
 // 既存シートへ追加する列（削除・改名は一切しない）
 const P1_ADDED_COLUMNS = {
@@ -9685,7 +9708,7 @@ const ACTION_POLICIES = {
 const ACTION_POLICIES_WRITE = {
   saveLog:{}, saveLogMulti:{}, quickLog:{}, deleteLog:{}, saveSettings:{}, saveOnboarding:{},
   saveTodayActions:{}, saveGoal:{}, saveWeeklyGoal:{}, archiveGoalItem:{}, migrateLocalTasks:{},
-  saveTask:{}, deleteTask:{}, saveSprint:{}, migrateTasksToSheet:{},
+  saveTask:{}, deleteTask:{}, carryOverTask:{}, saveSprint:{}, migrateTasksToSheet:{},
   submitSurvey:{}, syncCalendar:{}, sendMessage:{}, saveWeeklyReflection:{}, saveContentProfile:{},
   generateWorkReport:{}, snsSaveAccount:{}, snsSaveMetrics:{}, snsSavePost:{}
 };
@@ -9841,7 +9864,7 @@ const ADMIN_SECRET_ALLOWLIST = {
   // セットアップ・保守
   adminSetupTriggers:1, adminInstallTrigger:1, adminSetupPhase1:1, adminSetupAuth:1,
   authSetMode:1, authSetEnforce:1, authRoleApply:1, authRoleDryRun:1, authRevokeAll:1,
-  authCleanupTestData:1, adminPurgeTestUsers:1, authBreakerReset:1, rotateSessionSecret:1,
+  authCleanupTestData:1, adminPurgeTestUsers:1, adminMigrateTasks:1, authBreakerReset:1, rotateSessionSecret:1,
   p1Backup:1, p1BackupInfo:1, p1PurgeArchived:1, weeklyBackup:1
 };
 
@@ -10139,9 +10162,26 @@ function hasFeature(user, key) {
 function normalizeTaskStatus(v) {
   const s = String(v || "").trim().toUpperCase();
   if (s === "COMPLETED" || s === "DONE") return "DONE";
-  if (s === "DOING" || s === "IN_PROGRESS") return "DOING";
+  // ★DOING を IN_PROGRESS に寄せる★
+  //   画面は "doing"、指示は IN_PROGRESS。表記が2つあると集計で取り違える。
+  if (s === "DOING" || s === "IN_PROGRESS") return "IN_PROGRESS";
+  if (s === "CARRIED_OVER") return "CARRIED_OVER";
+  if (s === "ARCHIVED") return "ARCHIVED";
   return "TODO";
 }
+// タスクの文脈。★保存は内部コード、画面表示だけ日本語★
+// 初期値は UNSET。タイトルから勝手に分類しない。
+const TASK_CONTEXTS = ["UNSET", "WORK", "PERSONAL", "LEARNING", "HEALTH", "OTHER"];
+// ★context と公開範囲は別概念★
+// WORK だから上司へ自動共有、という設計にしない。
+// 仕事のタスクでもPRIVATEなものはある。共有は本人の確認が要る。
+
+// 依頼元。緊急対応が多い理由を「本人の計画不足」だけに帰さないため。
+const TASK_SOURCE_TYPES = ["SELF", "MANAGER", "COLLEAGUE", "CLIENT", "SYSTEM", "OTHER"];
+
+// タスクの状態。CARRIED_OVER は「持ち越した」ことが分かるように独立させる。
+const TASK_STATUSES = ["TODO", "IN_PROGRESS", "DONE", "CARRIED_OVER", "ARCHIVED"];
+
 const IMPORTANCE_LEVELS = ["HIGH", "MEDIUM", "LOW"];
 const URGENCY_LEVELS = ["HIGH", "MEDIUM", "LOW", "NONE"];
 
@@ -10245,6 +10285,15 @@ function decorateTask(t, nowMs) {
     due_at: t.due_at || "", memo: t.memo || "",
     completed_at: t.completed_at || "", first_started_at: t.first_started_at || "",
     carryover_count: Number(t.carryover_count || 0),
+    // 同期に使う。端末はこれを見て「自分が持っている版」と比べる
+    version: Number(t.version || 0),
+    updated_at: t.updated_at || "",
+    context: String(t.context || "UNSET").toUpperCase(),
+    deleted_at: t.deleted_at || "",
+    sort_order: (t.sort_order === "" || t.sort_order === undefined) ? null : Number(t.sort_order),
+    carried_from: t.carried_from || "",
+    source_type: String(t.source_type || "SELF").toUpperCase(),
+    requested_by: t.requested_by || "",
     priority: t.priority || "",                    // 既存互換。新UIでは使わない
     importance_level: effectiveImportance,
     importance_is_suggestion: !imp,                // 本人が決めていないなら提案値だと明示する
@@ -10465,13 +10514,42 @@ function migrateTasksToSheet(studentEmail, body) {
   const chk = p1RequireUser(studentEmail);
   if (!chk.ok) return chk;
 
+  const date = String((body && body.date) || formatDate(new Date())).slice(0, 10);
+
+  // ★移行元はサーバー側で読む★
+  //   クライアントから受け取る形だと、こちらで検証できない。
+  //   Journal.actions が現在の正なので、そこから直接読む。
+  //   items が明示的に渡された場合はそちらを使う（互換）。
   let items;
-  try { items = JSON.parse(String((body && body.items) || "[]")); }
-  catch (e) { return { ok: false, error: "items を読めませんでした" }; }
+  if (body && body.items) {
+    try { items = JSON.parse(String(body.items)); }
+    catch (e) { return { ok: false, error: "items を読めませんでした" }; }
+  } else {
+    const jr = sheetToObjects(getJournalSheet()).find(function (r) {
+      const rd = r.date instanceof Date ? Utilities.formatDate(r.date, "Asia/Tokyo", "yyyy-MM-dd") : String(r.date);
+      return r.student_email === studentEmail && rd === date;
+    });
+    if (!jr || !String(jr.actions || "").trim()) {
+      return { ok: true, dryRun: true, date: date, source: "Journal.actions",
+               counts: { before: p1List("Tasks", studentEmail).length, incoming: 0,
+                         willCreate: 0, alreadySame: 0, conflict: 0, skipped: 0 },
+               note: "この日の Journal.actions が空です。移行するものがありません" };
+    }
+    try { items = JSON.parse(String(jr.actions)); }
+    catch (e) { return { ok: false, error: "Journal.actions を読めませんでした" }; }
+  }
   if (!Array.isArray(items)) return { ok: false, error: "items が配列ではありません" };
   if (items.length > 500) return { ok: false, error: "件数が多すぎます（500件まで）" };
 
-  const date = String((body && body.date) || formatDate(new Date())).slice(0, 10);
+  // ★旧形式（文字列の配列）が混ざっていたら移行しない★
+  //   id が無いものへこちらで id を振ると、端末が持っている id と食い違い、
+  //   同じタスクが2件になる。端末に一度保存させてから移行する。
+  const legacy = items.filter(function (x) { return typeof x !== "object" || !x || !(x.id || x.task_id); });
+  if (legacy.length) {
+    return { ok: false, error: "旧形式のタスクが混ざっています（id が無い）",
+             legacyCount: legacy.length, total: items.length,
+             note: "端末でアプリを一度開いて保存し直すと、id が付いた形になります" };
+  }
   const confirm = String((body && body.confirm) || "") === "yes";
 
   const existing = p1List("Tasks", studentEmail);
@@ -10512,8 +10590,8 @@ function migrateTasksToSheet(studentEmail, body) {
   };
 
   if (!confirm) {
-    return { ok: true, dryRun: true, date: date, counts: counts,
-             conflicts: plan.conflict.slice(0, 20),
+    return { ok: true, dryRun: true, date: date, source: (body && body.items) ? "items" : "Journal.actions",
+             counts: counts, conflicts: plan.conflict.slice(0, 20),
              note: "confirm=yes で実行します。競合があるものは作成しません（報告のみ）" };
   }
 
@@ -10587,8 +10665,37 @@ function saveTask(studentEmail, body) {
   const chk = p1RequireUser(studentEmail);
   if (!chk.ok) return chk;
   const id = String((body && body.task_id) || "").trim();
-  if (id && !p1OwnedRow("Tasks", "task_id", id, studentEmail)) {
-    return { ok: false, error: "タスクが見つかりません" };
+  const existing = id ? p1OwnedRow("Tasks", "task_id", id, studentEmail) : null;
+  if (id && !existing) return { ok: false, error: "タスクが見つかりません" };
+
+  // ★同じ操作の再送を二重に実行しない★
+  //   オフラインで貯めた操作を送り直したとき、carryover_count が2回増えたり
+  //   同じタスクが2件できたりするのを防ぐ。直前の結果をそのまま返す。
+  const mutationId = String((body && body.mutation_id) || "").trim();
+  if (mutationId && existing && String(existing.last_mutation_id || "") === mutationId) {
+    return { ok: true, id: id, duplicate: true,
+             data: decorateTask(existing, Date.now()),
+             note: "同じ操作を受け取ったので、二重に実行していません" };
+  }
+
+  // ★消したタスクは復活させない★
+  //   古い端末が同じ task_id を送ってきても、削除済みなら拒否する。
+  if (existing && String(existing.deleted_at || "").trim() && String(body.restore || "") !== "1") {
+    return { ok: false, error: "TASK_DELETED",
+             note: "削除済みのタスクです。戻すには明示的な復元が要ります" };
+  }
+
+  // ★競合を黙って上書きしない★
+  //   クライアントが「自分が見ていた版」を送る。サーバーと違えば、
+  //   どちらが正しいかはこちらで決めず、両方返して判断を委ねる。
+  if (existing && body.base_version !== undefined && String(body.base_version) !== "") {
+    const curVer = Number(existing.version || 0);
+    if (Number(body.base_version) !== curVer) {
+      return { ok: false, error: "TASK_CONFLICT",
+               server: decorateTask(existing, Date.now()),
+               yours: body,
+               note: "別の端末で更新されています。サーバーの内容を確認してください" };
+    }
   }
   const title = p1Text_(body.title, 200);
   if (!id && !String(title).trim()) return { ok: false, error: "タスク名を入れてください" };
@@ -10626,10 +10733,12 @@ function saveTask(studentEmail, body) {
 
   // 着手・完了の記録。あとから「期限前に着手できたか」を見るために使う
   if (body.status !== undefined) {
-    const st = String(body.status).toUpperCase();
-    rec.status = ["TODO", "DOING", "DONE"].indexOf(st) !== -1 ? st : "TODO";
+    const st = normalizeTaskStatus(body.status);
+    rec.status = st;
     const cur = id ? p1OwnedRow("Tasks", "task_id", id, studentEmail) : null;
-    if (st === "DOING" && (!cur || !String(cur.first_started_at || "").trim())) {
+    // ★最初に着手したときだけ記録する★ 再開のたびに上書きしない。
+    //   上書きすると「期限前に着手できた割合」が測れなくなる。
+    if (st === "IN_PROGRESS" && (!cur || !String(cur.first_started_at || "").trim())) {
       rec.first_started_at = new Date().toISOString();
     }
     if (st === "DONE") rec.completed_at = new Date().toISOString();
@@ -10638,21 +10747,97 @@ function saveTask(studentEmail, body) {
     if (normalizeTaskStatus(cur && cur.status) === "DONE" && st === "DONE") rec.status = "DONE";
   }
 
+  // 文脈。受け取るのは内部コードだけ。勝手に推測して振り分けない
+  if (body.context !== undefined) {
+    const cx = String(body.context).toUpperCase();
+    rec.context = TASK_CONTEXTS.indexOf(cx) !== -1 ? cx : "UNSET";
+  }
+  if (body.source_type !== undefined) {
+    const sc = String(body.source_type).toUpperCase();
+    rec.source_type = TASK_SOURCE_TYPES.indexOf(sc) !== -1 ? sc : "SELF";
+  }
+  if (body.requested_by !== undefined) rec.requested_by = p1Text_(body.requested_by, 100);
+  if (body.requested_at !== undefined) rec.requested_at = p1Text_(body.requested_at, 25);
+  if (body.sort_order !== undefined) rec.sort_order = p1Num_(body.sort_order);
+
+  rec.version = Number((existing && existing.version) || 0) + 1;
+  rec.updated_at = new Date().toISOString();
+  if (mutationId) rec.last_mutation_id = mutationId;
+
   const r = p1Upsert("Tasks", "task_id", rec);
   const saved = p1OwnedRow("Tasks", "task_id", r.id, studentEmail);
-  return { ok: true, id: r.id, created: r.created, data: saved ? decorateTask(saved, Date.now()) : null };
+  // ★サーバーが確定した内容をそのまま返す★
+  //   端末はこれを反映する。各端末が独自の値を持ち続けないため。
+  return { ok: true, id: r.id, created: r.created,
+           data: saved ? decorateTask(saved, Date.now()) : null };
 }
 
 // タスクの削除は論理削除にする。集計（持ち越し率・完了率）の母数が
 // 消えてしまうと、あとから振り返れなくなるため。
+// ★削除は物理削除しない★
+//   行ごと消すと、古い端末が同じ task_id を送ってきたときに復活する。
+//   deleted_at を立てて墓標（tombstone）として残し、
+//   同期データには含めることで「これは消えた」と伝える。
 function deleteTask(studentEmail, body) {
   const chk = p1RequireUser(studentEmail);
   if (!chk.ok) return chk;
   const id = String((body && body.task_id) || "").trim();
   const row = id ? p1OwnedRow("Tasks", "task_id", id, studentEmail) : null;
   if (!row) return { ok: false, error: "タスクが見つかりません" };
-  p1Upsert("Tasks", "task_id", { task_id: id, deleted_at: new Date().toISOString() });
+
+  const mutationId = String((body && body.mutation_id) || "").trim();
+  if (mutationId && String(row.last_mutation_id || "") === mutationId) {
+    return { ok: true, deleted: true, task_id: id, duplicate: true };
+  }
+  if (String(row.deleted_at || "").trim()) {
+    return { ok: true, deleted: true, task_id: id, already: true };  // 何度呼んでも同じ
+  }
+  const rec = { task_id: id, deleted_at: new Date().toISOString(),
+                version: Number(row.version || 0) + 1,
+                updated_at: new Date().toISOString() };
+  if (mutationId) rec.last_mutation_id = mutationId;
+  p1Upsert("Tasks", "task_id", rec);
   return { ok: true, deleted: true, task_id: id };
+}
+
+// ★持ち越し★ 新しいタスクを複製しない。同じ task_id のまま日付を移す。
+function carryOverTask(studentEmail, body) {
+  const chk = p1RequireUser(studentEmail);
+  if (!chk.ok) return chk;
+  const id = String((body && body.task_id) || "").trim();
+  const row = id ? p1OwnedRow("Tasks", "task_id", id, studentEmail) : null;
+  if (!row) return { ok: false, error: "タスクが見つかりません" };
+  if (String(row.deleted_at || "").trim()) return { ok: false, error: "TASK_DELETED" };
+
+  const mutationId = String((body && body.mutation_id) || "").trim();
+  if (mutationId && String(row.last_mutation_id || "") === mutationId) {
+    // ★同じ操作を二重に実行しない★ carryover_count が2回増えるのを防ぐ
+    return { ok: true, task_id: id, duplicate: true, data: decorateTask(row, Date.now()) };
+  }
+
+  const from = String(row.date || "").slice(0, 10);
+  const to = String((body && body.to_date) || "").slice(0, 10) ||
+             Utilities.formatDate(new Date(Date.now() + 86400000), "Asia/Tokyo", "yyyy-MM-dd");
+  if (from === to) return { ok: false, error: "同じ日付へは持ち越せません" };
+
+  const rec = {
+    task_id: id, date: to,
+    carryover_count: Number(row.carryover_count || 0) + 1,
+    // 元の日付を残す。積み重なるので履歴として連ねる
+    carried_from: (String(row.carried_from || "") ? row.carried_from + "," : "") + from,
+    status: "CARRIED_OVER",
+    version: Number(row.version || 0) + 1,
+    updated_at: new Date().toISOString()
+  };
+  if (mutationId) rec.last_mutation_id = mutationId;
+  p1Upsert("Tasks", "task_id", rec);
+  const saved = p1OwnedRow("Tasks", "task_id", id, studentEmail);
+  authAudit("TASK_CARRYOVER", { result: "SUCCESS", action: "carryOverTask",
+            failureReason: "task=" + id + " " + from + "→" + to +
+                           " count=" + rec.carryover_count });
+  return { ok: true, task_id: id, from: from, to: to,
+           carryover_count: rec.carryover_count,
+           data: saved ? decorateTask(saved, Date.now()) : null };
 }
 
 function migrateLocalTasks(studentEmail, body) {
