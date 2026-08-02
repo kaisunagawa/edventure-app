@@ -432,6 +432,7 @@ function doGet(e) {
       case "getReport":    result = getReport(studentEmail, e.parameter); break;
       case "getReportList": result = getReportList(studentEmail); break;
       case "getStatusSummary": result = getStatusSummary(studentEmail); break;
+      case "getSelfMgmtPower": result = getSelfMgmtPower(studentEmail, e.parameter); break;
       case "getLogs":      result = getLogs(studentEmail, e.parameter); break;
       case "getMessages":  result = getMessages(studentEmail); break;
       case "getSchedule":  result = getSchedule(studentEmail); break;
@@ -988,6 +989,233 @@ function getHomeData(studentEmail) {
     };
     return { ok: true, data: data };
   } finally { _sheetReadCacheOn = false; _sheetReadCache = {}; }
+}
+
+// ══════════════════════════════════════════════════════════════════
+// 自己経営力（self_mgmt_power_v1）
+//
+// 既存の「記録・メモ・集中・目標・継続」（computeAllStatuses）とは
+// 別物として作る。あちらは活動量、こちらは「決めたことを進められたか」。
+// 旧ロジックは一切変更しない。XP・レベル・ランキング・夜間レポートにも繋がない。
+//
+// 大事にしたこと:
+//   ・未入力を0点にしない（0点と「まだ測っていない」は意味が違う）
+//   ・材料が無い指標は素直に null を返し、なぜ出せないかを書く
+//   ・立て直しの機会が一度も無い人を満点にしない（評価対象外にする）
+//   ・長く働くほど高得点にならない。休息を減点しない
+//   ・同じ事実を複数の指標へ満額加算しない（見る観点を分ける）
+// ══════════════════════════════════════════════════════════════════
+const SMP_VERSION = "v1.0.0";
+const SMP_KEYS = [
+  ["result_power",          "成果力",     "目標を成果に変える力"],
+  ["time_allocation_power", "時間配分力", "大事なことに時間を使う力"],
+  ["execution_power",       "実行力",     "決めたことを進める力"],
+  ["continuity_power",      "継続力",     "無理なく続ける力"],
+  ["recovery_power",        "立て直し力", "崩れたあとに戻る力"]
+];
+// しきい値は後から変えられるようにここへ集約する（ハードコードして散らさない）
+const SMP_BANDS = [[80, "強み"], [65, "安定"], [50, "要確認"], [0, "改善優先"]];
+function smpBand(score) {
+  if (score === null || score === undefined) return "データ不足";
+  for (let i = 0; i < SMP_BANDS.length; i++) if (score >= SMP_BANDS[i][0]) return SMP_BANDS[i][1];
+  return "改善優先";
+}
+
+// 構成要素。評価できたものだけで正規化する
+function smpRoll(parts) {
+  const ok = parts.filter(function (p) { return p.state === "evaluated" && p.value !== null; });
+  if (!ok.length) return { score: null, coverage: 0, sample: 0 };
+  let wsum = 0, vsum = 0, sample = 0;
+  ok.forEach(function (p) { wsum += (p.weight || 1); vsum += p.value * (p.weight || 1); sample += (p.sample || 0); });
+  return { score: Math.round(vsum / wsum), coverage: Math.round(ok.length / parts.length * 100) / 100, sample: sample };
+}
+
+function computeSelfMgmtPower(studentEmail, weekStart) {
+  const monday = weekStart || mondayOf(formatDate(new Date()));
+  const sunday = (function () { const d = new Date(monday + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() + 6);
+                                return d.toISOString().substring(0, 10); })();
+  const today = formatDate(new Date());
+  const inWeek = function (d) { const x = String(d || "").slice(0, 10); return x >= monday && x <= sunday; };
+
+  const tasks = p1List("Tasks", studentEmail).filter(function (t) { return !String(t.deleted_at || "").trim(); });
+  const weekTasks = tasks.filter(function (t) { return inWeek(p1DateOut_(t.date)); });
+  const logs = sheetToObjects(getSheet("DailyLog")).filter(function (l) {
+    return String(l.student_email) === studentEmail && inWeek(l.date); });
+  const goals = p1List("Goals", studentEmail).filter(function (g) { return p1Status_(g.status, "ACTIVE") !== "ARCHIVED"; });
+  const wgs = p1List("WeeklyGoals", studentEmail).filter(function (w) { return p1Status_(w.status, "ACTIVE") === "ACTIVE"; });
+
+  const out = {};
+  const na = function (reason) { return { value: null, state: "insufficient_data", reason: reason, sample: 0 }; };
+
+  // ── 実行力: 決めたことを進められたか ────────────────────────────
+  (function () {
+    const parts = [];
+    const done = weekTasks.filter(function (t) { return normalizeTaskStatus(t.status) === "DONE"; });
+    // 重要タスクの完了率
+    const imp = weekTasks.filter(function (t) { return String(t.importance_level).toUpperCase() === "HIGH"; });
+    parts.push(imp.length
+      ? { value: Math.round(imp.filter(function (t) { return normalizeTaskStatus(t.status) === "DONE"; }).length / imp.length * 100),
+          state: "evaluated", weight: 2, sample: imp.length, label: "重要タスク完了率" }
+      : Object.assign(na("重要（高）にしたタスクが今週ありません"), { weight: 2, label: "重要タスク完了率" }));
+    // 期限遵守率（期限があるものだけ）
+    const withDue = weekTasks.filter(function (t) { return String(p1DateOut_(t.due_at) || "").trim(); });
+    parts.push(withDue.length
+      ? { value: Math.round(withDue.filter(function (t) {
+            const c = String(t.completed_at || "").slice(0, 10);
+            return c && c <= p1DateOut_(t.due_at); }).length / withDue.length * 100),
+          state: "evaluated", weight: 2, sample: withDue.length, label: "期限遵守率" }
+      : Object.assign(na("期限を決めたタスクが今週ありません"), { weight: 2, label: "期限遵守率" }));
+    // 着手率（一度でも動かしたか）
+    parts.push(weekTasks.length
+      ? { value: Math.round(weekTasks.filter(function (t) {
+            return String(t.first_started_at || "").trim() || normalizeTaskStatus(t.status) === "DONE"; }).length / weekTasks.length * 100),
+          state: "evaluated", weight: 1, sample: weekTasks.length, label: "着手率" }
+      : Object.assign(na("今週のタスクがありません"), { weight: 1, label: "着手率" }));
+    // 持ち越し率（低いほど良いので反転）
+    parts.push(weekTasks.length
+      ? { value: Math.round((1 - weekTasks.filter(function (t) { return Number(t.carryover_count || 0) > 0; }).length / weekTasks.length) * 100),
+          state: "evaluated", weight: 1, sample: weekTasks.length, label: "持ち越しの少なさ" }
+      : Object.assign(na("今週のタスクがありません"), { weight: 1, label: "持ち越しの少なさ" }));
+    // 見積もり精度は actual_minutes が入っている場合だけ。未入力を0分にしない
+    const est = weekTasks.filter(function (t) { return Number(t.estimated_minutes) > 0 && Number(t.actual_minutes) > 0; });
+    parts.push(est.length >= 3
+      ? { value: (function () {
+            let acc = 0; est.forEach(function (t) {
+              const e = Number(t.estimated_minutes), a = Number(t.actual_minutes);
+              acc += Math.max(0, 100 - Math.abs(a - e) / e * 100); });
+            return Math.round(acc / est.length); })(),
+          state: "evaluated", weight: 1, sample: est.length, label: "見積もりの精度" }
+      : Object.assign(na("実績時間の記録が3件に満たないため、この要素は分母から外しています"), { weight: 1, label: "見積もりの精度" }));
+    const r = smpRoll(parts);
+    out.execution_power = { score: r.score, coverage: r.coverage, sample_count: r.sample, components: parts,
+      state: r.score === null ? "insufficient_data" : "evaluated",
+      reason: r.score === null ? "今週のタスクがまだありません" : "" };
+  })();
+
+  // ── 成果力: 目標を成果に変えられたか（登録しただけでは加点しない）──
+  (function () {
+    const parts = [];
+    // ★未記録と0達成を分ける★
+    //   目標を作った直後は actual が 0 になるが、それは「0件しかできなかった」
+    //   ではなく「まだ記録していない」。ここを0点にすると、決めた初日に
+    //   いきなり改善優先と出てしまう（実際に出た）。
+    let agg = {};
+    try { agg = aggregateWeeklyActual(studentEmail, monday) || {}; } catch (e) { agg = {}; }
+    const wgEval = wgs.filter(function (w) {
+      const t = Number(w.std_line) > 0 ? Number(w.std_line) : Number(w.target_total);
+      if (isNaN(t) || t <= 0) return false;
+      const a = agg[String(w.weekly_goal_id)] || {};
+      return Number(a.logCount || 0) > 0;   // 記録があるものだけ評価する
+    });
+    if (wgEval.length) {
+      let acc = 0, n = 0;
+      wgEval.forEach(function (w) {
+        const t = Number(w.std_line) > 0 ? Number(w.std_line) : Number(w.target_total);
+        const a = Number((agg[String(w.weekly_goal_id)] || {}).actual || w.actual_value || 0);
+        acc += Math.min(100, Math.round(a / t * 100)); n++;
+      });
+      parts.push({ value: Math.round(acc / n), state: "evaluated", weight: 2, sample: n, label: "週間目標の達成率" });
+    } else parts.push(Object.assign(
+      na(wgs.length ? "今週の週間目標にまだ記録がありません（0件という意味ではありません）"
+                    : "数値のある週間目標がありません"),
+      { weight: 2, label: "週間目標の達成率" }));
+
+    const gEval = goals.filter(function (g) { const p = computePace(g.start_date, g.end_date, g.current_value, g.target_value, g.unit, today);
+                                              return p.status !== "UNKNOWN" && p.progressPct !== null; });
+    if (gEval.length) {
+      let acc = 0;
+      gEval.forEach(function (g) {
+        const p = computePace(g.start_date, g.end_date, g.current_value, g.target_value, g.unit, today);
+        // 「経過した割合」に対して「進んだ割合」がどれだけ追いついているか
+        const elapsedPct = p.totalDays ? (p.elapsedDays / p.totalDays * 100) : 0;
+        acc += elapsedPct > 0 ? Math.min(100, Math.round(p.progressPct / elapsedPct * 100)) : 100;
+      });
+      parts.push({ value: Math.round(acc / gEval.length), state: "evaluated", weight: 2, sample: gEval.length, label: "3か月目標の進み具合" });
+    } else parts.push(Object.assign(na("3か月目標に現在値・期間が入っていないため測れません"), { weight: 2, label: "3か月目標の進み具合" }));
+
+    const r = smpRoll(parts);
+    out.result_power = { score: r.score, coverage: r.coverage, sample_count: r.sample, components: parts,
+      state: r.score === null ? "insufficient_data" : "evaluated",
+      reason: r.score === null ? "目標の数値が入っていないため、まだ算出できません" : "" };
+  })();
+
+  // ── 時間配分力: 5分類が未実装のため算出しない（推測で埋めない）──
+  out.time_allocation_power = { score: null, coverage: 0, sample_count: 0, components: [],
+    state: "insufficient_data",
+    reason: "時間の5分類（GOAL_DIRECT等）がまだ記録されていないため算出できません" };
+
+  // ── 継続力: 無理なく続けられたか（連続日数だけで決めない）──
+  (function () {
+    const parts = [];
+    const days = {};
+    logs.forEach(function (l) { days[String(l.date).slice(0, 10)] = 1; });
+    const acted = Object.keys(days).length;
+    const elapsed = Math.min(7, Math.max(1, Math.round((new Date(today + "T00:00:00+09:00") - new Date(monday + "T00:00:00+09:00")) / 86400000) + 1));
+    parts.push({ value: Math.min(100, Math.round(acted / elapsed * 100)), state: "evaluated", weight: 2, sample: acted, label: "行動した日数" });
+    // 偏りの少なさ。1日に詰め込みすぎていないか（長時間ほど高得点にしない）
+    const perDay = {};
+    logs.forEach(function (l) { const d = String(l.date).slice(0, 10); perDay[d] = (perDay[d] || 0) + 1; });
+    const counts = Object.keys(perDay).map(function (k) { return perDay[k]; });
+    if (counts.length >= 3) {
+      const avg = counts.reduce(function (a, b) { return a + b; }, 0) / counts.length;
+      const max = Math.max.apply(null, counts);
+      parts.push({ value: Math.max(0, Math.round(100 - (max - avg) / Math.max(1, avg) * 50)),
+                   state: "evaluated", weight: 1, sample: counts.length, label: "日ごとの偏りの少なさ" });
+    } else parts.push(Object.assign(na("記録が3日に満たないため、偏りは測れません"), { weight: 1, label: "日ごとの偏りの少なさ" }));
+    const r = smpRoll(parts);
+    out.continuity_power = { score: r.score, coverage: r.coverage, sample_count: r.sample, components: parts,
+      state: r.score === null ? "insufficient_data" : "evaluated",
+      reason: r.score === null ? "今週の記録がまだありません" : "" };
+  })();
+
+  // ── 立て直し力: 崩れた後に戻れたか（崩れていない人を満点にしない）──
+  (function () {
+    const parts = [];
+    const carried = tasks.filter(function (t) { return Number(t.carryover_count || 0) > 0; });
+    if (carried.length) {
+      parts.push({ value: Math.round(carried.filter(function (t) { return normalizeTaskStatus(t.status) === "DONE"; }).length / carried.length * 100),
+                   state: "evaluated", weight: 2, sample: carried.length, label: "持ち越したあとの完了率" });
+    } else parts.push({ value: null, state: "not_evaluable", weight: 2, sample: 0,
+                        label: "持ち越したあとの完了率", reason: "今週は持ち越しがありませんでした" });
+    const r = smpRoll(parts);
+    const anyEval = parts.some(function (p) { return p.state === "evaluated"; });
+    out.recovery_power = { score: r.score, coverage: r.coverage, sample_count: r.sample, components: parts,
+      state: anyEval ? "evaluated" : "not_evaluable",
+      reason: anyEval ? "" : "立て直しの機会が今週はなかったため、評価対象外です" };
+  })();
+
+  // 整形して返す
+  const calculatedAt = new Date().toISOString();
+  const rows = SMP_KEYS.map(function (k) {
+    const o = out[k[0]] || {};
+    return {
+      key: k[0], label: k[1], description: k[2],
+      score: (o.score === undefined ? null : o.score),
+      evaluation_state: o.state || "insufficient_data",
+      status_label: (o.state === "not_evaluable") ? "評価対象外" : smpBand(o.score),
+      confidence: o.score === null ? "NONE" : (o.coverage >= 0.8 ? "HIGH" : o.coverage >= 0.5 ? "MEDIUM" : "LOW"),
+      coverage: o.coverage || 0, sample_count: o.sample_count || 0,
+      components: o.components || [], incomplete_reason: o.reason || "",
+      period_start: monday, period_end: sunday,
+      calculation_version: SMP_VERSION, calculated_at: calculatedAt
+    };
+  });
+  return { period_start: monday, period_end: sunday, version: SMP_VERSION, metrics: rows };
+}
+
+function getSelfMgmtPower(studentEmail, body) {
+  const chk = p1RequireUser(studentEmail);
+  if (!chk.ok) return chk;
+  const user = sheetToObjects(getSheet("Users")).find(function (u) { return u.student_email === studentEmail; });
+  if (!hasFeature(user, SMP_FEATURE_KEY)) return { ok: false, error: "feature not enabled" };
+  const weekStart = String((body && body.weekStart) || "").slice(0, 10) || null;
+  const cur = computeSelfMgmtPower(studentEmail, weekStart);
+  let prev = null;
+  if (String((body && body.withPrev) || "") === "1") {
+    const d = new Date(cur.period_start + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() - 7);
+    prev = computeSelfMgmtPower(studentEmail, d.toISOString().substring(0, 10));
+  }
+  return { ok: true, data: cur, prev: prev };
 }
 
 function getStatusSummary(studentEmail) {
@@ -8029,7 +8257,17 @@ const P1_ADDED_COLUMNS = {
     "link_task_id","deleted_at","actual_minutes","duration_confirmed"],
   Journal: ["daily_focus_id","focus_completion_condition","focus_min_line","focus_planned_time",
     "focus_if_then","link_weekly_goal_id","focus_achievement_state","focus_miss_reason"],
-  Users: ["features","task_migrated_at"]
+  Users: ["features","task_migrated_at"],
+  // ★自己経営力（self_mgmt_power_v1）★
+  //   1ユーザー × 1週間 × 1指標 ＝ 1行（1人1週で最大5行）
+  //   既存の status score とは別レイヤー。XP・ランキング・夜間レポートには繋がない。
+  //   所有者キーは student_email（既存のp1List/p1OwnedRow/p1Upsertが
+  //   この列名で所有権を絞っているため。owner_emailを新設すると
+  //   所有権の仕組みを二重化してしまう）
+  SelfMgmtPower: ["row_id","student_email","period_start","period_end","key","label",
+    "score","evaluation_state","status_label","confidence","coverage","sample_count",
+    "calculation_version","calculated_at","input_hash","components","incomplete_reason",
+    "created_at","updated_at"]
 };
 
 // 新規シートを取得（無ければ列付きで作る）。既存のgetXxxSheet()と同じ流儀
@@ -9908,7 +10146,7 @@ const ACTION_POLICIES_WRITE = {
 // ランキングや「みんなの頑張り」は共有情報なのでここには入れない
 const ACTION_POLICIES_READ = {
   getUser:{}, getLogs:{}, getReport:{}, getReportList:{}, getHomeData:{}, getGoalTree:{},
-  getGameStatus:{}, getJournal:{}, getInsights:{}, getWeeklySummary:{}, getMonthlyReview:{},
+  getGameStatus:{}, getJournal:{}, getInsights:{}, getWeeklySummary:{}, getMonthlyReview:{}, getSelfMgmtPower:{},
   getTimeUse:{}, getAchievements:{}, getMessages:{}, p1Status2:{}, getTasks:{}, getSprints:{}
 };
 
@@ -10318,6 +10556,8 @@ function verifyP1Admin(email, secret, params) {
 // 新機能は features に該当キーを持つ人にだけ出す。cohortで分岐すると全画面に条件が
 // 散らばるため、1つの列で制御する（学生の除外も自動的に達成される）
 const P1_FEATURE_KEY = "goals_v1";
+// 自己経営力の段階公開。Kai→core希望者→全体の順に広げる
+const SMP_FEATURE_KEY = "self_mgmt_power_v1";
 function hasFeature(user, key) {
   if (!user) return false;
   if (user.student_email === adminEmail()) return true; // オーナーは常に有効
