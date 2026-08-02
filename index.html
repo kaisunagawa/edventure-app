@@ -1211,6 +1211,46 @@ function RankBadge({ level, size = 32 }) {
 // 自己評価ピッカー（5つ横並び・数字＋短いラベル）
 const EVAL_SHORT = {"5":"完璧","4":"よくできた","3":"まあまあ","2":"もう少し","1":"だめだった"};
 const EVAL_COLORS = {"5":"#22C55E","4":"#6366F1","3":"#F59E0B","2":"#F97316","1":"#EF4444"};
+// ── 時間の5分類（B6）──────────────────────────────
+//   「その時間が経営のどこに効いたか」を1タップで選ぶ。
+//   Tasks の文脈（仕事/プライベート…）とは別の軸なので、自動変換はしない。
+//   選ばなければ未分類のまま。あとから記録カードで直せる。
+const TIME_CLASS_OPTS = [
+  ["GOAL_DIRECT",           "目標に直結"],
+  ["OPERATIONS",            "日常業務"],
+  ["ASSET_BUILD",           "将来への投資"],
+  ["RECOVERY_RELATIONSHIP", "回復・人間関係"],
+  ["UNPLANNED_LEAKAGE",     "計画外の時間"],
+];
+const TIME_CLASS_LABEL = Object.fromEntries(TIME_CLASS_OPTS);
+const CLASS_REASON_TEXT = {
+  LINKED_WEEKLY_GOAL:        "今週の目標に紐づいているため",
+  LINKED_TASK_TO_WEEKLY_GOAL:"このタスクが今週の目標に紐づいているため",
+  LINKED_DAILY_FOCUS:        "今日のフォーカスに紐づいているため",
+  REST_MODE:                 "休息として記録したため",
+  USER_SELECTED:             "自分で選んだ分類です",
+  GOAL_RELATED_ONLY_NEEDS_USER: "「目標に関連」だけでは決められないので選んでください",
+  RULE_UNCERTAIN:            "決め手がないので選んでください",
+};
+function TimeClassPicker({value, onChange, hint}) {
+  return html`
+    <div class="form-grp">
+      <label class="form-lbl">この時間は何に使いましたか？</label>
+      <div style=${{display:"flex",flexWrap:"wrap",gap:6}}>
+        ${TIME_CLASS_OPTS.map(([k,l])=>{
+          const on = value===k;
+          return html`<button key=${k} onClick=${()=>onChange(on?"":k)}
+            style=${{padding:"7px 12px",borderRadius:20,fontSize:12,fontWeight:on?700:500,cursor:"pointer",
+                     fontFamily:"inherit",border:`1.5px solid ${on?"var(--accent)":"var(--border)"}`,
+                     background:on?"var(--accent-l)":"transparent",color:on?"var(--accent)":"var(--sub)"}}>${l}</button>`;
+        })}
+      </div>
+      <div style=${{fontSize:10.5,color:"var(--sub)",marginTop:6,lineHeight:1.7}}>
+        ${hint||"選ばなくても保存できます。あとから記録カードで変えられます"}
+      </div>
+    </div>`;
+}
+
 function EvalPicker({value, onChange}) {
   return html`<div style=${{display:"flex",gap:6}}>
     ${EVALS.map(f=>{
@@ -3543,6 +3583,16 @@ function LogScreen({onToast, isActive}) {
   // 最後に選んだ状態を記憶して新しい時間帯のデフォルトにする（タイマーと同じ方式）
   const goalRelatedDefault = () => localStorage.getItem("jiroku_log_goal_related") === "true";
   const [goalRelated, setGoalRelated] = useState(goalRelatedDefault);
+  const [timeClass, setTimeClass] = useState("");   // 時間の5分類（選ばなければ未分類）
+  const [clsEditing, setClsEditing] = useState(null);  // 分類を選び直している記録のlog_id
+  // 記録カードから分類を変える。サーバーが USER として保存し、以後ルールで上書きしない
+  const saveClass = async (l, k) => {
+    setClsEditing(null);
+    setLogs(prev=>prev.map(x=>x.log_id===l.log_id
+      ? {...x, time_classification:k, classification_method:"USER", classification_reason_code:"USER_SELECTED"} : x));
+    const r = await gasPostJson("setLogClassification", { log_id: l.log_id, time_classification: k });
+    if(!r || !r.ok) onToast("分類を変更できませんでした");
+  };
 
   // カレンダー予定の自動入力。端末キャッシュ→本人認証→サーバー共有
   // キャッシュの順にまず自動で試すが、Safari等でサードパーティCookieが
@@ -3689,6 +3739,7 @@ function LogScreen({onToast, isActive}) {
       date,
       task: task.trim(), focus_level: focus, memo: memo.trim(),
       goal_related: goalRelated ? "true" : "false",
+      time_classification: timeClass || undefined,   // 選ばなければサーバーのルール
     };
     if(blocks.length>1) payload.time_blocks = blocks.join(",");
     else payload.time_block = block;
@@ -3700,7 +3751,8 @@ function LogScreen({onToast, isActive}) {
     // （サーバーへの往復が倍になり保存が重く感じられるのを防ぐ）
     let next = [...logs];
     blocks.forEach(b=>{
-      const saved = {time_block:b, task:task.trim(), focus_level:focus, memo:memo.trim(), goal_related:goalRelated?"true":"false"};
+      const saved = {time_block:b, task:task.trim(), focus_level:focus, memo:memo.trim(), goal_related:goalRelated?"true":"false",
+                     time_classification:timeClass||"", classification_method:timeClass?"USER":""};
       const i = next.findIndex(l=>l.time_block===b);
       if(i>=0) next[i] = {...next[i], ...saved}; else next.push(saved);
     });
@@ -3815,6 +3867,7 @@ function LogScreen({onToast, isActive}) {
             <span style=${{fontSize:12.5,fontWeight:500,color:goalRelated?"var(--accent)":"var(--sub)"}}>この時間は目標に関連している</span>
           </button>
         </div>
+        <${TimeClassPicker} value=${timeClass} onChange=${setTimeClass}/>
         <div class="form-grp">
           <label class="form-lbl">自己評価</label>
           <${EvalPicker} value=${focus} onChange=${setFocus}/>
@@ -3841,6 +3894,55 @@ function LogScreen({onToast, isActive}) {
       </div>
     </div>
 
+    <!-- ★今日の時間の内訳（B7）★
+         分類ごとの実績時間と、まだ測れていない分をそのまま見せる。
+         未分類を「日常業務」などへ勝手に振り分けない。 -->
+    ${logs.length>0&&(()=>{
+      const mins = l => { const n=Number(l.actual_minutes); return n>0?n:null; };
+      const total = logs.reduce((a,l)=>a+(mins(l)||0),0);
+      const byCls = {}; let unclassifiedMin=0, unconfirmed=0, classifiedCount=0;
+      logs.forEach(l=>{
+        const m=mins(l);
+        if(m===null) unconfirmed++;
+        const k=String(l.time_classification||"");
+        if(k){ classifiedCount++; if(m) byCls[k]=(byCls[k]||0)+m; }
+        else if(m) unclassifiedMin+=m;
+      });
+      const classifiedMin = Object.values(byCls).reduce((a,b)=>a+b,0);
+      const timeCov = total>0 ? Math.round(classifiedMin/total*100) : 0;
+      const cntCov = logs.length>0 ? Math.round(classifiedCount/logs.length*100) : 0;
+      const hm = m => m>=60 ? (Math.floor(m/60)+"時間"+(m%60?(m%60)+"分":"")) : (m+"分");
+      return html`
+      <div class="card" style=${{marginBottom:14}}>
+        <div class="card-label">${isToday(date)?"今日の時間の内訳":date+" の時間の内訳"}</div>
+        ${total===0
+          ? html`<div style=${{fontSize:12,color:"var(--sub)",lineHeight:1.8}}>
+              実績時間がまだ記録されていません。タイマーで測ると、ここに積み上がります。</div>`
+          : html`
+            ${TIME_CLASS_OPTS.map(([k,label])=>{
+              const m=byCls[k]||0;
+              const pct=total>0?Math.round(m/total*100):0;
+              return html`<div key=${k} style=${{marginBottom:8}}>
+                <div style=${{display:"flex",justifyContent:"space-between",alignItems:"baseline",fontSize:12,marginBottom:4}}>
+                  <span style=${{color:m?"var(--text)":"var(--sub)",fontWeight:m?600:500}}>${label}</span>
+                  <span style=${{color:"var(--sub)"}}>${m?hm(m):"—"}${m?"（"+pct+"%）":""}</span>
+                </div>
+                <div style=${{height:6,background:"var(--bg)",borderRadius:99,overflow:"hidden"}}>
+                  <div style=${{height:"100%",width:pct+"%",background:"var(--accent)",borderRadius:99}}/>
+                </div>
+              </div>`;
+            })}
+            ${unclassifiedMin>0&&html`
+              <div style=${{fontSize:12,color:"var(--sub)",marginTop:10,lineHeight:1.8}}>
+                未分類 ${hm(unclassifiedMin)}（記録カードの「分類」から選べます）</div>`}
+            <div style=${{fontSize:11,color:"var(--sub)",marginTop:8,lineHeight:1.8,borderTop:"1px solid var(--border)",paddingTop:8}}>
+              実績時間の合計 ${hm(total)}<br/>
+              分類できた時間 ${timeCov}%・分類できた件数 ${cntCov}%
+              ${unconfirmed>0?html`<br/>実績時間が未確認の記録 ${unconfirmed}件（0分としては数えていません）`:""}
+            </div>`}
+      </div>`;
+    })()}
+
     ${logs.length>0&&html`
       <div class="card" style=${{marginBottom:24}}>
         <div class="card-label">${isToday(date)?"本日の記録":date+" の記録"}</div>
@@ -3856,6 +3958,24 @@ function LogScreen({onToast, isActive}) {
               <div class="log-task">${l.task}</div>
               ${focusStr&&html`<span class="log-focus"><span class="dot" style=${{background:DOT[num]||"var(--sub)"}}/>${num?num+"・":""}${focusLabel||focusStr}</span>`}
               ${l.memo&&html`<div class="log-memo">${l.memo}</div>`}
+              <!-- 分類チップ。押すと選び直せる（本人が選んだ分類はルールで上書きされない） -->
+              <div style=${{display:"flex",flexWrap:"wrap",gap:5,marginTop:5}} onClick=${e=>e.stopPropagation()}>
+                ${clsEditing===l.log_id
+                  ? TIME_CLASS_OPTS.map(([k,lb])=>html`
+                      <button key=${k} onClick=${()=>saveClass(l,k)}
+                        style=${{padding:"4px 9px",borderRadius:20,fontSize:10.5,cursor:"pointer",fontFamily:"inherit",
+                                 border:`1px solid ${l.time_classification===k?"var(--accent)":"var(--border)"}`,
+                                 background:l.time_classification===k?"var(--accent-l)":"transparent",
+                                 color:l.time_classification===k?"var(--accent)":"var(--sub)"}}>${lb}</button>`)
+                  : html`<button onClick=${()=>setClsEditing(l.log_id)}
+                      style=${{padding:"3px 9px",borderRadius:20,fontSize:10.5,cursor:"pointer",fontFamily:"inherit",
+                               border:`1px solid ${l.time_classification?"var(--accent)":"var(--border)"}`,
+                               background:"transparent",color:l.time_classification?"var(--accent)":"var(--sub)"}}>
+                      ${l.time_classification?TIME_CLASS_LABEL[l.time_classification]:"分類を選ぶ"}</button>
+                    ${l.time_classification&&l.classification_method==="RULE"&&l.classification_reason_code&&html`
+                      <span style=${{fontSize:10,color:"var(--sub)",alignSelf:"center"}}>
+                        ${CLASS_REASON_TEXT[l.classification_reason_code]||""}</span>`}`}
+              </div>
             </div>
           </div>`;
         })}
@@ -4592,6 +4712,14 @@ function ReportScreen() {
                     <div style=${{height:7,background:"var(--bg)",borderRadius:99,overflow:"hidden"}}>
                       <div style=${{height:"100%",width:(ev?Math.max(0,Math.min(100,v)):0)+"%",background:`linear-gradient(90deg, var(--hero1), ${color})`,borderRadius:99,transition:"width .5s ease"}}/>
                     </div>
+                    <!-- ★その数字の根拠★ 何を数えてこの点になったのかを1行で見せる。
+                         タップすると全部の内訳が開く（開かなくても理由が分かるように） -->
+                    <div style=${{fontSize:10.5,color:"var(--sub)",lineHeight:1.65,marginTop:5}}>
+                      ${ev
+                        ? (c.components||[]).filter(p=>p.state==="evaluated")
+                            .map(p=>p.detail?(p.label+" "+p.detail):(p.label+" "+p.value)).join(" ・ ")
+                        : (c.incomplete_reason||c.reason||"")}
+                    </div>
                   </div>
                 </button>
                 ${isOpen&&html`
@@ -4607,6 +4735,23 @@ function ReportScreen() {
               </div>`;
             })}
           </div>
+          <!-- ★なぜこの点数なのか★ AIではなく計算そのものを言葉にする（必ず数字と一致する） -->
+          ${(()=>{
+            const ev=(x.components||[]).filter(c=>c.state==="evaluated"&&c.score!==null);
+            const pend=(x.components||[]).filter(c=>c.state!=="evaluated");
+            if(!ev.length) return "";
+            const parts=ev.map(c=>c.label+" "+Math.round(c.score*c.weight/100)+"/"+c.weight);
+            const evW=ev.reduce((a,c)=>a+c.weight,0);
+            const got=ev.reduce((a,c)=>a+c.score*c.weight/100,0);
+            return html`<div style=${{fontSize:11.5,color:"var(--sub)",lineHeight:1.85,marginTop:14,paddingTop:12,borderTop:"1px solid var(--border)"}}>
+              <b style=${{color:"var(--text)",fontWeight:700}}>この点数の出し方</b><br/>
+              ${parts.join(" ＋ ")} ＝ ${Math.round(got)}点 / ${evW}点。
+              ${evW===100
+                ? "4項目すべてを合計した点数です。"
+                : "測れた"+evW+"点分を100点に換算して "+(shown===null||shown===undefined?"—":shown)+"点としています。"}
+              ${pend.length>0?html`<br/>${pend.map(c=>c.label).join("と")}は、まだ測れていないので点数に入れていません。`:""}
+            </div>`;
+          })()}
         </div>
 
         <div class="card">
@@ -4819,6 +4964,7 @@ function TimerScreen({onToast, isActive}) {
   const [logFocus, setLogFocus]       = useState("4 — よくできた");
   const [logMemo, setLogMemo]         = useState("");
   const [logGoalRelated, setLogGoalRelated] = useState(()=>localStorage.getItem("jiroku_timer_goal_related")!=="false");
+  const [logTimeClass, setLogTimeClass] = useState("");   // 時間の5分類
   const [saving, setSaving]           = useState(false);
   // 今回のセッションの実測結果（予定◯分に対して実際◯分集中したか）。
   // 途中で終えた場合も分単位で記録できるよう、モーダルを開く時点で確定させる
@@ -5056,7 +5202,8 @@ function TimerScreen({onToast, isActive}) {
       actual_minutes: measured,
       duration_confirmed: "true",        // タイマーで測った値なので確定扱い
       link_task_id: linkTaskId || "",
-      // 分類はサーバーのルールに任せる（本人が選ぶUIはB6で追加）
+      // 本人が選んだときだけ送る。送らなければサーバーのルールで決まる
+      time_classification: logTimeClass || undefined,
     });
     if(!res.ok){ onToast("記録に失敗しました。もう一度お試しください"); setSaving(false); return; }
     if(res.xp_gained){ const lv=res.level_up?` → Lv.${res.level}！`:""; onToast(`+${res.xp_gained} XP 獲得${lv}`); }
@@ -5065,7 +5212,7 @@ function TimerScreen({onToast, isActive}) {
     // （同じ時間帯キーを使うので、手動記録側で作ったイベントがあれば実測時刻に更新される）
     upsertCalendarEvent(formatDateStr(st), timeBlock, st.toISOString(), endDt.toISOString(), calTitle);
     setSaving(false); setShowModal(false); setLogMemo(""); setTask(""); setSessionResult(null);
-    setExecId(null); setLinkTaskId(null);   // 保存できたので、このセッションは終わり
+    setExecId(null); setLinkTaskId(null); setLogTimeClass("");   // 保存できたので、このセッションは終わり
     goToBreakOrReset();
   };
   const skipLog = () => { setShowModal(false); setTask(""); setSessionResult(null); goToBreakOrReset(); };
@@ -5245,6 +5392,8 @@ function TimerScreen({onToast, isActive}) {
               <span style=${{fontSize:12.5,fontWeight:500,color:logGoalRelated?"var(--accent)":"var(--sub)"}}>この時間は目標に関連している</span>
             </button>
           </div>
+          <${TimeClassPicker} value=${logTimeClass} onChange=${setLogTimeClass}
+            hint=${linkTaskId?"タスクから始めたので、目標に紐づいていれば自動で「目標に直結」になります":""}/>
           <div class="form-grp">
             <label class="form-lbl">自己評価</label>
             <${EvalPicker} value=${logFocus} onChange=${setLogFocus}/>
@@ -6788,7 +6937,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260803-021038";
+const APP_BUILD = "20260803-050804";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 

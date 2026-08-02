@@ -1569,9 +1569,14 @@ function computeDailyOpsFacts(studentEmail, dateStr, fixture) {
     operating = null; scoreBlockedBy = "PERFECT_SCORE_NEEDS_COVERAGE_080";
   }
   const evaluatedLabels = evaluated.map(function (x) { return x.label; });
+  // 画面に必ず出す点数と、その点数が「全体」か「測れた範囲」か
+  const displayed = (operating !== null && operating !== undefined) ? operating : partial;
+  const scope = (operating !== null && operating !== undefined) ? "FULL" : "PARTIAL";
   return {
     report_date: date, student_email: studentEmail,
     operating_score: operating,
+    displayed_score: displayed,
+    score_scope: displayed === null ? "NONE" : scope,
     partial_score: partial,
     partial_label: partial === null ? "" : opsBand(partial),
     partial_scope: evaluatedLabels.join("と"),
@@ -1866,13 +1871,17 @@ function opsBuildPrompt(cur, factList) {
   //   ここでAIに「点数は無い」と書かせると、画面の数字と食い違う。
   const shownScore = (cur.operating_score !== null && cur.operating_score !== undefined)
                      ? cur.operating_score : cur.partial_score;
+  const scope = (cur.operating_score !== null && cur.operating_score !== undefined) ? "FULL" : "PARTIAL";
   const view = {
     日付: cur.report_date,
-    今日の点数: shownScore,
-    点数の種類: (cur.operating_score !== null && cur.operating_score !== undefined)
-                ? "4項目すべてを含む総合点" : "測れた項目だけで出した点数",
-    今日の状態: cur.operating_state_label,
-    評価できた割合: cur.coverage, 確からしさ: cur.confidence,
+    displayed_score: shownScore,
+    score_scope: scope,
+    点数の意味: scope === "FULL" ? "4項目すべてを含む点数" : "測れた項目だけで出した点数",
+    partial_scope: cur.partial_scope || "",
+    evaluated_categories: cur.evaluated_categories || [],
+    excluded_categories: cur.excluded_items || [],
+    status_label: cur.operating_state_label,
+    coverage: cur.coverage, 確からしさ: cur.confidence,
     項目: (cur.components || []).map(function (c) {
       return { 名前: c.label, 配点: c.weight, 点数: c.score, 状態: c.evaluation_state,
                測定範囲: c.weighted_coverage, 不足: c.incomplete_reason || "" }; }),
@@ -1887,7 +1896,13 @@ function opsBuildPrompt(cur, factList) {
     + "・事実を述べる文には、その根拠になった fact_id を必ず全て挙げること。\n"
     + "　1つでも挙げられない内容が混じるなら、その文を書かないこと\n"
     + "・「準備が整った」「意識が高まった」のような、事実から確認できない断定をしないこと\n"
-    + "・「今日の点数」は画面に出ている数字。これと違う点数を書かないこと\n"
+    + "・displayed_score は画面に出ている数字。これと違う点数を書かないこと\n"
+    + "・score_scope が PARTIAL のときは、必ず範囲を限定して書くこと。\n"
+    + "　良い例:「測れた範囲では、成果への前進と計画の実行が良い状態でした」\n"
+    + "　悪い例:「今日は全体として100点でした」「すべての面で完璧な一日でした」\n"
+    + "・PARTIAL のとき、『総合』『全体』『満点』『完璧』という言葉を使わないこと\n"
+    + "・まだ測れていない項目について、良い・悪いを決めつけないこと\n"
+    + "・データが足りないことを、本人の失敗のように書かないこと\n"
     + "・点数が出ていない、算出できていない、とは書かないこと。\n"
     + "　まだ測れていない項目については「◯◯はこれから測れるようになる」と書いてよい\n"
     + "・next_action は本人が自分で決められて、達成したか測れる行動にすること\n"
@@ -1945,7 +1960,15 @@ function opsNarrative(studentEmail, cur, forceRefresh) {
       const text = result && result.content && result.content[0] ? result.content[0].text : "";
       const parsed = text ? parseAiJson(text) : null;
       const v = opsValidateNarrative(parsed, factList);
-      if (v.ok) { out = v.data; by = "ai"; fbReason = ""; }
+      // ★画面の点数と文章の意味を食い違わせない★
+      //   測れた範囲の点数なのに「総合」「満点」と書いていたら採用しない
+      const isPartial = (cur.operating_score === null || cur.operating_score === undefined);
+      const badWords = /総合|全体として|全体的|満点|完璧|すべての面/;
+      const allText = v.ok ? [v.data.operating_summary.text,
+                              (v.data.primary_management_issue || {}).text || "",
+                              (v.data.recovery_summary || {}).text || ""].join(" ") : "";
+      if (v.ok && isPartial && badWords.test(allText)) { fbReason = "SCOPE_MISMATCH"; }
+      else if (v.ok) { out = v.data; by = "ai"; fbReason = ""; }
       else fbReason = "SCHEMA_" + v.reason;
     } catch (e) { fbReason = "AI_ERROR"; }
   } else fbReason = "NO_API_KEY";
