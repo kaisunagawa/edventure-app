@@ -1712,7 +1712,7 @@ function getDailyOpsReport(studentEmail, body) {
 //   ・同じ入力なら生成し直さない（input_hash）
 //   ・schema検証に落ちたら機械組み立ての文章へ落とす
 // ══════════════════════════════════════════════════════════════════
-const OPS_PROMPT_VERSION = "self_management_daily_prompt_v1_1";
+const OPS_PROMPT_VERSION = "self_management_daily_prompt_v1_2";
 const OPS_MAX_REGENERATE = 8;   // 1日あたりの再生成の上限（編集のたびに課金しない）
 
 // 文章の材料。ここに無い事実をAIが書いたら落とす
@@ -1861,11 +1861,17 @@ function opsValidateNarrative(obj, factList) {
 }
 
 function opsBuildPrompt(cur, factList) {
+  // ★画面に出る点数をそのまま渡す★
+  //   総合が出せない日は「測れた範囲の点数」を出す運用（Kaiの判断）。
+  //   ここでAIに「点数は無い」と書かせると、画面の数字と食い違う。
+  const shownScore = (cur.operating_score !== null && cur.operating_score !== undefined)
+                     ? cur.operating_score : cur.partial_score;
   const view = {
     日付: cur.report_date,
-    総合スコア: cur.operating_score,
-    総合の状態: cur.operating_state_label,
-    総合を出せない理由: cur.score_blocked_by || "",
+    今日の点数: shownScore,
+    点数の種類: (cur.operating_score !== null && cur.operating_score !== undefined)
+                ? "4項目すべてを含む総合点" : "測れた項目だけで出した点数",
+    今日の状態: cur.operating_state_label,
     評価できた割合: cur.coverage, 確からしさ: cur.confidence,
     項目: (cur.components || []).map(function (c) {
       return { 名前: c.label, 配点: c.weight, 点数: c.score, 状態: c.evaluation_state,
@@ -1881,12 +1887,14 @@ function opsBuildPrompt(cur, factList) {
     + "・事実を述べる文には、その根拠になった fact_id を必ず全て挙げること。\n"
     + "　1つでも挙げられない内容が混じるなら、その文を書かないこと\n"
     + "・「準備が整った」「意識が高まった」のような、事実から確認できない断定をしないこと\n"
-    + "・総合スコアが null のときは、点数があるかのように書かないこと\n"
+    + "・「今日の点数」は画面に出ている数字。これと違う点数を書かないこと\n"
+    + "・点数が出ていない、算出できていない、とは書かないこと。\n"
+    + "　まだ測れていない項目については「◯◯はこれから測れるようになる」と書いてよい\n"
     + "・next_action は本人が自分で決められて、達成したか測れる行動にすること\n"
     + "・stop_action は「やめる・減らすこと」。思い当たらなければ null\n"
     + "・日本語。やさしい言葉で書くこと\n\n"
     + "次のJSONだけを返してください（前後に文章を付けない）。\n"
-    + '{\n  "operating_summary": { "text": "<今日の経営状態の要約。2文以内>", "fact_ids": ["<根拠のid>"] },\n'
+    + '{\n  "operating_summary": { "text": "<今日の1日の要約。2文以内。むずかしい言葉を使わない>", "fact_ids": ["<根拠のid>"] },\n'
     + '  "progress_items": [ { "text": "<今日の前進。1文>", "fact_ids": ["<根拠のid>"] } ],\n'
     + '  "primary_management_issue": { "text": "<今日の経営課題。2文以内>", "fact_ids": ["<根拠のid>"] } または null,\n'
     + '  "next_action": { "text": "<明日の一手。1文>", "based_on_fact_ids": ["<根拠のid>"],\n'
