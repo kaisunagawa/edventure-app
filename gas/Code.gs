@@ -1089,7 +1089,9 @@ function computeSelfMgmtPower(studentEmail, weekStart) {
     const r = smpRoll(parts);
     out.execution_power = { score: r.score, coverage: r.coverage, sample_count: r.sample, components: parts,
       state: r.score === null ? "insufficient_data" : "evaluated",
-      reason: r.score === null ? "今週のタスクがまだありません" : "" };
+      reason: r.score === null
+        ? (parts.filter(function (p) { return p.state !== "evaluated" && p.reason; })
+                .map(function (p) { return p.reason; }).join(" / ") || "今週のタスクがまだありません") : "" };
   })();
 
   // ── 成果力: 目標を成果に変えられたか（登録しただけでは加点しない）──
@@ -1120,23 +1122,45 @@ function computeSelfMgmtPower(studentEmail, weekStart) {
                     : "数値のある週間目標がありません"),
       { weight: 2, label: "週間目標の達成率" }));
 
-    const gEval = goals.filter(function (g) { const p = computePace(g.start_date, g.end_date, g.current_value, g.target_value, g.unit, today);
-                                              return p.status !== "UNKNOWN" && p.progressPct !== null; });
+    // ★status を除外条件に使わない★
+    //   computePace の status=UNKNOWN は「データが無い」ではなく
+    //   「経過7日未満で実績ペースがまだ出せない」ことも含む。
+    //   これで弾いていたため、現在値20/目標400が入っているのに
+    //   「目標の数値が入っていない」と誤って報告していた。
+    //   見るのは progressPct が出せるか（＝現在値・目標値・期間が揃っているか）。
+    const gWithNum = goals.map(function (g) {
+      return { g: g, p: computePace(g.start_date, g.end_date, g.current_value, g.target_value, g.unit, today) };
+    }).filter(function (x) { return x.p.progressPct !== null && x.p.totalDays; });
+    // 期間の頭は「経過1日で進捗5%」のような値になり、比で見ると455%になる。
+    // 短すぎる期間から進み具合を断じない（7日を過ぎてから評価する）
+    const gEval = gWithNum.filter(function (x) { return x.p.elapsedDays >= 7; });
     if (gEval.length) {
       let acc = 0;
-      gEval.forEach(function (g) {
-        const p = computePace(g.start_date, g.end_date, g.current_value, g.target_value, g.unit, today);
+      gEval.forEach(function (x) {
         // 「経過した割合」に対して「進んだ割合」がどれだけ追いついているか
-        const elapsedPct = p.totalDays ? (p.elapsedDays / p.totalDays * 100) : 0;
-        acc += elapsedPct > 0 ? Math.min(100, Math.round(p.progressPct / elapsedPct * 100)) : 100;
+        const elapsedPct = x.p.elapsedDays / x.p.totalDays * 100;
+        acc += Math.min(100, Math.round(x.p.progressPct / elapsedPct * 100));
       });
-      parts.push({ value: Math.round(acc / gEval.length), state: "evaluated", weight: 2, sample: gEval.length, label: "3か月目標の進み具合" });
-    } else parts.push(Object.assign(na("3か月目標に現在値・期間が入っていないため測れません"), { weight: 2, label: "3か月目標の進み具合" }));
+      parts.push({ value: Math.round(acc / gEval.length), state: "evaluated", weight: 2, sample: gEval.length,
+                   label: "3か月目標の進み具合" });
+    } else if (gWithNum.length) {
+      parts.push(Object.assign(
+        na("3か月目標を始めてから" + Math.max.apply(null, gWithNum.map(function (x) { return x.p.elapsedDays; })) +
+           "日なので、進み具合はまだ評価できません（7日を過ぎると出ます）"),
+        { weight: 2, label: "3か月目標の進み具合" }));
+    } else {
+      parts.push(Object.assign(na("3か月目標に現在値・目標値・期間のいずれかが入っていません"),
+                               { weight: 2, label: "3か月目標の進み具合" }));
+    }
 
     const r = smpRoll(parts);
+    // ★理由は内訳から組み立てる★ 決め打ちの文言だと、実際の原因と食い違う
+    //   （現在値も期間も入っているのに「数値が入っていない」と出ていた）
+    const why = parts.filter(function (p) { return p.state !== "evaluated" && p.reason; })
+                     .map(function (p) { return p.reason; });
     out.result_power = { score: r.score, coverage: r.coverage, sample_count: r.sample, components: parts,
       state: r.score === null ? "insufficient_data" : "evaluated",
-      reason: r.score === null ? "目標の数値が入っていないため、まだ算出できません" : "" };
+      reason: r.score === null ? why.join(" / ") : "" };
   })();
 
   // ── 時間配分力: 5分類が未実装のため算出しない（推測で埋めない）──
@@ -1165,7 +1189,9 @@ function computeSelfMgmtPower(studentEmail, weekStart) {
     const r = smpRoll(parts);
     out.continuity_power = { score: r.score, coverage: r.coverage, sample_count: r.sample, components: parts,
       state: r.score === null ? "insufficient_data" : "evaluated",
-      reason: r.score === null ? "今週の記録がまだありません" : "" };
+      reason: r.score === null
+        ? (parts.filter(function (p) { return p.state !== "evaluated" && p.reason; })
+                .map(function (p) { return p.reason; }).join(" / ") || "今週の記録がまだありません") : "" };
   })();
 
   // ── 立て直し力: 崩れた後に戻れたか（崩れていない人を満点にしない）──

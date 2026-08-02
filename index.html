@@ -2308,16 +2308,16 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
       const Row = ({icon, color, label, title, right, sub, open, onToggle, onAdd, addLabel, last, children}) => html`
         <div style=${{display:"flex",alignItems:"stretch",gap:0}}>
           <!-- アイコンと縦線 -->
-          <div style=${{width:56,flexShrink:0,display:"flex",flexDirection:"column",alignItems:"center",paddingTop:14,paddingLeft:6}}>
-            <div style=${{width:30,height:30,borderRadius:"50%",background:color,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,boxShadow:"0 1px 3px rgba(0,0,0,0.12)"}}>${icon}</div>
+          <div style=${{width:54,flexShrink:0,display:"flex",flexDirection:"column",alignItems:"center",paddingTop:12,paddingLeft:8}}>
+            <div style=${{width:28,height:28,borderRadius:"50%",background:color,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,boxShadow:"0 1px 3px rgba(0,0,0,0.12)"}}>${icon}</div>
             ${!last&&html`<div style=${{flex:1,width:2,background:"var(--border)",marginTop:4,marginBottom:-2,minHeight:18}}/>`}
           </div>
           <div style=${{flex:1,minWidth:0,paddingRight:14}}>
             <button onClick=${title?onToggle:onAdd}
-              style=${{width:"100%",display:"flex",alignItems:"center",gap:9,background:"none",border:"none",
-                       padding:last?"13px 0 15px":"13px 0 11px",cursor:"pointer",textAlign:"left",fontFamily:"inherit",
+              style=${{width:"100%",display:"flex",alignItems:"flex-start",gap:9,background:"none",border:"none",
+                       padding:last?"12px 0 14px":"12px 0 11px",cursor:"pointer",textAlign:"left",fontFamily:"inherit",
                        borderBottom:last?"none":"1px solid var(--border)"}}>
-              <span style=${{flexShrink:0,fontSize:10.5,fontWeight:700,color:color,width:68}}>${label}</span>
+              <span style=${{flexShrink:0,fontSize:10.5,fontWeight:700,color:color,width:68,lineHeight:1.45,paddingTop:1}}>${label}</span>
               <span style=${{flex:1,minWidth:0}}>
                 <!-- ★切らずに折り返す★ 目標名が「会社としての売上を400…」で
                      切れて何の目標か分からなくなっていた。2行まで見せる -->
@@ -2326,7 +2326,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
                                color:title?"var(--text)":"var(--accent)",overflowWrap:"anywhere"}}>${title||addLabel}</span>
                 ${sub&&html`<span style=${{display:"block",fontSize:10.5,color:"var(--sub)",marginTop:2}}>${sub}</span>`}
               </span>
-              ${right&&html`<span style=${{flexShrink:0,fontSize:12,color:"var(--sub)",whiteSpace:"nowrap"}}>${right}</span>`}
+              ${right&&html`<span style=${{flexShrink:0,fontSize:12,color:"var(--sub)",whiteSpace:"nowrap",lineHeight:1.45,paddingTop:1}}>${right}</span>`}
             </button>
             ${open&&children&&html`<div style=${{padding:"0 0 12px"}}>${children}</div>`}
           </div>
@@ -2493,8 +2493,8 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
     <!-- ★今日のフォーカス★
          3か月目標のどれに効くのか、今日どれだけ進んだかを1枚で見せる。
          関連タスクの件数から、今日の行動へ降りられるようにする。 -->
-    <div style=${{margin:"12px 16px 0",background:"var(--card)",borderRadius:16,border:"1px solid var(--border)",padding:"14px 16px"}}>
-      <div style=${{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:intent?6:8}}>
+    <div style=${{margin:"12px 16px 0",background:"var(--card)",borderRadius:16,border:"1px solid var(--border)",padding:"13px 16px 14px"}}>
+      <div style=${{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:intent?2:8}}>
         <span style=${{fontSize:13,fontWeight:800,color:"var(--text)"}}>今日のフォーカス</span>
         ${intent
           ? html`<button onClick=${openEditIntent}
@@ -2533,8 +2533,14 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
                 ${intent.intent}${intent.done?" 達成🎉":""}</span>
             </button>
             ${relCount>0&&html`
-              <button onClick=${()=>setOpenRow("goal")}
-                style=${{background:"none",border:"none",padding:"6px 0 0",cursor:"pointer",fontFamily:"inherit",
+              <!-- ★押した先を一致させる★ 「関連タスク」で3か月目標が開くのは
+                   期待と違う。今日のタスク一覧まで運ぶ -->
+              <button onClick=${()=>{
+                  const el=[].slice.call(document.querySelectorAll("div"))
+                    .find(function(x){ return x.children.length===0 && x.textContent.trim()==="今日のタスク"; });
+                  if(el) el.scrollIntoView({behavior:"smooth",block:"start"});
+                }}
+                style=${{background:"none",border:"none",padding:"5px 0 0",cursor:"pointer",fontFamily:"inherit",
                          fontSize:11.5,color:"var(--accent)",fontWeight:700}}>関連タスク ${relCount}件 ›</button>`}
           </div>
           <div style=${{flexShrink:0,textAlign:"center"}}>
@@ -6485,7 +6491,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260802-213335";
+const APP_BUILD = "20260802-214555";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
