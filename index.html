@@ -1147,8 +1147,12 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
   const [editItems, setEditItems] = useState([]); // [{text, min}]（minは想定時間・分、任意）
   // タスクごとの想定時間（分）。タスク文字列をキーに持つ並行マップ。
   // タイマーでそのタスクを選ぶと、この想定時間でタイマーが始まる
+  // ★id をキーにする（Phase 2）★ 重要度・期限と同じ理由
   const [taskEstimates, setTaskEstimates] = useState(()=>{
-    try { return JSON.parse(localStorage.getItem("jiroku_task_estimates_"+formatDateStr(new Date()))||"{}"); } catch(e){ return {}; }
+    try {
+      const raw = JSON.parse(localStorage.getItem("jiroku_task_estimates_"+formatDateStr(new Date()))||"{}");
+      return migrateMapKeysToId(raw, customActions);
+    } catch(e){ return {}; }
   });
   // ★重要度と期限★（2026-08-01追加）
   // 既存の taskEstimates と同じ流儀で、タスク名をキーにした別マップで持つ。
@@ -1467,7 +1471,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
   // 想定時間(min)も一緒に載せて、タイマーで選んだ時にその時間で始められるようにする
   useEffect(()=>{
     try {
-      const remaining = actionItems.filter(item=>!checked[item]).map(t=>({text:t, min:(taskEstimates[t]||null)}));
+      const remaining = actionItems.filter(item=>!checked[item]).map(t=>({text:t, min:(estOf(t)||null)}));
       localStorage.setItem("jiroku_today_actions_shared", JSON.stringify({date:todayKey, items:remaining}));
     } catch(e){}
   },[actionItems, checked, todayKey, taskEstimates]);
@@ -1496,7 +1500,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
   // カードをタップ→タイマー画面へ。想定時間つきならその時間で、タイマー側が自動選択する。
   // タイマーに送ったタスクは「実行中」に進める（着手の可視化）
   const goToTimerWith = (task) => {
-    try { localStorage.setItem("jiroku_timer_pending_task", JSON.stringify({text:task, min:(taskEstimates[task]||null), date:todayKey})); } catch(e){}
+    try { localStorage.setItem("jiroku_timer_pending_task", JSON.stringify({text:task, min:(estOf(task)||null), date:todayKey})); } catch(e){}
     if(statusOf(task)==="todo") setStatus(task, "doing");
     onGoTimer && onGoTimer();
   };
@@ -1509,8 +1513,10 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
   // タスクの想定時間を更新（詳細画面）
   const setTaskTime = (task, min) => {
     const m = Math.round(Number(min));
+    const key = idOfTitle(task) || task;
     const next = {...taskEstimates};
-    if(m>0 && m<=600) next[task]=m; else delete next[task];
+    if(m>0 && m<=600) next[key]=m; else delete next[key];
+    delete next[task];   // 旧形式（名前キー）の掃除
     setTaskEstimates(next);
     try { localStorage.setItem("jiroku_task_estimates_"+todayKey, JSON.stringify(next)); } catch(e){}
   };
@@ -1519,7 +1525,8 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
     const list = actionItems.filter(t=>t!==task);
     if(list.length===0){ setCustomActions(null); localStorage.removeItem("jiroku_custom_actions_"+todayKey); }
     else { const st=toStored(list); setCustomActions(st); localStorage.setItem("jiroku_custom_actions_"+todayKey, JSON.stringify(st)); }
-    const est={...taskEstimates}; delete est[task]; setTaskEstimates(est); localStorage.setItem("jiroku_task_estimates_"+todayKey, JSON.stringify(est));
+    const eKey=idOfTitle(task); const est={...taskEstimates}; delete est[eKey]; delete est[task];
+    setTaskEstimates(est); localStorage.setItem("jiroku_task_estimates_"+todayKey, JSON.stringify(est));
     const impKey=idOfTitle(task); const imp={...taskImportance}; delete imp[impKey]; delete imp[task];
     setTaskImportance(imp); localStorage.setItem("jiroku_task_importance_"+todayKey, JSON.stringify(imp));
     const duKey=idOfTitle(task); const du={...taskDue}; delete du[duKey]; delete du[task];
@@ -1545,6 +1552,12 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
   // ★読み出しは必ずここを通す★
   //   「idで引き、無ければ名前で引く」を11箇所に散らすと必ず書き漏らす。
   const dueOf = (task) => taskDue[idOfTitle(task)] || taskDue[task] || "";
+  // 想定時間も同じく1本化する。散らすと必ず書き漏らす
+  const estOf = (task) => {
+    const k = idOfTitle(task);
+    const v = (k && taskEstimates[k] !== undefined) ? taskEstimates[k] : taskEstimates[task];
+    return (v === undefined || v === null || v === "") ? "" : v;
+  };
   const setTaskDueAt = (task, v) => {
     const key = idOfTitle(task) || task;
     const next = {...taskDue};
@@ -1587,7 +1600,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
   // 行に載せて一緒に運ぶ。
   const toEditRows = (arr) => arr.map(t=>({
     text:t,
-    min:(taskEstimates[t]!=null?String(taskEstimates[t]):""),
+    min:(estOf(t)!==""?String(estOf(t)):""),
     imp:(taskImportance[idOfTitle(t)]||taskImportance[t]||""),
     due:dueOf(t)
   }));
@@ -1629,7 +1642,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
     // 想定時間マップを作り直す（編集分＋完了分の既存値を維持）
     const est = {};
     rows.forEach(r=>{ const m=Math.round(Number(r.min)); if(m>0 && m<=600) est[r.text]=m; });
-    completed.forEach(c=>{ if(taskEstimates[c]>0) est[c]=taskEstimates[c]; });
+    completed.forEach(c=>{ const ck=idOfTitle(c)||c; if(taskEstimates[ck]>0) est[ck]=taskEstimates[ck]; });
     setTaskEstimates(est);
     try { localStorage.setItem("jiroku_task_estimates_"+todayKey, JSON.stringify(est)); }catch(e){}
     // 重要度・期限も新しい名前で作り直す（改名で失わないため）
@@ -2089,7 +2102,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
               ${(()=>{ const q=quadrantOf(item); if(q.quadrant==="DEFER_OR_DELETE"&&!dueOf(item)) return ""; const L=QUADRANT_LABEL[q.quadrant];
                 return html`<span style=${{flexShrink:0,fontSize:10.5,fontWeight:700,color:L.color,border:"1px solid "+L.color,borderRadius:20,padding:"1px 7px"}} title=${L.hint}>${L.icon}${L.label}</span>`; })()}
               ${dueOf(item)&&html`<span style=${{flexShrink:0,fontSize:10.5,color:quadrantOf(item).overdue?"#dc2626":"var(--sub)",fontWeight:quadrantOf(item).overdue?700:400}}>${dueLabel(dueOf(item), quadrantOf(item).overdue)}</span>`}
-              ${taskEstimates[item]>0&&html`<span style=${{flexShrink:0,fontSize:11,fontWeight:600,color:checked[item]?"var(--sub)":"var(--accent)",background:checked[item]?"var(--bg)":"var(--accent-l)",borderRadius:20,padding:"2px 8px",marginTop:1}}>⏱${taskEstimates[item]}分</span>`}
+              ${estOf(item)>0&&html`<span style=${{flexShrink:0,fontSize:11,fontWeight:600,color:checked[item]?"var(--sub)":"var(--accent)",background:checked[item]?"var(--bg)":"var(--accent-l)",borderRadius:20,padding:"2px 8px",marginTop:1}}>⏱${estOf(item)}分</span>`}
 
             </button>
             <button onClick=${()=>setDetailTask(item)} aria-label="詳細を開く"
@@ -2126,7 +2139,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
               ${(()=>{ const q=quadrantOf(item); if(q.quadrant==="DEFER_OR_DELETE"&&!dueOf(item)) return ""; const L=QUADRANT_LABEL[q.quadrant];
                 return html`<span style=${{flexShrink:0,fontSize:10.5,fontWeight:700,color:L.color,border:"1px solid "+L.color,borderRadius:20,padding:"1px 7px"}} title=${L.hint}>${L.icon}${L.label}</span>`; })()}
               ${dueOf(item)&&html`<span style=${{flexShrink:0,fontSize:10.5,color:quadrantOf(item).overdue?"#dc2626":"var(--sub)",fontWeight:quadrantOf(item).overdue?700:400}}>${dueLabel(dueOf(item), quadrantOf(item).overdue)}</span>`}
-              ${taskEstimates[item]>0&&html`<span style=${{flexShrink:0,fontSize:10.5,fontWeight:600,color:"var(--accent)",background:"var(--accent-l)",borderRadius:20,padding:"2px 7px"}}>⏱${taskEstimates[item]}分</span>`}
+              ${estOf(item)>0&&html`<span style=${{flexShrink:0,fontSize:10.5,fontWeight:600,color:"var(--accent)",background:"var(--accent-l)",borderRadius:20,padding:"2px 7px"}}>⏱${estOf(item)}分</span>`}
 
               ${st!=="done"&&html`<button title="タイマーで計測" aria-label="計測" onClick=${stop(()=>goToTimerWith(item))}
                 style=${{...chip,color:"#fff",background:"var(--accent)",border:"none",fontSize:13}}>⏱</button>`}
@@ -2215,7 +2228,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
 
           <label class="form-lbl">想定時間（分）</label>
           <div style=${{display:"flex",alignItems:"center",gap:8,marginBottom:16}}>
-            <input class="inp" type="number" inputmode="numeric" value=${taskEstimates[t]||""} placeholder="例：25"
+            <input class="inp" type="number" inputmode="numeric" value=${estOf(t)} placeholder="例：25"
               onInput=${e=>setTaskTime(t, e.target.value)} style=${{width:110,margin:0,textAlign:"center"}}/>
             <span style=${{fontSize:12.5,color:"var(--sub)"}}>分（タイマーがこの時間で始まります）</span>
           </div>
