@@ -1,11 +1,6 @@
 {
   "version": "0.0.1",
   "configurations": [
-    {
-      "name": "edventure",
-      "runtimeExecutable": "python3",
-      "runtimeArgs": ["-m", "http.server", "3100", "--directory", "/Users/kai/Projects/edventure-app"],
-      "port": 3100
-    }
+    { "name": "jiroku-local", "runtimeExecutable": "python3", "runtimeArgs": ["-m", "http.server", "8765"], "port": 8765 }
   ]
 }
