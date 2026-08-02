@@ -204,6 +204,22 @@ PY
     ng "actions を文字列前提で読んでいる箇所がある（${bad}箇所中 ${norm} だけ正規化）"
   fi
 
+  # ★タスク行は「押す場所」と「起きること」が一致していること★
+  # 行全体が完了トグルだったため、内容を見ようとして押しただけで
+  # 完了になっていた（Kaiの指摘）。チェックボックスだけが完了。
+  if python3 -c "
+import sys
+s=open('../index.html').read()
+i=s.index('const row = (item, showBorder) => html\`')
+seg=s[i:i+2600]
+tg=seg.count('toggleCheck(item)'); dt=seg.count('setDetailTask(item)')
+sys.exit(0 if (tg==1 and dt==1) else 1)
+" 2>/dev/null; then
+    ok "タスク行 完了トグル1箇所・詳細1箇所（押す場所と結果が一致）"
+  else
+    ng "タスク行 押した場所と違う結果になる（完了トグルと詳細の数が想定外）"
+  fi
+
   # 表示ラベル（高・中・低で別の言葉になるか）
   if python3 build_label_test.py >/dev/null 2>&1 || python3 ../gas/build_label_test.py >/dev/null 2>&1; then
     ok "タスクの表示ラベル（高・中・低が別の言葉）"

@@ -2146,22 +2146,27 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
           //   ボタンの入れ子は無効なHTMLになるので、外側をdivにして分ける。
           const row = (item, showBorder) => html`
             <div key=${item}
-              style=${{display:"flex",alignItems:"flex-start",gap:12,width:"100%",background:isDone(item)?"var(--bg)":"none",borderBottom:showBorder?"1px solid var(--border)":"none",transition:"background .15s"}}>
+              style=${{display:"flex",alignItems:"flex-start",gap:0,width:"100%",background:isDone(item)?"var(--bg)":"none",borderBottom:showBorder?"1px solid var(--border)":"none",transition:"background .15s"}}>
+            <!-- ★チェックボックスだけが完了の切り替え★
+                 以前は行全体が完了トグルだったため、内容を見ようとして
+                 押しただけで完了になってしまった。押す場所と結果を一致させる。 -->
             <button onClick=${()=>toggleCheck(item)}
-              style=${{display:"flex",alignItems:"flex-start",gap:12,flex:1,minWidth:0,background:"none",border:"none",padding:"13px 4px 13px 16px",cursor:"pointer",textAlign:"left",fontFamily:"inherit"}}>
-              <div style=${{width:20,height:20,borderRadius:6,border:`2px solid ${isDone(item)?"var(--accent)":"var(--border)"}`,background:isDone(item)?"var(--accent)":"transparent",flexShrink:0,marginTop:1,display:"flex",alignItems:"center",justifyContent:"center",transition:"all .15s"}}>
+              aria-label=${isDone(item)?"未完了に戻す":"完了にする"}
+              style=${{flexShrink:0,background:"none",border:"none",cursor:"pointer",
+                       padding:"13px 8px 13px 16px",fontFamily:"inherit",lineHeight:0}}>
+              <div style=${{width:20,height:20,borderRadius:6,border:`2px solid ${isDone(item)?"var(--accent)":"var(--border)"}`,background:isDone(item)?"var(--accent)":"transparent",display:"flex",alignItems:"center",justifyContent:"center",transition:"all .15s"}}>
                 ${isDone(item)&&html`<svg width="11" height="11" viewBox="0 0 10 10" fill="none"><path d="M2 5l2.5 2.5L8 3" stroke="white" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`}
               </div>
+            </button>
+            <!-- ★それ以外を押したら詳細が開く★ -->
+            <button onClick=${()=>setDetailTask(item)}
+              style=${{display:"flex",alignItems:"flex-start",gap:8,flex:1,minWidth:0,background:"none",border:"none",padding:"13px 16px 13px 4px",cursor:"pointer",textAlign:"left",fontFamily:"inherit"}}>
               <span style=${{flex:1,minWidth:0,fontSize:14,color:isDone(item)?"var(--sub)":"var(--text)",textDecoration:isDone(item)?"line-through":"none",lineHeight:1.6}}>${item}</span>
               ${(()=>{ const q=quadrantOf(item); if(q.quadrant==="DEFER_OR_DELETE"&&!dueOf(item)&&q.isSuggestion) return ""; const L=taskLabel(q.importance,q.urgency);
                 return html`<span style=${{flexShrink:0,fontSize:10.5,fontWeight:700,color:L.color,border:"1px solid "+L.color,borderRadius:20,padding:"1px 7px"}} title=${L.hint}>${L.icon}${L.label}</span>`; })()}
               ${dueOf(item)&&html`<span style=${{flexShrink:0,fontSize:10.5,color:quadrantOf(item).overdue?"#dc2626":"var(--sub)",fontWeight:quadrantOf(item).overdue?700:400}}>${dueLabel(dueOf(item), quadrantOf(item).overdue)}</span>`}
               ${estOf(item)>0&&html`<span style=${{flexShrink:0,fontSize:11,fontWeight:600,color:isDone(item)?"var(--sub)":"var(--accent)",background:isDone(item)?"var(--bg)":"var(--accent-l)",borderRadius:20,padding:"2px 8px",marginTop:1}}>⏱${estOf(item)}分</span>`}
-
             </button>
-            <button onClick=${()=>setDetailTask(item)} aria-label="詳細を開く"
-              style=${{flexShrink:0,background:"none",border:"none",cursor:"pointer",color:"var(--sub)",
-                       padding:"13px 14px 13px 6px",fontFamily:"inherit",fontSize:12.5}}>詳細</button>
             </div>`;
           return html`
             ${incompleteItems.length>0
