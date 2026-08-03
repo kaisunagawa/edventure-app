@@ -3666,7 +3666,6 @@ function buildReportRankingSet(emailSet, allReports, windowDays) {
   const opsFinal = {};
   try {
     sheetToObjects(getP1Sheet("DailyOpsReport")).forEach(function (o) {
-      if (!String(o.finalized_at || "").trim()) return;
       const em = String(o.student_email || ""), d = String(o.report_date).slice(0, 10);
       const v = String(o.operating_score || "").trim();
       if (!em || !d || v === "") return;
@@ -3726,9 +3725,30 @@ function getRanking(studentEmail) {
     return cs > ps ? "up" : cs < ps ? "down" : "same";
   };
 
+  // ★見ている本人の点数は、画面と必ず同じにする★（2026-08-03 Kai指摘）
+  //   ランキングは5分キャッシュ、レポートはその場計算なので、
+  //   その日のうちは数字がずれて見えていた。本人の分だけ出し直す。
+  let myOps = null;
+  try {
+    if (hasFeature(meU, OPS_FEATURE_KEY)) {
+      const day = payload.date || formatDate(new Date());
+      const fin = p1List("DailyOpsReport", studentEmail).find(function (r) {
+        return String(r.report_date).slice(0, 10) === day && String(r.finalized_at || "").trim(); });
+      if (fin && String(fin.operating_score || "").trim() !== "") myOps = Number(fin.operating_score);
+      else {
+        const f = computeDailyOpsFacts(studentEmail, day);
+        const v = (f.operating_score !== null && f.operating_score !== undefined) ? f.operating_score : f.partial_score;
+        if (v !== null && v !== undefined) myOps = v;
+      }
+    }
+  } catch (e) {}
+
   const idx = scores.findIndex(s => s.email === studentEmail);
   if (idx !== -1) {
-    return { ok: true, data: { rank: idx + 1, total: scores.length, score: scores[idx].score, trend: myTrend() } };
+    const myScore = (myOps === null) ? scores[idx].score : myOps;
+    const rank = (myOps === null) ? (idx + 1)
+      : (scores.filter(function (s) { return s.email !== studentEmail && s.score > myScore; }).length + 1);
+    return { ok: true, data: { rank: rank, total: scores.length, score: myScore, trend: myTrend() } };
   }
 
   // 「みんなの頑張り」を非表示にしている本人は共有scoresから除外されるため、ここで個別救済。
