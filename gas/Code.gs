@@ -217,6 +217,27 @@ function doGet(e) {
           avg_new: scores.length ? Math.round(scores.reduce(function (a, b) { return a + b; }, 0) / scores.length) : null,
           rows: rows });
       }
+      // 夜のレポート生成を、保存せずに1人分だけ試す（今夜の本番前の確認用）
+      case "adminReportGenTest": {
+        if (!verifyAdmin(e.parameter.coachEmail)) return jsonResponse({ ok: false, error: "not admin" });
+        const em3 = String(e.parameter.email || "").trim();
+        const day3 = String(e.parameter.date || "").slice(0, 10) || formatDate(new Date());
+        const u3 = sheetToObjects(getSheet("Users")).find(function (x) { return x.student_email === em3; });
+        if (!u3) return jsonResponse({ ok: false, error: "no user" });
+        const logs3 = sheetToObjects(getSheet("DailyLog")).filter(function (l) {
+          const d = l.date instanceof Date ? Utilities.formatDate(l.date, "Asia/Tokyo", "yyyy-MM-dd") : String(l.date).slice(0, 10);
+          return String(l.student_email) === em3 && d === day3 && !String(l.deleted_at || "").trim(); })
+          .sort(function (a, b) { return String(a.time_block) > String(b.time_block) ? 1 : -1; })
+          .map(function (r) { return { time_block: r.time_block, task: r.task, focus_level: r.focus_level,
+                                       memo: r.memo, goal_related: r.goal_related, date: day3 }; });
+        if (!logs3.length) return jsonResponse({ ok: false, error: "no logs", date: day3 });
+        const rep = generateReportWithClaude(em3, u3.name, logs3);
+        if (!rep) return jsonResponse({ ok: false, error: REPORT_GEN_LAST_ERROR || "generation failed" });
+        return jsonResponse({ ok: true, saved: false, date: day3, score: rep.score,
+          score_precise: rep.score_precise, breakdown: rep.breakdown, facts: rep.score_facts,
+          feedback: rep.feedback, highlights: rep.highlights, improvement: rep.improvement,
+          action: rep.action, reasons: rep.breakdown_reasons });
+      }
       case "adminActualMinutesAudit":
         return jsonResponse(verifyAdmin(e.parameter.coachEmail)
           ? actualMinutesAudit() : { ok: false, error: "not admin" });
@@ -1686,7 +1707,14 @@ function computeDailyOpsFacts(studentEmail, dateStr, fixture) {
     const avail = fx ? (fx.available || { minutes: null, state: "insufficient_data" })
                      : resolveAvailableMinutes(studentEmail, date);
     const parts = [];
-    if (avail && avail.minutes > 0) {
+    // 使える時間を0分＝休む日として設定した日は、休む日として扱う
+    const zeroDay = !!(avail && avail.minutes === 0);
+    if (zeroDay) {
+      parts.push({ label: "予定を詰め込みすぎていないか", weight: 2, sample: tasks.length, state: "evaluated",
+                   value: planned > 0 ? Math.max(0, 100 - Math.round(planned / 60) * 20) : 100,
+                   detail: planned > 0 ? ("休む日に " + planned + "分の予定") : "休む日として計画" });
+      parts.push(na("明日に残る量", 1, "休む日のため見ません", "REST_DAY", NO_CHANCE));
+    } else if (avail && avail.minutes > 0) {
       // 使える時間の8割までを「無理のない範囲」とする。超えるほど下がる
       const ratio = planned / avail.minutes;
       const okRatio = ratio <= 0.8 ? 100 : Math.max(0, Math.round((1 - (ratio - 0.8) / 0.8) * 100));
@@ -1706,7 +1734,7 @@ function computeDailyOpsFacts(studentEmail, dateStr, fixture) {
     const restMin = logs.filter(function (l) { return String(l.time_classification) === "RECOVERY_RELATIONSHIP"; })
                         .reduce(function (a, l) { const am = Number(l.actual_minutes);
                           return a + (am > 0 ? am : timeBlockMinutes(l.time_block)); }, 0);
-    const isRest = (avail && avail.day_type === "REST") || restDay;
+    const isRest = (avail && avail.day_type === "REST") || restDay || zeroDay;
     if (restMin > 0 || isRest) {
       parts.push({ label: "休む時間があったか", weight: 1, sample: logs.length, state: "evaluated",
                    value: isRest ? 100 : Math.min(100, Math.round(restMin / 60 * 100)),
@@ -12111,7 +12139,7 @@ const ADMIN_SECRET_ALLOWLIST = {
   // 一斉送信（Kaiの明示的な要望により残す）
   adminBroadcastLine:1, adminBroadcastLinePending:1, adminSendStudentCampaign:1,
   // セットアップ・保守
-  adminSetupTriggers:1, adminInstallTrigger:1, adminSetupPhase1:1, adminSetupAuth:1, adminPhase4DryRun:1, adminLegacyBackfill:1, adminWritePathStats:1, adminIssueTestSession:1, adminDropTestSessions:1, adminOpsSelfTest:1, adminActualMinutesAudit:1, adminXpCorrection:1, adminStreakRecalc:1, adminGrantFeature:1, adminUserDiag:1, adminReportScoreDryRun:1,
+  adminSetupTriggers:1, adminInstallTrigger:1, adminSetupPhase1:1, adminSetupAuth:1, adminPhase4DryRun:1, adminLegacyBackfill:1, adminWritePathStats:1, adminIssueTestSession:1, adminDropTestSessions:1, adminOpsSelfTest:1, adminActualMinutesAudit:1, adminXpCorrection:1, adminStreakRecalc:1, adminGrantFeature:1, adminUserDiag:1, adminReportScoreDryRun:1, adminReportGenTest:1,
   authSetMode:1, authSetEnforce:1, authRoleApply:1, authRoleDryRun:1, authRevokeAll:1,
   authCleanupTestData:1, adminPurgeTestUsers:1, adminMigrateTasks:1, authBreakerReset:1, rotateSessionSecret:1,
   p1Backup:1, p1BackupInfo:1, p1PurgeArchived:1, weeklyBackup:1

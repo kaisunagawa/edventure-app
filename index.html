@@ -2038,10 +2038,24 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
         if (isDone(t.title)) chk[t.task_id] = true;
         return;
       }
+      // ★サーバーが空のときは、端末の値を消さない★
+      //   「かかる時間を入れたのに、あとで消えている」不具合（2026-08-03 Kai報告）。
+      //   サーバーにまだ届いていない・保存されていない項目まで空で上書きしていた。
+      //   値があるときだけサーバーを採用し、無ければこの端末の値を残す。
       if (t.importance_level && !t.importance_is_suggestion) imp[t.task_id] = t.importance_level;
+      else if (taskImportance[t.task_id]) imp[t.task_id] = taskImportance[t.task_id];
       if (t.due_at) due[t.task_id] = t.due_at;
+      else if (taskDue[t.task_id]) due[t.task_id] = taskDue[t.task_id];
       if (Number(t.estimated_minutes) > 0) est[t.task_id] = Number(t.estimated_minutes);
+      else if (taskEstimates[t.task_id] !== undefined && Number(taskEstimates[t.task_id]) > 0) {
+        est[t.task_id] = Number(taskEstimates[t.task_id]);
+        // 端末にしか無い ＝ サーバーへ届いていない。もう一度送る
+        enqueueTaskMutation("UPDATE", t.task_id, { estimated_minutes: Number(taskEstimates[t.task_id]) },
+                            { estimated_minutes: "" });
+      }
       if (t.memo) memo[t.task_id] = String(t.memo);
+      else if (taskNotes[t.task_id]) memo[t.task_id] = taskNotes[t.task_id];
+      if (!t.context || t.context === "UNSET") { if (taskContext[t.task_id]) ctx[t.task_id] = taskContext[t.task_id]; }
       stt[t.task_id] = sttOf(t.status);
       if (t.status === "DONE") chk[t.task_id] = true;
     });
@@ -7378,7 +7392,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260803-163421";
+const APP_BUILD = "20260803-165645";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
