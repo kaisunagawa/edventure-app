@@ -1488,6 +1488,20 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
   // {text, min}（minは想定時間・分、任意。タスクの横に時間として表示・タイマー連携）
   const [intentTasks, setIntentTasks] = useState([{text:"",min:""}]);
   const [intentEditMode, setIntentEditMode] = useState(false); // 既存フォーカスの編集で開いたか
+  // ★開いてすぐ聞く★（2026-08-03 Kai指摘）
+  //   以前はサーバーから今日のデータが返ってくるのを待ってから出していたので、
+  //   数秒かかっていた。端末に残っている宣言だけで判断して、先に出す。
+  //   サーバー側に宣言があったと分かったら、その場で閉じる。
+  useEffect(()=>{
+    try{
+      const today = formatDateStr(new Date());
+      const li = JSON.parse(localStorage.getItem("jiroku_intent")||"null");
+      if (li && li.date === today && String(li.intent||"").trim()) return;   // もう決めている
+      if (localStorage.getItem("jiroku_intent_skip") === today) return;      // 今日はスキップ済み
+      if (new Date().getHours() < 4) return;                                 // 深夜は出さない
+      setIntentEditMode(false); setShowIntentModal(true);
+    }catch(e){}
+  },[]);
   const saveIntent = async () => {
     const text = intentInput.trim();
     if(!text) return;
@@ -1690,6 +1704,9 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
           const next = {date:todayStr, intent:d.intent.intent, done:d.intent.done, hours:d.intent.hours};
           localStorage.setItem("jiroku_intent", JSON.stringify(next));
           setIntent(next);
+          // 別の端末で宣言済みだった場合は、先に出した確認を引っ込める
+          // （入力を始めている人の手は止めない）
+          setShowIntentModal(prev => (prev && !String(intentInput||"").trim()) ? false : prev);
         } else if(!hasToday && !skipped){
           // ★時間帯でしぼらない★
           //   以前は6時〜18時だけだった。早朝5時台に開いた日は一度も聞かれず、
@@ -7440,7 +7457,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260803-200823";
+const APP_BUILD = "20260804-072412";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
