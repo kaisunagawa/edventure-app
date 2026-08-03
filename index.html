@@ -2706,7 +2706,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
           if (e2>0) restMin+=e2; else noEst++;
         });
         const q0=quadrantOf(next);
-        const L=taskLabel(q0.importance,q0.urgency);
+        const L=taskLabel(q0.importance,q0.urgency) || { icon:"", label:"", hint:"", color:"var(--sub)" };
         const why = taskWhy[idOfTitle(next)] || (q0.overdue ? "期限が過ぎています" : "上から順番に");
         const tile=(color,icon,label,value)=>html`
           <div style=${{flex:"1 1 0",minWidth:0,background:"var(--bg)",borderRadius:10,padding:"7px 7px"}}>
@@ -2967,7 +2967,8 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
             let total=0, impMin=0, overMin=0, noEst=0;
             actionItems.forEach(it=>{
               const e2 = Number(estOf(it))||0;
-              if (e2>0) total+=e2; else noEst++;
+              // 終わったタスクの「時間が未入力」は数えない（もう見積もる意味がないため）
+              if (e2>0) total+=e2; else if (!isDone(it)) noEst++;
               const q = quadrantOf(it);
               if (q.importance==="HIGH" && e2>0) impMin+=e2;
               if (q.overdue && !isDone(it) && e2>0) overMin+=e2;
@@ -3007,15 +3008,21 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
             </button>
             <!-- ★それ以外を押したら詳細が開く★ -->
             <button onClick=${()=>setDetailTask(item)}
-              style=${{display:"flex",alignItems:"flex-start",flexWrap:"wrap",gap:"4px 8px",flex:1,minWidth:0,background:"none",border:"none",padding:"13px 16px 13px 4px",cursor:"pointer",textAlign:"left",fontFamily:"inherit"}}>
+              style=${{display:"flex",alignItems:"center",flexWrap:"nowrap",gap:8,flex:1,minWidth:0,background:"none",border:"none",padding:"13px 16px 13px 4px",cursor:"pointer",textAlign:"left",fontFamily:"inherit"}}>
               <!-- ★タイトルに最低幅を持たせる★ 並び替えボタンを足したぶん幅が減り、
                    長い名前が1文字ずつ縦に折り返されてしまったため。
                    入りきらないラベルは下の行へ回す（flexWrap） -->
-              <span style=${{flex:"1 1 60%",minWidth:"8em",fontSize:14,color:isDone(item)?"var(--sub)":"var(--text)",textDecoration:isDone(item)?"line-through":"none",lineHeight:1.6,overflowWrap:"anywhere"}}>${item}</span>
-              ${(()=>{ const q=quadrantOf(item); if(q.quadrant==="DEFER_OR_DELETE"&&!dueOf(item)&&q.isSuggestion) return ""; const L=taskLabel(q.importance,q.urgency);
-                return html`<span style=${{flexShrink:0,fontSize:10.5,fontWeight:700,color:L.color,border:"1px solid "+L.color,borderRadius:20,padding:"1px 7px"}} title=${L.hint}>${L.icon}${L.label}</span>`; })()}
-              ${dueOf(item)&&html`<span style=${{flexShrink:0,fontSize:10.5,color:quadrantOf(item).overdue?"#dc2626":"var(--sub)",fontWeight:quadrantOf(item).overdue?700:400}}>${dueLabel(dueOf(item), quadrantOf(item).overdue)}</span>`}
-              ${estOf(item)>0&&html`<span style=${{flexShrink:0,fontSize:11,fontWeight:600,color:isDone(item)?"var(--sub)":"var(--accent)",background:isDone(item)?"var(--bg)":"var(--accent-l)",borderRadius:20,padding:"2px 8px",marginTop:1}}>⏱${estOf(item)}分</span>`}
+              <!-- ★1行におさめる★ 札や時間が下の行へ回ると、1件が2段になって読みにくい。
+                   タイトルは長ければ省略し、時間と札は右側に横並びで置く -->
+              <span style=${{flex:"1 1 auto",minWidth:0,fontSize:14,color:isDone(item)?"var(--sub)":"var(--text)",
+                             textDecoration:isDone(item)?"line-through":"none",lineHeight:1.5,
+                             overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>${item}</span>
+              <span style=${{flexShrink:0,display:"flex",alignItems:"center",gap:6}}>
+                ${(()=>{ const q=quadrantOf(item); if(q.quadrant==="DEFER_OR_DELETE"&&!dueOf(item)&&q.isSuggestion) return ""; const L=taskLabel(q.importance,q.urgency); if(!L) return "";
+                  return html`<span style=${{fontSize:10.5,fontWeight:700,color:L.color,border:"1px solid "+L.color,borderRadius:20,padding:"1px 7px",whiteSpace:"nowrap"}} title=${L.hint}>${L.icon}${L.label}</span>`; })()}
+                ${dueOf(item)&&html`<span style=${{fontSize:10.5,whiteSpace:"nowrap",color:quadrantOf(item).overdue?"#dc2626":"var(--sub)",fontWeight:quadrantOf(item).overdue?700:400}}>${dueLabel(dueOf(item), quadrantOf(item).overdue)}</span>`}
+                ${estOf(item)>0&&html`<span style=${{fontSize:11,fontWeight:600,whiteSpace:"nowrap",color:isDone(item)?"var(--sub)":"var(--accent)",background:isDone(item)?"var(--bg)":"var(--accent-l)",borderRadius:20,padding:"2px 8px"}}>⏱${estOf(item)}分</span>`}
+              </span>
             </button>
             <!-- ★手動並び替え★ 自動の順位とは別に、本人の順を持たせる。
                  期限超過だけは下へ動かしても先頭に出る（サーバー側で保証） -->
@@ -3056,7 +3063,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
               onClick=${()=>setDetailTask(item)}
               style=${{background:"var(--card)",border:`1px solid ${st==="doing"?"var(--accent)":"var(--border)"}`,borderRadius:10,padding:"10px 11px",marginBottom:8,cursor:"pointer",boxShadow:dragTask===item?"0 4px 14px rgba(0,0,0,0.15)":"none",opacity:dragTask===item?0.5:1,transition:"box-shadow .15s",display:"flex",alignItems:"center",gap:8}}>
               <span style=${{flex:1,minWidth:0,fontSize:13.5,color:st==="done"?"var(--sub)":"var(--text)",textDecoration:st==="done"?"line-through":"none",lineHeight:1.5,overflowWrap:"anywhere"}}>${item}</span>
-              ${(()=>{ const q=quadrantOf(item); if(q.quadrant==="DEFER_OR_DELETE"&&!dueOf(item)&&q.isSuggestion) return ""; const L=taskLabel(q.importance,q.urgency);
+              ${(()=>{ const q=quadrantOf(item); if(q.quadrant==="DEFER_OR_DELETE"&&!dueOf(item)&&q.isSuggestion) return ""; const L=taskLabel(q.importance,q.urgency); if(!L) return "";
                 return html`<span style=${{flexShrink:0,fontSize:10.5,fontWeight:700,color:L.color,border:"1px solid "+L.color,borderRadius:20,padding:"1px 7px"}} title=${L.hint}>${L.icon}${L.label}</span>`; })()}
               ${dueOf(item)&&html`<span style=${{flexShrink:0,fontSize:10.5,color:quadrantOf(item).overdue?"#dc2626":"var(--sub)",fontWeight:quadrantOf(item).overdue?700:400}}>${dueLabel(dueOf(item), quadrantOf(item).overdue)}</span>`}
               ${estOf(item)>0&&html`<span style=${{flexShrink:0,fontSize:10.5,fontWeight:600,color:"var(--accent)",background:"var(--accent-l)",borderRadius:20,padding:"2px 7px"}}>⏱${estOf(item)}分</span>`}
@@ -3262,6 +3269,8 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
           </div>
           <div style=${{fontSize:11.5,color:"var(--sub)",marginBottom:16,lineHeight:1.8}}>
             ${(()=>{ const q=quadrantOf(t); const L=taskLabel(q.importance,q.urgency);
+              if(!L) return html`いまの分類：<b style=${{color:"var(--text)"}}>ふつう</b>（急ぎでも最重要でもない）<br/>
+                緊急度は期限から自動で決まります。`;
               return html`いまの分類：<b style=${{color:L.color}}>${L.icon} ${L.label}</b>（${L.hint}）<br/>
                 緊急度は期限から自動で決まります。`; })()}
           </div>
@@ -7202,13 +7211,16 @@ const QUADRANT_LABEL = {
 //   同じ表示になる。中を選んでも低と変わらないなら、選ぶ意味がない
 //   （Kaiの指摘）。集計の区分は変えず、表示だけ細かくする。
 //   高の表示は従来どおり。
+//   ★ふつうのタスクには何も付けない★（2026-08-03 Kaiの指摘）
+//   全部に札が付くと、どれが大事なのか分からない。
+//   「今すぐ」「重要」「早めに」だけ出して、それ以外は無印にする。
 const TASK_LABEL = {
-  HIGH:   { urgent:{ icon:"🔥", label:"今すぐ",         hint:"重要かつ緊急",           color:"#dc2626" },
-            other: { icon:"📌", label:"予定を決める",   hint:"重要だが急がない。先に時間を取る", color:"#0891b2" } },
-  MEDIUM: { urgent:{ icon:"⚡", label:"早めに片付ける", hint:"急ぎだが、最重要ではない", color:"#ea580c" },
-            other: { icon:"📋", label:"順番に進める",   hint:"通常の仕事。空いた時間で",  color:"#0d9488" } },
-  LOW:    { urgent:{ icon:"⏩", label:"任せる・手短に", hint:"急ぎだが重要ではない。依頼するか短時間で", color:"#d97706" },
-            other: { icon:"🗂", label:"後回し・削除",   hint:"やらない選択も含めて見直す", color:"#6b7280" } }
+  HIGH:   { urgent:{ icon:"🔥", label:"今すぐ", hint:"重要かつ緊急",           color:"#dc2626" },
+            other: { icon:"📌", label:"重要",   hint:"重要だが急がない。先に時間を取る", color:"#0891b2" } },
+  MEDIUM: { urgent:{ icon:"⚡", label:"早めに", hint:"急ぎだが、最重要ではない", color:"#ea580c" },
+            other: null },
+  LOW:    { urgent:{ icon:"⏩", label:"手短に", hint:"急ぎだが重要ではない", color:"#d97706" },
+            other: null }
 };
 function taskLabel(importance, urgency){
   const imp = TASK_LABEL[String(importance||"MEDIUM").toUpperCase()] || TASK_LABEL.MEDIUM;
@@ -7234,7 +7246,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260803-144029";
+const APP_BUILD = "20260803-144811";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
