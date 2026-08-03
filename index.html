@@ -2998,6 +2998,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
             }}
             style=${{fontSize:11,background:"var(--amber,#BA7517)",color:"#fff",border:"none",borderRadius:20,padding:"2px 9px",fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}
             title="押すともう一度送ります">保存できず ${taskSync.failed}件・再送</button>`}
+          ${taskSync.pending>0&&html`<span style=${{fontSize:11,color:"var(--sub)"}}>保存待ち ${taskSync.pending}件</span>`}
           <!-- 今日の計画量。利用可能時間が未設定のうちは判定しない（勝手に8時間と仮定しない） -->
           ${(()=>{
             const fmtMin = m => m>=60 ? `${Math.floor(m/60)}時間${m%60?`${m%60}分`:""}` : `${m}分`;
@@ -7503,7 +7504,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260804-073010";
+const APP_BUILD = "20260804-081449";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
