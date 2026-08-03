@@ -737,6 +737,7 @@ function doPost(e) {
       case "saveLog":      return jsonResponse(saveLog(studentEmail, body));
       case "deleteLog":    return jsonResponse(deleteLog(studentEmail, body));
       case "setLogClassification": return jsonResponse(setLogClassification(studentEmail, body));
+      case "clientError":  return jsonResponse(recordClientError(body));
       case "getDayPlan":   return jsonResponse(getDayPlan(studentEmail, body));
       case "saveDayPlan":  return jsonResponse(saveDayPlan(studentEmail, body));
       case "saveWeeklyAvailable": return jsonResponse(saveWeeklyAvailable(studentEmail, body));
@@ -9468,6 +9469,12 @@ const P1_SHEETS = {
   DayPlanHistory: ["history_id","student_email","date","previous_day_type","new_day_type",
     "previous_available_minutes","new_available_minutes","reason","changed_by","changed_at",
     "change_timing","mutation_id"],
+  // ★端末で起きた不具合の記録★
+  //   画面側のエラーは、報告を受けるまで誰にも見えなかった（実際に
+  //   「今日のフォーカスの画面が無い」に何日も気づけなかった）。
+  //   1人1日5件までに絞って、同じ内容はまとめる。
+  ClientErrors: ["row_id","student_email","occurred_at","app_build","kind","message",
+    "detail","user_agent","viewport","path","count","last_at"],
   // ★XP台帳★ どの記録で何点入ったかを1行ずつ残す。
   //   記録を消したときに、その分だけを正確に戻せるようにするため。
   //   同じ source_id では二重に加算しない。
@@ -10163,6 +10170,40 @@ function resolveAvailableMinutes(studentEmail, dateStr) {
   }
   return { minutes: null, source: "NONE", day_type: plan ? String(plan.day_type || "NORMAL") : "",
            state: "insufficient_data", reason_code: "AVAILABLE_TIME_MISSING" };
+}
+
+// 端末で起きたエラーを受け取る（ログイン前でも受ける。だから中身は最小限）。
+//   ・1人1日5件まで。同じ内容は count を増やすだけ
+//   ・本文は500字で切る。ここに個人情報を積まない
+function recordClientError(body) {
+  try {
+    const email = String((body && body.studentEmail) || "").slice(0, 120);
+    const kind = String((body && body.kind) || "ERROR").slice(0, 40);
+    const msg = String((body && body.message) || "").slice(0, 300);
+    if (!msg) return { ok: false };
+    const today = formatDate(new Date());
+    const key = sha256Hex([email, today, kind, msg].join("|")).slice(0, 16);
+    const rows = sheetToObjects(getP1Sheet("ClientErrors"));
+    const mine = rows.filter(function (r) {
+      return String(r.student_email) === email && String(r.occurred_at).slice(0, 10) === today; });
+    const same = rows.find(function (r) { return String(r.row_id) === "ce_" + key; });
+    if (same) {
+      p1Upsert("ClientErrors", "row_id", { row_id: same.row_id, student_email: email,
+        count: Number(same.count || 1) + 1, last_at: new Date().toISOString() });
+      return { ok: true, deduped: true };
+    }
+    if (mine.length >= 5) return { ok: true, throttled: true };
+    p1Upsert("ClientErrors", "row_id", {
+      row_id: "ce_" + key, student_email: email,
+      occurred_at: new Date().toISOString(), app_build: String((body && body.build) || "").slice(0, 40),
+      kind: kind, message: msg, detail: String((body && body.detail) || "").slice(0, 500),
+      user_agent: String((body && body.ua) || "").slice(0, 200),
+      viewport: String((body && body.viewport) || "").slice(0, 40),
+      path: String((body && body.path) || "").slice(0, 120),
+      count: 1, last_at: new Date().toISOString()
+    });
+    return { ok: true };
+  } catch (e) { return { ok: false }; }
 }
 
 function getDayPlan(studentEmail, body) {
@@ -11680,7 +11721,10 @@ function enforceFlag(kind) {
 // トークンの有無に関係なく通してよいもの。ログインの入口そのもの。
 // ここを拒否すると、失効した人が再ログインできなくなって詰む。
 const PUBLIC_ACTIONS = {
-  authChallenge: 1, login: 1, loginAccess: 1, authConfig: 1, healthCheck: 1
+  authChallenge: 1, login: 1, loginAccess: 1, authConfig: 1, healthCheck: 1,
+  // 起動に失敗した端末からも受け取りたいので、ログイン前でも通す。
+  // 保存するのは件数制限つきの最小限の情報だけ（recordClientError 参照）
+  clientError: 1
 };
 
 function strictTokenCheck(action, token) {

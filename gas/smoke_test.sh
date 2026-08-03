@@ -283,6 +283,33 @@ sys.exit(1 if missing else 0)
     fi
   fi
 
+  # ★「開くための状態」があるのに、描画する場所が無い画面を見つける★
+  #   2026-08-02に「今日のフォーカス」の宣言モーダルを、描画ブロックごと
+  #   消してしまった。状態も保存処理も残っていたので静的検査を素通りし、
+  #   利用者が「押しても何も出ない」と気づくまで分からなかった。
+  #   const [showX,setShowX]=useState があるなら、showX を描画で使っているか確かめる。
+  orphan=$(python3 - <<'PYX'
+import re
+s = open("../index.html").read()
+names = set(re.findall(r"const \[(show[A-Z]\w*)\s*,", s))
+bad = []
+for n in names:
+    # 宣言と set 呼び出しを除いた出現箇所があるか
+    uses = [m.start() for m in re.finditer(r"(?<![A-Za-z])" + n + r"(?![A-Za-z0-9_])", s)]
+    real = 0
+    for i in uses:
+        line = s[s.rfind("\n", 0, i) + 1 : s.find("\n", i)]
+        if "useState" in line and "const [" in line:
+            continue
+        real += 1
+    if real == 0:
+        bad.append(n)
+print(",".join(sorted(bad)))
+PYX
+)
+  if [ -z "$orphan" ]; then ok "開く状態と描画が対応している（画面の消し忘れなし）"
+  else ng "描画されていない画面がある: ${orphan}"; fi
+
   # ★Tasksの行を「持ち主なし」で特定するコードを増やさないこと★
   #   task_idはクライアント採番（旧lt_はタイトルのハッシュ）のため
   #   別ユーザー間で衝突し得る。idだけで行を引くと他人の行に当たる。

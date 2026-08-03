@@ -362,6 +362,7 @@
   window.__jirokuBootWatchdog = setTimeout(function () {
     var root = document.getElementById("root");
     if (!root || root.querySelector(".nav") || root.querySelector(".login-wrap")) return;
+    try { window.__reportClientError && window.__reportClientError("BOOT_TIMEOUT", "10秒たっても描画されなかった", navigator.userAgent); } catch (e) {}
     var d = document.createElement("div");
     d.setAttribute("style", "position:fixed;inset:0;z-index:9998;background:#fff;color:#1B1F23;"
       + "display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;"
@@ -1557,12 +1558,9 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
   };
   const [showGoalTimeEdit, setShowGoalTimeEdit] = useState(false);
   const [dailyGoalHours, setDailyGoalHours] = useState(getDailyGoalHours);
-  // 週の記録目標（自分のペース）。毎日=7 / 週5 / 週4 / 週3 / 週2。既定は週3。
-  // 「毎日じゃない＝サボり」ではなく「自分で決めたペースを守れたか」で評価するための土台
-  const [weeklyGoal, setWeeklyGoal] = useState(()=>Number(localStorage.getItem("jiroku_weekly_goal"))||3);
-  const [showWeeklyGoalEdit, setShowWeeklyGoalEdit] = useState(false);
+  // 週の記録目標（自分のペース）の設定画面は、いまの画面構成には無い。
+  // 状態だけ残っていて「押しても何も出ない」の元になるため削除した（2026-08-03）。
   const [showDoneTasks, setShowDoneTasks] = useState(false); // 完了タスク（フォルダ）の開閉
-  const pickWeeklyGoal = (n)=>{ localStorage.setItem("jiroku_weekly_goal", String(n)); setWeeklyGoal(n); setShowWeeklyGoalEdit(false); };
   // 0.5〜6時間までは選択肢を並べるだけで済んだが、12時間まで広げると
   // 0.5刻みで24個にもなり選びにくいため、+/-で刻むステッパー形式にする
   const [pendingGoalHours, setPendingGoalHours] = useState(dailyGoalHours);
@@ -3071,6 +3069,35 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
           </div>`;
         })()}
     </div>
+
+    <!-- ★今日の目標時間を変える画面★
+         こちらも2026-08-02の変更で描画ブロックだけ消えていて、
+         「変更」を押しても何も出ない状態だった（静的検査を追加して発見）。 -->
+    ${showGoalTimeEdit&&ReactDOM.createPortal(html`
+      <div style=${{position:"fixed",inset:0,height:"100dvh",background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"flex-end",zIndex:500}}
+        onClick=${e=>{if(e.target===e.currentTarget)setShowGoalTimeEdit(false);}}>
+        <div style=${{background:"var(--card)",borderRadius:"20px 20px 0 0",padding:"24px 20px calc(28px + env(safe-area-inset-bottom))",width:"100%",boxSizing:"border-box",maxHeight:"70dvh",overflowY:"auto"}}>
+          <div style=${{fontSize:18,fontWeight:800,marginBottom:4,color:"var(--text)"}}>1日の目標時間</div>
+          <div style=${{fontSize:13,color:"var(--sub)",marginBottom:18,lineHeight:1.6}}>目標に関連した記録を、1日に何時間積みたいですか？無理なく続けられる時間を、自分で決めましょう。</div>
+          <div style=${{display:"flex",alignItems:"center",justifyContent:"center",gap:24,marginBottom:20}}>
+            <button onClick=${()=>setPendingGoalHours(v=>Math.max(0.5,Math.round((v-0.5)*10)/10))}
+              style=${{width:48,height:48,borderRadius:"50%",border:"1.5px solid var(--border)",background:"transparent",color:"var(--text)",fontSize:22,fontWeight:700,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>−</button>
+            <div style=${{fontSize:34,fontWeight:800,color:"var(--text)",minWidth:110,textAlign:"center"}}>${pendingGoalHours}<span style=${{fontSize:16,fontWeight:600,color:"var(--sub)"}}>時間</span></div>
+            <button onClick=${()=>setPendingGoalHours(v=>Math.min(12,Math.round((v+0.5)*10)/10))}
+              style=${{width:48,height:48,borderRadius:"50%",border:"1.5px solid var(--border)",background:"transparent",color:"var(--text)",fontSize:22,fontWeight:700,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>＋</button>
+          </div>
+          <div style=${{display:"flex",flexWrap:"wrap",gap:8,justifyContent:"center",marginBottom:20}}>
+            ${[1,2,3,4,6,8,12].map(h=>{
+              const on=pendingGoalHours===h;
+              return html`<button key=${h} onClick=${()=>setPendingGoalHours(h)}
+                style=${{padding:"6px 12px",borderRadius:20,border:`1.5px solid ${on?"var(--accent)":"var(--border)"}`,background:on?"var(--accent-l)":"transparent",color:on?"var(--accent)":"var(--sub)",fontSize:12.5,fontWeight:on?700:500,cursor:"pointer",fontFamily:"inherit"}}>
+                ${h}時間</button>`;
+            })}
+          </div>
+          <button class="btn" onClick=${()=>pickDailyGoal(pendingGoalHours)}>この時間で決定する</button>
+        </div>
+      </div>
+    `, document.body)}
 
     <!-- ★今日のフォーカスの宣言モーダル★
          2026-08-02のデザイン変更のときに、この描画ブロックごと消してしまっていた。
@@ -7128,7 +7155,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260803-111043";
+const APP_BUILD = "20260803-111446";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
@@ -8659,7 +8686,8 @@ const ERR_STYLE = "padding:20px;font-family:monospace;font-size:12px;color:red;b
 class ErrorBoundary extends React.Component {
   constructor(p){ super(p); this.state={err:null}; }
   static getDerivedStateFromError(e){ return {err:e}; }
-  componentDidCatch(e,info){ console.error("ErrorBoundary caught:",e,info); }
+  componentDidCatch(e,info){ console.error("ErrorBoundary caught:",e,info);
+    try { window.__reportClientError("RENDER", e && e.message, (e && e.stack) || ""); } catch(err){} }
   render(){
     if(this.state.err) return React.createElement("div",{style:{padding:20,fontFamily:"monospace",fontSize:13,color:"red",background:"#fff",position:"fixed",top:0,left:0,right:0,bottom:0,overflow:"auto",zIndex:9999,whiteSpace:"pre-wrap"}},
       "レンダーエラー（スクショを送ってください）:\n"+this.state.err.message+"\n\n"+this.state.err.stack);
@@ -8717,8 +8745,33 @@ try {
   setTimeout(check, 60000);
 })();
 
+// ★端末の不具合をサーバーへ残す★
+//   これまでは画面側のエラーが誰にも見えず、利用者の報告があるまで
+//   気づけなかった。1人1日5件までで、同じ内容はまとめられる。
+window.__reportClientError = function (kind, message, detail) {
+  try {
+    if (!window.GAS_URL) return;
+    const seen = window.__reportedErrors || (window.__reportedErrors = {});
+    const k = kind + "|" + String(message).slice(0, 120);
+    if (seen[k]) return; seen[k] = 1;                     // 同じものは1回だけ送る
+    let email = "";
+    try { email = (JSON.parse(localStorage.getItem("edventure_user") || "null") || {}).email || ""; } catch (e) {}
+    fetch(GAS_URL, { method: "POST", headers: { "Content-Type": "text/plain" },
+      body: JSON.stringify({ action: "clientError", studentEmail: email, kind: kind,
+        message: String(message || "").slice(0, 300), detail: String(detail || "").slice(0, 500),
+        build: (typeof APP_BUILD === "string" ? APP_BUILD : ""), ua: navigator.userAgent,
+        viewport: window.innerWidth + "x" + window.innerHeight, path: location.pathname + location.search })
+    }).catch(function () {});
+  } catch (e) {}
+};
+window.addEventListener("unhandledrejection", function (ev) {
+  const r = ev && ev.reason;
+  window.__reportClientError("PROMISE", (r && r.message) || String(r), (r && r.stack) || "");
+});
+
 window.onerror = (msg,src,line,col,err) => {
   console.error("JS ERROR:", msg, "Line:"+line, err);
+  try { window.__reportClientError("JS", msg, (err && err.stack) || (src + ":" + line + ":" + col)); } catch(e){}
   // アプリが描画済みなら画面は壊さない。起動前のエラーのみ全画面表示
   const rendered = document.querySelector("#root .nav") || document.querySelector("#root .login-wrap");
   if(!rendered){
