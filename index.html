@@ -2025,6 +2025,11 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
       if (t.context && t.context !== "UNSET") ctx[t.task_id] = t.context;
       cry[t.task_id] = Number(t.carryover_count || 0);
       if (hold[t.task_id]) {   // 端末の値を優先
+        // ★仕分けが元に戻る不具合★
+        //   送信待ちのあいだはサーバーがまだ UNSET のため、
+        //   サーバーの値で上書きすると、いま選んだ分類が消えていた
+        const lc = taskContext[t.task_id];
+        if (lc) ctx[t.task_id] = lc; else delete ctx[t.task_id];
         if (taskImportance[t.task_id]) imp[t.task_id] = taskImportance[t.task_id];
         if (taskDue[t.task_id]) due[t.task_id] = taskDue[t.task_id];
         if (taskEstimates[t.task_id] !== undefined) est[t.task_id] = taskEstimates[t.task_id];
@@ -2041,6 +2046,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
       if (t.status === "DONE") chk[t.task_id] = true;
     });
     heldLocal.forEach(t => {
+      if (taskContext[t.id]) ctx[t.id] = taskContext[t.id];
       if (taskImportance[t.id]) imp[t.id] = taskImportance[t.id];
       if (taskDue[t.id]) due[t.id] = taskDue[t.id];
       if (taskEstimates[t.id] !== undefined) est[t.id] = taskEstimates[t.id];
@@ -2430,8 +2436,10 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
       const Row = ({icon, color, label, title, right, sub, open, onToggle, onAdd, addLabel, last, children}) => html`
         <div style=${{display:"flex",alignItems:"stretch",gap:0}}>
           <!-- アイコンと縦線 -->
-          <div style=${{width:54,flexShrink:0,display:"flex",flexDirection:"column",alignItems:"center",paddingTop:12,paddingLeft:8}}>
-            <div style=${{width:28,height:28,borderRadius:"50%",background:color,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,boxShadow:"0 1px 3px rgba(0,0,0,0.12)"}}>${icon}</div>
+          <div style=${{width:54,flexShrink:0,display:"flex",flexDirection:"column",alignItems:"center",paddingTop:10,paddingLeft:8}}>
+            <!-- ★行の1行目の文字と、丸アイコンの中心を合わせる★
+                 以前は少し下にずれて見えていた（行の高さが増えたため） -->
+            <div style=${{width:28,height:28,borderRadius:"50%",background:color,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,boxShadow:"0 1px 3px rgba(0,0,0,0.12)",lineHeight:0}}>${icon}</div>
             ${!last&&html`<div style=${{flex:1,width:2,background:"var(--border)",marginTop:4,marginBottom:-2,minHeight:18}}/>`}
           </div>
           <div style=${{flex:1,minWidth:0,paddingRight:14}}>
@@ -2454,7 +2462,8 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
           </div>
         </div>`;
       // 「20 / 400万円」の左だけ濃く出す
-      const val = (cur, tgt, unit) => html`<span><b style=${{color:"var(--text)",fontWeight:700}}>${cur}</b> <span style=${{opacity:0.7}}>/ ${tgt}${unit||""}</span></span>`;
+      // 左だけ濃いと「今の値」が強調されすぎて読みにくかったので、同じ濃さにそろえる
+      const val = (cur, tgt, unit) => html`<span>${cur} / ${tgt}${unit||""}</span>`;
 
       return html`
       <div style=${{margin:"12px 16px 0",background:"var(--card)",borderRadius:16,border:"1px solid var(--border)",overflow:"hidden"}}>
@@ -2726,10 +2735,10 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
             ${tile(overdue>0?"var(--red,#d33)":"var(--sub)", "⚠", "超過", overdue+"件")}
             ${tile("var(--amber,#BA7517)", "🕐", "今日中", dueToday+"件")}
             ${tile("var(--accent)", "☰", "残り", undone.length+"件")}
-            ${tile("#7F77DD", "◷", "想定", restMin>0?fmtMin(restMin):"—")}
+            ${tile("#7F77DD", "◷", "残り時間", restMin>0?fmtMin(restMin):"—")}
           </div>
           <div style=${{display:"flex",alignItems:"center",gap:7,flexWrap:"wrap",marginTop:8,fontSize:10.5,color:"var(--sub)"}}>
-            ${noEst>0&&html`<span>見積もり未設定 ${noEst}件</span>`}
+            ${noEst>0&&html`<span>かかる時間が未入力 ${noEst}件</span>`}
             <span style=${{marginLeft:"auto"}}></span>
             ${taskSync.pending>0&&html`<span style=${{background:"var(--bg)",borderRadius:20,padding:"3px 9px"}}>保存中…</span>`}
             ${taskSync.failed>0&&html`<button onClick=${()=>{ const q=loadTaskQueue(); q.forEach(x=>{ if(x.state==="failed"){x.state="pending";x.tries=0;} }); saveTaskQueue(q); flushTaskQueue(); }}
@@ -2887,28 +2896,18 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
       </div>`}
     <!-- タスクボード（予定/実行中/完了。PC=ドラッグ、スマホ=移動ボタン。カードタップでタイマー） -->
     <div style=${{margin:"12px 16px 0",background:"var(--card)",borderRadius:16,border:"1px solid var(--border)",overflow:"hidden"}}>
-      <div style=${{padding:"14px 16px",borderBottom:"1px solid var(--border)",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-        <div style=${{display:"flex",alignItems:"center",gap:8}}>
-          <div style=${{fontSize:12,fontWeight:700,color:"var(--text)"}}>${boardWide?"タスクボード":"今日のタスク"}</div>
+      <div style=${{padding:"14px 16px",borderBottom:"1px solid var(--border)",display:"flex",justifyContent:"space-between",alignItems:"center",gap:8}}>
+        <div style=${{display:"flex",alignItems:"center",gap:8,flexShrink:0}}>
+          <div style=${{fontSize:12,fontWeight:700,color:"var(--text)",whiteSpace:"nowrap"}}>${boardWide?"タスクボード":"今日のタスク"}</div>
           ${actionItems.length>0&&html`
             <div style=${{fontSize:11,background:doneCount===actionItems.length?"var(--accent)":"var(--bg)",color:doneCount===actionItems.length?"#fff":"var(--sub)",padding:"2px 8px",borderRadius:20,fontWeight:600}}>
               ${doneCount}/${actionItems.length}
             </div>`}
         </div>
-        <div style=${{display:"flex",alignItems:"center",gap:10}}>
-          ${taskSync.conflict>0&&html`<button onClick=${()=>{
-              const c = loadTaskQueue().find(x=>x.state==="conflict");
-              if (c) setConflictItem(c);
-            }}
-            style=${{fontSize:11,background:"var(--bg)",color:"var(--sub)",border:"1px solid var(--border)",borderRadius:20,padding:"2px 10px",fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>どちらを残す？ ${taskSync.conflict}件</button>`}
-          ${taskSync.failed>0&&html`<button onClick=${()=>{
-              const q = loadTaskQueue();
-              q.forEach(x=>{ if(x.state==="failed"){ x.state="pending"; x.tries=0; } });
-              saveTaskQueue(q); flushTaskQueue();
-            }}
-            style=${{fontSize:11,background:"var(--amber,#BA7517)",color:"#fff",border:"none",borderRadius:20,padding:"2px 9px",fontWeight:600,cursor:"pointer"}}
-            title="押すともう一度送ります">保存できず ${taskSync.failed}件・再試行</button>`}
-          ${taskSync.pending>0&&html`<span style=${{fontSize:11,background:"var(--bg)",color:"var(--sub)",borderRadius:20,padding:"2px 9px",fontWeight:600}}>保存中…</span>`}
+        <div style=${{display:"flex",alignItems:"center",gap:8,flexShrink:0}}>
+          <!-- ★見出しを2行にしない★ 保存の状態は小さな丸だけにして、
+               詳しい文言は下の行に出す（幅の狭い端末で「今日のタスク」が折り返していた） -->
+          ${taskSync.pending>0&&html`<span title="保存中" style=${{width:7,height:7,borderRadius:"50%",background:"var(--sub)",display:"inline-block"}}></span>`}
           ${boardWide&&html`<span style=${{fontSize:10.5,color:"var(--sub)"}}>カードをドラッグで移動</span>`}
           <!-- ★追加は右上に置く★ 一覧の下だと、タスクが増えるほど遠くなる -->
           <button onClick=${openAddTask}
@@ -2942,6 +2941,18 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
               style=${{fontSize:11,color:"var(--accent)",background:"none",border:"none",cursor:"pointer",fontFamily:"inherit",fontWeight:700,padding:0}}>
               未分類 ${unset.length}件を仕分ける</button>`;
           })()}
+          ${taskSync.conflict>0&&html`<button onClick=${()=>{
+              const c = loadTaskQueue().find(x=>x.state==="conflict");
+              if (c) setConflictItem(c);
+            }}
+            style=${{fontSize:11,background:"var(--bg)",color:"var(--sub)",border:"1px solid var(--border)",borderRadius:20,padding:"2px 10px",fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>どちらを残す？ ${taskSync.conflict}件</button>`}
+          ${taskSync.failed>0&&html`<button onClick=${()=>{
+              const q = loadTaskQueue();
+              q.forEach(x=>{ if(x.state==="failed"){ x.state="pending"; x.tries=0; } });
+              saveTaskQueue(q); flushTaskQueue();
+            }}
+            style=${{fontSize:11,background:"var(--amber,#BA7517)",color:"#fff",border:"none",borderRadius:20,padding:"2px 9px",fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}
+            title="押すともう一度送ります">保存できず ${taskSync.failed}件・再送</button>`}
           <!-- 今日の計画量。利用可能時間が未設定のうちは判定しない（勝手に8時間と仮定しない） -->
           ${(()=>{
             const fmtMin = m => m>=60 ? `${Math.floor(m/60)}時間${m%60?`${m%60}分`:""}` : `${m}分`;
@@ -2954,10 +2965,10 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
               if (q.overdue && !isDone(it) && e2>0) overMin+=e2;
             });
             return html`<div style=${{fontSize:11,color:"var(--sub)",lineHeight:1.6}}>
-              想定 <b style=${{color:"var(--text)"}}>${total>0?fmtMin(total):"—"}</b>
+              今日やる予定 <b style=${{color:"var(--text)"}}>${total>0?fmtMin(total):"—"}</b>
               ${impMin>0&&html` ・重要 ${fmtMin(impMin)}`}
               ${overMin>0&&html` ・<span style=${{color:"#dc2626"}}>期限超過 ${fmtMin(overMin)}</span>`}
-              ${noEst>0&&html` ・見積もり未設定 ${noEst}件`}
+              ${noEst>0&&html` ・かかる時間が未入力 ${noEst}件`}
             </div>`;
           })()}
         </div>`}
@@ -7215,7 +7226,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260803-115317";
+const APP_BUILD = "20260803-140423";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
