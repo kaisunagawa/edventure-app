@@ -1626,13 +1626,25 @@ function getSelfMgmtPower(studentEmail, body) {
   const user = sheetToObjects(getSheet("Users")).find(function (u) { return u.student_email === studentEmail; });
   if (!hasFeature(user, SMP_FEATURE_KEY)) return { ok: false, error: "feature not enabled" };
   const weekStart = String((body && body.weekStart) || "").slice(0, 10) || null;
+  // ★10分だけ結果を取っておく★
+  //   週次は日ごとの計算を積み上げるため10秒ほどかかる。毎回待たせると
+  //   画面が「ステータス」のまま切り替わらないことがある（Kaiの端末で発生）。
+  const ckey = "smp_" + sha256Hex(studentEmail + "|" + (weekStart || "cur") + "|" +
+                                  String((body && body.withPrev) || "") + "|" + SMP_VERSION +
+                                  "|" + OPS_CALC_VERSION + "|" + formatDate(new Date())).slice(0, 40);
+  if (String((body && body.refresh) || "") !== "1") {
+    try { const hit = CacheService.getScriptCache().get(ckey);
+      if (hit) return JSON.parse(hit); } catch (e) {}
+  }
   const cur = computeSelfMgmtPower(studentEmail, weekStart);
   let prev = null;
   if (String((body && body.withPrev) || "") === "1") {
     const d = new Date(cur.period_start + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() - 7);
     prev = computeSelfMgmtPower(studentEmail, d.toISOString().substring(0, 10));
   }
-  return { ok: true, data: cur, prev: prev };
+  const out = { ok: true, data: cur, prev: prev };
+  try { CacheService.getScriptCache().put(ckey, JSON.stringify(out), 600); } catch (e) { /* 大きすぎるときは諦める */ }
+  return out;
 }
 
 // ══════════════════════════════════════════════════════════════════
