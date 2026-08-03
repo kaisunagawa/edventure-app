@@ -2731,8 +2731,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
             ${taskSync.pending>0&&html`<span style=${{background:"var(--bg)",borderRadius:20,padding:"3px 9px"}}>保存中…</span>`}
             ${taskSync.failed>0&&html`<button onClick=${()=>{ const q=loadTaskQueue(); q.forEach(x=>{ if(x.state==="failed"){x.state="pending";x.tries=0;} }); saveTaskQueue(q); flushTaskQueue(); }}
               style=${{background:"var(--amber,#BA7517)",color:"#fff",border:"none",borderRadius:20,padding:"3px 9px",fontSize:10.5,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>保存できず ${taskSync.failed}件</button>`}
-            ${taskSync.conflict>0&&html`<button onClick=${()=>{ const c=loadTaskQueue().find(x=>x.state==="conflict"); if(c) setConflictItem(c); }}
-              style=${{background:"var(--red,#d33)",color:"#fff",border:"none",borderRadius:20,padding:"3px 9px",fontSize:10.5,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>要確認 ${taskSync.conflict}件</button>`}
+            <!-- 「どちらを残す？」はタスクボードの見出しに1か所だけ出す（2か所に出していた） -->
           </div>
         </div>`;
       })()}
@@ -2898,7 +2897,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
               const c = loadTaskQueue().find(x=>x.state==="conflict");
               if (c) setConflictItem(c);
             }}
-            style=${{fontSize:11,background:"var(--red,#d33)",color:"#fff",border:"none",borderRadius:20,padding:"2px 9px",fontWeight:600,cursor:"pointer"}}>要確認 ${taskSync.conflict}件</button>`}
+            style=${{fontSize:11,background:"var(--bg)",color:"var(--sub)",border:"1px solid var(--border)",borderRadius:20,padding:"2px 10px",fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>どちらを残す？ ${taskSync.conflict}件</button>`}
           ${taskSync.failed>0&&html`<button onClick=${()=>{
               const q = loadTaskQueue();
               q.forEach(x=>{ if(x.state==="failed"){ x.state="pending"; x.tries=0; } });
@@ -7055,7 +7054,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260803-101517";
+const APP_BUILD = "20260803-103627";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 

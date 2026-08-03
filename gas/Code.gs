@@ -12889,12 +12889,21 @@ function saveTask(studentEmail, body) {
         if (k === "status") return normalizeTaskStatus(v);
         return String(v).trim();
       };
-      // ★並び替え（sort_order）では確認を求めない★
-      //   並び順は本人が見て決め直せるもので、中身ではない。
-      //   しかも並べ替えは複数タスクをまとめて送るため、自分の送信同士で
-      //   ぶつかって「確認してください」が出てしまう（実際に出た）。後勝ちでよい。
-      const NEVER_ASK = { sort_order: 1 };
-      const keys = Object.keys(bv).filter(function (k) { return !NEVER_ASK[k]; });
+      // ★聞くのは「消えたら困る項目」だけ★（2026-08-03 Kaiの判断）
+      //   題名・日付・期限が食い違ったときだけ止める。
+      //   メモ・想定時間・状態・並び順は、あとから見て直せるものなので
+      //   新しいほうを採用し、確認を求めない。
+      //   （毎回の確認は手間で、しかも並べ替えは自分の送信同士でぶつかる）
+      const ASK_ONLY = { title: 1, date: 1, due_at: 1 };
+      const keys = Object.keys(bv).filter(function (k) { return ASK_ONLY[k]; });
+      // 聞かずに上書きした項目は、あとで本人に伝えられるよう控えておく
+      const autoResolved = [];
+      Object.keys(bv).forEach(function (k) {
+        if (ASK_ONLY[k]) return;
+        const sv = norm(k, existing[k]), bvv = norm(k, bv[k]), wv = norm(k, body[k]);
+        if (sv !== wv && sv !== bvv) autoResolved.push(k);
+      });
+      if (autoResolved.length) body.__auto_resolved = autoResolved;
       for (let i = 0; i < keys.length; i++) {
         const f = keys[i];
         const serverVal = norm(f, existing[f]);
@@ -13001,9 +13010,12 @@ function saveTask(studentEmail, body) {
 
   const r = p1Upsert("Tasks", "task_id", rec);
   const saved = p1OwnedRow("Tasks", "task_id", r.id, studentEmail);
+  const autoResolvedOut = body.__auto_resolved || null;
   // ★サーバーが確定した内容をそのまま返す★
   //   端末はこれを反映する。各端末が独自の値を持ち続けないため。
   return { ok: true, id: r.id, created: r.created,
+           // 聞かずに新しいほうを採用した項目（端末に一言だけ知らせるため）
+           auto_resolved: autoResolvedOut,
            data: saved ? decorateTask(saved, Date.now()) : null };
 }
 
