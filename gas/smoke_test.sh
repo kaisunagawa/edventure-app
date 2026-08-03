@@ -283,6 +283,42 @@ sys.exit(1 if missing else 0)
     fi
   fi
 
+  # ★定義していない定数を参照していないか★（2026-08-03）
+  #   SMP_SHORT を参照だけ入れて定義を忘れ、レポート画面が真っ赤になった。
+  #   構文としては正しいので node --check では見つからない。
+  #   大文字の定数だけを対象に、宣言があるかどうかを照合する。
+  undef=$(python3 - <<'PYX'
+import re
+KNOWN = set("""JSON Math Date Object Array String Number Boolean RegExp Promise Set Map WeakMap
+Intl NaN Infinity URL URLSearchParams TextEncoder TextDecoder Error TypeError
+DOMParser FormData FileReader Audio Image Notification AbortController
+React ReactDOM APP_BUILD GAS_URL""".split())
+bad = []
+for f in ("../index.html", "../coach/index.html"):
+    try: s = open(f).read()
+    except OSError: continue
+    js = "\n".join(m.group(2) for m in re.finditer(r"<script([^>]*)>(.*?)</script" + ">", s, re.S | re.I)
+                    if "src=" not in m.group(1).lower())
+    declared = set(re.findall(r"(?:const|let|var|function|class)\s+([A-Z][A-Z0-9_]{2,})\b", js))
+    scan = re.sub(r"/\*.*?\*/", " ", js, flags=re.S)
+    scan = re.sub(r"//[^\n]*", " ", scan)
+    # 文字列は「同じ行の中だけ」で消す。行をまたいで消すと、
+    # テンプレート内の本物のコードまで巻き込んでしまう（実測）
+    scan = "\n".join(
+        re.sub(r'"(?:\\.|[^"\\])*"', " ", re.sub(r"'(?:\\.|[^'\\])*'", " ", ln))
+        for ln in scan.split("\n"))
+    used = set(re.findall(r"(?<![.\w$#])([A-Z][A-Z0-9_]{2,})\s*(?=[\[\.(])", scan))
+    for n in sorted(used - declared - KNOWN):
+        if n.startswith("_"): continue
+        # SVGのパス（M13 など）は英字1文字なので対象外にする
+        if sum(1 for c in n if c.isalpha()) < 2: continue
+        bad.append(f.split("/")[-2] + ":" + n)
+print(",".join(bad))
+PYX
+)
+  if [ -z "$undef" ]; then ok "定義していない定数の参照なし"
+  else ng "定義していない定数を参照している: ${undef}"; fi
+
   # ★「開くための状態」があるのに、描画する場所が無い画面を見つける★
   #   2026-08-02に「今日のフォーカス」の宣言モーダルを、描画ブロックごと
   #   消してしまった。状態も保存処理も残っていたので静的検査を素通りし、
@@ -581,6 +617,20 @@ PYEOF
     if [ -z "$r" ]; then ng "管理者以外テストの応答が空"
     elif echo "$r" | grep -q '"ok":false'; then ok "管理者以外は署名があっても拒否"
     else ng "管理者以外の拒否が異常: $(echo "$r" | head -c 140)"; fi
+
+    # ★点数の食い違いを見つける★（2026-08-03）
+    #   同じ日の点数が、レポート詳細・一覧・ランキング・みんなの頑張りで
+    #   別々の数字になっていたことがある（64 / 71 / 73）。
+    #   1か所でも違ったらデプロイを止める。
+    cons=$(curl -sL --max-time 180 "${URL}?$(sign adminScoreConsistency "$ADMIN")")
+    if [ -z "$cons" ]; then ng "点数の整合性チェックが空応答"
+    elif echo "$cons" | grep -q '"consistent":true'; then
+      ok "点数が4か所で一致（詳細・一覧・ランキング・みんなの頑張り）"
+    elif echo "$cons" | grep -q '"ok":false'; then
+      echo "  － 点数の整合性チェックは対象外（$(echo "$cons" | head -c 80)）"
+    else
+      ng "点数が食い違っている: $(echo "$cons" | python3 -c 'import sys,json;d=json.load(sys.stdin);print(d.get("values"))' 2>/dev/null || echo "$cons" | head -c 140)"
+    fi
 
     # 同じ署名の使い回し（リプレイ）が拒否されること。
     # 1回目が実際に通ったことを確認してから2回目を試す（前提が崩れた状態で判定しない）

@@ -238,6 +238,39 @@ function doGet(e) {
           feedback: rep.feedback, highlights: rep.highlights, improvement: rep.improvement,
           action: rep.action, reasons: rep.breakdown_reasons });
       }
+      // 点数が食い違っていないかを、サーバー側で突き合わせる（4か所）
+      case "adminScoreConsistency": {
+        if (!verifyAdmin(e.parameter.coachEmail)) return jsonResponse({ ok: false, error: "not admin" });
+        const em4 = String(e.parameter.email || "").trim() || adminEmail();
+        const day4 = String(e.parameter.date || "").slice(0, 10) || formatDate(new Date());
+        const detail = getDailyOpsReport(em4, { date: day4 });
+        const dv = (detail && detail.ok && detail.data) ? detail.data.displayed_score : null;
+        const listR = getReportList(em4);
+        const lrow = (listR.data || []).find(function (r) { return String(r.date).slice(0, 10) === day4; });
+        const lv = lrow ? lrow.score : null;
+        const rk = getRanking(em4);
+        const rv = (rk && rk.data) ? rk.data.score : null;
+        const comm = getCommunity(em4);
+        let cv = null;
+        try {
+          const arr = Object.keys(comm.data || {}).filter(function (k) { return /^\d+$/.test(k); })
+                        .map(function (k) { return comm.data[k]; });
+          const me = arr.find(function (x) { return x.isMe; });
+          cv = me ? me.reportScore : null;
+        } catch (e2) {}
+        const vals = { detail: dv, list: lv, ranking: rv, community: cv };
+        // ランキングと「みんなの頑張り」は最新レポート日を見るので、
+        // 指定日が最新日でなければ比較対象から外す
+        const latest = (listR.data || [])[0];
+        const isLatest = latest && String(latest.date).slice(0, 10) === day4;
+        const target = isLatest ? ["detail", "list", "ranking", "community"] : ["detail", "list"];
+        const seen = {};
+        target.forEach(function (k) { if (vals[k] !== null && vals[k] !== undefined) seen[String(vals[k])] = 1; });
+        const uniq = Object.keys(seen);
+        return jsonResponse({ ok: true, date: day4, email: em4, checked: target,
+          values: vals, consistent: uniq.length <= 1,
+          note: isLatest ? "" : "指定日が最新のレポートではないため、ランキングと共有欄は比較していません" });
+      }
       case "adminActualMinutesAudit":
         return jsonResponse(verifyAdmin(e.parameter.coachEmail)
           ? actualMinutesAudit() : { ok: false, error: "not admin" });
@@ -12427,7 +12460,7 @@ const ADMIN_SECRET_ALLOWLIST = {
   // 一斉送信（Kaiの明示的な要望により残す）
   adminBroadcastLine:1, adminBroadcastLinePending:1, adminSendStudentCampaign:1,
   // セットアップ・保守
-  adminSetupTriggers:1, adminInstallTrigger:1, adminSetupPhase1:1, adminSetupAuth:1, adminPhase4DryRun:1, adminLegacyBackfill:1, adminWritePathStats:1, adminIssueTestSession:1, adminDropTestSessions:1, adminOpsSelfTest:1, adminActualMinutesAudit:1, adminXpCorrection:1, adminStreakRecalc:1, adminGrantFeature:1, adminUserDiag:1, adminReportScoreDryRun:1, adminReportGenTest:1,
+  adminSetupTriggers:1, adminInstallTrigger:1, adminSetupPhase1:1, adminSetupAuth:1, adminPhase4DryRun:1, adminLegacyBackfill:1, adminWritePathStats:1, adminIssueTestSession:1, adminDropTestSessions:1, adminOpsSelfTest:1, adminActualMinutesAudit:1, adminXpCorrection:1, adminStreakRecalc:1, adminGrantFeature:1, adminUserDiag:1, adminReportScoreDryRun:1, adminReportGenTest:1, adminScoreConsistency:1,
   authSetMode:1, authSetEnforce:1, authRoleApply:1, authRoleDryRun:1, authRevokeAll:1,
   authCleanupTestData:1, adminPurgeTestUsers:1, adminMigrateTasks:1, authBreakerReset:1, rotateSessionSecret:1,
   p1Backup:1, p1BackupInfo:1, p1PurgeArchived:1, weeklyBackup:1
