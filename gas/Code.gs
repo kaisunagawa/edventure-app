@@ -1307,10 +1307,61 @@ function computeSelfMgmtPower(studentEmail, weekStart) {
       reason: r.score === null ? why.join(" / ") : "" };
   })();
 
-  // ── 時間配分力: 5分類が未実装のため算出しない（推測で埋めない）──
-  out.time_allocation_power = { score: null, coverage: 0, sample_count: 0, components: [],
-    state: "insufficient_data", reason_code: "TIME_CLASSIFICATION_UNAVAILABLE",
-    reason: "時間の使い方を分類する機能を準備しています" };
+  // ── 時間配分力 ──────────────────────────────
+  //   5分類（GOAL_DIRECT等）はまだ全員分そろっていない。
+  //   ただし「時間帯」と「目標に関連」は前からずっと記録されている。
+  //   そこで、まずは今あるデータからの代理指標で出す（Kaiの判断・2026-08-03）。
+  //   ★これは推定であることを画面にも必ず書く★
+  //   実測（タイマー）と5分類が増えるほど、この項目は正確になる。
+  (function () {
+    const parts = [];
+    const mins = function (l) {
+      const am = Number(l.actual_minutes);
+      if (am > 0) return am;                        // 実測があればそれを使う
+      return timeBlockMinutes(l.time_block);        // 無ければ時間帯の長さ
+    };
+    const total = logs.reduce(function (a, l) { return a + mins(l); }, 0);
+    if (total > 0) {
+      // 分類（USER/RULEで入ったもの）があれば、そちらを正として使う
+      const clsMin = {};
+      let classified = 0;
+      logs.forEach(function (l) {
+        const c = String(l.time_classification || "");
+        if (!c) return;
+        clsMin[c] = (clsMin[c] || 0) + mins(l);
+        classified += mins(l);
+      });
+      const goalMin = (classified / total >= 0.5)
+        ? (clsMin.GOAL_DIRECT || 0)
+        : logs.filter(function (l) { return String(l.goal_related) === "true" || l.goal_related === true; })
+              .reduce(function (a, l) { return a + mins(l); }, 0);
+      const byClass = (classified / total >= 0.5);
+      parts.push({ label: "目標に直結した時間の割合", weight: 2, sample: logs.length, state: "evaluated",
+                   value: Math.round(goalMin / total * 100),
+                   detail: Math.round(goalMin / 60 * 10) / 10 + "時間 / " + (Math.round(total / 60 * 10) / 10) + "時間"
+                           + (byClass ? "（分類から）" : "（時間帯からの推定）") });
+      // 集中して使えた時間（自己評価4以上）
+      const focusMin = logs.filter(function (l) { return (parseInt(l.focus_level, 10) || 0) >= 4; })
+                           .reduce(function (a, l) { return a + mins(l); }, 0);
+      parts.push({ label: "集中して使えた時間の割合", weight: 1, sample: logs.length, state: "evaluated",
+                   value: Math.round(focusMin / total * 100),
+                   detail: Math.round(focusMin / 60 * 10) / 10 + "時間 / " + (Math.round(total / 60 * 10) / 10) + "時間" });
+      // 5分類そのもの（回復・投資などの内訳）は、まだ全員分そろっていない
+      parts.push({ label: "5分類での配分", weight: 1, value: null, state: "insufficient_data",
+                   reason: "時間の使い方の分類が半分以上たまると、ここも見られます" });
+    } else {
+      parts.push({ label: "目標に直結した時間の割合", weight: 2, value: null, state: "insufficient_data",
+                   reason: "今週の記録がまだありません" });
+    }
+    const r2 = smpRoll(parts);
+    out.time_allocation_power = { score: r2.score, coverage: r2.coverage,
+      component_coverage: r2.componentCoverage, sample_count: r2.sample, components: parts,
+      state: r2.score === null ? "insufficient_data" : "evaluated",
+      reason_code: r2.score === null ? "NO_RECORDS_YET" : "",
+      estimated: true,
+      reason: r2.score === null ? "今週の記録がまだありません"
+                                : "時間帯と「目標に関連」からの推定です。タイマーでの実測と分類が増えると正確になります" };
+  })();
 
   // ── 継続力: 無理なく続けられたか ──
   //   ★sample_count は日単位★ 同じ日に何回記録しても件数が増えるだけで、

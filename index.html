@@ -3427,6 +3427,24 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
             style=${{flexShrink:0,whiteSpace:"nowrap",background:"none",border:"none",color:"var(--accent)",fontSize:11.5,fontWeight:700,cursor:"pointer",fontFamily:"inherit",padding:0}}>詳細を見る</button>
         </div>
 
+        <!-- ステータスと同じ5角形。測れていない軸は点線にして、面に含めない -->
+        <div style=${{display:"flex",alignItems:"center",gap:6,marginBottom:6}}>
+          <${SelfMgmtRadar} metrics=${M}/>
+          <div style=${{flex:1,minWidth:0,fontSize:11,color:"var(--sub)",lineHeight:1.85}}>
+            ${(()=>{
+              const ev=M.filter(m=>m.evaluation_state==="evaluated"&&m.score!==null&&!m.provisional);
+              if(!ev.length) return "記録がたまると、ここに形が出ます。";
+              const best=ev.slice().sort((a,b)=>b.score-a.score)[0];
+              const worst=ev.slice().sort((a,b)=>a.score-b.score)[0];
+              const pend=M.filter(m=>!(m.evaluation_state==="evaluated"&&m.score!==null&&!m.provisional)).map(m=>m.label);
+              return html`
+                <div>いま伸びている：<b style=${{color:"var(--text)"}}>${best.label}</b> ${best.score}</div>
+                ${ev.length>1&&html`<div>のびしろ：<b style=${{color:"var(--text)"}}>${worst.label}</b> ${worst.score}</div>`}
+                ${pend.length>0&&html`<div style=${{opacity:0.85,marginTop:2}}>点線の軸（${pend.join("・")}）は、まだ測っていません</div>`}`;
+            })()}
+          </div>
+        </div>
+
         ${M.map((m,i)=>{ const v=view(m);
           // ★測れている範囲が半分未満のときは、点数をホームに出さない★
           //   数字だけが一人歩きするため、代わりに「測れた事実」を見せる
@@ -4387,6 +4405,48 @@ function BreakdownRadar({breakdown}) {
       })}
     </svg>
   `;
+}
+
+// ★自己経営力のレーダー★
+//   ステータスの5角形と同じ見せ方にそろえる（Kaiの指示）。
+//   ちがうのは、測れていない項目を「0」として描かないこと。
+//   0で描くと「できていない」に見えるが、実際は「まだ測っていない」。
+//   測れていない軸は点線の外枠だけにして、面には含めない。
+function SelfMgmtRadar({metrics}) {
+  const M = (metrics || []).slice(0, 5);
+  const N = M.length || 5;
+  const cx = 80, cy = 80, maxR = 54;
+  const start = -Math.PI / 2, step = (Math.PI * 2) / N;
+  const pt = (i, frac) => [cx + Math.cos(start + i * step) * maxR * frac,
+                           cy + Math.sin(start + i * step) * maxR * frac];
+  const shown = (m) => m && m.evaluation_state === "evaluated" && m.score !== null && !m.provisional;
+  const rings = [0.25, 0.5, 0.75, 1].map(f => M.map((_, i) => pt(i, f).join(",")).join(" "));
+  const axes = M.map((_, i) => pt(i, 1));
+  // 面は「測れた軸」だけで作る。測れていない軸は中心へ寄せず、その軸を飛ばす
+  const okIdx = M.map((m, i) => shown(m) ? i : -1).filter(i => i >= 0);
+  const poly = okIdx.map(i => pt(i, Math.max(0.04, Math.min(100, M[i].score) / 100)).join(",")).join(" ");
+  const labels = M.map((_, i) => pt(i, 1.3));
+  return html`
+    <svg width="160" height="160" viewBox="0 0 160 160" style=${{flexShrink:0}}>
+      <defs>
+        <linearGradient id="smpGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stop-color="var(--hero1)"/><stop offset="100%" stop-color="var(--hero2)"/>
+        </linearGradient>
+      </defs>
+      ${rings.map((pts,i)=>html`<polygon key=${i} points=${pts} fill="none" stroke="var(--border)" stroke-width="1"/>`)}
+      ${axes.map((p,i)=>html`<line key=${i} x1=${cx} y1=${cy} x2=${p[0]} y2=${p[1]}
+        stroke="var(--border)" stroke-width="1" stroke-dasharray=${shown(M[i])?"":"2 3"}/>`)}
+      ${okIdx.length>=3&&html`<polygon points=${poly} fill="url(#smpGrad)" fill-opacity="0.32"
+        stroke="url(#smpGrad)" stroke-width="2.5" stroke-linejoin="round"/>`}
+      ${okIdx.length===2&&html`<line x1=${pt(okIdx[0],Math.min(100,M[okIdx[0]].score)/100)[0]} y1=${pt(okIdx[0],Math.min(100,M[okIdx[0]].score)/100)[1]}
+        x2=${pt(okIdx[1],Math.min(100,M[okIdx[1]].score)/100)[0]} y2=${pt(okIdx[1],Math.min(100,M[okIdx[1]].score)/100)[1]}
+        stroke="url(#smpGrad)" stroke-width="2.5"/>`}
+      ${okIdx.map(i=>{ const p=pt(i, Math.max(0.04, Math.min(100,M[i].score)/100));
+        return html`<circle key=${i} cx=${p[0]} cy=${p[1]} r="3" fill="var(--hero1)"/>`; })}
+      ${M.map((m,i)=>{ const [lx,ly]=labels[i];
+        return html`<text key=${m.key} x=${lx} y=${ly+3} text-anchor="middle" font-size="9.5"
+          fill="var(--sub)" opacity=${shown(m)?0.75:0.4} style=${{fontFamily:"inherit"}}>${String(m.label||"").slice(0,5)}</text>`; })}
+    </svg>`;
 }
 
 // セカンドブレイン画面（気づきタブ）: 蓄積した記録を能動的に振り返る場所。
@@ -7155,7 +7215,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260803-111446";
+const APP_BUILD = "20260803-115317";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
