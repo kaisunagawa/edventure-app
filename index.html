@@ -6270,7 +6270,7 @@ function ReauthGate() {
 
 // LINE連携の設定セクション。認証済みの本人だけが「連携用のことば」を発行できる。
 // 発行したことばをLINEへ送ると連携が完了する（5分間・1回限り）。
-function LineLinkSection({onToast, linked}) {
+function LineLinkSection({onToast, linked, onLinked}) {
   const [code,setCode]=useState("");
   const [left,setLeft]=useState(0);
   const [busy,setBusy]=useState(false);
@@ -6289,6 +6289,17 @@ function LineLinkSection({onToast, linked}) {
         機種変更などで連携し直したいときは、運営までご連絡ください。
       </div>`;
   }
+
+  // コードを出したあと、LINEで送信が済んだかを見に行く。
+  // 済んでいれば、この画面をそのまま「連携済みです」に切り替える
+  useEffect(()=>{
+    if(!code || linked) return;
+    const t=setInterval(async()=>{
+      const r=await authedPost("getUser");
+      if(r&&r.ok&&r.data&&r.data.lineLinked){ clearInterval(t); onLinked&&onLinked(); }
+    }, 5000);
+    return ()=>clearInterval(t);
+  },[code, linked]);
 
   const issue=async()=>{
     setBusy(true);
@@ -6564,6 +6575,7 @@ function SettingsScreen({onToast,onLogout,onGoalSaved,profile,onProfileSaved,onC
   // 折りたたみ式セクション。開閉状態は openSec で管理し、本体は安定した
   // モジュール外コンポーネント SettingsSec を使う（下の各セクションで直接呼ぶ）
   const [openSec,setOpenSec]=useState("");
+  const [linkTick,setLinkTick]=useState(0);   // 連携完了で画面を描き直すための印
   const [showGoalTree,setShowGoalTree]=useState(false); // 目標階層（段階公開）
 
   return html`<div style=${{paddingBottom:48}}>
@@ -6756,7 +6768,10 @@ function SettingsScreen({onToast,onLogout,onGoalSaved,profile,onProfileSaved,onC
            以前はメールアドレスを送るだけで連携できたが、それだと他人になりすまして
            通知の宛先を奪えたため、アプリで発行したことばでのみ連携する -->
       <${SettingsSec} k="linelink" icon="💬" title="LINE連携" open=${openSec==="linelink"} onToggle=${()=>setOpenSec(openSec==="linelink"?"":"linelink")}>
-        <${LineLinkSection} onToast=${onToast} linked=${CURRENT_USER&&CURRENT_USER.lineLinked!==false}/>
+        <${LineLinkSection} onToast=${onToast} linked=${CURRENT_USER&&CURRENT_USER.lineLinked!==false}
+          onLinked=${()=>{ if(CURRENT_USER){ CURRENT_USER={...CURRENT_USER,lineLinked:true};
+            try{ localStorage.setItem("edventure_user",JSON.stringify(CURRENT_USER)); }catch(e){} }
+            onToast&&onToast("LINE連携が完了しました"); setOpenSec("linelink"); setLinkTick(t=>t+1); }}/>
       <//>
 
       <!-- カレンダー -->
@@ -7054,7 +7069,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260803-103627";
+const APP_BUILD = "20260803-105504";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
@@ -7549,14 +7564,16 @@ function LineLinkBanner({email, onDismiss, onGoToSettings}) {
   return html`
     <div style=${{background:"#fff3cd",borderBottom:"1px solid #ffe08a",padding:"10px 16px",fontSize:12.5,color:"#8a6d1f",position:"relative",zIndex:50}}>
       <div style=${{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
-        <div style=${{lineHeight:1.6}}>
-          LINE連携が未完了です。連携するとリマインダー・AIレポートが届くようになります。<br/>
-          <b>設定 →「LINE連携」</b>から「連携コード」を出して、LINEに送ってください。
+        <div style=${{lineHeight:1.7}}>
+          <b>LINEでリマインダーとAIレポートを受け取れます。</b><br/>
+          ① 下のボタンで <b>連携コード</b>を出す<br/>
+          ② コピーして、JIROKUのLINEにそのまま送る<br/>
+          <span style=${{fontSize:11.5}}>※「LINK 〜」の行ごと送ってください（コードだけだと連携できません）</span>
         </div>
         <button onClick=${onDismiss} style=${{background:"none",border:"none",color:"#8a6d1f",fontSize:16,cursor:"pointer",flexShrink:0}}>×</button>
       </div>
       <div style=${{display:"flex",gap:8,marginTop:8}}>
-        <button onClick=${onGoToSettings} style=${{padding:"6px 12px",borderRadius:7,border:"1px solid #ffe08a",background:"#fff",fontSize:12,cursor:"pointer",fontWeight:600,color:"#8a6d1f"}}>設定を開く</button>
+        <button onClick=${onGoToSettings} style=${{padding:"6px 12px",borderRadius:7,border:"none",background:"#8a6d1f",color:"#fff",fontSize:12,cursor:"pointer",fontWeight:700}}>連携コードを出す</button>
         <button onClick=${()=>window.open("https://lin.ee/5pElLYY","_blank")} style=${{padding:"6px 12px",borderRadius:7,border:"none",background:"#06C755",color:"#fff",fontSize:12,cursor:"pointer",fontWeight:600}}>LINEを開く</button>
       </div>
     </div>
@@ -8362,6 +8379,19 @@ function App() {
   },[]);
   const [toast,setToast]=useState(null);
   const [bannerDismissed,setBannerDismissed]=useState(false);
+  // ★連携が終わったら、案内はひとりでに消える★
+  //   以前は連携が完了しても、アプリを開き直すまで黄色い帯が出たままだった。
+  //   未連携のあいだだけ、画面に戻ったときと30秒ごとに状態を見に行く。
+  useEffect(()=>{
+    if(!user || user.lineLinked!==false) return;
+    let alive=true;
+    const check=async()=>{ if(!alive) return; const linked=await recheckUser(); if(linked) alive=false; };
+    const onVis=()=>{ if(!document.hidden) check(); };
+    document.addEventListener("visibilitychange", onVis);
+    window.addEventListener("focus", check);
+    const t=setInterval(check, 30000);
+    return ()=>{ alive=false; clearInterval(t); document.removeEventListener("visibilitychange", onVis); window.removeEventListener("focus", check); };
+  },[user && user.lineLinked]);
   // 学生向け必須セットアップ（ホーム画面追加＋LINE連携）。PC等でどうしてもできない人用に
   // 目立たないスキップだけ用意（セッション内のみ・次回開くとまた出る）
   const [setupSkipped,setSetupSkipped]=useState(false);
@@ -8390,6 +8420,7 @@ function App() {
     } catch(e){}
     return null;
   };
+  const [settingsJump,setSettingsJump]=useState("");
   const [calLinked,setCalLinked]=useState(!!localStorage.getItem("cal_linked"));
   const [calBannerDismissed,setCalBannerDismissed]=useState(false);
   const [showTutorial,setShowTutorial]=useState(!localStorage.getItem("tutorial_seen"));
@@ -8518,7 +8549,7 @@ function App() {
     <div style=${{height:"100%",position:"relative",display:"flex",flexDirection:"column"}}>
       ${showAnnounce && html`<${FeatureAnnounce} onClose=${dismissAnnounce} onGo=${()=>{dismissAnnounce();setTab("brain");}}/>`}
       ${showSurvey && !showAnnounce && html`<${SurveyModal} onDone=${answerSurvey} onLater=${snoozeSurvey}/>`}
-      ${user.lineLinked===false && !bannerDismissed && html`<${LineLinkBanner} email=${user.email} onDismiss=${()=>setBannerDismissed(true)} onGoToSettings=${()=>{setBannerDismissed(true);setTab("settings");}}/>`}
+      ${user.lineLinked===false && !bannerDismissed && html`<${LineLinkBanner} email=${user.email} onDismiss=${()=>setBannerDismissed(true)} onGoToSettings=${()=>{setBannerDismissed(true);setSettingsJump("linelink");setTab("settings");}}/>`}
       ${!calLinked && !calBannerDismissed && !isServerCalendar() && html`<${CalendarLinkBanner} onGoToSettings=${()=>setTab("settings")} onDismiss=${()=>setCalBannerDismissed(true)}/>`}
       <div style=${{position:"relative",flex:1,minHeight:0}}>
         <div class="screen">
@@ -8527,7 +8558,7 @@ function App() {
           <div style=${{display:tab==="report"?"block":"none"}}><${ReportScreen}/></div>
           <div style=${{display:tab==="brain"?"block":"none"}}><${SecondBrainScreen} isActive=${tab==="brain"}/></div>
           <div style=${{display:tab==="timer"?"block":"none",height:"100%"}}><${TimerScreen} onToast=${setToast} isActive=${tab==="timer"}/></div>
-          <div style=${{display:tab==="settings"?"block":"none"}}><${SettingsScreen} onToast=${setToast} onLogout=${logout} onGoalSaved=${setGoalData} profile=${profile} onProfileSaved=${setProfile} onCalLinked=${()=>setCalLinked(true)}/></div>
+          <div style=${{display:tab==="settings"?"block":"none"}}><${SettingsScreen} onToast=${setToast} onLogout=${logout} onGoalSaved=${setGoalData} profile=${profile} onProfileSaved=${setProfile} onCalLinked=${()=>setCalLinked(true)} jumpTo=${settingsJump} onJumped=${()=>setSettingsJump("")}/></div>
         </div>
       </div>
       <!-- 独り言（クイック記録）フローティングボタン。
