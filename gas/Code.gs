@@ -1211,6 +1211,112 @@ function smpRoll(parts) {
   };
 }
 
+// ★週次＝日次の積み重ね★（2026-08-03 Kaiの構造に合わせて作り直し）
+//   日次の5項目と週次の5つの力は1対1で対応する。
+//   ならば週次は、その週の日次スコアを日ごとに平均したものにするのが素直。
+//   こうすると「日次は出ているのに週次だけ空っぽ」が起きない。
+//   1日ずつ計算するが、シートは1回だけ読んで日ごとに配る（重くしない）。
+const SMP_FROM_DAILY = {
+  progress:       ["result_power",          "成果力"],
+  execution:      ["execution_power",       "実行力"],
+  time_use:       ["time_allocation_power", "時間配分力"],
+  sustainability: ["continuity_power",      "継続力"],
+  review:         ["recovery_power",        "立て直し力"]
+};
+function computeSelfMgmtPowerFromDaily_(studentEmail, monday, sunday, today) {
+  const inWeek = function (d) { const x = String(d || "").slice(0, 10); return x >= monday && x <= sunday; };
+  const dayOf = function (v) {
+    return v instanceof Date ? Utilities.formatDate(v, "Asia/Tokyo", "yyyy-MM-dd") : String(v || "").slice(0, 10); };
+  // まとめて1回読む
+  const allLogs = sheetToObjects(getSheet("DailyLog")).filter(function (l) {
+    return String(l.student_email) === studentEmail && inWeek(dayOf(l.date)) && !String(l.deleted_at || "").trim(); });
+  const allTasks = p1List("Tasks", studentEmail).filter(function (t) {
+    return !String(t.deleted_at || "").trim() && inWeek(p1DateOut_(t.date)); });
+  const allJournal = sheetToObjects(getJournalSheet()).filter(function (r) {
+    return String(r.student_email) === studentEmail && inWeek(dayOf(r.date)); });
+  const wgs = p1List("WeeklyGoals", studentEmail).filter(function (w) { return p1Status_(w.status, "ACTIVE") === "ACTIVE"; });
+  // 使える時間も1回だけ読む（日ごとにシートを読むと重くなる）
+  const planRows = p1List("DayPlan", studentEmail);
+  const userRow = sheetToObjects(getSheet("Users")).find(function (u) { return u.student_email === studentEmail; });
+  const weekly = parseWeeklyAvailable_(userRow && userRow.weekly_available_minutes);
+  const availOf = function (d) {
+    const pl = planRows.find(function (r) { return String(r.date).slice(0, 10) === d; }) || null;
+    if (pl && String(pl.available_minutes || "").trim() !== "") {
+      return { minutes: Number(pl.available_minutes), source: "DAY_PLAN",
+               day_type: String(pl.day_type || "NORMAL"), state: "evaluated" };
+    }
+    const dow = WEEKDAY_KEYS[(new Date(d + "T00:00:00+09:00").getDay() + 6) % 7];
+    if (weekly && weekly[dow] !== undefined) {
+      return { minutes: weekly[dow], source: "WEEKDAY_DEFAULT",
+               day_type: pl ? String(pl.day_type || "NORMAL") : "NORMAL", state: "evaluated" };
+    }
+    return { minutes: null, source: "NONE", day_type: pl ? String(pl.day_type || "NORMAL") : "",
+             state: "insufficient_data", reason_code: "AVAILABLE_TIME_MISSING" };
+  };
+
+  // 週の初日から今日（週末を越えていれば日曜）まで
+  const last = today < sunday ? today : sunday;
+  const days = [];
+  for (let d = monday; d <= last; ) {
+    days.push(d);
+    const x = new Date(d + "T00:00:00+09:00"); x.setDate(x.getDate() + 1); d = formatDate(x);
+  }
+  const acc = {};   // key → { sum, n, covSum, days:[] }
+  Object.keys(SMP_FROM_DAILY).forEach(function (k) { acc[k] = { sum: 0, n: 0, covSum: 0, days: [] }; });
+  let evaluatedDays = 0;
+  days.forEach(function (d) {
+    const fx = {
+      logs: allLogs.filter(function (l) { return dayOf(l.date) === d; }),
+      tasks: allTasks.filter(function (t) { return p1DateOut_(t.date) === d; }),
+      journal: allJournal.find(function (r) { return dayOf(r.date) === d; }) || {},
+      weekly_goals: wgs,
+      available: availOf(d)
+    };
+    // その日に何も無ければ数えない（0点として平均を下げない）
+    if (!fx.logs.length && !fx.tasks.length && !String(fx.journal.intent || "").trim()) return;
+    evaluatedDays++;
+    const f = computeDailyOpsFacts(studentEmail, d, fx);
+    (f.components || []).forEach(function (c) {
+      const a = acc[c.key]; if (!a) return;
+      if (c.state === "evaluated" && c.score !== null) {
+        a.sum += c.score; a.n++; a.covSum += (c.weighted_coverage || 0);
+        a.days.push(d.slice(5) + " " + c.score);
+      }
+    });
+  });
+  const out = {};
+  Object.keys(SMP_FROM_DAILY).forEach(function (k) {
+    const a = acc[k];
+    const key = SMP_FROM_DAILY[k][0];
+    if (!a.n) {
+      out[key] = { score: null, coverage: 0, component_coverage: 0, sample_count: 0, components: [],
+        state: evaluatedDays ? "insufficient_data" : "insufficient_data",
+        reason_code: evaluatedDays ? "NOT_MEASURED_THIS_WEEK" : "NO_RECORDS_YET",
+        reason: evaluatedDays ? "今週はまだこの項目を測れていません" : "今週の記録がまだありません" };
+      return;
+    }
+    const score = Math.round(a.sum / a.n);
+    // 測れた日の割合 × その日の中で測れていた割合
+    const dayRate = evaluatedDays ? a.n / evaluatedDays : 0;
+    const inner = a.covSum / a.n;
+    out[key] = {
+      score: score,
+      coverage: Math.round(dayRate * inner * 100) / 100,
+      component_coverage: Math.round(dayRate * 100) / 100,
+      sample_count: a.n,
+      components: [
+        { label: "日ごとの平均", value: score, state: "evaluated", weight: 2,
+          detail: a.n + "日分（" + a.days.join(" / ") + "）" },
+        { label: "測れた日", value: Math.round(dayRate * 100), state: "evaluated", weight: 1,
+          detail: a.n + "日 / 記録のあった" + evaluatedDays + "日" }
+      ],
+      state: "evaluated", reason: ""
+    };
+  });
+  out.__days = { elapsed: days.length, with_records: evaluatedDays };
+  return out;
+}
+
 function computeSelfMgmtPower(studentEmail, weekStart) {
   const monday = weekStart || mondayOf(formatDate(new Date()));
   const sunday = (function () { const d = new Date(monday + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() + 6);
@@ -1476,10 +1582,16 @@ function computeSelfMgmtPower(studentEmail, weekStart) {
       reason: anyEval ? "" : "立て直しの機会が今週はなかったため、評価対象外です" };
   })();
 
-  // 整形して返す
+  // ★日次の積み重ねを正とする★
+  //   これまでは週次だけ別の計算をしていたため、日次では点が出ているのに
+  //   週次は「データ蓄積中」だらけになっていた（Kaiの指摘）。
+  let daily = null;
+  try { daily = computeSelfMgmtPowerFromDaily_(studentEmail, monday, sunday, today); } catch (e) { daily = null; }
   const calculatedAt = new Date().toISOString();
   const rows = SMP_KEYS.map(function (k) {
-    const o = out[k[0]] || {};
+    const fromDaily = daily && daily[k[0]];
+    // 日次から出せたものはそれを使う。出せないものだけ従来の計算を残す
+    const o = (fromDaily && fromDaily.score !== null) ? fromDaily : (out[k[0]] || {});
     return {
       key: k[0], label: k[1], description: k[2],
       score: (o.score === undefined ? null : o.score),

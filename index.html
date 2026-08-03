@@ -3413,35 +3413,67 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
             ${smpWeek==="prev"?"先週":"今週"}の自己経営の状態</div>
           <div style=${{fontSize:11,color:"var(--sub)",marginBottom:14}}>対象期間 ${src.period_start} 〜 ${src.period_end}</div>
 
-          ${M.map(m=>html`
-            <div key=${m.key} style=${{background:"var(--card)",borderRadius:12,border:"1px solid var(--border)",padding:"13px 14px",marginBottom:10}}>
-              <div style=${{display:"flex",alignItems:"baseline",gap:8,marginBottom:3}}>
-                <span style=${{fontSize:14,fontWeight:800,color:"var(--text)"}}>${m.label}</span>
-                ${m.score!==null&&!m.provisional&&html`<span style=${{fontSize:17,fontWeight:800,color:"var(--text)"}}>${m.score}</span>`}
-                ${m.score!==null&&m.provisional&&html`
-                  <span style=${{fontSize:11.5,color:"var(--sub)"}}>参考値 ${m.score}　測定範囲 ${Math.round((m.coverage||0)*100)}%</span>`}
-                <span style=${{marginLeft:"auto",fontSize:11.5,color:"var(--sub)"}}>${m.provisional?"データ蓄積中":view(m)}</span>
+          <!-- 5角形も詳細に置く（ホームと同じ見え方でそろえる） -->
+          <div style=${{display:"flex",justifyContent:"center",marginBottom:6}}>
+            <${SelfMgmtRadar} metrics=${M}/>
+          </div>
+
+          ${M.map(m=>{
+            // ★読みやすさ優先★ 二重かっこや機械的な表記をやめる。
+            //   「25（1日分（08-03 25））」のような読みにくい行が出ていた。
+            const daily = (m.components||[]).find(c=>c.label==="日ごとの平均");
+            const dayList = daily && daily.detail ? String(daily.detail).replace(/^\d+日分（/,"").replace(/）$/,"") : "";
+            const days = dayList ? dayList.split(" / ").map(x=>{
+              const p2 = x.trim().split(" ");
+              const md = (p2[0]||"").split("-");
+              return { d: md.length===2 ? (Number(md[0])+"/"+Number(md[1])) : p2[0], v: p2[1] };
+            }) : [];
+            const others = (m.components||[]).filter(c=>c.label!=="日ごとの平均"&&c.label!=="測れた日");
+            const measured = (m.components||[]).find(c=>c.label==="測れた日");
+            const barColor = m.score===null?"var(--border)":m.score>=80?"var(--green)":m.score>=65?"var(--accent)":m.score>=50?"var(--amber,#BA7517)":"var(--red,#d33)";
+            return html`
+            <div key=${m.key} style=${{background:"var(--card)",borderRadius:14,border:"1px solid var(--border)",padding:"14px 16px",marginBottom:10}}>
+              <div style=${{display:"flex",alignItems:"center",gap:8,marginBottom:2}}>
+                <span style=${{flex:1,minWidth:0,fontSize:14.5,fontWeight:800,color:"var(--text)"}}>${m.label}</span>
+                ${m.score!==null&&!m.provisional
+                  ? html`<span style=${{fontSize:20,fontWeight:800,color:"var(--text)",fontVariantNumeric:"tabular-nums"}}>${m.score}</span>`
+                  : html`<span style=${{fontSize:11.5,color:"var(--sub)"}}>${m.provisional?("参考 "+m.score):"—"}</span>`}
+                <span style=${{flexShrink:0,fontSize:11,color:"var(--sub)",background:"var(--bg)",borderRadius:20,padding:"2px 9px"}}>
+                  ${m.provisional?"データ蓄積中":view(m)}</span>
               </div>
               <div style=${{fontSize:11.5,color:"var(--sub)",lineHeight:1.7,marginBottom:9}}>${m.description}</div>
-              ${(m.components||[]).length>0&&html`
-                <div style=${{fontSize:11,fontWeight:700,color:"var(--sub)",marginBottom:5}}>主な内訳</div>
-                ${(m.components||[]).map((c,i)=>html`
-                  <div key=${i} style=${{display:"flex",alignItems:"center",gap:8,fontSize:11.5,lineHeight:1.9}}>
+              ${m.score!==null&&html`
+                <div style=${{height:7,background:"var(--bg)",borderRadius:99,overflow:"hidden",marginBottom:10}}>
+                  <div style=${{height:"100%",width:Math.max(0,Math.min(100,m.score))+"%",background:barColor,borderRadius:99}}/>
+                </div>`}
+              ${days.length>0&&html`
+                <div style=${{fontSize:11,fontWeight:700,color:"var(--sub)",marginBottom:5}}>日ごとの点数</div>
+                <div style=${{display:"flex",flexWrap:"wrap",gap:6,marginBottom:10}}>
+                  ${days.map((d,i)=>html`
+                    <span key=${i} style=${{fontSize:11,color:"var(--text)",background:"var(--bg)",borderRadius:8,padding:"4px 9px",whiteSpace:"nowrap"}}>
+                      ${d.d} <b style=${{fontVariantNumeric:"tabular-nums"}}>${d.v}</b></span>`)}
+                </div>`}
+              ${others.length>0&&html`
+                <div style=${{fontSize:11,fontWeight:700,color:"var(--sub)",marginBottom:5}}>内訳</div>
+                ${others.map((c,i)=>html`
+                  <div key=${i} style=${{display:"flex",alignItems:"baseline",gap:8,fontSize:11.5,lineHeight:1.9}}>
                     <span style=${{flex:1,minWidth:0,color:c.state==="evaluated"?"var(--text)":"var(--sub)"}}>${c.label}</span>
-                    <span style=${{flexShrink:0,color:"var(--sub)"}}>
-                      ${c.state==="evaluated" ? `${c.value}${c.detail?`（${c.detail}）`:""}` : "—"}</span>
-                  </div>`)}`}
+                    <span style=${{flexShrink:0,color:"var(--sub)",fontVariantNumeric:"tabular-nums"}}>
+                      ${c.state==="evaluated" ? c.value : "—"}</span>
+                  </div>
+                  ${c.detail&&c.state==="evaluated"&&html`<div key=${"d"+i} style=${{fontSize:10.5,color:"var(--sub)",opacity:0.85,marginTop:-2,marginBottom:3}}>${c.detail}</div>`}`)}`}
               ${m.incomplete_reason&&html`
                 <div style=${{fontSize:11,color:"var(--sub)",lineHeight:1.7,marginTop:7,paddingTop:7,borderTop:"1px solid var(--border)"}}>
                   ${m.incomplete_reason}</div>`}
-              <div style=${{fontSize:10.5,color:"var(--sub)",marginTop:7,lineHeight:1.7}}>
-                評価できた要素 ${Math.round((m.coverage||0)*100)}%（重みで計算）・確からしさ ${CONF[m.confidence]||m.confidence} ・件数 ${m.sample_count}
+              <div style=${{fontSize:10.5,color:"var(--sub)",marginTop:9,paddingTop:8,borderTop:"1px solid var(--border)",lineHeight:1.8}}>
+                ${measured&&measured.detail ? measured.detail.replace("記録のあった","うち記録のあった日 ")+"を平均" : "測れた範囲 "+Math.round((m.coverage||0)*100)+"%"}
+                ・確からしさ ${CONF[m.confidence]||m.confidence}
                 ${m.provisional?html`<br/><span style=${{color:"var(--amber,#BA7517)"}}>測れている要素が半分未満のため、参考値です。ホームには点数を出していません</span>`:""}
               </div>
               ${m.evaluation_state==="evaluated"&&html`
-                <div style=${{fontSize:11.5,color:"var(--text)",lineHeight:1.7,marginTop:7,background:"var(--bg)",borderRadius:9,padding:"8px 10px"}}>
+                <div style=${{fontSize:11.5,color:"var(--text)",lineHeight:1.7,marginTop:9,background:"var(--bg)",borderRadius:9,padding:"9px 11px"}}>
                   <b style=${{color:"var(--sub)",fontSize:10.5}}>改善のヒント</b><br/>${HINT[m.key]||""}</div>`}
-            </div>`)}
+            </div>`;})}
         </div>
       </div>`;
     })()}
@@ -7392,7 +7424,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260803-165645";
+const APP_BUILD = "20260803-190111";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
