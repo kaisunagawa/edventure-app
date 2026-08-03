@@ -3676,6 +3676,34 @@ function computeWeekLogDays(logs, nWeeks) {
 // レポートランキングの対象期間（日）。最新レポート日から7日以内に自分のレポートが
 // ある人だけがランキングに載る（止まっている人が分母に残り続けないように）
 const RANKING_WINDOW_DAYS = 7;
+// ★どの画面でも「その人の最新の点数」を同じルールで出す★（2026-08-04）
+//   ランキングは最新レポート日、共有欄は最新の新レポート…と別々に見ていたため、
+//   同じ瞬間に 73 と 66 が並んでいた。ここに一本化する。
+//   優先順位: 今日の新レポート → 直近の新レポート → 夜レポートの最新
+function latestScoreOf_(email, opsIndex, latestReportRow) {
+  const o = opsIndex && opsIndex[email];
+  if (o && o.score !== null && o.score !== undefined) {
+    const lrDate = latestReportRow ? String(latestReportRow.date).slice(0, 10) : "";
+    if (!lrDate || o.date >= lrDate) return { score: o.score, date: o.date, source: "daily_v2" };
+  }
+  if (latestReportRow) return { score: Number(latestReportRow.score) || 0,
+                                date: String(latestReportRow.date).slice(0, 10), source: "legacy" };
+  return o ? { score: o.score, date: o.date, source: "daily_v2" } : null;
+}
+// 全員分の「最新の新レポート点数」を1回で読む
+function opsLatestIndex_() {
+  const idx = {};
+  try {
+    sheetToObjects(getP1Sheet("DailyOpsReport")).forEach(function (o) {
+      const em = String(o.student_email || ""), d = String(o.report_date).slice(0, 10);
+      const v = String(o.operating_score || "").trim();
+      if (!em || !d || v === "") return;
+      if (!idx[em] || idx[em].date < d) idx[em] = { date: d, score: Number(v) };
+    });
+  } catch (e) {}
+  return idx;
+}
+
 function buildReportRankingSet(emailSet, allReports, windowDays) {
   const has = (emailSet && typeof emailSet.has === "function")
     ? function (e) { return emailSet.has(e); }
@@ -3696,25 +3724,15 @@ function buildReportRankingSet(emailSet, allReports, windowDays) {
   // ★確定した新レポートがある人は、その点数でランキングに載せる★（2026-08-03 Kaiの判断）
   //   画面に出ている点数と、ランキングの点数が違うのはおかしいため。
   //   まだ新レポートが無い人は、これまでどおり夜レポートの点数で比べる。
-  const opsFinal = {};
-  try {
-    sheetToObjects(getP1Sheet("DailyOpsReport")).forEach(function (o) {
-      const em = String(o.student_email || ""), d = String(o.report_date).slice(0, 10);
-      const v = String(o.operating_score || "").trim();
-      if (!em || !d || v === "") return;
-      if (!opsFinal[em] || opsFinal[em].date < d) opsFinal[em] = { date: d, score: Number(v) };
-    });
-  } catch (e) {}
+  const opsFinal = opsLatestIndex_();
   const scores = [];
   latestByEmail.forEach(function (r, email) {
     if (!(noWindow || r.date >= cutoff)) return;
-    const o = opsFinal[email];
-    const useOps = o && o.date === String(r.date).slice(0, 10);
-    scores.push({ email: email,
-      score: useOps ? o.score : (Number(r.score) || 0),
+    const v = latestScoreOf_(email, opsFinal, r);
+    scores.push({ email: email, score: v.score,
       // 同点のときだけ小数で比べる（画面に出すのは整数のまま）
-      precise: useOps ? o.score : (Number(r.score_precise) || Number(r.score) || 0),
-      source: useOps ? "daily_v2" : "legacy", date: r.date });
+      precise: v.source === "daily_v2" ? v.score : (Number(r.score_precise) || Number(r.score) || 0),
+      source: v.source, date: v.date });
   });
   scores.sort(function (a, b) { return (b.score - a.score) || (b.precise - a.precise); });
   return { latestDate: latestDate, cutoff: cutoff, scores: scores };
@@ -3764,14 +3782,21 @@ function getRanking(studentEmail) {
   let myOps = null;
   try {
     if (hasFeature(meU, OPS_FEATURE_KEY)) {
-      const day = payload.date || formatDate(new Date());
-      const fin = p1List("DailyOpsReport", studentEmail).find(function (r) {
-        return String(r.report_date).slice(0, 10) === day && String(r.finalized_at || "").trim(); });
-      if (fin && String(fin.operating_score || "").trim() !== "") myOps = Number(fin.operating_score);
-      else {
-        const f = computeDailyOpsFacts(studentEmail, day);
+      // 今日の分があれば今日、なければ直近の新レポート（他の画面と同じルール）
+      const today0 = formatDate(new Date());
+      const mine = p1List("DailyOpsReport", studentEmail);
+      const todayRow = mine.find(function (r) { return String(r.report_date).slice(0, 10) === today0; });
+      if (todayRow && String(todayRow.finalized_at || "").trim() &&
+          String(todayRow.operating_score || "").trim() !== "") {
+        myOps = Number(todayRow.operating_score);
+      } else {
+        const f = computeDailyOpsFacts(studentEmail, today0);
         const v = (f.operating_score !== null && f.operating_score !== undefined) ? f.operating_score : f.partial_score;
         if (v !== null && v !== undefined) myOps = v;
+        else {
+          const idx = opsLatestIndex_()[studentEmail];
+          if (idx) myOps = idx.score;
+        }
       }
     }
   } catch (e) {}
@@ -3829,20 +3854,10 @@ function getCommunity(studentEmail) {
   });
   // ★他の人から見える点数も、本人の画面と同じにする★（2026-08-03 Kai指摘）
   //   新しいレポートを使っている人は、その点数を使う
-  const opsLatest = {};
-  try {
-    sheetToObjects(getP1Sheet("DailyOpsReport")).forEach(function (o) {
-      const em = String(o.student_email || ""), dd = String(o.report_date).slice(0, 10);
-      const v = String(o.operating_score || "").trim();
-      if (!em || !dd || v === "") return;
-      if (!opsLatest[em] || opsLatest[em].date < dd) opsLatest[em] = { date: dd, score: Number(v) };
-    });
-  } catch (e) {}
+  const opsLatest = opsLatestIndex_();
   const reportScoreOf = function (email) {
-    const lr = latestReportByEmail.get(email);
-    const o = opsLatest[email];
-    if (o && (!lr || o.date >= String(lr.date).slice(0, 10))) return o.score;
-    return lr ? Number(lr.score) : null;
+    const v = latestScoreOf_(email, opsLatest, latestReportByEmail.get(email) || null);
+    return v ? v.score : null;
   };
 
   const list = users.map(u => {
