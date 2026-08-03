@@ -158,6 +158,33 @@ function doGet(e) {
           failureReason: em2 + " " + r.before + "->" + r.after + " freeze " + r.freeze_before + "->" + r.freeze_after });
         return jsonResponse({ ok: true, result: r });
       }
+      // 利用者1人の状態を読むだけの点検（ログイン・LINE連携・機能フラグ）
+      case "adminUserDiag": {
+        if (!verifyAdmin(e.parameter.coachEmail)) return jsonResponse({ ok: false, error: "not admin" });
+        const q = String(e.parameter.q || "").trim().toLowerCase();
+        if (!q) return jsonResponse({ ok: false, error: "no q" });
+        const users = sheetToObjects(getSheet("Users")).filter(function (u) {
+          return String(u.student_email || "").toLowerCase().indexOf(q) !== -1 ||
+                 String(u.name || "").toLowerCase().indexOf(q) !== -1 ||
+                 String(u.nickname || "").toLowerCase().indexOf(q) !== -1; });
+        const sess = sheetToObjects(getAuthSheet("Sessions"));
+        const now = Date.now();
+        return jsonResponse({ ok: true, found: users.length, users: users.slice(0, 60).map(function (u) {
+          const mine = sess.filter(function (x) { return String(x.user_id) === String(u.user_id); });
+          const live = mine.filter(function (x) {
+            return !String(x.revoked_at || "").trim() &&
+                   new Date(String(x.expires_at)).getTime() > now &&
+                   Number(x.token_version || 0) >= Number(u.token_version || 0); });
+          return { email: u.student_email, name: u.name, nickname: u.nickname,
+                   is_active: u.is_active, cohort: u.cohort || "",
+                   line_linked: !!String(u.line_user_id || "").trim(),
+                   features: String(u.features || ""),
+                   streak: u.streak, last_log_date: String(u.last_log_date || ""),
+                   sessions_total: mine.length, sessions_live: live.length,
+                   last_session_at: mine.length ? String(mine[mine.length - 1].created_at || "") : "",
+                   token_version: u.token_version || 0 };
+        }) });
+      }
       case "adminActualMinutesAudit":
         return jsonResponse(verifyAdmin(e.parameter.coachEmail)
           ? actualMinutesAudit() : { ok: false, error: "not admin" });
@@ -650,7 +677,7 @@ function doPost(e) {
           const rows = sheetToObjects(getSheet("Users"));
           // すでに連携済みなら何もしない
           if (rows.find(r => r.line_user_id === lineUserId)) return;
-          sendLineMessage(lineUserId, "🎉 追加ありがとうございます！\n\nまず、下のリンクからJIROKUアプリに登録してください👇\n" + APP_URL + "\n\n登録が完了したら、アプリの 設定 →「LINE連携」で連携コードを出して、このトークに送ってください。\n\n✅ 毎時間の記録リマインダー\n✅ 毎晩のAIレポート\nがこのLINEに届くようになります。");
+          sendLineMessage(lineUserId, "🎉 追加ありがとうございます！\n\nこのLINEで受け取れるようになるもの\n✅ 記録のリマインダー\n✅ 毎晩のAIレポート\n\n【つなぐ手順（30秒）】\n① 下のリンクを開く\n" + APP_URL + "?open=linelink\n② 出てきた「連携コードを出す」を押す\n③ 「コピーする」を押して、このトークに貼り付けて送る\n\n※ 送るのは「LINK 〜」の行ごとです。まだアプリに登録していない方は、リンク先でGoogleログインをしてから同じ手順でどうぞ。");
         }
 
         if (event.type === "message" && event.message.type === "text") {
@@ -682,12 +709,12 @@ function doPost(e) {
           // 連携はアプリ（認証済み）で発行したワンタイムトークンでのみ行う。
           if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(text)) {
             // 従来どおりメールを送ってきた人への案内（連携はしない）
-            sendLineMessage(lineUserId, "連携のやり方が新しくなりました🙏\n\nJIROKUアプリを開き、設定 →「LINE連携」で連携コードを出して、このトークに送ってください。\n\n" + APP_URL);
+            sendLineMessage(lineUserId, "連携のやり方が新しくなりました🙏\nメールアドレスではつながらなくなっています（他の人がなりすませてしまうため）。\n\n【いまの手順（30秒）】\n① 下のリンクを開く\n" + APP_URL + "?open=linelink\n② 「連携コードを出す」を押す\n③ 「コピーする」を押して、このトークに貼り付けて送る\n\n※ 送るのは「LINK 〜」の行ごとです。コードだけだとつながりません。");
             try { authAudit("LINE_LINK_BLOCKED", { result: "DENY", action: "lineWebhookLink",
                         failureReason: "email_link_disabled" }); } catch (e4) {}
           } else {
             // メール以外のメッセージ（雑談等）が送られた場合、無反応にせず連携方法を再案内する
-            sendLineMessage(lineUserId, "JIROKUと連携するには🙏\n\nアプリを開き、設定 →「LINE連携」で連携コードを出して、このトークに送ってください。\n\n" + APP_URL);
+            sendLineMessage(lineUserId, "JIROKUとつなぐには🙏\n\n① 下のリンクを開く\n" + APP_URL + "?open=linelink\n② 「連携コードを出す」を押す\n③ 「コピーする」を押して、このトークに貼り付けて送る\n\n※ 送るのは「LINK 〜」の行ごとです。コードだけだとつながりません。");
           }
         }
       });
@@ -11762,7 +11789,7 @@ const ADMIN_SECRET_ALLOWLIST = {
   // 一斉送信（Kaiの明示的な要望により残す）
   adminBroadcastLine:1, adminBroadcastLinePending:1, adminSendStudentCampaign:1,
   // セットアップ・保守
-  adminSetupTriggers:1, adminInstallTrigger:1, adminSetupPhase1:1, adminSetupAuth:1, adminPhase4DryRun:1, adminLegacyBackfill:1, adminWritePathStats:1, adminIssueTestSession:1, adminDropTestSessions:1, adminOpsSelfTest:1, adminActualMinutesAudit:1, adminXpCorrection:1, adminStreakRecalc:1, adminGrantFeature:1,
+  adminSetupTriggers:1, adminInstallTrigger:1, adminSetupPhase1:1, adminSetupAuth:1, adminPhase4DryRun:1, adminLegacyBackfill:1, adminWritePathStats:1, adminIssueTestSession:1, adminDropTestSessions:1, adminOpsSelfTest:1, adminActualMinutesAudit:1, adminXpCorrection:1, adminStreakRecalc:1, adminGrantFeature:1, adminUserDiag:1,
   authSetMode:1, authSetEnforce:1, authRoleApply:1, authRoleDryRun:1, authRevokeAll:1,
   authCleanupTestData:1, adminPurgeTestUsers:1, adminMigrateTasks:1, authBreakerReset:1, rotateSessionSecret:1,
   p1Backup:1, p1BackupInfo:1, p1PurgeArchived:1, weeklyBackup:1

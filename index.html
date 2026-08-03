@@ -6369,7 +6369,7 @@ function isServerCalendar() {
 //  目標などの入力欄からフォーカスが外れて「引っ込む」原因になっていた）
 function SettingsSec({k, icon, title, sub, open, onToggle, children}) {
   return html`
-    <div class="card" style=${{padding:0,marginBottom:10,overflow:"hidden"}}>
+    <div id=${"sec-"+k} class="card" style=${{padding:0,marginBottom:10,overflow:"hidden"}}>
       <button onClick=${onToggle}
         style=${{display:"flex",alignItems:"center",gap:10,width:"100%",background:"none",border:"none",padding:"15px 16px",cursor:"pointer",fontFamily:"inherit",textAlign:"left"}}>
         <span style=${{fontSize:16,flexShrink:0}}>${icon}</span>
@@ -6381,7 +6381,7 @@ function SettingsSec({k, icon, title, sub, open, onToggle, children}) {
     </div>`;
 }
 
-function SettingsScreen({onToast,onLogout,onGoalSaved,profile,onProfileSaved,onCalLinked}) {
+function SettingsScreen({onToast,onLogout,onGoalSaved,profile,onProfileSaved,onCalLinked,jumpTo,onJumped}) {
   const [nickname,setNickname]=useState(profile?.nickname||CURRENT_USER.name);
   const [avatar,setAvatar]=useState(profile?.avatar||"🦊");
   const [showAllAvatars,setShowAllAvatars]=useState(false);
@@ -6576,6 +6576,10 @@ function SettingsScreen({onToast,onLogout,onGoalSaved,profile,onProfileSaved,onC
   // モジュール外コンポーネント SettingsSec を使う（下の各セクションで直接呼ぶ）
   const [openSec,setOpenSec]=useState("");
   const [linkTick,setLinkTick]=useState(0);   // 連携完了で画面を描き直すための印
+  // ホームのバナーや、LINEのメッセージのリンク（?open=linelink）から来たときは、
+  // その場でLINE連携の欄を開いて、そこまでスクロールする
+  useEffect(()=>{ if(jumpTo){ setOpenSec(jumpTo); onJumped&&onJumped();
+    setTimeout(()=>{ try{ const el=document.getElementById("sec-"+jumpTo); if(el) el.scrollIntoView({behavior:"smooth",block:"start"}); }catch(e){} }, 250); } },[jumpTo]);
   const [showGoalTree,setShowGoalTree]=useState(false); // 目標階層（段階公開）
 
   return html`<div style=${{paddingBottom:48}}>
@@ -7069,7 +7073,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260803-105504";
+const APP_BUILD = "20260803-110501";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
@@ -8420,7 +8424,10 @@ function App() {
     } catch(e){}
     return null;
   };
-  const [settingsJump,setSettingsJump]=useState("");
+  // LINEのメッセージから「?open=linelink」で来た人を、そのままLINE連携の欄へ運ぶ
+  const [settingsJump,setSettingsJump]=useState(()=>{
+    try{ const v=new URLSearchParams(location.search).get("open"); return v==="linelink" ? "linelink" : ""; }catch(e){ return ""; }
+  });
   const [calLinked,setCalLinked]=useState(!!localStorage.getItem("cal_linked"));
   const [calBannerDismissed,setCalBannerDismissed]=useState(false);
   const [showTutorial,setShowTutorial]=useState(!localStorage.getItem("tutorial_seen"));
