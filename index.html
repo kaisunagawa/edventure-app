@@ -6587,6 +6587,97 @@ function SettingsSec({k, icon, title, sub, open, onToggle, children}) {
     </div>`;
 }
 
+
+// ★1日に使える時間と、休む日（B8〜B10）★
+//   会社でいう資金繰り。使える時間が分からないと「詰め込みすぎ」を判定できない。
+//   曜日ごとの既定を決めておき、その日だけ変えたいときは今日の設定で上書きする。
+function AvailableTimeSection({onToast}) {
+  const DAYS = [["mon","月"],["tue","火"],["wed","水"],["thu","木"],["fri","金"],["sat","土"],["sun","日"]];
+  const todayKey2 = formatDateStr(new Date());
+  const [wk, setWk] = useState(null);          // 曜日ごとの既定（分）
+  const [day, setDay] = useState(null);        // 今日の設定
+  const [busy, setBusy] = useState(false);
+  useEffect(()=>{ (async()=>{
+    const r = await authedPost("getDayPlan", { date: todayKey2 });
+    if (r && r.ok && r.data) {
+      setWk(r.data.weekly_available_minutes || {});
+      setDay({ day_type: r.data.day_type || "NORMAL", available_minutes: r.data.available_minutes,
+               resolved: r.data.resolved });
+    } else { setWk({}); setDay({ day_type:"NORMAL", available_minutes:null }); }
+  })(); },[]);
+  if (wk === null) return html`<div style=${{fontSize:12.5,color:"var(--sub)"}}>読み込み中…</div>`;
+
+  const hh = (m) => m === null || m === undefined || m === "" ? "未設定"
+                    : (Math.floor(m/60) + "時間" + (m%60 ? (m%60)+"分" : ""));
+  const saveWeek = async (next) => {
+    setWk(next); setBusy(true);
+    const r = await authedPost("saveWeeklyAvailable", { weekly_available_minutes: JSON.stringify(next) });
+    setBusy(false);
+    if (!r || !r.ok) onToast && onToast("保存できませんでした");
+  };
+  const saveDay = async (patch) => {
+    const next = { ...day, ...patch };
+    setDay(next); setBusy(true);
+    const r = await authedPost("saveDayPlan", { date: todayKey2, day_type: next.day_type,
+      available_minutes: next.available_minutes === null ? "" : next.available_minutes });
+    setBusy(false);
+    if (r && r.ok && r.data) setDay({ ...next, resolved: r.data.resolved });
+    else onToast && onToast("保存できませんでした");
+  };
+
+  return html`
+    <div style=${{fontSize:12,color:"var(--sub)",lineHeight:1.8,marginBottom:12}}>
+      その日に「仕事や勉強へ回せる時間」の目安です。決めておくと、
+      予定を詰め込みすぎていないかが分かります。休む日は休む日として記録できます。
+    </div>
+
+    <div style=${{fontSize:12,fontWeight:700,color:"var(--text)",marginBottom:8}}>曜日ごとの目安</div>
+    ${DAYS.map(([k,lb])=>{
+      const cur = wk[k];
+      return html`<div key=${k} style=${{display:"flex",alignItems:"center",gap:8,marginBottom:7}}>
+        <span style=${{width:22,fontSize:12.5,color:"var(--text)",fontWeight:600}}>${lb}</span>
+        <div style=${{display:"flex",gap:5,flexWrap:"wrap",flex:1}}>
+          ${[0,120,240,360,480,600].map(m=>{
+            const on = cur === m;
+            return html`<button key=${m} disabled=${busy} onClick=${()=>{ const nx={...wk}; if(on) delete nx[k]; else nx[k]=m; saveWeek(nx); }}
+              style=${{padding:"5px 9px",borderRadius:20,fontSize:11,cursor:"pointer",fontFamily:"inherit",
+                       border:`1px solid ${on?"var(--accent)":"var(--border)"}`,
+                       background:on?"var(--accent-l)":"transparent",color:on?"var(--accent)":"var(--sub)",
+                       fontWeight:on?700:500}}>${m===0?"休み":(m/60)+"h"}</button>`;
+          })}
+        </div>
+      </div>`;
+    })}
+    <div style=${{fontSize:11,color:"var(--sub)",lineHeight:1.7,margin:"4px 0 16px"}}>
+      押すと設定、もう一度押すと未設定に戻ります。未設定の曜日は判定しません（勝手に8時間とみなしたりはしません）。
+    </div>
+
+    <div style=${{fontSize:12,fontWeight:700,color:"var(--text)",marginBottom:8}}>今日（${todayKey2}）</div>
+    <div style=${{display:"flex",gap:6,marginBottom:10}}>
+      ${[["NORMAL","ふつうの日"],["REST","休む日"],["ADJUSTED","調整した日"]].map(([v,lb])=>{
+        const on = (day && day.day_type) === v;
+        return html`<button key=${v} disabled=${busy} onClick=${()=>saveDay({day_type:v})}
+          style=${{flex:1,padding:"9px 4px",borderRadius:10,fontSize:12,cursor:"pointer",fontFamily:"inherit",
+                   border:`1.5px solid ${on?"var(--accent)":"var(--border)"}`,
+                   background:on?"var(--accent-l)":"transparent",color:on?"var(--accent)":"var(--sub)",
+                   fontWeight:on?700:500}}>${lb}</button>`;
+      })}
+    </div>
+    <div style=${{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
+      <input class="inp" type="number" inputmode="numeric" placeholder="例：300"
+        value=${day && day.available_minutes !== null && day.available_minutes !== undefined ? day.available_minutes : ""}
+        onInput=${e=>{ const v=e.target.value; setDay({...day, available_minutes: v===""?null:Number(v)}); }}
+        onBlur=${()=>saveDay({})} style=${{width:110,margin:0,textAlign:"center"}}/>
+      <span style=${{fontSize:12.5,color:"var(--sub)"}}>分（今日だけ変えたいとき）</span>
+    </div>
+    <div style=${{fontSize:11.5,color:"var(--sub)",lineHeight:1.8}}>
+      いま使う値：<b style=${{color:"var(--text)"}}>${day && day.resolved ? hh(day.resolved.minutes) : "未設定"}</b>
+      ${day && day.resolved && day.resolved.source==="WEEKDAY_DEFAULT" ? "（曜日の目安から）" : ""}
+      ${day && day.resolved && day.resolved.source==="DAY_PLAN" ? "（今日の設定）" : ""}
+      <br/>変更した記録は残ります（あとから休む日に変えて評価を避けられないようにするため）。
+    </div>`;
+}
+
 function SettingsScreen({onToast,onLogout,onGoalSaved,profile,onProfileSaved,onCalLinked,jumpTo,onJumped}) {
   const [nickname,setNickname]=useState(profile?.nickname||CURRENT_USER.name);
   const [avatar,setAvatar]=useState(profile?.avatar||"🦊");
@@ -6874,6 +6965,11 @@ function SettingsScreen({onToast,onLogout,onGoalSaved,profile,onProfileSaved,onC
         </div>
         <button class="btn" onClick=${()=>setShowGoalTree(true)}>目標を設定する</button>
       <//>`}
+
+      <!-- 1日に使える時間・休む日 -->
+      <${SettingsSec} k="capacity" icon="🕰" title="1日に使える時間" open=${openSec==="capacity"} onToggle=${()=>setOpenSec(openSec==="capacity"?"":"capacity")}>
+        <${AvailableTimeSection} onToast=${onToast}/>
+      <//>
 
       <!-- タイマー -->
       <${SettingsSec} k="timer" icon="⏱" title="タイマー設定" open=${openSec==="timer"} onToggle=${()=>setOpenSec(openSec==="timer"?"":"timer")}>
@@ -7282,7 +7378,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260803-162724";
+const APP_BUILD = "20260803-163421";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 

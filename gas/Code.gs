@@ -1629,12 +1629,52 @@ function computeDailyOpsFacts(studentEmail, dateStr, fixture) {
                                  { required: ["予定したタスクの実行"] }));
   })();
 
-  // ── 時間の使い方（20）── 5分類が入るまで算出しない ──────
-  items.push(rollOps("time_use", "時間の使い方", OPS_WEIGHTS.time_use, [
-    na("集中できた時間", 1, "時間の使い方を分類する機能を準備しています", "TIME_CLASSIFICATION_UNAVAILABLE"),
-    na("目標に向けた時間", 1, "時間の使い方を分類する機能を準備しています", "TIME_CLASSIFICATION_UNAVAILABLE"),
-    na("こま切れになった時間", 1, "時間の使い方を分類する機能を準備しています", "TIME_CLASSIFICATION_UNAVAILABLE")
-  ]));
+  // ── 時間の使い方（20）→ 週次の「時間配分力」につながる ──────
+  //   会社でいう「人・お金・設備をどこへ配ったか」。
+  //   5分類がそろっていない間は、時間帯と「目標に関連」からの推定で出す。
+  //   分類が半分以上たまったら、推定ではなく分類の実績に切り替わる。
+  (function () {
+    const mins = function (l) {
+      const am = Number(l.actual_minutes);
+      return am > 0 ? am : timeBlockMinutes(l.time_block);
+    };
+    const total = logs.reduce(function (a, l) { return a + mins(l); }, 0);
+    const parts = [];
+    if (total > 0) {
+      const clsMin = {};
+      let classified = 0;
+      logs.forEach(function (l) {
+        const c = String(l.time_classification || "");
+        if (!c) return;
+        clsMin[c] = (clsMin[c] || 0) + mins(l);
+        classified += mins(l);
+      });
+      const byClass = (classified / total) >= 0.5;
+      const goalMin = byClass ? (clsMin.GOAL_DIRECT || 0)
+        : logs.filter(function (l) { return String(l.goal_related) === "true" || l.goal_related === true; })
+              .reduce(function (a, l) { return a + mins(l); }, 0);
+      const h = function (m) { return (Math.round(m / 60 * 10) / 10) + "時間"; };
+      parts.push({ label: "目標に向けた時間", weight: 2, sample: logs.length, state: "evaluated",
+                   value: Math.round(goalMin / total * 100),
+                   detail: h(goalMin) + " / " + h(total) + (byClass ? "（分類から）" : "（時間帯からの推定）") });
+      const focusMin = logs.filter(function (l) { return (parseInt(l.focus_level, 10) || 0) >= 4; })
+                           .reduce(function (a, l) { return a + mins(l); }, 0);
+      parts.push({ label: "集中できた時間", weight: 1, sample: logs.length, state: "evaluated",
+                   value: Math.round(focusMin / total * 100), detail: h(focusMin) + " / " + h(total) });
+      if (byClass) {
+        // 計画外に流れた時間が少ないほど良い
+        const leak = clsMin.UNPLANNED_LEAKAGE || 0;
+        parts.push({ label: "計画外に流れた時間の少なさ", weight: 1, sample: logs.length, state: "evaluated",
+                     value: Math.max(0, Math.round((1 - leak / total) * 100)), detail: h(leak) });
+      } else {
+        parts.push(na("5分類での配分", 1, "記録の半分以上を分類すると、ここも見られます", "TIME_CLASSIFICATION_PARTIAL"));
+      }
+    } else {
+      parts.push(na("目標に向けた時間", 2, "今日の記録がまだありません", "NO_RECORDS_TODAY", NO_CHANCE));
+      parts.push(na("集中できた時間", 1, "今日の記録がまだありません", "NO_RECORDS_TODAY", NO_CHANCE));
+    }
+    items.push(rollOps("time_use", "時間の使い方", OPS_WEIGHTS.time_use, parts));
+  })();
 
   // ── 続けられる運営（20）─────────────────────────
   //   長く働くほど高得点にしない。休息を減点しない。
@@ -1642,12 +1682,39 @@ function computeDailyOpsFacts(studentEmail, dateStr, fixture) {
   (function () {
     const planned = tasks.reduce(function (a, t) { return a + (Number(t.estimated_minutes) || 0); }, 0);
     const carried = tasks.filter(function (t) { return normalizeTaskStatus(t.status) === "CARRIED_OVER"; }).length;
-    const parts = [
-      na("予定を詰め込みすぎていないか", 1, "1日に使える時間の設定がないため判定できません", "AVAILABLE_TIME_MISSING"),
-      na("日によるムラ", 1, "実績時間の記録が十分でないため判定できません", "ACTUAL_MINUTES_COVERAGE_LOW"),
-      na("休む時間があったか", 1, "休息や回復を分類する機能を準備しています", "TIME_CLASSIFICATION_UNAVAILABLE"),
-      na("明日に残る量", 1, "残った作業量を見積もる情報が足りません", "REMAINING_LOAD_UNAVAILABLE")
-    ];
+    // 会社でいう「資金繰り」。使える時間に対して、詰め込みすぎていないか。
+    const avail = fx ? (fx.available || { minutes: null, state: "insufficient_data" })
+                     : resolveAvailableMinutes(studentEmail, date);
+    const parts = [];
+    if (avail && avail.minutes > 0) {
+      // 使える時間の8割までを「無理のない範囲」とする。超えるほど下がる
+      const ratio = planned / avail.minutes;
+      const okRatio = ratio <= 0.8 ? 100 : Math.max(0, Math.round((1 - (ratio - 0.8) / 0.8) * 100));
+      parts.push({ label: "予定を詰め込みすぎていないか", weight: 2, sample: tasks.length, state: "evaluated",
+                   value: planned > 0 ? okRatio : 100,
+                   detail: "予定" + planned + "分 / 使える" + avail.minutes + "分" });
+      const carriedMin = tasks.filter(function (t) { return normalizeTaskStatus(t.status) === "CARRIED_OVER"; })
+                              .reduce(function (a, t) { return a + (Number(t.estimated_minutes) || 0); }, 0);
+      parts.push({ label: "明日に残る量", weight: 1, sample: tasks.length, state: "evaluated",
+                   value: Math.max(0, Math.round((1 - carriedMin / avail.minutes) * 100)),
+                   detail: "持ち越し" + carriedMin + "分" });
+    } else {
+      parts.push(na("予定を詰め込みすぎていないか", 2, "1日に使える時間を設定すると見られます", "AVAILABLE_TIME_MISSING"));
+      parts.push(na("明日に残る量", 1, "1日に使える時間を設定すると見られます", "AVAILABLE_TIME_MISSING"));
+    }
+    // 休む時間。分類（回復・人間関係）か、休みと決めた日かで見る
+    const restMin = logs.filter(function (l) { return String(l.time_classification) === "RECOVERY_RELATIONSHIP"; })
+                        .reduce(function (a, l) { const am = Number(l.actual_minutes);
+                          return a + (am > 0 ? am : timeBlockMinutes(l.time_block)); }, 0);
+    const isRest = (avail && avail.day_type === "REST") || restDay;
+    if (restMin > 0 || isRest) {
+      parts.push({ label: "休む時間があったか", weight: 1, sample: logs.length, state: "evaluated",
+                   value: isRest ? 100 : Math.min(100, Math.round(restMin / 60 * 100)),
+                   detail: isRest ? "休む日として計画" : (restMin + "分") });
+    } else {
+      parts.push(na("休む時間があったか", 1, "回復・人間関係に分類した記録があると見られます", "NO_RECOVERY_LOG"));
+    }
+    parts.push(na("日によるムラ", 1, "実績時間の記録が十分でないため判定できません", "ACTUAL_MINUTES_COVERAGE_LOW"));
     const r = rollOps("sustainability", "無理なく続ける", OPS_WEIGHTS.sustainability, parts);
     // 参考事実（点数には使わない）
     r.reference_facts = [];
