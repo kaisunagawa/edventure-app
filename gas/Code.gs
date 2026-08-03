@@ -3794,6 +3794,23 @@ function getCommunity(studentEmail) {
     const cur = latestReportByEmail.get(r.student_email);
     if (!cur || r.date > cur.date) latestReportByEmail.set(r.student_email, r);
   });
+  // ★他の人から見える点数も、本人の画面と同じにする★（2026-08-03 Kai指摘）
+  //   新しいレポートを使っている人は、その点数を使う
+  const opsLatest = {};
+  try {
+    sheetToObjects(getP1Sheet("DailyOpsReport")).forEach(function (o) {
+      const em = String(o.student_email || ""), dd = String(o.report_date).slice(0, 10);
+      const v = String(o.operating_score || "").trim();
+      if (!em || !dd || v === "") return;
+      if (!opsLatest[em] || opsLatest[em].date < dd) opsLatest[em] = { date: dd, score: Number(v) };
+    });
+  } catch (e) {}
+  const reportScoreOf = function (email) {
+    const lr = latestReportByEmail.get(email);
+    const o = opsLatest[email];
+    if (o && (!lr || o.date >= String(lr.date).slice(0, 10))) return o.score;
+    return lr ? Number(lr.score) : null;
+  };
 
   const list = users.map(u => {
     const isMe = u.student_email === studentEmail;
@@ -3805,7 +3822,7 @@ function getCommunity(studentEmail) {
       avatar: maskAvatar(u, isMe),
       streak: Number(u.streak || 0),
       score: status ? status.score : 0,
-      reportScore: latestReport ? Number(latestReport.score) : null
+      reportScore: reportScoreOf(u.student_email)
     };
   }).sort((a, b) => b.score - a.score);
 

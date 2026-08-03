@@ -5,7 +5,7 @@
 // ★v10★ 2026-08-01: 通信をPOSTのJSON本文へ統一（URLにトークンを載せない）。
 // 古いフロントがキャッシュに残っていると、URLへトークンを載せる旧コードが
 // 動き続けてしまう。版を上げて確実に入れ替える。
-const CACHE = "jiroku-v11-taskid";
+const CACHE = "jiroku-v12-shell-split";
 
 // タイマー終了などをバックグラウンドでも通知するためのFirebase Cloud Messaging。
 // 別ファイル（firebase-messaging-sw.js）として登録すると、同じスコープ('/')の
@@ -84,12 +84,17 @@ self.addEventListener('fetch', e => {
   if (e.request.mode === 'navigate') {
     e.respondWith((async () => {
       const cache = await caches.open(CACHE);
+      // ★画面ごとに分けて持つ★
+      //   以前は本体もコーチ画面も 'app-shell' という同じ名前で1つだけ持っていた。
+      //   コーチ画面を開くと本体のキャッシュが置き換わり、通信が遅いときに
+      //   別の画面が返って「開かない・回り続ける」ことがあった（2026-08-03）。
+      const shellKey = url.pathname.indexOf('/coach') !== -1 ? 'app-shell-coach' : 'app-shell';
       try {
         const res = await fetchWithTimeout(e.request, 2500);
-        if (res.ok) cache.put('app-shell', res.clone());
+        if (res.ok) cache.put(shellKey, res.clone());
         return res;
       } catch {
-        const cached = await cache.match('app-shell');
+        const cached = await cache.match(shellKey);
         if (cached) return cached;
         return fetch(e.request);
       }
