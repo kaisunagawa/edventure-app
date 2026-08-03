@@ -3224,26 +3224,41 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
     ${detailTask!==null && ReactDOM.createPortal((()=>{
       const t=detailTask, st=statusOf(t);
       const STS=[["todo","予定","📋"],["doing","実行中","🔥"],["done","完了","✅"]];
-      return html`<div style=${{position:"fixed",inset:0,height:"100dvh",background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"flex-end",justifyContent:"center",zIndex:600}}
-        onClick=${e=>{if(e.target===e.currentTarget)setDetailTask(null);}}>
-        <div style=${{background:"var(--card)",width:"100%",maxWidth:520,borderRadius:"20px 20px 0 0",padding:"18px 20px calc(20px + env(safe-area-inset-bottom))",maxHeight:"88dvh",overflowY:"auto"}}>
-          <div style=${{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
-            <span style=${{fontSize:11,fontWeight:700,color:"var(--sub)"}}>タスクの詳細</span>
-            <button onClick=${()=>setDetailTask(null)} style=${{background:"none",border:"none",fontSize:22,color:"var(--sub)",cursor:"pointer",lineHeight:1}}>×</button>
+      // Sprintの設定画面と同じ作りにそろえる（全画面・区切りのあるカード）。
+      // ぎゅうぎゅうの吹き出しだと、項目が多いタスク詳細は読みにくかった。
+      const Sec = (title, sub, body) => html`
+        <div style=${{background:"var(--card)",border:"1px solid var(--border)",borderRadius:14,padding:"14px 16px",marginBottom:12}}>
+          <div style=${{fontSize:12.5,fontWeight:800,color:"var(--text)",marginBottom:sub?2:10}}>${title}</div>
+          ${sub&&html`<div style=${{fontSize:11,color:"var(--sub)",lineHeight:1.7,marginBottom:10}}>${sub}</div>`}
+          ${body}
+        </div>`;
+      return html`<div style=${{position:"fixed",inset:0,height:"100dvh",background:"var(--bg)",display:"flex",flexDirection:"column",zIndex:600}}>
+        <div style=${{display:"flex",alignItems:"center",gap:10,padding:"14px 16px 10px",flexShrink:0,paddingTop:"calc(14px + var(--safe-top, 0px))"}}>
+          <button onClick=${()=>setDetailTask(null)} aria-label="閉じる"
+            style=${{background:"none",border:"none",color:"var(--sub)",fontSize:22,cursor:"pointer",lineHeight:1,padding:"0 4px"}}>×</button>
+          <div style=${{flex:1,textAlign:"center",fontSize:11.5,fontWeight:700,color:"var(--sub)"}}>タスクの詳細</div>
+          <span style=${{width:26,flexShrink:0}}></span>
+        </div>
+        <div style=${{flex:1,minHeight:0,overflowY:"auto",WebkitOverflowScrolling:"touch",padding:"0 16px calc(24px + var(--safe-bottom, 0px))"}}>
+          <div style=${{fontSize:20,fontWeight:800,color:"var(--text)",lineHeight:1.45,margin:"2px 0 6px",overflowWrap:"anywhere"}}>${t}</div>
+          <div style=${{fontSize:11.5,color:"var(--sub)",lineHeight:1.7,marginBottom:14}}>
+            ${(()=>{ const q=quadrantOf(t); const L=taskLabel(q.importance,q.urgency);
+              const est=estOf(t)>0?("想定 "+estOf(t)+"分"):"時間は未入力";
+              return (L?L.icon+" "+L.label+" ・ ":"") + est + (dueOf(t)?" ・ 期限 "+dueLabel(dueOf(t), q.overdue):"");
+            })()}
           </div>
-          <div style=${{fontSize:19,fontWeight:800,color:"var(--text)",lineHeight:1.4,marginBottom:16,overflowWrap:"anywhere"}}>${t}</div>
 
-          <label class="form-lbl">状態</label>
+          ${Sec("いまの状態", "", html`
           <div style=${{display:"flex",gap:8,marginBottom:16}}>
             ${STS.map(([k,lb,em])=>{
               const on=st===k;
               return html`<button key=${k} onClick=${()=>setStatus(t,k)}
                 style=${{flex:1,padding:"10px 4px",borderRadius:10,border:`1.5px solid ${on?"var(--accent)":"var(--border)"}`,background:on?"var(--accent-l)":"transparent",color:on?"var(--accent)":"var(--sub)",fontSize:12.5,fontWeight:on?700:500,cursor:"pointer",fontFamily:"inherit"}}>${em} ${lb}</button>`;
             })}
-          </div>
+          </div>`)}
 
-          <label class="form-lbl">重要度</label>
-          <div style=${{display:"flex",gap:6,marginBottom:16}}>
+          ${Sec("大事さと期限", "重要度と期限から「今すぐ」「重要」などが自動で決まります", html`
+          <div style=${{display:"flex",gap:6,marginBottom:12}}>
             ${[["HIGH","高"],["MEDIUM","中"],["LOW","低"]].map(([v,lb])=>{
               const ik = idOfTitle(t);
               const cur = (ik && taskImportance[ik]) || taskImportance[t];
@@ -3257,33 +3272,32 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
                          opacity:(on&&!set)?0.65:1}}>${lb}</button>`;
             })}
           </div>
-          ${!((idOfTitle(t)&&taskImportance[idOfTitle(t)])||taskImportance[t]) && html`<div style=${{fontSize:11.5,color:"var(--sub)",marginTop:-12,marginBottom:14}}>
+          ${!((idOfTitle(t)&&taskImportance[idOfTitle(t)])||taskImportance[t]) && html`<div style=${{fontSize:11.5,color:"var(--sub)",marginTop:-6,marginBottom:12}}>
             まだ決めていないので「中」として扱っています。押すと確定します。</div>`}
-
-          <label class="form-lbl">期限</label>
           <div style=${{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
             <input class="inp" type="date" value=${dueOf(t)}
               onInput=${e=>setTaskDueAt(t, e.target.value)} style=${{width:170,margin:0}}/>
             ${dueOf(t) && html`<button onClick=${()=>setTaskDueAt(t,"")}
               style=${{background:"none",border:"none",color:"var(--sub)",fontSize:12.5,cursor:"pointer",fontFamily:"inherit"}}>期限なしに戻す</button>`}
           </div>
-          <div style=${{fontSize:11.5,color:"var(--sub)",marginBottom:16,lineHeight:1.8}}>
+          <div style=${{fontSize:11.5,color:"var(--sub)",lineHeight:1.8}}>
             ${(()=>{ const q=quadrantOf(t); const L=taskLabel(q.importance,q.urgency);
-              if(!L) return html`いまの分類：<b style=${{color:"var(--text)"}}>ふつう</b>（急ぎでも最重要でもない）<br/>
-                緊急度は期限から自動で決まります。`;
-              return html`いまの分類：<b style=${{color:L.color}}>${L.icon} ${L.label}</b>（${L.hint}）<br/>
-                緊急度は期限から自動で決まります。`; })()}
-          </div>
+              if(!L) return html`いまの分類：<b style=${{color:"var(--text)"}}>ふつう</b>（急ぎでも最重要でもない）`;
+              return html`いまの分類：<b style=${{color:L.color}}>${L.icon} ${L.label}</b>（${L.hint}）`; })()}
+          </div>`)}
 
-          <label class="form-lbl">想定時間（分）</label>
-          <div style=${{display:"flex",alignItems:"center",gap:8,marginBottom:16}}>
+          ${Sec("かかる時間", "タイマーはこの時間で始まります", html`
+          <div style=${{display:"flex",alignItems:"center",gap:8}}>
             <input class="inp" type="number" inputmode="numeric" value=${estOf(t)} placeholder="例：25"
               onInput=${e=>setTaskTime(t, e.target.value)} style=${{width:110,margin:0,textAlign:"center"}}/>
-            <span style=${{fontSize:12.5,color:"var(--sub)"}}>分（タイマーがこの時間で始まります）</span>
-          </div>
+            <span style=${{fontSize:12.5,color:"var(--sub)"}}>分</span>
+            ${[15,25,45,60].map(m=>html`<button key=${m} onClick=${()=>setTaskTime(t, String(m))}
+              style=${{padding:"6px 10px",borderRadius:20,fontSize:11.5,cursor:"pointer",fontFamily:"inherit",
+                       border:"1px solid var(--border)",background:"transparent",color:"var(--sub)"}}>${m}分</button>`)}
+          </div>`)}
 
-          <label class="form-lbl">分類（仕事/プライベート）</label>
-          <div style=${{display:"flex",gap:6,flexWrap:"wrap",marginBottom:16}}>
+          ${Sec("仕分け", "仕事とプライベートを分けると、今日のタスクで絞り込めます", html`
+          <div style=${{display:"flex",gap:6,flexWrap:"wrap"}}>
             ${[["UNSET","未設定"],["WORK","仕事"],["PERSONAL","プライベート"],["LEARNING","学び"],["HEALTH","健康"],["OTHER","その他"]].map(([v,lb])=>{
               const ck2 = idOfTitle(t);
               const cur = (ck2 && taskContext[ck2]) || taskContext[t] || "UNSET";
@@ -3294,10 +3308,9 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
                          background:on?"var(--accent-l)":"transparent",
                          color:on?"var(--accent)":"var(--sub)",fontWeight:on?700:500}}>${lb}</button>`;
             })}
-          </div>
+          </div>`)}
 
-          ${st!=="done"&&html`
-            <label class="form-lbl">持ち越し</label>
+          ${st!=="done"&&Sec("持ち越し", "終わらなかったときは、同じタスクの日付を移せます（複製しません）", html`<div>
             ${(()=>{ const cid=idOfTitle(t); const cnt=Number((cid&&taskCarry[cid])||0);
               return cnt>0 ? html`<div style=${{fontSize:11.5,color:"var(--sub)",marginBottom:6}}>これまでに${cnt}回持ち越しています</div>` : ""; })()}
             ${carryPick===null ? html`
@@ -3324,21 +3337,24 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
                     style=${{flex:1,padding:"10px 4px",borderRadius:10,border:"1.5px solid var(--border)",background:"transparent",color:"var(--sub)",fontSize:12.5,cursor:"pointer",fontFamily:"inherit"}}>やめる</button>
                 </div>
               </div>`}
-          `}
+          </div>`)}
 
-          <label class="form-lbl">メモ</label>
+          ${Sec("メモ", "", html`
           <textarea class="inp" placeholder="このタスクのメモ・詳細・持ち物など" value=${taskNotes[idOfTitle(t)]||taskNotes[t]||""}
             onInput=${e=>setTaskNote(t, e.target.value)}
-            style=${{minHeight:90,resize:"vertical",lineHeight:1.6,fontFamily:"inherit",marginBottom:16}}/>
+            style=${{minHeight:90,resize:"vertical",lineHeight:1.6,fontFamily:"inherit",margin:0}}/>`)}
 
           <!-- ★保存ボタン★ 各項目は変えた時点で保存されているが、
                「押して確定した」という手応えが無いと不安になる、という声を受けて置く。
                押すと未送信ぶんをすぐ送って閉じる。 -->
-          <button class="btn" style=${{marginBottom:10}} onClick=${()=>{ flushTaskQueue(); setDetailTask(null); }}>保存する</button>
           ${st!=="done"&&html`<button onClick=${()=>{ goToTimerWith(t); setDetailTask(null); }}
-            style=${{width:"100%",padding:"11px",marginBottom:10,background:"none",border:"1.5px solid var(--accent)",borderRadius:10,color:"var(--accent)",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>⏱ タイマーで計測する</button>`}
+            style=${{width:"100%",padding:"12px",marginBottom:10,background:"none",border:"1.5px solid var(--accent)",borderRadius:10,color:"var(--accent)",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>⏱ タイマーで計測する</button>`}
           <button onClick=${()=>{ if(confirm("このタスクを削除しますか？")) deleteTask(t); }}
-            style=${{width:"100%",padding:"11px",background:"none",border:"1.5px solid var(--border)",borderRadius:10,color:"var(--red,#d33)",fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>削除する</button>
+            style=${{width:"100%",padding:"12px",marginBottom:14,background:"none",border:"1.5px solid var(--border)",borderRadius:10,color:"var(--red,#d33)",fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>削除する</button>
+        </div>
+        <!-- 保存は下に固定する（項目が多いので、下まで探しに行かなくていいように） -->
+        <div style=${{flexShrink:0,padding:"10px 16px calc(12px + var(--safe-bottom, 0px))",borderTop:"1px solid var(--border)",background:"var(--card)"}}>
+          <button class="btn" style=${{margin:0}} onClick=${()=>{ flushTaskQueue(); setDetailTask(null); }}>保存する</button>
         </div>
       </div>`;
     })(), document.body)}
@@ -7246,7 +7262,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260803-144811";
+const APP_BUILD = "20260803-145141";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
