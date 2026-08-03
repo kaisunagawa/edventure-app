@@ -4394,7 +4394,7 @@ function JournalSection({date, logs}) {
   </div>`;
 }
 
-const BREAKDOWN_CATS = [["records","記録数"],["memo","メモの質"],["focus","集中度"],["goal","目標への取り組み"],["consistency","継続性"]];
+const BREAKDOWN_CATS = [["records","記録の量"],["memo","ふりかえりの中身"],["focus","集中できたか"],["goal","目標に向けた行動"],["consistency","続けられているか"]];
 const BREAKDOWN_LABELS = {
   records:     {en:"RECORD", jp:"記録"},
   memo:        {en:"MEMO",   jp:"メモ"},
@@ -7262,7 +7262,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260803-145141";
+const APP_BUILD = "20260803-161112";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 

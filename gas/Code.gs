@@ -1572,23 +1572,23 @@ function computeDailyOpsFacts(studentEmail, dateStr, fixture) {
       const started = imp.filter(function (t) { return String(t.first_started_at || "").trim() &&
                                                        normalizeTaskStatus(t.status) !== "DONE"; }).length;
       // 完了=満点 / 着手=半分
-      parts.push({ label: "重要タスクの前進", weight: 2, sample: imp.length, state: "evaluated",
+      parts.push({ label: "大事なタスクが進んだか", weight: 2, sample: imp.length, state: "evaluated",
                    value: Math.round((done + started * 0.5) / imp.length * 100),
                    detail: "完了" + done + "件・着手" + started + "件 / " + imp.length + "件" });
-    } else parts.push(na("重要タスクの前進", 2, "今日は重要（高）のタスクがありません", "NO_IMPORTANT_TASK", NO_CHANCE));
+    } else parts.push(na("大事なタスクが進んだか", 2, "今日は重要（高）のタスクがありません", "NO_IMPORTANT_TASK", NO_CHANCE));
 
     const focusText = String(journal.intent || "").trim();
     if (focusText) {
       const goalMin = logs.filter(function (l) { return String(l.goal_related) === "true" || l.goal_related === true; }).length * 60;
       const targetMin = (Number(journal.intent_hours) || 2) * 60;
       const doneFlag = String(journal.intent_done || "") === "true";
-      parts.push({ label: "今日のフォーカスの前進", weight: 2, sample: 1, state: "evaluated",
+      parts.push({ label: "今日いちばんの達成", weight: 2, sample: 1, state: "evaluated",
                    value: doneFlag ? 100 : Math.min(100, Math.round(goalMin / Math.max(60, targetMin) * 100)),
                    detail: doneFlag ? "達成" : (Math.round(goalMin / 60 * 10) / 10) + "時間 / " + (targetMin / 60) + "時間" });
-    } else parts.push(na("今日のフォーカスの前進", 2, "今日のフォーカスが決まっていません", "NO_DAILY_FOCUS", NO_CHANCE));
+    } else parts.push(na("今日いちばんの達成", 2, "今日のフォーカスが決まっていません", "NO_DAILY_FOCUS", NO_CHANCE));
 
-    items.push(restDay ? restCat("progress", "成果への前進", OPS_WEIGHTS.progress)
-                       : rollOps("progress", "成果への前進", OPS_WEIGHTS.progress, parts));
+    items.push(restDay ? restCat("progress", "目標に近づけたか", OPS_WEIGHTS.progress)
+                       : rollOps("progress", "目標に近づけたか", OPS_WEIGHTS.progress, parts));
   })();
 
   // ── 計画の実行（30）───────────────────────────────
@@ -1599,35 +1599,35 @@ function computeDailyOpsFacts(studentEmail, dateStr, fixture) {
       const done = tasks.filter(function (t) { return normalizeTaskStatus(t.status) === "DONE"; }).length;
       const started = tasks.filter(function (t) { return String(t.first_started_at || "").trim() &&
                                                          normalizeTaskStatus(t.status) !== "DONE"; }).length;
-      parts.push({ label: "予定したことの実行", weight: 2, sample: tasks.length, state: "evaluated",
+      parts.push({ label: "予定したタスクの実行", weight: 2, sample: tasks.length, state: "evaluated",
                    value: Math.round((done + started * 0.5) / tasks.length * 100),
                    detail: "完了" + done + "件・着手" + started + "件 / " + tasks.length + "件" });
       const withDue = tasks.filter(function (t) { return String(p1DateOut_(t.due_at) || "").trim(); });
       if (withDue.length) {
-        parts.push({ label: "期限を守れた割合", weight: 1, sample: withDue.length, state: "evaluated",
+        parts.push({ label: "期限に間に合った割合", weight: 1, sample: withDue.length, state: "evaluated",
                      value: Math.round(withDue.filter(function (t) {
                        const c = String(t.completed_at || "").slice(0, 10);
                        return c && c <= p1DateOut_(t.due_at); }).length / withDue.length * 100) });
-      } else parts.push(na("期限を守れた割合", 1, "期限を決めたタスクがありません", "NO_DUE_TASK", NO_CHANCE));
+      } else parts.push(na("期限に間に合った割合", 1, "期限を決めたタスクがありません", "NO_DUE_TASK", NO_CHANCE));
       // 持ち越しは「少ないほど良い」。1件も無い日を減点しない
-      parts.push({ label: "翌日へ残さなかった割合", weight: 1, sample: tasks.length, state: "evaluated",
+      parts.push({ label: "翌日に残さなかった割合", weight: 1, sample: tasks.length, state: "evaluated",
                    value: Math.round((1 - tasks.filter(function (t) {
                      return normalizeTaskStatus(t.status) === "CARRIED_OVER"; }).length / tasks.length) * 100) });
     } else {
-      parts.push(na("予定したことの実行", 2, "今日のタスクが登録されていません", "NO_TASK_TODAY", NO_CHANCE));
-      parts.push(na("期限を守れた割合", 1, "今日のタスクが登録されていません", "NO_TASK_TODAY", NO_CHANCE));
-      parts.push(na("翌日へ残さなかった割合", 1, "今日のタスクが登録されていません", "NO_TASK_TODAY", NO_CHANCE));
+      parts.push(na("予定したタスクの実行", 2, "今日のタスクが登録されていません", "NO_TASK_TODAY", NO_CHANCE));
+      parts.push(na("期限に間に合った割合", 1, "今日のタスクが登録されていません", "NO_TASK_TODAY", NO_CHANCE));
+      parts.push(na("翌日に残さなかった割合", 1, "今日のタスクが登録されていません", "NO_TASK_TODAY", NO_CHANCE));
     }
-    items.push(restDay ? restCat("execution", "計画の実行", OPS_WEIGHTS.execution)
-                       : rollOps("execution", "計画の実行", OPS_WEIGHTS.execution, parts,
-                                 { required: ["予定したことの実行"] }));
+    items.push(restDay ? restCat("execution", "決めたことをやれたか", OPS_WEIGHTS.execution)
+                       : rollOps("execution", "決めたことをやれたか", OPS_WEIGHTS.execution, parts,
+                                 { required: ["予定したタスクの実行"] }));
   })();
 
   // ── 時間の使い方（20）── 5分類が入るまで算出しない ──────
   items.push(rollOps("time_use", "時間の使い方", OPS_WEIGHTS.time_use, [
-    na("集中に使った時間", 1, "時間の使い方を分類する機能を準備しています", "TIME_CLASSIFICATION_UNAVAILABLE"),
-    na("目標に直結した時間", 1, "時間の使い方を分類する機能を準備しています", "TIME_CLASSIFICATION_UNAVAILABLE"),
-    na("こま切れ時間の割合", 1, "時間の使い方を分類する機能を準備しています", "TIME_CLASSIFICATION_UNAVAILABLE")
+    na("集中できた時間", 1, "時間の使い方を分類する機能を準備しています", "TIME_CLASSIFICATION_UNAVAILABLE"),
+    na("目標に向けた時間", 1, "時間の使い方を分類する機能を準備しています", "TIME_CLASSIFICATION_UNAVAILABLE"),
+    na("こま切れになった時間", 1, "時間の使い方を分類する機能を準備しています", "TIME_CLASSIFICATION_UNAVAILABLE")
   ]));
 
   // ── 続けられる運営（20）─────────────────────────
@@ -1637,12 +1637,12 @@ function computeDailyOpsFacts(studentEmail, dateStr, fixture) {
     const planned = tasks.reduce(function (a, t) { return a + (Number(t.estimated_minutes) || 0); }, 0);
     const carried = tasks.filter(function (t) { return normalizeTaskStatus(t.status) === "CARRIED_OVER"; }).length;
     const parts = [
-      na("予定量 ÷ 使える時間", 1, "1日に使える時間の設定がないため判定できません", "AVAILABLE_TIME_MISSING"),
-      na("記録時間の偏り", 1, "実績時間の記録が十分でないため判定できません", "ACTUAL_MINUTES_COVERAGE_LOW"),
-      na("回復・休息の時間", 1, "休息や回復を分類する機能を準備しています", "TIME_CLASSIFICATION_UNAVAILABLE"),
-      na("翌日へ残る総負荷", 1, "残った作業量を見積もる情報が足りません", "REMAINING_LOAD_UNAVAILABLE")
+      na("予定を詰め込みすぎていないか", 1, "1日に使える時間の設定がないため判定できません", "AVAILABLE_TIME_MISSING"),
+      na("日によるムラ", 1, "実績時間の記録が十分でないため判定できません", "ACTUAL_MINUTES_COVERAGE_LOW"),
+      na("休む時間があったか", 1, "休息や回復を分類する機能を準備しています", "TIME_CLASSIFICATION_UNAVAILABLE"),
+      na("明日に残る量", 1, "残った作業量を見積もる情報が足りません", "REMAINING_LOAD_UNAVAILABLE")
     ];
-    const r = rollOps("sustainability", "続けられる運営", OPS_WEIGHTS.sustainability, parts);
+    const r = rollOps("sustainability", "無理なく続けられたか", OPS_WEIGHTS.sustainability, parts);
     // 参考事実（点数には使わない）
     r.reference_facts = [];
     if (tasks.length) r.reference_facts.push("翌日への持ち越し " + carried + "件 / " + tasks.length + "件（参考）");
