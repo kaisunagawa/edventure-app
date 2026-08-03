@@ -1027,12 +1027,30 @@ function getUser(studentEmail) {
 
 function getReportList(studentEmail) {
   const rows = getFilteredRows("Reports", "student_email", studentEmail);
+  // ★一覧と詳細で点数を食い違わせない★（2026-08-03 Kai指摘）
+  //   新しい5項目のレポートを使っている人には、保存済みの新しい点数を出す。
+  //   まだ無い日だけ、従来の夜のレポートの点数を出す。
+  const opsByDate = {};
+  try {
+    const u = sheetToObjects(getSheet("Users")).find(function (x) { return x.student_email === studentEmail; });
+    if (hasFeature(u, OPS_FEATURE_KEY)) {
+      p1List("DailyOpsReport", studentEmail).forEach(function (r) {
+        const d = String(r.report_date).slice(0, 10);
+        const v = String(r.operating_score || "").trim();
+        if (d && v !== "") opsByDate[d] = Number(v);
+      });
+    }
+  } catch (e) {}
   const list = rows
     .sort((a, b) => b.date > a.date ? 1 : -1)
     .map(r => {
       let breakdown = null;
       if (r.breakdown) { try { breakdown = JSON.parse(r.breakdown); } catch (e) {} }
-      return { date: r.date, score: Number(r.score), breakdown };
+      const d = String(r.date).slice(0, 10);
+      const ops = opsByDate[d];
+      return { date: r.date, score: (ops === undefined ? Number(r.score) : ops),
+               legacy_score: Number(r.score), source: (ops === undefined ? "legacy" : "daily_v2"),
+               breakdown };
     });
   return { ok: true, data: list };
 }
@@ -6530,6 +6548,12 @@ function nightlyReport() {
 }
 
 function sendReportLineMessage(user, report) {
+  // 新しいレポートを使っている人には、その点数を送る（画面と食い違わせない）
+  try {
+    if (hasFeature(user, OPS_FEATURE_KEY) && report.__ops_score !== undefined && report.__ops_score !== null) {
+      report = Object.assign({}, report, { score: report.__ops_score });
+    }
+  } catch (e) {}
   const latestUser = sheetToObjects(getSheet("Users")).find(u => u.student_email === user.student_email);
   const streak = Number(latestUser?.streak || 1);
   const streakMsg = streak >= 3 ? "\n\n🔥 連続" + streak + "日記録中！" : "";
@@ -6558,6 +6582,17 @@ function adminRunNightlyReport(email) {
       const report = generateReportWithClaude(user.student_email, user.name, logs);
       if (!report) { results.push({ email: user.student_email, status: "ai-failed", reason: REPORT_GEN_LAST_ERROR }); return; }
       appendReportRow(targetDate, user.student_email, report, logs.length);
+      // 新しい5項目のレポートを使っている人は、その日の分をここで作って保存する。
+      // 一覧・LINE・詳細で同じ点数になるようにするため（2026-08-03）
+      try {
+        if (hasFeature(user, OPS_FEATURE_KEY)) {
+          const ops = getDailyOpsReport(user.student_email, { date: targetDate });
+          if (ops && ops.ok && ops.data && ops.data.displayed_score !== null &&
+              ops.data.displayed_score !== undefined) {
+            report.__ops_score = ops.data.displayed_score;
+          }
+        }
+      } catch (e) { /* 新レポートが作れなくても、従来の配信は止めない */ }
       if (user.line_user_id) sendReportLineMessage(user, report);
       notifyCoachOnReport(user, report);
       results.push({ email: user.student_email, status: "sent", score: report.score });
@@ -7135,6 +7170,23 @@ breakdown_reasonsは各項目の点数についてのひとことコメントで
     Logger.log("Claudeテキスト: " + text.substring(0, 500));
     const parsed = parseAiJson(text);
     if (!parsed) { Logger.log("JSONパース失敗"); REPORT_GEN_LAST_ERROR = "JSONパース失敗: " + text.substring(0, 200); return null; }
+    // ★文章の中の「◯◯点」を消す★
+    //   点数はこちらで計算するので、AIが書いた数字は必ず食い違う。
+    //   実際にLINEへ「今日58点」と出て、画面の71点と矛盾していた（2026-08-03）。
+    try {
+      const dropScore = function (v) {
+        return String(v || "")
+          .replace(/(?:今日|本日|昨日|前日)?\s*\d{1,3}\s*点(?:へ|に|から|まで|台)?/g, "")
+          .replace(/\s{2,}/g, " ").trim();
+      };
+      ["feedback", "highlights", "improvement", "action", "trend"].forEach(function (k) {
+        if (parsed[k]) parsed[k] = dropScore(parsed[k]);
+      });
+      if (parsed.breakdown_reasons) {
+        Object.keys(parsed.breakdown_reasons).forEach(function (k) {
+          parsed.breakdown_reasons[k] = dropScore(parsed.breakdown_reasons[k]); });
+      }
+    } catch (e) {}
     // ★点数はAIに決めさせない★ 記録から計算した値で必ず上書きする
     try {
       const calc = computeReportBreakdown_(studentEmail, logs, user, targetDateForReport_(logs));
