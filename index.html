@@ -4508,10 +4508,13 @@ function BreakdownRadar({breakdown}) {
 //   ちがうのは、測れていない項目を「0」として描かないこと。
 //   0で描くと「できていない」に見えるが、実際は「まだ測っていない」。
 //   測れていない軸は点線の外枠だけにして、面には含めない。
+// 5角形のラベル。長いと枠から出て切れるので短くする
+const SMP_SHORT = { result_power:"成果", time_allocation_power:"時間配分",
+                    execution_power:"実行", continuity_power:"継続", recovery_power:"立て直し" };
 function SelfMgmtRadar({metrics}) {
   const M = (metrics || []).slice(0, 5);
   const N = M.length || 5;
-  const cx = 80, cy = 80, maxR = 54;
+  const cx = 95, cy = 88, maxR = 52;
   const start = -Math.PI / 2, step = (Math.PI * 2) / N;
   const pt = (i, frac) => [cx + Math.cos(start + i * step) * maxR * frac,
                            cy + Math.sin(start + i * step) * maxR * frac];
@@ -7432,7 +7435,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260803-190954";
+const APP_BUILD = "20260803-191409";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
