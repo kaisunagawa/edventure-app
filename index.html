@@ -1378,6 +1378,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
     try { return JSON.parse(localStorage.getItem("jiroku_task_order_"+formatDateStr(new Date()))||"{}")||{}; } catch(e){ return {}; }
   });
   const [ctxFilter, setCtxFilter] = useState("ALL");   // すべて/仕事/プライベート
+  const [sortSheet, setSortSheet] = useState(false);   // 未分類をまとめて仕分ける画面
   const [carryPick, setCarryPick] = useState(null);    // 持ち越しの確認表示 {date}
   // タスク同期キューの見える化（同期待ちN件・競合N件）
   const [taskSync, setTaskSync] = useState(()=>({pending:0, conflict:0, failed:0}));
@@ -1996,9 +1997,13 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
     if (!r || !r.ok || !Array.isArray(r.data)) return;
     if (editMode || detailTask) return;   // 通信中に開いたら適用しない
     const hold = {};   // 送信待ち・競合中のタスクは端末の値を保つ
-    loadTaskQueue().forEach(m => { hold[m.task_id] = 1; });
-    // 今日の分だけ。ARCHIVED は画面に出さない
-    const rows = r.data.filter(t => String(t.date).slice(0,10) === todayKey && t.status !== "ARCHIVED");
+    const deleting = {}; // ★削除の送信待ち★ サーバーにはまだ残っているので、ここで外す
+    loadTaskQueue().forEach(m => { hold[m.task_id] = 1; if (m.op === "DELETE") deleting[m.task_id] = 1; });
+    // 今日の分だけ。ARCHIVED は画面に出さない。
+    // ★消したタスクが戻ってこないように★ 削除がまだ届いていない間も一覧から外す
+    //   （以前はサーバーの一覧をそのまま反映していたため、消しても復活していた）
+    const rows = r.data.filter(t => String(t.date).slice(0,10) === todayKey && t.status !== "ARCHIVED"
+                                    && !deleting[t.task_id]);
     if (!rows.length && !(customActions||[]).length) return;
     // サーバーの進捗語彙（大文字）を画面の語彙（小文字）へ
     const sttOf = s => s === "DONE" ? "done" : s === "IN_PROGRESS" ? "doing" : "todo";
@@ -2920,12 +2925,25 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
           <div style=${{display:"flex",gap:4}}>
             ${[["ALL","すべて"],["WORK","仕事"],["PERSONAL","プライベート"]].map(([v,lb])=>{
               const on = ctxFilter===v;
+              // 何件がその分類か（未設定はどのタブでも見えるので、数には入れない）
+              const n = v==="ALL" ? actionItems.length : actionItems.filter(it=>{
+                const k=idOfTitle(it); return ((k&&taskContext[k])||taskContext[it])===v; }).length;
               return html`<button key=${v} onClick=${()=>setCtxFilter(v)}
                 style=${{padding:"3px 10px",borderRadius:20,fontSize:11,cursor:"pointer",fontFamily:"inherit",fontWeight:on?700:500,
                          border:`1px solid ${on?"var(--accent)":"var(--border)"}`,
-                         background:on?"var(--accent-l)":"transparent",color:on?"var(--accent)":"var(--sub)"}}>${lb}</button>`;
+                         background:on?"var(--accent-l)":"transparent",color:on?"var(--accent)":"var(--sub)"}}>${lb}${v!=="ALL"&&n>0?" "+n:""}</button>`;
             })}
           </div>
+          ${(()=>{
+            // ★仕分けができていないと、どのタブも同じ一覧に見える★
+            //   未設定の件数を出して、その場で仕事／プライベートに振り分けられるようにする
+            const unset = actionItems.filter(it=>{ const k=idOfTitle(it);
+              return !((k&&taskContext[k])||taskContext[it]); });
+            if(!unset.length) return "";
+            return html`<button onClick=${()=>setSortSheet(true)}
+              style=${{fontSize:11,color:"var(--accent)",background:"none",border:"none",cursor:"pointer",fontFamily:"inherit",fontWeight:700,padding:0}}>
+              未分類 ${unset.length}件を仕分ける</button>`;
+          })()}
           <!-- 今日の計画量。利用可能時間が未設定のうちは判定しない（勝手に8時間と仮定しない） -->
           ${(()=>{
             const fmtMin = m => m>=60 ? `${Math.floor(m/60)}時間${m%60?`${m%60}分`:""}` : `${m}分`;
@@ -3111,6 +3129,43 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
         </div>
       </div>
     `, document.body)}
+
+    <!-- ★未分類のタスクをまとめて仕分ける★
+         1件ずつ詳細を開かないと分類できず、結局どのタブも同じ一覧に見えていた。
+         ここで上から順に「仕事／プライベート」を押していけば終わる。 -->
+    ${sortSheet && ReactDOM.createPortal(html`
+      <div style=${{position:"fixed",inset:0,height:"100dvh",background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"flex-end",zIndex:640}}
+        onClick=${e=>{ if(e.target===e.currentTarget) setSortSheet(false); }}>
+        <div style=${{background:"var(--card)",width:"100%",maxWidth:520,margin:"0 auto",borderRadius:"20px 20px 0 0",
+                      padding:"18px 20px calc(20px + env(safe-area-inset-bottom))",maxHeight:"86dvh",display:"flex",flexDirection:"column"}}>
+          <div style=${{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
+            <span style=${{fontSize:15,fontWeight:800,color:"var(--text)"}}>タスクを仕分ける</span>
+            <button onClick=${()=>setSortSheet(false)}
+              style=${{background:"none",border:"none",color:"var(--sub)",fontSize:13,cursor:"pointer",fontFamily:"inherit"}}>閉じる</button>
+          </div>
+          <div style=${{fontSize:11.5,color:"var(--sub)",lineHeight:1.7,marginBottom:12}}>
+            仕事とプライベートを分けると、上のタブで絞り込めます。あとから変えられます。
+          </div>
+          <div style=${{flex:1,minHeight:0,overflowY:"auto"}}>
+            ${actionItems.filter(it=>{ const k=idOfTitle(it);
+                return !((k&&taskContext[k])||taskContext[it]); }).map((it,i)=>html`
+              <div key=${i} style=${{padding:"10px 0",borderTop:i?"1px solid var(--border)":"none"}}>
+                <div style=${{fontSize:13,color:"var(--text)",lineHeight:1.6,marginBottom:7,
+                              display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical",overflow:"hidden"}}>${it}</div>
+                <div style=${{display:"flex",gap:6,flexWrap:"wrap"}}>
+                  ${[["WORK","仕事"],["PERSONAL","プライベート"],["LEARNING","学び"],["HEALTH","健康"]].map(([v,lb])=>html`
+                    <button key=${v} onClick=${()=>setTaskCtx(it, v)}
+                      style=${{padding:"6px 12px",borderRadius:20,fontSize:12,cursor:"pointer",fontFamily:"inherit",
+                               border:"1px solid var(--border)",background:"transparent",color:"var(--sub)"}}>${lb}</button>`)}
+                </div>
+              </div>`)}
+            ${actionItems.filter(it=>{ const k=idOfTitle(it);
+                return !((k&&taskContext[k])||taskContext[it]); }).length===0&&html`
+              <div style=${{fontSize:12.5,color:"var(--sub)",lineHeight:1.9,padding:"18px 0",textAlign:"center"}}>
+                すべて仕分けできました 🎉</div>`}
+          </div>
+        </div>
+      </div>`, document.body)}
 
     <!-- タスク詳細画面（Trello風カード詳細。状態変更・時間・メモ・計測・削除） -->
     ${detailTask!==null && ReactDOM.createPortal((()=>{
@@ -7073,7 +7128,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260803-110501";
+const APP_BUILD = "20260803-111043";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
