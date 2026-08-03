@@ -522,7 +522,14 @@ if [ "$MODE" = "live" ] || [ "$MODE" = "all" ]; then
   URL="${2:-}"
   [ -z "$URL" ] && { echo "live には URL が必要です"; exit 2; }
   ADMIN="${SMOKE_ADMIN_EMAIL:-work.sunagawa@gmail.com}"
+  # ★整合性チェックは毎回走らせる★（2026-08-04 Kaiの指示）
+  #   鍵を毎回手で export しないと運用系の検査が飛ばされ、点数の食い違いを
+  #   見逃していた。ローカルの鍵ファイル（リポジトリ外）があれば自動で使う。
   SECRET="${P1_ADMIN_SECRET:-}"
+  if [ -z "$SECRET" ] && [ -f "$HOME/.config/jiroku/admin_secret" ]; then
+    SECRET="$(cat "$HOME/.config/jiroku/admin_secret")"
+    export P1_ADMIN_SECRET="$SECRET"   # 署名を作るPythonは環境変数から読む
+  fi
   echo "── 実機チェック（${URL:0:60}…）──"
 
   # 同じURLはGoogle側でキャッシュされるため、毎回ユニークにする。

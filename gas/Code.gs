@@ -6749,6 +6749,19 @@ function adminRunNightlyReport(email) {
           }
           // ここで締める。以後この日の点数は動かない
           finalizeDailyOpsReport(user.student_email, targetDate);
+          // ★毎晩、点数が食い違っていないか自分で確かめる★（2026-08-04 Kaiの指示）
+          //   画面ごとに違う数字が出ていたことがあるため、夜のうちに気づけるようにする
+          try {
+            const detail = getDailyOpsReport(user.student_email, { date: targetDate });
+            const dv = detail && detail.ok && detail.data ? detail.data.displayed_score : null;
+            const lst = getReportList(user.student_email);
+            const lrow = (lst.data || []).find(function (x) { return String(x.date).slice(0, 10) === targetDate; });
+            const lv = lrow ? lrow.score : null;
+            if (dv !== null && lv !== null && Number(dv) !== Number(lv)) {
+              authAudit("SCORE_MISMATCH", { result: "DENY", action: "nightlyReport",
+                failureReason: user.student_email + " " + targetDate + " detail=" + dv + " list=" + lv });
+            }
+          } catch (e3) {}
         }
       } catch (e) { /* 新レポートが作れなくても、従来の配信は止めない */ }
       if (user.line_user_id) sendReportLineMessage(user, report);
