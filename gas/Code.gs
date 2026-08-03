@@ -2212,6 +2212,13 @@ function appendReportRow(targetDate, studentEmail, report, logCount) {
     if (rIdx === -1) { rIdx = headers2.length; sheet.getRange(1, rIdx + 1).setValue("breakdown_reasons"); }
     sheet.getRange(newRow, rIdx + 1).setValue(JSON.stringify(report.breakdown_reasons));
   }
+  // 小数まで残す（同点が並んだときの並び順に使う。画面には整数を出す）
+  if (report.score_precise != null) {
+    const headersP = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+    let pIdx = headersP.indexOf("score_precise");
+    if (pIdx === -1) { pIdx = headersP.length; sheet.getRange(1, pIdx + 1).setValue("score_precise"); }
+    sheet.getRange(newRow, pIdx + 1).setValue(Number(report.score_precise));
+  }
   if (logCount != null) {
     const headers3 = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
     let cIdx = headers3.indexOf("log_count");
@@ -3215,9 +3222,11 @@ function buildReportRankingSet(emailSet, allReports, windowDays) {
   const cutoff = noWindow ? null : formatDate(new Date(new Date(latestDate + "T00:00:00").getTime() - (windowDays - 1) * 86400000));
   const scores = [];
   latestByEmail.forEach(function (r, email) {
-    if (noWindow || r.date >= cutoff) scores.push({ email: email, score: Number(r.score) || 0, date: r.date });
+    if (noWindow || r.date >= cutoff) scores.push({ email: email, score: Number(r.score) || 0,
+      // 同点のときだけ小数で比べる（画面に出すのは整数のまま）
+      precise: Number(r.score_precise) || Number(r.score) || 0, date: r.date });
   });
-  scores.sort(function (a, b) { return b.score - a.score; });
+  scores.sort(function (a, b) { return (b.score - a.score) || (b.precise - a.precise); });
   return { latestDate: latestDate, cutoff: cutoff, scores: scores };
 }
 
@@ -6528,6 +6537,54 @@ ${tasksText}
   return { ok: false, error: "AI生成に失敗しました。少し待ってからもう一度お試しください。（詳細: " + String(lastErr).slice(0, 160) + "）" };
 }
 
+// ══════════════════════════════════════════════════════════════════
+// レポートの点数を、記録そのものから決める（2026-08-03 Kaiの指示）
+//   これまではAIが5項目に0〜20点を付けていた。AIは14/16/18のような
+//   きりのいい数字を選ぶため、別の人が同じ点数になりやすく、
+//   ランキングで並んでしまっていた。
+//   ここでは実データから連続的に計算し、1点単位で差が出るようにする。
+//   AIは文章だけを書く（点数は上書きされる）。
+// ══════════════════════════════════════════════════════════════════
+function computeReportBreakdown_(studentEmail, logs, user) {
+  const n = logs.length;
+  const clamp = function (v) { return Math.max(0, Math.min(20, v)); };
+  // 記録した時間帯の数。10コマで満点、それ以上は少しずつ伸びる
+  const records = clamp(n === 0 ? 0 : 20 * Math.min(1, Math.pow(n / 10, 0.85)));
+  // メモ。書いた割合(4割)と、書いた量(6割)の両方を見る
+  const memoLogs = logs.filter(function (l) { return String(l.memo || "").trim(); });
+  const memoChars = memoLogs.reduce(function (a, l) { return a + String(l.memo).trim().length; }, 0);
+  const memoRate = n ? memoLogs.length / n : 0;
+  const memoVol = Math.min(1, memoChars / 600);
+  const memo = clamp(20 * (memoRate * 0.4 + memoVol * 0.6));
+  // 集中度の平均（1〜5 → 0〜20）。未入力は数えない
+  const fv = logs.map(function (l) { return parseInt(l.focus_level, 10) || 0; }).filter(function (x) { return x > 0; });
+  const focusAvg = fv.length ? fv.reduce(function (a, b) { return a + b; }, 0) / fv.length : 0;
+  const focus = clamp(fv.length ? 20 * (focusAvg - 1) / 4 : 0);
+  // 目標に関連した記録の割合。件数が少ない日は割合が跳ねるので件数でも補正
+  const goalCount = logs.filter(function (l) { return String(l.goal_related) === "true" || l.goal_related === true; }).length;
+  const goalRate = n ? goalCount / n : 0;
+  const goal = clamp(20 * (goalRate * 0.7 + Math.min(1, goalCount / 6) * 0.3));
+  // 継続。連続記録日数（14日で満点）
+  const streak = Number((user && user.streak) || 0);
+  const consistency = clamp(20 * Math.min(1, Math.pow(streak / 14, 0.8)));
+
+  const r1 = function (v) { return Math.round(v * 10) / 10; };
+  const parts = { records: r1(records), memo: r1(memo), focus: r1(focus), goal: r1(goal), consistency: r1(consistency) };
+  const precise = parts.records + parts.memo + parts.focus + parts.goal + parts.consistency;
+  // 表示は整数。合計を先に丸めてから、5項目の整数の合計が必ず一致するように配分する
+  const score = Math.round(precise);
+  const ints = {}; let acc = 0;
+  const keys = ["records", "memo", "focus", "goal", "consistency"];
+  keys.forEach(function (k, i) {
+    if (i === keys.length - 1) { ints[k] = Math.max(0, Math.min(20, score - acc)); return; }
+    ints[k] = Math.round(parts[k]); acc += ints[k];
+  });
+  return { score: score, score_precise: Math.round(precise * 10) / 10, breakdown: ints, raw: parts,
+           facts: { blocks: n, memo_logs: memoLogs.length, memo_chars: memoChars,
+                    focus_avg: Math.round(focusAvg * 100) / 100, goal_count: goalCount,
+                    goal_rate: Math.round(goalRate * 100), streak: streak } };
+}
+
 function generateReportWithClaude(studentEmail, studentName, logs) {
   REPORT_GEN_LAST_ERROR = "";
   const apiKey = PropertiesService.getScriptProperties().getProperty("CLAUDE_API_KEY");
@@ -6560,7 +6617,10 @@ ${ctx}
 【今日のログ（${totalBlocks}時間帯、メモ${withMemo}個、目標関連${goalRelatedCount}時間帯(${goalRelatedPct}%)）】
 ${logsText}
 
-【採点基準（各0〜20点・合計で100点満点のscoreになるようにする）】
+【点数について】
+- 点数はアプリ側が記録から計算して確定させる。あなたが決めた数字は使われない
+- 文章の中で「◯点」と具体的な点数を断定しない（下の観点は、何を見ているかの参考）
+【採点の観点（各0〜20点・合計100点）】
 - records（20点）: 記録した時間帯の数の多さ
 - memo（20点）: 振り返りメモの深さと量
 - focus（20点）: 自己評価（集中度）の平均の高さ
@@ -6617,6 +6677,14 @@ breakdown_reasonsは各項目の点数についてのひとことコメントで
     Logger.log("Claudeテキスト: " + text.substring(0, 500));
     const parsed = parseAiJson(text);
     if (!parsed) { Logger.log("JSONパース失敗"); REPORT_GEN_LAST_ERROR = "JSONパース失敗: " + text.substring(0, 200); return null; }
+    // ★点数はAIに決めさせない★ 記録から計算した値で必ず上書きする
+    try {
+      const calc = computeReportBreakdown_(studentEmail, logs, user);
+      parsed.score = calc.score;
+      parsed.score_precise = calc.score_precise;
+      parsed.breakdown = calc.breakdown;
+      parsed.score_facts = calc.facts;
+    } catch (e) { Logger.log("点数計算に失敗（AIの値を使う）: " + e); }
     // 「明日のアクション」は1つだけにする。AIが万一2つ以上返しても、先頭の1件だけ採用する。
     // （アプリ側は改行で分割してチェックリスト化するため、複数行にせず1行にする）
     if (Array.isArray(parsed.actions)) {
