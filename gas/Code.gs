@@ -6624,7 +6624,46 @@ ${tasksText}
 //   ここでは実データから連続的に計算し、1点単位で差が出るようにする。
 //   AIは文章だけを書く（点数は上書きされる）。
 // ══════════════════════════════════════════════════════════════════
-function computeReportBreakdown_(studentEmail, logs, user) {
+// 採点対象の日付。ログの日付を使い、無ければ今日
+function targetDateForReport_(logs) {
+  const d = (logs && logs.length && logs[0] && logs[0].date) ? String(logs[0].date).slice(0, 10) : "";
+  return d || formatDate(new Date());
+}
+
+function computeReportBreakdown_(studentEmail, logs, user, dateStr) {
+  const date = String(dateStr || formatDate(new Date())).slice(0, 10);
+  // 今日のタスクと、今日のフォーカス（アプリの中心にある行動を採点に入れる）
+  let tasks = [], journal = {};
+  try {
+    tasks = p1List("Tasks", studentEmail).filter(function (t) {
+      return !String(t.deleted_at || "").trim() && p1DateOut_(t.date) === date; });
+  } catch (e) {}
+  try {
+    journal = sheetToObjects(getJournalSheet()).find(function (r) {
+      const rd = r.date instanceof Date ? Utilities.formatDate(r.date, "Asia/Tokyo", "yyyy-MM-dd") : String(r.date).slice(0, 10);
+      return String(r.student_email) === studentEmail && rd === date; }) || {};
+  } catch (e) {}
+  // 週間目標への前進（今週ぶんの達成率。無ければ null）
+  let weekProgress = null;
+  try {
+    const wgs = p1List("WeeklyGoals", studentEmail).filter(function (w) {
+      return p1Status_(w.status, "ACTIVE") === "ACTIVE"; });
+    const ok = wgs.filter(function (w) {
+      const t = Number(w.std_line) > 0 ? Number(w.std_line) : Number(w.target_total);
+      return t > 0; });
+    if (ok.length) {
+      let acc = 0;
+      ok.forEach(function (w) {
+        const t = Number(w.std_line) > 0 ? Number(w.std_line) : Number(w.target_total);
+        acc += Math.min(1, (Number(w.actual_value) || 0) / t);
+      });
+      weekProgress = acc / ok.length;
+    }
+  } catch (e) {}
+  return computeReportBreakdownCore_(studentEmail, logs, user, tasks, journal, weekProgress, date);
+}
+
+function computeReportBreakdownCore_(studentEmail, logs, user, tasks, journal, weekProgress, date) {
   const n = logs.length;
   const clamp = function (v) { return Math.max(0, Math.min(20, v)); };
   // 記録した時間帯の数。10コマで満点、それ以上は少しずつ伸びる
@@ -6638,17 +6677,45 @@ function computeReportBreakdown_(studentEmail, logs, user) {
   // 集中度の平均（1〜5 → 0〜20）。未入力は数えない
   const fv = logs.map(function (l) { return parseInt(l.focus_level, 10) || 0; }).filter(function (x) { return x > 0; });
   const focusAvg = fv.length ? fv.reduce(function (a, b) { return a + b; }, 0) / fv.length : 0;
-  const focus = clamp(fv.length ? 20 * (focusAvg - 1) / 4 : 0);
+  // 集中：自己評価の平均7割 ＋ 今日のフォーカスを達成できたか3割
+  //   （宣言していない日は自己評価だけで見る）
+  const focusBase = fv.length ? (focusAvg - 1) / 4 : 0;
+  const declared = String((journal && journal.intent) || "").trim();
+  const focusDone = String((journal && journal.intent_done) || "") === "true";
+  const focus = clamp(declared ? 20 * (focusBase * 0.7 + (focusDone ? 1 : 0) * 0.3)
+                               : 20 * focusBase);
   // 目標に関連した記録の割合。件数が少ない日は割合が跳ねるので件数でも補正
   const goalCount = logs.filter(function (l) { return String(l.goal_related) === "true" || l.goal_related === true; }).length;
   const goalRate = n ? goalCount / n : 0;
-  const goal = clamp(20 * (goalRate * 0.7 + Math.min(1, goalCount / 6) * 0.3));
+  // 目標：関連した記録の割合5割 ＋ 今日のタスクの実行3割 ＋ 週間目標への前進2割
+  //   記録の割合だけだと「タスクを終わらせたこと」がまったく点数に入らなかった
+  const doneT = tasks.filter(function (t) { return normalizeTaskStatus(t.status) === "DONE"; }).length;
+  const startedT = tasks.filter(function (t) { return String(t.first_started_at || "").trim() &&
+                                                      normalizeTaskStatus(t.status) !== "DONE"; }).length;
+  const taskRate = tasks.length ? Math.min(1, (doneT + startedT * 0.5) / tasks.length) : null;
+  const wp = (weekProgress === null || weekProgress === undefined) ? null : Math.min(1, weekProgress);
+  // 測れない要素は「0点」にせず、測れた要素だけで割り直す
+  const gParts = [[goalRate, 0.5]];
+  if (taskRate !== null) gParts.push([taskRate, 0.3]);
+  if (wp !== null) gParts.push([wp, 0.2]);
+  const gW = gParts.reduce(function (a2, x) { return a2 + x[1]; }, 0);
+  const goal = clamp(20 * (gParts.reduce(function (a2, x) { return a2 + x[0] * x[1]; }, 0) / gW));
   // 継続。連続記録日数（14日で満点）
   const streak = Number((user && user.streak) || 0);
   const consistency = clamp(20 * Math.min(1, Math.pow(streak / 14, 0.8)));
 
+  // ★休みの日は、記録の量で責めない★
+  //   休みと決めた曜日は「たくさん記録したか」を求めない。
+  //   記録量に関する2項目だけ、達成の基準をゆるめる（休んだ日が0点にならないように）
+  let records2 = records, memo2 = memo;
+  try {
+    if (isRestDay(user || {}, date)) {
+      records2 = clamp(Math.max(records, 20 * Math.min(1, n / 3)));   // 3コマで満点扱い
+      memo2 = clamp(Math.max(memo, memoLogs.length ? 14 : 0));        // 1件でも書けていれば及第
+    }
+  } catch (e) {}
   const r1 = function (v) { return Math.round(v * 10) / 10; };
-  const parts = { records: r1(records), memo: r1(memo), focus: r1(focus), goal: r1(goal), consistency: r1(consistency) };
+  const parts = { records: r1(records2), memo: r1(memo2), focus: r1(focus), goal: r1(goal), consistency: r1(consistency) };
   const precise = parts.records + parts.memo + parts.focus + parts.goal + parts.consistency;
   // 表示は整数。合計を先に丸めてから、5項目の整数の合計が必ず一致するように配分する
   const score = Math.round(precise);
@@ -6661,7 +6728,11 @@ function computeReportBreakdown_(studentEmail, logs, user) {
   return { score: score, score_precise: Math.round(precise * 10) / 10, breakdown: ints, raw: parts,
            facts: { blocks: n, memo_logs: memoLogs.length, memo_chars: memoChars,
                     focus_avg: Math.round(focusAvg * 100) / 100, goal_count: goalCount,
-                    goal_rate: Math.round(goalRate * 100), streak: streak } };
+                    goal_rate: Math.round(goalRate * 100), streak: streak,
+                    tasks_total: tasks.length, tasks_done: doneT, tasks_started: startedT,
+                    daily_focus: declared ? (focusDone ? "達成" : "未達") : "未設定",
+                    week_progress: wp === null ? null : Math.round(wp * 100),
+                    rest_day: (function(){ try { return isRestDay(user || {}, date); } catch(e){ return false; } })() } };
 }
 
 function generateReportWithClaude(studentEmail, studentName, logs) {
@@ -6758,7 +6829,7 @@ breakdown_reasonsは各項目の点数についてのひとことコメントで
     if (!parsed) { Logger.log("JSONパース失敗"); REPORT_GEN_LAST_ERROR = "JSONパース失敗: " + text.substring(0, 200); return null; }
     // ★点数はAIに決めさせない★ 記録から計算した値で必ず上書きする
     try {
-      const calc = computeReportBreakdown_(studentEmail, logs, user);
+      const calc = computeReportBreakdown_(studentEmail, logs, user, targetDateForReport_(logs));
       parsed.score = calc.score;
       parsed.score_precise = calc.score_precise;
       parsed.breakdown = calc.breakdown;
