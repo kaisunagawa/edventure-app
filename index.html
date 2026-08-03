@@ -3523,10 +3523,13 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
             style=${{flexShrink:0,whiteSpace:"nowrap",background:"none",border:"none",color:"var(--accent)",fontSize:11.5,fontWeight:700,cursor:"pointer",fontFamily:"inherit",padding:0}}>詳細を見る</button>
         </div>
 
-        <!-- ステータスと同じ5角形。測れていない軸は点線にして、面に含めない -->
-        <div style=${{display:"flex",alignItems:"center",gap:6,marginBottom:6}}>
+        <!-- ステータスと同じ5角形。測れていない軸は点線にして、面に含めない。
+             ★横に文字を置くとラベルと重なるため、上下に分ける★（2026-08-03 Kai指摘） -->
+        <div style=${{display:"flex",justifyContent:"center",marginBottom:2}}>
           <${SelfMgmtRadar} metrics=${M}/>
-          <div style=${{flex:1,minWidth:0,fontSize:11,color:"var(--sub)",lineHeight:1.85}}>
+        </div>
+        <div style=${{marginBottom:8}}>
+          <div style=${{fontSize:11,color:"var(--sub)",lineHeight:1.85,textAlign:"center"}}>
             ${(()=>{
               const ev=M.filter(m=>m.evaluation_state==="evaluated"&&m.score!==null&&!m.provisional);
               if(!ev.length) return "記録がたまると、ここに形が出ます。";
@@ -3534,9 +3537,11 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
               const worst=ev.slice().sort((a,b)=>a.score-b.score)[0];
               const pend=M.filter(m=>!(m.evaluation_state==="evaluated"&&m.score!==null&&!m.provisional)).map(m=>m.label);
               return html`
-                <div>いま伸びている：<b style=${{color:"var(--text)"}}>${best.label}</b> ${best.score}</div>
-                ${ev.length>1&&html`<div>のびしろ：<b style=${{color:"var(--text)"}}>${worst.label}</b> ${worst.score}</div>`}
-                ${pend.length>0&&html`<div style=${{opacity:0.85,marginTop:2}}>点線の軸（${pend.join("・")}）は、まだ測っていません</div>`}`;
+                <div style=${{display:"flex",justifyContent:"center",flexWrap:"wrap",gap:"2px 14px"}}>
+                  <span>いま伸びている <b style=${{color:"var(--text)"}}>${best.label} ${best.score}</b></span>
+                  ${ev.length>1&&html`<span>のびしろ <b style=${{color:"var(--text)"}}>${worst.label} ${worst.score}</b></span>`}
+                </div>
+                ${pend.length>0&&html`<div style=${{opacity:0.85,marginTop:3}}>点線の軸（${pend.join("・")}）は、まだ測っていません</div>`}`;
             })()}
           </div>
         </div>
@@ -7435,7 +7440,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260803-191409";
+const APP_BUILD = "20260803-200823";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
