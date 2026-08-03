@@ -81,14 +81,23 @@ if [ "$MODE" = "static" ] || [ "$MODE" = "all" ]; then
   # 画面側の「ログインの骨格」も必ず検査する。
   echo "── 静的チェック（画面側）──"
 
-  extract_js() {  # $1=htmlファイル → 埋め込みスクリプトを取り出す
-    python3 - "$1" <<'PY'
-import sys
+  extract_js() {  # $1=htmlファイル → 埋め込みスクリプト（src無し）を全部つなげて取り出す
+    # 以前は「最初の<script>から最後の</script>まで」を切り出していたが、
+    # 途中にHTMLや別のscriptがあると構文エラーに見えてしまうため、
+    # インラインのスクリプトだけを1つずつ拾って連結する
+    python3 - "$1" <<'PYX'
+import sys, re
 s = open(sys.argv[1]).read()
-i = s.index("<script>", 3000)
-j = s.rindex("</script>")
-sys.stdout.write(s[i+8:j])
-PY
+out = []
+for m in re.finditer(r"<script([^>]*)>(.*?)</script" + ">", s, re.S | re.I):
+    attrs, body = m.group(1), m.group(2)
+    if "src=" in attrs.lower():
+        continue
+    if len(body.strip()) < 40:
+        continue
+    out.append("(function(){" + body + "\n})();")
+sys.stdout.write("\n".join(out))
+PYX
   }
 
   for f in ../index.html ../coach/index.html; do

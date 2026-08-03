@@ -18,6 +18,20 @@
   <script crossorigin="anonymous" integrity="sha384-DGyLxAyjq0f9SPpVevD6IgztCFlnMF6oW/XQGmfe+IsZ8TqEiDrcHkMLKI6fiB/Z" src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"></script>
   <script crossorigin="anonymous" integrity="sha384-gTGxhz21lVGYNMcdJOyq01Edg0jhn/c22nsx0kyqP0TxaV5WVdsSH1fSDUf5YJj1" src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
   <script crossorigin="anonymous" integrity="sha384-iPOMe3E8jVgp/PepuDy7lJvw7L/QP97X5POfi+X1EVyDVQi8Kuv/MooNVB5OFXVN" src="https://unpkg.com/htm@3.1.1/dist/htm.js"></script>
+  <!-- ★unpkgが落ちている・遅いときの保険★
+       ここが読めないとアプリは起動画面のまま止まる（2026-08-03にKaiの端末で発生）。
+       中身は同じnpmパッケージなので、SRIハッシュはそのまま使える。 -->
+  <script>
+    (function () {
+      var need = [];
+      if (!window.React)    need.push(["https://cdn.jsdelivr.net/npm/react@18.3.1/umd/react.production.min.js","sha384-DGyLxAyjq0f9SPpVevD6IgztCFlnMF6oW/XQGmfe+IsZ8TqEiDrcHkMLKI6fiB/Z"]);
+      if (!window.ReactDOM) need.push(["https://cdn.jsdelivr.net/npm/react-dom@18.3.1/umd/react-dom.production.min.js","sha384-gTGxhz21lVGYNMcdJOyq01Edg0jhn/c22nsx0kyqP0TxaV5WVdsSH1fSDUf5YJj1"]);
+      if (!window.htm)      need.push(["https://cdn.jsdelivr.net/npm/htm@3.1.1/dist/htm.js","sha384-iPOMe3E8jVgp/PepuDy7lJvw7L/QP97X5POfi+X1EVyDVQi8Kuv/MooNVB5OFXVN"]);
+      for (var i = 0; i < need.length; i++) {
+        document.write('<script crossorigin="anonymous" integrity="' + need[i][1] + '" src="' + need[i][0] + '"><\/script>');
+      }
+    })();
+  </script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -340,6 +354,44 @@
 </style>
 </head>
 <body>
+<script>
+  // ★起動画面のまま止まったときの逃げ道★
+  //   2026-08-03、Kaiの端末で「開いても何も出ない」が起きた。
+  //   原因が何であれ、利用者が自分で復帰できるようにしておく。
+  //   10秒たってもアプリが描画されていなければ、案内と再読み込みボタンを出す。
+  window.__jirokuBootWatchdog = setTimeout(function () {
+    var root = document.getElementById("root");
+    if (!root || root.querySelector(".nav") || root.querySelector(".login-wrap")) return;
+    var d = document.createElement("div");
+    d.setAttribute("style", "position:fixed;inset:0;z-index:9998;background:#fff;color:#1B1F23;"
+      + "display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;"
+      + "padding:28px;text-align:center;font-family:-apple-system,BlinkMacSystemFont,sans-serif");
+    var t = document.createElement("div");
+    t.setAttribute("style", "font-size:15px;font-weight:700");
+    t.textContent = "うまく開けませんでした";
+    var m = document.createElement("div");
+    m.setAttribute("style", "font-size:13px;line-height:1.9;color:#5C6672;max-width:22em");
+    m.textContent = "通信が不安定だと、この画面で止まることがあります。記録は消えていません。下のボタンで開き直してください。";
+    var b1 = document.createElement("button");
+    b1.setAttribute("style", "padding:13px 22px;border-radius:10px;border:none;background:#0891B2;color:#fff;font-size:14px;font-weight:700");
+    b1.textContent = "再読み込み";
+    b1.onclick = function () { location.reload(); };
+    var b2 = document.createElement("button");
+    b2.setAttribute("style", "padding:10px 18px;border-radius:10px;border:1px solid #D5D9DE;background:none;color:#5C6672;font-size:12.5px");
+    b2.textContent = "それでも直らないとき（保存データは消えません）";
+    b2.onclick = function () {
+      try {
+        if (window.caches) caches.keys().then(function (ks) { ks.forEach(function (k) { caches.delete(k); }); });
+        if (navigator.serviceWorker) navigator.serviceWorker.getRegistrations().then(function (rs) {
+          rs.forEach(function (r) { r.unregister(); });
+          setTimeout(function () { location.reload(); }, 300);
+        }); else location.reload();
+      } catch (e) { location.reload(); }
+    };
+    d.appendChild(t); d.appendChild(m); d.appendChild(b1); d.appendChild(b2);
+    document.body.appendChild(d);
+  }, 10000);
+</script>
 <div id="root">
   <div id="splash" style="height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;background:var(--bg);gap:20px">
     <!-- 案Aロゴ: リングマーク -->
@@ -6938,7 +6990,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260803-085317";
+const APP_BUILD = "20260803-085928";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
@@ -8448,6 +8500,7 @@ class ErrorBoundary extends React.Component {
   }
 }
 try {
+  try { clearTimeout(window.__jirokuBootWatchdog); } catch (e) {}
   ReactDOM.createRoot(document.getElementById("root")).render(
     React.createElement(ErrorBoundary,null,html`<${App}/>`)
   );
