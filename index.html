@@ -4679,6 +4679,7 @@ function ReportScreen() {
   const [listLoading, setListLoading]=useState(true);
   const [view, setView]=useState("report"); // "report" | "diary"
   const [expandedBreakdown, setExpandedBreakdown]=useState(null);
+  const [showScoreMeaning, setShowScoreMeaning]=useState(false);
   const [weeklySummary, setWeeklySummary]=useState(null);
   const [monthlyReview, setMonthlyReview]=useState(null);
   const [timeUse, setTimeUse]=useState(null);
@@ -5053,6 +5054,25 @@ function ReportScreen() {
                 ? "4項目すべてを合計した点数です。"
                 : "測れた"+evW+"点分を100点に換算して "+(shown===null||shown===undefined?"—":shown)+"点としています。"}
               ${pend.length>0?html`<br/>${pend.map(c=>c.label).join("と")}は、まだ測れていないので点数に入れていません。`:""}
+              <!-- ★点数の意味を取り違えさせない★
+                   「人として100点」でも「目標達成100%」でもない。今日の運営の点数。 -->
+              <div style=${{marginTop:8,paddingTop:8,borderTop:"1px solid var(--border)"}}>
+                この点数は、今日どれだけ<b style=${{color:"var(--text)"}}>自分という事業を運営できたか</b>を表します。
+                人としての評価でも、目標の達成率でもありません。
+                <button onClick=${()=>setShowScoreMeaning(v=>!v)}
+                  style=${{display:"block",marginTop:5,background:"none",border:"none",padding:0,color:"var(--accent)",fontSize:11.5,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
+                  ${showScoreMeaning?"閉じる":"5つの項目は何を見ている？"}</button>
+                ${showScoreMeaning&&html`
+                  <div style=${{marginTop:8,background:"var(--bg)",borderRadius:10,padding:"10px 12px",lineHeight:1.9}}>
+                    会社の経営で見るものを、自分の1日に置き換えています。<br/>
+                    ・売上や利益 → <b style=${{color:"var(--text)"}}>目標の前進</b><br/>
+                    ・計画の実行 → <b style=${{color:"var(--text)"}}>決めたことの実行</b><br/>
+                    ・人やお金の配分 → <b style=${{color:"var(--text)"}}>時間の使い方</b><br/>
+                    ・資金繰りと健全さ → <b style=${{color:"var(--text)"}}>無理なく続ける</b><br/>
+                    ・経営会議と改善 → <b style=${{color:"var(--text)"}}>振り返りと改善</b><br/>
+                    毎日のこの5つが積み重なって、週の「自己経営力」になり、3か月の成果につながります。
+                  </div>`}
+              </div>
             </div>`;
           })()}
         </div>
@@ -7262,7 +7282,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260803-161904";
+const APP_BUILD = "20260803-162724";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
