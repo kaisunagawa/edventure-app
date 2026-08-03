@@ -3985,6 +3985,21 @@ function LogScreen({onToast, isActive}) {
     lastLoadedRef.current = v;
   };
 
+  // ★時間を細かく決める★ 開始・終了を5分きざみで指定できるようにする
+  const [fineOpen, setFineOpen] = useState(false);
+  const [fineFrom, setFineFrom] = useState(()=>{
+    const d=new Date(); const m=Math.floor(d.getMinutes()/5)*5;
+    return String(d.getHours()).padStart(2,"0")+":"+String(m).padStart(2,"0");
+  });
+  const [fineTo, setFineTo] = useState(()=>{
+    const d=new Date(); d.setMinutes(Math.floor(d.getMinutes()/5)*5+30);
+    return String(d.getHours()).padStart(2,"0")+":"+String(d.getMinutes()).padStart(2,"0");
+  });
+  const hmToMin = (v)=>{ const p2=String(v||"").split(":"); return (Number(p2[0])||0)*60+(Number(p2[1])||0); };
+  const addMinutesToHM = (v,add)=>{ let t=hmToMin(v)+add; t=((t%1440)+1440)%1440;
+    return String(Math.floor(t/60)).padStart(2,"0")+":"+String(t%60).padStart(2,"0"); };
+  const fineMinutes = (()=>{ let d=hmToMin(fineTo)-hmToMin(fineFrom); if(d<0) d+=1440; return d; })();
+
   const handleBlockSelect = (b) => {
     setBlock(b);
     loadBlockData(b, logs);
@@ -4161,11 +4176,42 @@ function LogScreen({onToast, isActive}) {
               ? `⧉ ${1+extraBlocks.length}個の時間帯を選択中（チップをタップで追加）`
               : !isToday(date) ? "🗓 過去の記録を追加・編集できます（XPは付きません）" : recorded.has(block) ? "✏️ 記録済み（編集できます）" : "📝 未記録"}
           </div>
-          <button onClick=${toggleMultiMode}
-            style=${{flexShrink:0,padding:"4px 10px",borderRadius:20,border:`1.5px solid ${multiMode?"var(--accent)":"var(--border)"}`,background:multiMode?"var(--accent)":"transparent",color:multiMode?"#fff":"var(--sub)",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>
-            ${multiMode?"選択をやめる":"⧉ まとめて記録"}
-          </button>
+          <div style=${{display:"flex",gap:6,flexShrink:0}}>
+            <!-- ★時間を細かく決める★（2026-08-04 Kai要望）
+                 1時間の枠だけだと、30分の打ち合わせや15分の移動が記録できない。
+                 開始と終了を5分きざみで指定できるようにする。 -->
+            <button onClick=${()=>setFineOpen(v=>!v)}
+              style=${{padding:"4px 10px",borderRadius:20,border:`1.5px solid ${fineOpen?"var(--accent)":"var(--border)"}`,background:fineOpen?"var(--accent-l)":"transparent",color:fineOpen?"var(--accent)":"var(--sub)",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>
+              ⏱ 時間を細かく
+            </button>
+            <button onClick=${toggleMultiMode}
+              style=${{padding:"4px 10px",borderRadius:20,border:`1.5px solid ${multiMode?"var(--accent)":"var(--border)"}`,background:multiMode?"var(--accent)":"transparent",color:multiMode?"#fff":"var(--sub)",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>
+              ${multiMode?"選択をやめる":"⧉ まとめて"}
+            </button>
+          </div>
         </div>
+        ${fineOpen&&html`
+          <div style=${{background:"var(--bg)",border:"1px solid var(--border)",borderRadius:10,padding:"11px 12px",marginBottom:12}}>
+            <div style=${{fontSize:11.5,color:"var(--sub)",lineHeight:1.7,marginBottom:8}}>
+              開始と終了を決めると、その時間で記録します（5分きざみ）。
+            </div>
+            <div style=${{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+              <input class="inp" type="time" step="300" value=${fineFrom} onInput=${e=>setFineFrom(e.target.value)}
+                style=${{width:120,margin:0}}/>
+              <span style=${{color:"var(--sub)"}}>〜</span>
+              <input class="inp" type="time" step="300" value=${fineTo} onInput=${e=>setFineTo(e.target.value)}
+                style=${{width:120,margin:0}}/>
+              <span style=${{fontSize:11.5,color:"var(--sub)"}}>${fineMinutes>0?fineMinutes+"分":""}</span>
+            </div>
+            <div style=${{display:"flex",gap:6,flexWrap:"wrap",marginTop:8}}>
+              ${[15,30,45,60,90].map(m=>html`<button key=${m} onClick=${()=>setFineTo(addMinutesToHM(fineFrom,m))}
+                style=${{padding:"5px 10px",borderRadius:20,fontSize:11,cursor:"pointer",fontFamily:"inherit",
+                         border:"1px solid var(--border)",background:"transparent",color:"var(--sub)"}}>${m}分</button>`)}
+            </div>
+            <button class="btn" style=${{marginTop:10,opacity:fineMinutes>0?1:0.5}} disabled=${!(fineMinutes>0)}
+              onClick=${()=>{ handleBlockSelect(fineFrom+"-"+fineTo); setFineOpen(false); }}>
+              この時間で記録する</button>
+          </div>`}
         ${calNeedsTap&&html`
           <button onClick=${loadCalByTap} style=${{display:"flex",alignItems:"center",gap:8,width:"100%",padding:"10px 14px",marginBottom:12,borderRadius:10,border:"1.5px dashed var(--accent)",background:"var(--accent-l)",color:"var(--accent)",fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>
             📅 タップしてカレンダーの予定を読み込む
@@ -7457,7 +7503,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260804-072412";
+const APP_BUILD = "20260804-073010";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
