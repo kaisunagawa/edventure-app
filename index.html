@@ -4973,7 +4973,7 @@ function ReportScreen() {
       ${(()=>{
         const x=ops.data;
         const N=x.narrative||{};
-        const CATICON={progress:"rocket",execution:"target",time_use:"clock",sustainability:"flame"};
+        const CATICON={progress:"rocket",execution:"target",time_use:"clock",sustainability:"flame",review:"bulb"};
         // 総合が出ない日は、測れた範囲の点数を出す（点数が消えるとランキングと噛み合わないため）
         const shown = (x.operating_score!==null&&x.operating_score!==undefined) ? x.operating_score : x.partial_score;
         const partial = (x.operating_score===null||x.operating_score===undefined) && shown!==null && shown!==undefined;
@@ -7262,7 +7262,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260803-161112";
+const APP_BUILD = "20260803-161904";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 

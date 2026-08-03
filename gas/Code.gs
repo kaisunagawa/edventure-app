@@ -1514,11 +1514,17 @@ function getSelfMgmtPower(studentEmail, body) {
 //   こちらは「今日の事実の整理」。継続力や立て直し力のような、
 //   1日では判断できないものは毎日採点しない。
 // ══════════════════════════════════════════════════════════════════
-const OPS_CALC_VERSION = "self_management_daily_score_v1";
+const OPS_CALC_VERSION = "self_management_daily_score_v2";
 const OPS_REPORT_VERSION = "self_management_daily_v1";
 const OPS_FEATURE_KEY = "self_management_daily_report_v1";
 // 配点。calculation_version で管理する
-const OPS_WEIGHTS = { progress: 30, execution: 30, time_use: 20, sustainability: 20 };
+// 週次の自己経営力と1対1で対応させる（Kaiの整理・2026-08-03）
+//   目標の前進     → 成果力
+//   決めたことの実行 → 実行力
+//   時間の使い方    → 時間配分力
+//   無理なく続ける  → 継続力
+//   振り返りと改善  → 立て直し力
+const OPS_WEIGHTS = { progress: 25, execution: 25, time_use: 20, sustainability: 15, review: 15 };
 const OPS_BANDS = [[85, "非常に良い流れ"], [70, "着実に前進"], [55, "調整しながら前進"],
                    [40, "立て直しどき"], [0, "まず一つに絞る"]];
 function opsBand(score) {
@@ -1587,8 +1593,8 @@ function computeDailyOpsFacts(studentEmail, dateStr, fixture) {
                    detail: doneFlag ? "達成" : (Math.round(goalMin / 60 * 10) / 10) + "時間 / " + (targetMin / 60) + "時間" });
     } else parts.push(na("今日いちばんの達成", 2, "今日のフォーカスが決まっていません", "NO_DAILY_FOCUS", NO_CHANCE));
 
-    items.push(restDay ? restCat("progress", "目標に近づけたか", OPS_WEIGHTS.progress)
-                       : rollOps("progress", "目標に近づけたか", OPS_WEIGHTS.progress, parts));
+    items.push(restDay ? restCat("progress", "目標の前進", OPS_WEIGHTS.progress)
+                       : rollOps("progress", "目標の前進", OPS_WEIGHTS.progress, parts));
   })();
 
   // ── 計画の実行（30）───────────────────────────────
@@ -1618,8 +1624,8 @@ function computeDailyOpsFacts(studentEmail, dateStr, fixture) {
       parts.push(na("期限に間に合った割合", 1, "今日のタスクが登録されていません", "NO_TASK_TODAY", NO_CHANCE));
       parts.push(na("翌日に残さなかった割合", 1, "今日のタスクが登録されていません", "NO_TASK_TODAY", NO_CHANCE));
     }
-    items.push(restDay ? restCat("execution", "決めたことをやれたか", OPS_WEIGHTS.execution)
-                       : rollOps("execution", "決めたことをやれたか", OPS_WEIGHTS.execution, parts,
+    items.push(restDay ? restCat("execution", "決めたことの実行", OPS_WEIGHTS.execution)
+                       : rollOps("execution", "決めたことの実行", OPS_WEIGHTS.execution, parts,
                                  { required: ["予定したタスクの実行"] }));
   })();
 
@@ -1642,13 +1648,46 @@ function computeDailyOpsFacts(studentEmail, dateStr, fixture) {
       na("休む時間があったか", 1, "休息や回復を分類する機能を準備しています", "TIME_CLASSIFICATION_UNAVAILABLE"),
       na("明日に残る量", 1, "残った作業量を見積もる情報が足りません", "REMAINING_LOAD_UNAVAILABLE")
     ];
-    const r = rollOps("sustainability", "無理なく続けられたか", OPS_WEIGHTS.sustainability, parts);
+    const r = rollOps("sustainability", "無理なく続ける", OPS_WEIGHTS.sustainability, parts);
     // 参考事実（点数には使わない）
     r.reference_facts = [];
     if (tasks.length) r.reference_facts.push("翌日への持ち越し " + carried + "件 / " + tasks.length + "件（参考）");
     if (planned > 0) r.reference_facts.push("今日の予定は合計 " + planned + "分（参考）");
     r.reference = r.reference_facts.join(" ・ ");
     items.push(r);
+  })();
+
+  // ── 振り返りと改善（15）→ 週次の「立て直し力」につながる ──────
+  //   1日でも測れる：ふりかえりを書いたか、崩れたものを立て直したか。
+  (function () {
+    const parts = [];
+    // ふりかえりを書いた割合（記録があるときだけ）
+    if (logs.length) {
+      const withMemo = logs.filter(function (l) { return String(l.memo || "").trim(); }).length;
+      parts.push({ label: "ふりかえりを書いた割合", weight: 2, sample: logs.length, state: "evaluated",
+                   value: Math.round(withMemo / logs.length * 100),
+                   detail: withMemo + "件 / " + logs.length + "件" });
+      const chars = logs.reduce(function (a, l) { return a + String(l.memo || "").trim().length; }, 0);
+      parts.push({ label: "ふりかえりの中身", weight: 1, sample: logs.length, state: "evaluated",
+                   value: Math.min(100, Math.round(chars / 300 * 100)),
+                   detail: chars + "文字" });
+    } else {
+      parts.push(na("ふりかえりを書いた割合", 2, "今日の記録がまだありません", "NO_RECORDS_TODAY", NO_CHANCE));
+      parts.push(na("ふりかえりの中身", 1, "今日の記録がまだありません", "NO_RECORDS_TODAY", NO_CHANCE));
+    }
+    // 昨日から持ち越したタスクを、今日進められたか（崩れたあとの立て直し）
+    const y = new Date(date + "T00:00:00+09:00"); y.setDate(y.getDate() - 1);
+    const carriedIn = tasks.filter(function (t) { return Number(t.carryover_count || 0) > 0; });
+    if (carriedIn.length) {
+      const back = carriedIn.filter(function (t) {
+        return normalizeTaskStatus(t.status) === "DONE" || String(t.first_started_at || "").trim(); }).length;
+      parts.push({ label: "持ち越したことの立て直し", weight: 2, sample: carriedIn.length, state: "evaluated",
+                   value: Math.round(back / carriedIn.length * 100),
+                   detail: "再開" + back + "件 / 持ち越し" + carriedIn.length + "件" });
+    } else {
+      parts.push(na("持ち越したことの立て直し", 2, "立て直す場面がありませんでした", "NO_CARRYOVER", NO_CHANCE));
+    }
+    items.push(rollOps("review", "振り返りと改善", OPS_WEIGHTS.review, parts));
   })();
 
   // ── 総合（中間案）──────────────────────────────
