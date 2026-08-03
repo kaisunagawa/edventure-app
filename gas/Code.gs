@@ -1039,6 +1039,21 @@ function getReportList(studentEmail) {
         const v = String(r.operating_score || "").trim();
         if (d && v !== "") opsByDate[d] = Number(v);
       });
+      // ★今日だけは計算し直す★
+      //   保存した後に記録を足すと、保存済みの点数（一覧）と、開いたときに
+      //   計算し直す点数（詳細）がずれる。実際に一覧64・詳細73になった。
+      //   過去の日は変わらないので、今日の分だけその場で出し直す。
+      const today = formatDate(new Date());
+      const finalizedToday = p1List("DailyOpsReport", studentEmail).some(function (r) {
+        return String(r.report_date).slice(0, 10) === today && String(r.finalized_at || "").trim(); });
+      try {
+        if (finalizedToday) throw new Error("finalized");   // 締めた日は触らない
+        const f = computeDailyOpsFacts(studentEmail, today);
+        const v = (f.operating_score !== null && f.operating_score !== undefined)
+                  ? f.operating_score : f.partial_score;
+        if (v !== null && v !== undefined) opsByDate[today] = v;
+        else delete opsByDate[today];
+      } catch (e2) {}
     }
   } catch (e) {}
   const list = rows
@@ -2057,6 +2072,24 @@ function getDailyOpsReport(studentEmail, body) {
   const user = sheetToObjects(getSheet("Users")).find(function (u) { return u.student_email === studentEmail; });
   if (!hasFeature(user, OPS_FEATURE_KEY)) return { ok: false, error: "feature not enabled" };
   const date = String((body && body.date) || "").slice(0, 10) || formatDate(new Date());
+  // ★確定した日は、そのときの内容をそのまま返す★（2026-08-03 Kaiの判断）
+  //   あとからタスクの日付を明日へ動かしただけで、昨日の点数が動くのはおかしい。
+  //   夜のトリガーで締めたら、その日の評価はもう変えない。
+  const frozen = p1List("DailyOpsReport", studentEmail).find(function (r) {
+    return String(r.report_date).slice(0, 10) === date &&
+           String(r.report_version) === OPS_REPORT_VERSION &&
+           String(r.finalized_at || "").trim(); });
+  if (frozen && String((body && body.refresh) || "") !== "1") {
+    let snap = null, nar = null;
+    try { snap = JSON.parse(frozen.snapshot_json || "null"); } catch (e) {}
+    try { nar = JSON.parse(frozen.narrative_json || "null"); } catch (e) {}
+    if (snap) {
+      snap.narrative = nar || null;
+      snap.finalized = true;
+      snap.finalized_at = String(frozen.finalized_at);
+      return { ok: true, data: snap };
+    }
+  }
   const cur = computeDailyOpsFacts(studentEmail, date);
   // 自分の過去とだけ比べる。legacy score とは比べない。
   // ★データ量の差を「成長」と誤読させないため、比較条件を満たす日だけ比べる★
@@ -2384,6 +2417,8 @@ function opsNarrative(studentEmail, cur, forceRefresh) {
     calculation_version: cur.calculation_version, prompt_version: OPS_PROMPT_VERSION,
     input_hash: hash, generated_at: now,
     narrative_json: JSON.stringify(out), generated_by: by, fallback_reason: fbReason,
+    // 確定したときにそのまま返せるよう、計算結果まるごとを残す
+    snapshot_json: JSON.stringify(cur).slice(0, 45000),
     regenerate_count: row ? regen + 1 : 0
   });
   return Object.assign({}, out, { generated_by: by, fallback_reason: fbReason,
@@ -2541,6 +2576,24 @@ function opsSelfTest(studentEmail, dateStr) {
   out.week_stats = { operating: stat(scored), partial: stat(parts) };
   out.today = brief(computeDailyOpsFacts(studentEmail, date));
   return out;
+}
+
+// その日の評価を締める（夜のトリガーから呼ぶ）。以後は計算し直さない
+function finalizeDailyOpsReport(studentEmail, date) {
+  const day = String(date || "").slice(0, 10) || formatDate(new Date());
+  const r = getDailyOpsReport(studentEmail, { date: day });
+  if (!r || !r.ok || !r.data) return { ok: false };
+  if (r.data.finalized) return { ok: true, already: true, score: r.data.displayed_score };
+  const row = p1List("DailyOpsReport", studentEmail).find(function (x) {
+    return String(x.report_date).slice(0, 10) === day &&
+           String(x.report_version) === OPS_REPORT_VERSION; });
+  if (!row) return { ok: false };
+  p1Upsert("DailyOpsReport", "row_id", {
+    row_id: row.row_id, student_email: studentEmail,
+    finalized_at: new Date().toISOString(),
+    snapshot_json: JSON.stringify(Object.assign({}, r.data, { narrative: undefined })).slice(0, 45000)
+  });
+  return { ok: true, score: r.data.displayed_score };
 }
 
 function getStatusSummary(studentEmail) {
@@ -3607,11 +3660,29 @@ function buildReportRankingSet(emailSet, allReports, windowDays) {
   // それ以外は「最新日を含む windowDays 日ぶん」だけを対象に（例: 3 なら 最新日・前日・前々日）。
   const noWindow = !(windowDays > 0);
   const cutoff = noWindow ? null : formatDate(new Date(new Date(latestDate + "T00:00:00").getTime() - (windowDays - 1) * 86400000));
+  // ★確定した新レポートがある人は、その点数でランキングに載せる★（2026-08-03 Kaiの判断）
+  //   画面に出ている点数と、ランキングの点数が違うのはおかしいため。
+  //   まだ新レポートが無い人は、これまでどおり夜レポートの点数で比べる。
+  const opsFinal = {};
+  try {
+    sheetToObjects(getP1Sheet("DailyOpsReport")).forEach(function (o) {
+      if (!String(o.finalized_at || "").trim()) return;
+      const em = String(o.student_email || ""), d = String(o.report_date).slice(0, 10);
+      const v = String(o.operating_score || "").trim();
+      if (!em || !d || v === "") return;
+      if (!opsFinal[em] || opsFinal[em].date < d) opsFinal[em] = { date: d, score: Number(v) };
+    });
+  } catch (e) {}
   const scores = [];
   latestByEmail.forEach(function (r, email) {
-    if (noWindow || r.date >= cutoff) scores.push({ email: email, score: Number(r.score) || 0,
+    if (!(noWindow || r.date >= cutoff)) return;
+    const o = opsFinal[email];
+    const useOps = o && o.date === String(r.date).slice(0, 10);
+    scores.push({ email: email,
+      score: useOps ? o.score : (Number(r.score) || 0),
       // 同点のときだけ小数で比べる（画面に出すのは整数のまま）
-      precise: Number(r.score_precise) || Number(r.score) || 0, date: r.date });
+      precise: useOps ? o.score : (Number(r.score_precise) || Number(r.score) || 0),
+      source: useOps ? "daily_v2" : "legacy", date: r.date });
   });
   scores.sort(function (a, b) { return (b.score - a.score) || (b.precise - a.precise); });
   return { latestDate: latestDate, cutoff: cutoff, scores: scores };
@@ -6591,6 +6662,8 @@ function adminRunNightlyReport(email) {
               ops.data.displayed_score !== undefined) {
             report.__ops_score = ops.data.displayed_score;
           }
+          // ここで締める。以後この日の点数は動かない
+          finalizeDailyOpsReport(user.student_email, targetDate);
         }
       } catch (e) { /* 新レポートが作れなくても、従来の配信は止めない */ }
       if (user.line_user_id) sendReportLineMessage(user, report);
@@ -9934,6 +10007,8 @@ const P1_SHEETS = {
     "evaluation_components","evaluation_state","coverage","confidence",
     "calculation_version","prompt_version","input_hash","generated_at",
     "narrative_json","generated_by","fallback_reason","regenerate_count",
+    // ★確定★ 夜のトリガーで締めた印。これが入った日はもう計算し直さない
+    "finalized_at","snapshot_json",
     "created_at","updated_at"],
   // ★自己経営力（self_mgmt_power_v1）★
   //   1ユーザー × 1週間 × 1指標 ＝ 1行（1人1週で最大5行）
