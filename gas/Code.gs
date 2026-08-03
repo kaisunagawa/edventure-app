@@ -185,6 +185,38 @@ function doGet(e) {
                    token_version: u.token_version || 0 };
         }) });
       }
+      // 新しい採点方式を、実データで試算する（保存はしない）
+      case "adminReportScoreDryRun": {
+        if (!verifyAdmin(e.parameter.coachEmail)) return jsonResponse({ ok: false, error: "not admin" });
+        const day = String(e.parameter.date || "").slice(0, 10) || formatDate(new Date());
+        const users = sheetToObjects(getSheet("Users")).filter(function (u) {
+          return String(u.is_active || "").toUpperCase() === "TRUE"; });
+        const allLogs = sheetToObjects(getSheet("DailyLog"));
+        const reports = sheetToObjects(getSheet("Reports"));
+        const rows = [];
+        users.forEach(function (u) {
+          const logs = allLogs.filter(function (l) {
+            const d = l.date instanceof Date ? Utilities.formatDate(l.date, "Asia/Tokyo", "yyyy-MM-dd") : String(l.date).slice(0, 10);
+            return String(l.student_email) === u.student_email && d === day &&
+                   !String(l.deleted_at || "").trim(); });
+          if (!logs.length) return;
+          const c = computeReportBreakdown_(u.student_email, logs, u, day);
+          const old = reports.find(function (r) {
+            const d = r.date instanceof Date ? Utilities.formatDate(r.date, "Asia/Tokyo", "yyyy-MM-dd") : String(r.date).slice(0, 10);
+            return String(r.student_email) === u.student_email && d === day; });
+          rows.push({ name: String(u.name || u.nickname || ""), old: old ? Number(old.score) : null,
+                      neu: c.score, precise: c.score_precise, b: c.breakdown, f: c.facts });
+        });
+        rows.sort(function (a, b) { return b.precise - a.precise; });
+        const scores = rows.map(function (r) { return r.neu; });
+        const dupNew = scores.length - new Set(scores).size;
+        const oldScores = rows.map(function (r) { return r.old; }).filter(function (x) { return x !== null; });
+        const dupOld = oldScores.length - new Set(oldScores).size;
+        return jsonResponse({ ok: true, date: day, users: rows.length,
+          ties_old: dupOld, ties_new: dupNew,
+          avg_new: scores.length ? Math.round(scores.reduce(function (a, b) { return a + b; }, 0) / scores.length) : null,
+          rows: rows });
+      }
       case "adminActualMinutesAudit":
         return jsonResponse(verifyAdmin(e.parameter.coachEmail)
           ? actualMinutesAudit() : { ok: false, error: "not admin" });
@@ -6714,8 +6746,22 @@ function computeReportBreakdownCore_(studentEmail, logs, user, tasks, journal, w
       memo2 = clamp(Math.max(memo, memoLogs.length ? 14 : 0));        // 1件でも書けていれば及第
     }
   } catch (e) {}
+  // ★測れないものを0点にしない★（2026-08-03 dry-runで発覚）
+  //   集中度を1件も入れていない日は「集中0点」、目標に関連づける習慣がまだ無い人は
+  //   「目標0点」となり、20点まるごと失っていた。それは「できていない」ではなく
+  //   「測っていない」。測れない軸は、測れた軸の平均で埋めて、有利にも不利にもしない。
+  const measurable = { records: true, memo: true, consistency: true,
+                       focus: fv.length > 0,
+                       goal: (goalCount > 0 || tasks.length > 0 || wp !== null) };
+  const rawParts = { records: records2, memo: memo2, focus: focus, goal: goal, consistency: consistency };
+  const okKeys = Object.keys(rawParts).filter(function (k) { return measurable[k]; });
+  const avgOk = okKeys.length ? okKeys.reduce(function (a2, k) { return a2 + rawParts[k]; }, 0) / okKeys.length : 0;
+  Object.keys(rawParts).forEach(function (k) { if (!measurable[k]) rawParts[k] = avgOk; });
+  records2 = rawParts.records; memo2 = rawParts.memo;
+  const focusF = rawParts.focus, goalF = rawParts.goal, consistencyF = rawParts.consistency;
+
   const r1 = function (v) { return Math.round(v * 10) / 10; };
-  const parts = { records: r1(records2), memo: r1(memo2), focus: r1(focus), goal: r1(goal), consistency: r1(consistency) };
+  const parts = { records: r1(records2), memo: r1(memo2), focus: r1(focusF), goal: r1(goalF), consistency: r1(consistencyF) };
   const precise = parts.records + parts.memo + parts.focus + parts.goal + parts.consistency;
   // 表示は整数。合計を先に丸めてから、5項目の整数の合計が必ず一致するように配分する
   const score = Math.round(precise);
@@ -6732,7 +6778,9 @@ function computeReportBreakdownCore_(studentEmail, logs, user, tasks, journal, w
                     tasks_total: tasks.length, tasks_done: doneT, tasks_started: startedT,
                     daily_focus: declared ? (focusDone ? "達成" : "未達") : "未設定",
                     week_progress: wp === null ? null : Math.round(wp * 100),
-                    rest_day: (function(){ try { return isRestDay(user || {}, date); } catch(e){ return false; } })() } };
+                    rest_day: (function(){ try { return isRestDay(user || {}, date); } catch(e){ return false; } })(),
+                    // 測れなかった軸（平均で埋めたもの）。理由の説明に使う
+                    estimated_axes: Object.keys(measurable).filter(function (k) { return !measurable[k]; }) } };
 }
 
 function generateReportWithClaude(studentEmail, studentName, logs) {
@@ -6770,6 +6818,8 @@ ${logsText}
 【点数について】
 - 点数はアプリ側が記録から計算して確定させる。あなたが決めた数字は使われない
 - 文章の中で「◯点」と具体的な点数を断定しない（下の観点は、何を見ているかの参考）
+- 記録していない項目（例: 集中度を入れていない、目標に関連づけていない）は
+  「できていない」ではなく「まだ測れていない」として書く。責めない
 【採点の観点（各0〜20点・合計100点）】
 - records（20点）: 記録した時間帯の数の多さ
 - memo（20点）: 振り返りメモの深さと量
@@ -11955,7 +12005,7 @@ const ADMIN_SECRET_ALLOWLIST = {
   // 一斉送信（Kaiの明示的な要望により残す）
   adminBroadcastLine:1, adminBroadcastLinePending:1, adminSendStudentCampaign:1,
   // セットアップ・保守
-  adminSetupTriggers:1, adminInstallTrigger:1, adminSetupPhase1:1, adminSetupAuth:1, adminPhase4DryRun:1, adminLegacyBackfill:1, adminWritePathStats:1, adminIssueTestSession:1, adminDropTestSessions:1, adminOpsSelfTest:1, adminActualMinutesAudit:1, adminXpCorrection:1, adminStreakRecalc:1, adminGrantFeature:1, adminUserDiag:1,
+  adminSetupTriggers:1, adminInstallTrigger:1, adminSetupPhase1:1, adminSetupAuth:1, adminPhase4DryRun:1, adminLegacyBackfill:1, adminWritePathStats:1, adminIssueTestSession:1, adminDropTestSessions:1, adminOpsSelfTest:1, adminActualMinutesAudit:1, adminXpCorrection:1, adminStreakRecalc:1, adminGrantFeature:1, adminUserDiag:1, adminReportScoreDryRun:1,
   authSetMode:1, authSetEnforce:1, authRoleApply:1, authRoleDryRun:1, authRevokeAll:1,
   authCleanupTestData:1, adminPurgeTestUsers:1, adminMigrateTasks:1, authBreakerReset:1, rotateSessionSecret:1,
   p1Backup:1, p1BackupInfo:1, p1PurgeArchived:1, weeklyBackup:1
