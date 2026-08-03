@@ -2537,16 +2537,24 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
         ${Row({ label:"今週の目標", last:true,
           color:"#22A559",
           icon: html`<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round"><path d="M5 21V4M5 4h11l-2 4 2 4H5"/></svg>`,
-          title: wg.length ? (wg.length===1 ? wg[0].title : wg.map(w=>w.title).join(" / ")) : "",
+          // ★別々の目標を1つにまとめない★
+          //   以前は「アポ6件」と「テレアポ300件」を足して 0/306件 と出していた。
+          //   単位が同じでも中身は別物なので、代表の1つを出して残りは件数で示す。
+          title: wg.length ? (wg.length===1 ? wg[0].title
+                              : wg[0].title + "　ほか" + (wg.length-1) + "件") : "",
           addLabel: curSp.length ? "＋ 今週やる数字を決める" : "先に2週間スプリントを決めてください",
           onAdd: ()=>{ if(curSp.length) setWgSheet(true); else if(goals.length) setSprintSheet({}); },
-          right: wg.length ? (()=>{ let a2=0,t2=0,u="";
-            wg.forEach(w=>{ const t=Number(w.std_line)>0?Number(w.std_line):Number(w.target_total);
-              if(!isNaN(t)&&t>0){ a2+=Number(w.actual_value)||0; t2+=t; u=u||w.unit||""; } });
-            return t2>0 ? val(a2, t2, u) : "数値なし"; })() : null,
+          right: wg.length ? (()=>{
+            // 右側も足し算をやめて、代表の1つだけを出す（複数あるときは下の内訳で見る）
+            const w0 = wg[0];
+            const t0 = Number(w0.std_line)>0 ? Number(w0.std_line) : Number(w0.target_total);
+            if(!(t0>0)) return "数値なし";
+            return val(Number(w0.actual_value)||0, t0, w0.unit||"");
+          })() : null,
           open: openRow==="week", onToggle: ()=>setOpenRow(openRow==="week"?"":"week"),
           children: html`
             <div style=${{fontSize:11.5,color:"var(--sub)",lineHeight:1.8}}>
+              ${wg.length>1&&html`<div style=${{marginBottom:6,color:"var(--sub)"}}>今週の目標が${wg.length}件あります。1つずつの進み具合はこちらです。</div>`}
               ${wg.map((w,k)=>{ const t=Number(w.std_line)>0?Number(w.std_line):Number(w.target_total);
                 const u=w.unit||(w.metric_type==="DURATION"?"分":"");
                 return html`<div key=${k} style=${{marginBottom:6}}>
@@ -7226,7 +7234,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260803-140423";
+const APP_BUILD = "20260803-144029";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
