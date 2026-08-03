@@ -3055,6 +3055,64 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
         })()}
     </div>
 
+    <!-- ★今日のフォーカスの宣言モーダル★
+         2026-08-02のデザイン変更のときに、この描画ブロックごと消してしまっていた。
+         宣言する画面が無いので、朝のポップアップも「決める」ボタンも
+         押しても何も出ない状態だった（2026-08-03にKaiが発見）。
+         アンケートより手前に出す。 -->
+    ${showIntentModal&&ReactDOM.createPortal(html`
+      <div style=${{position:"fixed",inset:0,height:"100dvh",background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"flex-end",zIndex:650}}>
+        <div style=${{background:"var(--card)",borderRadius:"20px 20px 0 0",padding:"24px 20px calc(28px + env(safe-area-inset-bottom))",width:"100%",boxSizing:"border-box",maxHeight:"88dvh",overflowY:"auto"}}>
+          <div style=${{fontSize:18,fontWeight:800,marginBottom:4,color:"var(--text)"}}>${intentEditMode?"⭐ 今日のフォーカスを編集":"⭐ 今日いちばん達成したいことは？"}</div>
+          <div style=${{fontSize:13,color:"var(--sub)",marginBottom:16,lineHeight:1.6}}>${intentEditMode?"やりたいことと、かける時間を編集できます。":"やりたいこと1つと、それに使う時間を決めましょう。今日はこの達成をコーチと一緒に目指します。"}</div>
+          <label class="form-lbl" style=${{fontSize:11}}>達成したいこと</label>
+          <input class="inp" placeholder="例：企画書を仕上げる、30分走る" value=${intentInput}
+            onInput=${e=>setIntentInput(e.target.value)} style=${{marginBottom:12}}/>
+          ${actionItems.length>0&&html`
+            <div style=${{display:"flex",flexWrap:"wrap",gap:6,marginBottom:16}}>
+              ${actionItems.slice(0,3).map((a,i)=>html`
+                <button key=${i} onClick=${()=>setIntentInput(a)}
+                  style=${{padding:"5px 10px",borderRadius:20,border:`1.5px solid ${intentInput===a?"var(--accent)":"var(--border)"}`,background:intentInput===a?"var(--accent-l)":"transparent",color:intentInput===a?"var(--accent)":"var(--sub)",fontSize:11.5,fontWeight:500,cursor:"pointer",fontFamily:"inherit",maxWidth:"100%",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                  🎯 ${a}
+                </button>
+              `)}
+            </div>
+          `}
+          <label class="form-lbl" style=${{fontSize:11}}>どれくらい時間をかける？</label>
+          <div style=${{display:"flex",alignItems:"center",justifyContent:"center",gap:20,margin:"6px 0 18px"}}>
+            <button onClick=${()=>setIntentHours(v=>Math.max(0.5,Math.round((v-0.5)*10)/10))}
+              style=${{width:44,height:44,borderRadius:"50%",border:"1.5px solid var(--border)",background:"transparent",color:"var(--text)",fontSize:20,fontWeight:700,cursor:"pointer"}}>−</button>
+            <div style=${{fontSize:30,fontWeight:800,color:"var(--text)",minWidth:96,textAlign:"center"}}>${intentHours}<span style=${{fontSize:15,fontWeight:600,color:"var(--sub)"}}>時間</span></div>
+            <button onClick=${()=>setIntentHours(v=>Math.min(12,Math.round((v+0.5)*10)/10))}
+              style=${{width:44,height:44,borderRadius:"50%",border:"1.5px solid var(--border)",background:"transparent",color:"var(--text)",fontSize:20,fontWeight:700,cursor:"pointer"}}>＋</button>
+          </div>
+          <label class="form-lbl" style=${{fontSize:11}}>今日のタスクも追加（任意）</label>
+          <div style=${{display:"flex",flexDirection:"column",gap:8,marginBottom:6}}>
+            ${intentTasks.map((t,i)=>html`
+              <div key=${i} style=${{display:"flex",gap:8,alignItems:"center"}}>
+                <input class="inp" style=${{flex:1,margin:0}} value=${t.text} placeholder="例：数学の課題を出す"
+                  onInput=${e=>{ const a=[...intentTasks]; a[i]={...a[i],text:e.target.value}; setIntentTasks(a); }}/>
+                <input class="inp" type="number" inputmode="numeric" value=${t.min} placeholder="分"
+                  style=${{width:56,margin:0,textAlign:"center",padding:"10px 6px",flexShrink:0}}
+                  onInput=${e=>{ const a=[...intentTasks]; a[i]={...a[i],min:e.target.value}; setIntentTasks(a); }}/>
+                <span style=${{fontSize:12,color:"var(--sub)",flexShrink:0}}>分</span>
+                ${intentTasks.length>1&&html`<button onClick=${()=>setIntentTasks(intentTasks.filter((_,j)=>j!==i))}
+                  style=${{background:"none",border:"none",color:"var(--sub)",fontSize:20,cursor:"pointer",flexShrink:0,padding:"0 4px"}}>×</button>`}
+              </div>
+            `)}
+          </div>
+          <button onClick=${()=>setIntentTasks([...intentTasks,{text:"",min:""}])}
+            style=${{width:"100%",padding:"8px",borderRadius:10,border:"1.5px dashed var(--border)",background:"none",color:"var(--accent)",fontSize:12.5,fontWeight:600,cursor:"pointer",marginBottom:16,fontFamily:"inherit"}}>
+            ＋ タスクを追加
+          </button>
+          <button class="btn" disabled=${!intentInput.trim()||intentSaving} onClick=${saveIntent}
+            style=${{opacity:intentInput.trim()?1:0.5}}>${intentEditMode?"更新する":"今日のフォーカスにする"}</button>
+          <button onClick=${intentEditMode?closeIntentModal:skipIntent}
+            style=${{display:"block",width:"100%",marginTop:10,background:"none",border:"none",color:"var(--sub)",fontSize:13,cursor:"pointer",fontFamily:"inherit",padding:8}}>${intentEditMode?"キャンセル":"今日はスキップ"}</button>
+        </div>
+      </div>
+    `, document.body)}
+
     <!-- タスク詳細画面（Trello風カード詳細。状態変更・時間・メモ・計測・削除） -->
     ${detailTask!==null && ReactDOM.createPortal((()=>{
       const t=detailTask, st=statusOf(t);
@@ -6997,7 +7055,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260803-090850";
+const APP_BUILD = "20260803-101517";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
@@ -8368,6 +8426,16 @@ function App() {
     const t=setTimeout(()=>{
       if(localStorage.getItem("announce_seen")!==ANNOUNCE_ID) return; // 告知が先
       if(localStorage.getItem("tutorial_seen")!=="1") return;         // 初回導線が先
+      // ★今日のフォーカスが先★
+      //   アンケートが上に出て、フォーカスの宣言画面が隠れてしまっていた。
+      //   宣言するかスキップするまでアンケートは出さない。
+      try{
+        const today=formatDateStr(new Date());
+        const li=JSON.parse(localStorage.getItem("jiroku_intent")||"null");
+        const declared=!!(li && li.date===today && String(li.intent||"").trim());
+        const skipped=localStorage.getItem("jiroku_intent_skip")===today;
+        if(!declared && !skipped) return;
+      }catch(e){}
       setShowSurvey(true);
     },2500);
     return ()=>clearTimeout(t);
@@ -8518,6 +8586,45 @@ try {
   _d.textContent = "ERROR:\n"+e.message+"\n\n"+e.stack;
   const _r=document.getElementById("root"); _r.textContent=""; _r.appendChild(_d);
 }
+// ★新しい版が出たら、開きっぱなしの端末にも届ける★
+//   直した内容が「アプリを開き直すまで反映されない」状態を放置しない。
+//   画面に戻ってきたタイミングで配信中の版を確かめ、違っていたら
+//   入力中でなければその場で読み込み直す。入力中なら小さな案内だけ出す。
+(function () {
+  var CHECK_MIN = 20 * 60 * 1000;   // 20分に1回まで
+  var last = 0, banner = null;
+  function busy() {
+    var a = document.activeElement;
+    if (a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)) return true;
+    return !!document.querySelector('[data-modal-open="1"]');
+  }
+  function showBanner() {
+    if (banner) return;
+    banner = document.createElement("button");
+    banner.setAttribute("style", "position:fixed;left:12px;right:12px;bottom:78px;z-index:9990;"
+      + "padding:12px;border:none;border-radius:12px;background:#0891B2;color:#fff;font-size:13px;"
+      + "font-weight:700;box-shadow:0 6px 20px rgba(0,0,0,.2);font-family:inherit");
+    banner.textContent = "新しい版があります。タップして更新";
+    banner.onclick = function () { location.reload(); };
+    document.body.appendChild(banner);
+  }
+  async function check() {
+    if (Date.now() - last < CHECK_MIN) return;
+    last = Date.now();
+    try {
+      var res = await fetch(location.pathname + "?buildcheck=" + Date.now(), { cache: "no-store" });
+      if (!res.ok) return;
+      var txt = await res.text();
+      var m = txt.match(/APP_BUILD = "([^"]+)"/);
+      if (!m || m[1] === APP_BUILD) return;
+      if (busy()) showBanner(); else location.reload();
+    } catch (e) { /* 通信できないときは何もしない */ }
+  }
+  document.addEventListener("visibilitychange", function () { if (!document.hidden) check(); });
+  window.addEventListener("focus", check);
+  setTimeout(check, 60000);
+})();
+
 window.onerror = (msg,src,line,col,err) => {
   console.error("JS ERROR:", msg, "Line:"+line, err);
   // アプリが描画済みなら画面は壊さない。起動前のエラーのみ全画面表示
