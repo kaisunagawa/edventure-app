@@ -1798,13 +1798,19 @@ function computeSelfMgmtPower(studentEmail, weekStart) {
   //   1つの数字が無かった。確かに測れている（暫定でない）力の平均を総合点にする。
   //   測れていない力を0点として混ぜると、記録が少ない人ほど不当に低く出るため、
   //   分母には入れない。何本ぶんの平均なのかを evaluated_count で添える。
-  const solid = rows.filter(function (m) {
-    return m.evaluation_state === "evaluated" && m.score !== null && !m.provisional; });
-  const overall = solid.length
-    ? Math.round(solid.reduce(function (a, m) { return a + Number(m.score); }, 0) / solid.length)
+  // ★暫定でも隠さない★（2026-08-05 Kaiの判断）
+  //   これまでは「測れた要素が半分未満」の項目を総合から外し、画面にも点数を出さなかった。
+  //   その結果、継続力のように素点があるのに何も出ない項目が生まれ、
+  //   「消えた」と見えてしまった。
+  //   数字を隠すより、出したうえで「何が測れていないか」を添えるほうが正しい。
+  const scored = rows.filter(function (m) {
+    return m.evaluation_state === "evaluated" && m.score !== null; });
+  const overall = scored.length
+    ? Math.round(scored.reduce(function (a, m) { return a + Number(m.score); }, 0) / scored.length)
     : null;
   return { period_start: monday, period_end: sunday, version: SMP_VERSION, metrics: rows,
-           overall_score: overall, evaluated_count: solid.length, metric_count: rows.length };
+           overall_score: overall, evaluated_count: scored.length, metric_count: rows.length,
+           provisional_count: scored.filter(function (m) { return m.provisional; }).length };
 }
 
 function getSelfMgmtPower(studentEmail, body) {

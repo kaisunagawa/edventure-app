@@ -3103,14 +3103,13 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
       ((goalTree&&goalTree.orphanWeeklyGoals)||[]).forEach(w=>ws.push({...w, parentTitle:""}));
       const wg = ws.filter(w=>String(w.status||"ACTIVE").toUpperCase()==="ACTIVE");
 
-      // ★段階ごとに色を分ける★
-      //   一度すべて基本色の濃淡にしてみたが、差が小さすぎて
-      //   かえって中途半端に見えた（2026-08-05 Kaiの判断で元に戻した）。
-      //   段階が変わったことがはっきり分かる色を使う。
-      const C_Q = "var(--accent)";   // 3か月目標  … アプリの基本色
-      const C_S = "#3B82F6";         // 2週間Sprint … 基本色と見分けがつく青
-      const C_W = "var(--green)";    // 今週の目標  … 達成の緑
-      const C_STAR = "var(--amber)"; // 今日のフォーカス … 注目の黄
+      // ★色は指定いただいた画像のとおり★（2026-08-05 Kaiの指示）
+      //   基本色に寄せる案・濃淡だけの案も試したが、
+      //   段階が変わったことが分かりにくかった。画像の色に戻す。
+      const C_Q = "#14B8A6";    // 3か月目標   ティール
+      const C_S = "#3B82F6";    // 2週間Sprint 青
+      const C_W = "#4CAF50";    // 今週の目標   緑
+      const C_STAR = "#F5C542"; // 今日のフォーカス 黄
 
       // ★目標がまだ無い人にも入口を残す★
       if (!goals.length && !allSp.length) return html`
@@ -4466,7 +4465,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
       };
       // 改善提案は evaluated の中からいちばん低いものだけ
       // 改善提案は、確かに測れていて（暫定でない）かつ伸びしろがあるものだけ
-      const evald = M.filter(m=>m.evaluation_state==="evaluated" && m.score!==null && !m.provisional);
+      const evald = M.filter(m=>m.evaluation_state==="evaluated" && m.score!==null);
       const weak = evald.slice().sort((a,b)=>a.score-b.score).filter(m=>m.score<80)[0];
       const HINT = {
         result_power: "今週の目標に、今日の行動を1つ結びつけてみましょう。",
@@ -4497,10 +4496,10 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
         continuity_power: html`<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 12a3 3 0 105 2.2l4-4.4A3 3 0 1117 12a3 3 0 01-5-2.2l-4 4.4A3 3 0 017 12z" stroke-linejoin="round"/></svg>`,
         recovery_power: html`<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 109-9 9 9 0 00-6.4 2.6L3 8" stroke-linecap="round" stroke-linejoin="round"/><path d="M3 4v4h4" stroke-linecap="round" stroke-linejoin="round"/><path d="M12 8v4.5l3 1.8" stroke-linecap="round"/></svg>`,
       };
-      const ev2 = M.filter(m=>m.evaluation_state==="evaluated"&&m.score!==null&&!m.provisional);
+      const ev2 = M.filter(m=>m.evaluation_state==="evaluated"&&m.score!==null);
       const best2 = ev2.slice().sort((a,b)=>b.score-a.score)[0];
       const worst2 = ev2.slice().sort((a,b)=>a.score-b.score)[0];
-      const pend2 = M.filter(m=>!(m.evaluation_state==="evaluated"&&m.score!==null&&!m.provisional)).map(m=>m.label);
+      const pend2 = M.filter(m=>!(m.evaluation_state==="evaluated"&&m.score!==null)).map(m=>m.label);
       return html`
       <div style=${{margin:"12px 16px 0",background:"var(--card)",borderRadius:16,border:"1px solid var(--border)",padding:"16px 16px 14px"}}>
         <div style=${{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8,marginBottom:6}}>
@@ -4550,7 +4549,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
                 </div>`;
               })()}
               <div style=${{fontSize:10.5,color:"var(--sub)",marginTop:9,lineHeight:1.6}}>
-                測れている${smp.data.evaluated_count}項目の平均（全${smp.data.metric_count}項目）
+                ${smp.data.evaluated_count}項目の平均（全${smp.data.metric_count}項目）${smp.data.provisional_count?"・うち暫定"+smp.data.provisional_count+"項目":""}
                 ${smp.data.rank_total?html`<br/>${smp.data.rank_total}人中 ${smp.data.rank}位`:""}</div>
             ` : html`
               <div style=${{fontSize:12,color:"var(--sub)",lineHeight:1.8}}>
@@ -4594,12 +4593,17 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
         <!-- 5項目の一覧 -->
         <div style=${{border:"1px solid var(--border)",borderRadius:12,overflow:"hidden",marginBottom:10}}>
           ${M.map((m,i)=>{ const v=view(m);
-            const num = v.kind==="num" && !m.provisional;
-            const band = m.status_label||"";
+            // ★暫定でも点数を隠さない★（2026-08-05 Kaiの判断）
+            //   測れた要素が半分未満の項目を非表示にしていたため、
+            //   素点があるのに何も出ない項目が生まれ「消えた」と見えていた。
+            //   点数は出し、まだ測れていないものを下に添えて伝える。
+            const num = v.kind==="num";
+            const band = m.provisional ? "暫定" : (m.status_label||"");
             const bc = BADGE[band]||BADGE["要確認"];
+            const notYet = (m.components||[]).filter(c=>c.state!=="evaluated"&&c.label).map(c=>c.label);
             return html`
-            <div key=${m.key} style=${{display:"flex",alignItems:"center",gap:10,padding:"11px 12px",
-                                       borderTop:i?"1px solid var(--border)":"none"}}>
+            <div key=${m.key} style=${{padding:"11px 12px",borderTop:i?"1px solid var(--border)":"none"}}>
+            <div style=${{display:"flex",alignItems:"center",gap:10}}>
               <span style=${{flexShrink:0,width:32,height:32,borderRadius:"50%",background:"var(--bg)",
                              display:"flex",alignItems:"center",justifyContent:"center",color:"var(--accent)"}}>
                 ${ICON[m.key]||""}</span>
@@ -4622,6 +4626,10 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
                 <span style=${{flexShrink:0,width:58,textAlign:"center",fontSize:10.5,fontWeight:700,
                                padding:"3px 0",borderRadius:7,
                                color:bc.fg,background:bc.bg,whiteSpace:"nowrap"}}>${band}</span>`}
+            </div>
+            ${(num&&m.provisional&&notYet.length>0)&&html`
+              <div style=${{fontSize:10,color:"var(--sub)",lineHeight:1.7,marginTop:4,marginLeft:42}}>
+                まだ測れていません：${notYet.join("・")}</div>`}
             </div>`; })}
         </div>
 
@@ -5843,7 +5851,8 @@ function SelfMgmtRadar({metrics, size}) {
   const start = -Math.PI / 2, step = (Math.PI * 2) / N;
   const pt = (i, frac) => [cx + Math.cos(start + i * step) * maxR * frac,
                            cy + Math.sin(start + i * step) * maxR * frac];
-  const shown = (m) => m && m.evaluation_state === "evaluated" && m.score !== null && !m.provisional;
+  // 暫定でも形に含める。欠けていると「その力が無い」ように見えてしまう
+  const shown = (m) => m && m.evaluation_state === "evaluated" && m.score !== null;
   const rings = [0.25, 0.5, 0.75, 1].map(f => M.map((_, i) => pt(i, f).join(",")).join(" "));
   const axes = M.map((_, i) => pt(i, 1));
   // 面は「測れた軸」だけで作る。測れていない軸は中心へ寄せず、その軸を飛ばす
@@ -8852,7 +8861,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260805-063431";
+const APP_BUILD = "20260805-070609";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
