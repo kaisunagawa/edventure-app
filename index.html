@@ -1002,7 +1002,9 @@ async function flushCalendarQueue(){
 const CAL_COLOR_BY_CLASS = {
   GOAL_DIRECT:           "10", // Basil   濃い緑 ── いちばん良い使い方
   ASSET_BUILD:           "2",  // Sage    明るい緑 ── 将来への投資
-  RECOVERY_RELATIONSHIP: "7",  // Peacock 青 ── 回復・人間関係（消耗ではなく充電）
+  RECOVERY:              "7",  // Peacock 青 ── 回復（消耗ではなく充電）
+  RELATIONSHIP:          "5",  // Banana  黄 ── 人間関係（あたたかい時間）
+  RECOVERY_RELATIONSHIP: "7",  // 旧分類。書き換えない昔の記録のために残す
   OPERATIONS:            "8",  // Graphite 灰 ── 日常業務（良くも悪くもない）
   UNPLANNED_LEAKAGE:     "11", // Tomato  赤 ── 計画外の時間（いちばん減らしたい）
 };
@@ -1305,14 +1307,36 @@ const EVAL_COLORS = {"5":"#22C55E","4":"#6366F1","3":"#F59E0B","2":"#F97316","1"
 //   「その時間が経営のどこに効いたか」を1タップで選ぶ。
 //   Tasks の文脈（仕事/プライベート…）とは別の軸なので、自動変換はしない。
 //   選ばなければ未分類のまま。あとから記録カードで直せる。
+//
+// ★6分類にした★（2026-08-05 Kaiの判断）
+//   もとは「回復・人間関係」を1つにまとめていたが、
+//   休むことと人と会うことは性質が違う（充電と、関係への投資）。
+//   分けないと「どちらのために時間を使ったのか」が本人にも分からない。
+//   並びは「良い使い方 → 減らしたい使い方」の順にして、
+//   上から順に読むだけで意味が伝わるようにする。
 const TIME_CLASS_OPTS = [
-  ["GOAL_DIRECT",           "目標に直結"],
-  ["OPERATIONS",            "日常業務"],
-  ["ASSET_BUILD",           "将来への投資"],
-  ["RECOVERY_RELATIONSHIP", "回復・人間関係"],
-  ["UNPLANNED_LEAKAGE",     "計画外の時間"],
+  ["GOAL_DIRECT",       "目標に直結"],
+  ["ASSET_BUILD",       "将来への投資"],
+  ["RECOVERY",          "回復"],
+  ["RELATIONSHIP",      "人間関係"],
+  ["OPERATIONS",        "日常業務"],
+  ["UNPLANNED_LEAKAGE", "計画外の時間"],
 ];
-const TIME_CLASS_LABEL = Object.fromEntries(TIME_CLASS_OPTS);
+// 迷いやすいところだけ、選ぶ基準を1行で添える（2026-08-05）
+//   「目標に直結」と「将来への投資」の線引きは本人には判断できない。
+const TIME_CLASS_NOTE = {
+  GOAL_DIRECT:       "3か月目標に直接効いた時間",
+  ASSET_BUILD:       "すぐ効かないが将来のためになる学習・仕込み",
+  RECOVERY:          "休息・睡眠・運動など、充電になった時間",
+  RELATIONSHIP:      "人と会う・話す・つながりを保つ時間",
+  OPERATIONS:        "やらないと回らない日常の作業",
+  UNPLANNED_LEAKAGE: "予定になかった割り込み・流されて使った時間",
+};
+// ★昔の記録を壊さない★
+//   2026-08-05より前の記録は RECOVERY_RELATIONSHIP で保存されている。
+//   書き換えはしない（1,700件を触ると事故る）。表示だけ読み替える。
+const TIME_CLASS_LEGACY = { RECOVERY_RELATIONSHIP: "回復・人間関係" };
+const TIME_CLASS_LABEL = Object.assign({}, TIME_CLASS_LEGACY, Object.fromEntries(TIME_CLASS_OPTS));
 const CLASS_REASON_TEXT = {
   LINKED_WEEKLY_GOAL:        "今週の目標に紐づいているため",
   LINKED_TASK_TO_WEEKLY_GOAL:"このタスクが今週の目標に紐づいているため",
@@ -1322,6 +1346,82 @@ const CLASS_REASON_TEXT = {
   GOAL_RELATED_ONLY_NEEDS_USER: "「目標に関連」だけでは決められないので選んでください",
   RULE_UNCERTAIN:            "決め手がないので選んでください",
 };
+// ★まとめて分類する画面★（2026-08-05）
+//   直近7日ぶんの「まだ分類していない記録」を集めて、上から順に選べるようにする。
+//   1件選ぶごとにその場で保存し、選んだ行は静かに消えていく（押し直しはできる）。
+//   保存に失敗したら、その行は消さずに残す（黙って無かったことにしない）。
+function BulkClassifySheet({date, onClose, onSaved, onToast}) {
+  const [rows, setRows] = useState(null);   // null = 読み込み中
+  const [busy, setBusy] = useState("");
+  const [doneCount, setDoneCount] = useState(0);
+  useEffect(()=>{
+    let alive = true;
+    // 今日を含む直近7日。日ごとの取得なので7回に分けて、まとめて待つ
+    const days = Array.from({length:7}, (_,i)=>addDays(date, -i));
+    Promise.all(days.map(d=>gasApi("getLogs",{date:d}).then(r=>({d, list:(r&&r.ok&&r.data)||[]})).catch(()=>({d,list:[]}))))
+      .then(res=>{
+        if(!alive) return;
+        const out = [];
+        res.forEach(({d,list})=>list.forEach(l=>{
+          if(String(l.time_classification||"").trim()) return;
+          if(!l.log_id) return;                 // 分類の保存はlog_idで行うため
+          out.push({...l, __date:d});
+        }));
+        out.sort((a,b)=> a.__date===b.__date
+          ? blockSortKey(a.time_block)-blockSortKey(b.time_block)
+          : (a.__date>b.__date?-1:1));
+        setRows(out);
+      });
+    return ()=>{ alive=false; };
+  },[date]);
+
+  const pick = async (l, k) => {
+    if(busy) return;
+    setBusy(l.log_id);
+    const r = await gasPostJson("setLogClassification", { log_id: l.log_id, time_classification: k });
+    setBusy("");
+    if(!r || !r.ok){ onToast&&onToast("分類を保存できませんでした"); return; }
+    setDoneCount(n=>n+1);
+    onSaved&&onSaved(l.log_id, k);
+    setRows(prev=>prev.filter(x=>x.log_id!==l.log_id));
+  };
+
+  return html`
+    <div style=${{position:"fixed",inset:0,height:"100dvh",zIndex:430,background:"var(--bg)",display:"flex",flexDirection:"column"}}>
+      <div style=${{display:"flex",alignItems:"center",gap:10,padding:"14px 16px",borderBottom:"1px solid var(--border)",flexShrink:0,paddingTop:"calc(14px + var(--safe-top, 0px))"}}>
+        <div style=${{flex:1,minWidth:0}}>
+          <div style=${{fontSize:15,fontWeight:800}}>まとめて分類する</div>
+          <div style=${{fontSize:11,color:"var(--sub)",marginTop:2}}>
+            ${rows===null?"読み込み中…":(rows.length?`残り ${rows.length}件（直近7日）`:"すべて分類できました")}
+            ${doneCount>0?`　／　${doneCount}件 完了`:""}</div>
+        </div>
+        <button onClick=${onClose} style=${{background:"none",border:"none",color:"var(--sub)",fontSize:22,cursor:"pointer",lineHeight:1,padding:"0 4px"}}>×</button>
+      </div>
+      <div style=${{flex:1,minHeight:0,overflowY:"auto",WebkitOverflowScrolling:"touch",padding:"14px 16px calc(28px + var(--safe-bottom, 0px))"}}>
+        ${rows===null&&html`<div style=${{padding:24,textAlign:"center",color:"var(--sub)",fontSize:13}}>読み込み中…</div>`}
+        ${rows&&rows.length===0&&html`
+          <div style=${{padding:"28px 16px",textAlign:"center",color:"var(--sub)",fontSize:13,lineHeight:1.9}}>
+            分類していない記録はありません。<br/>時間の使い方が正しく採点されます。</div>`}
+        ${rows&&rows.map(l=>html`
+          <div key=${l.log_id} style=${{background:"var(--card)",border:"1px solid var(--border)",borderRadius:12,padding:"12px 14px",marginBottom:10,opacity:busy===l.log_id?0.5:1}}>
+            <div style=${{display:"flex",gap:8,alignItems:"baseline",marginBottom:6}}>
+              <span style=${{flexShrink:0,fontSize:11,color:"var(--sub)",fontVariantNumeric:"tabular-nums"}}>
+                ${l.__date===date?"":Number(l.__date.slice(5,7))+"/"+Number(l.__date.slice(8,10))+" "}${l.time_block}</span>
+              <span style=${{flex:1,minWidth:0,fontSize:13,fontWeight:700,color:"var(--text)",overflowWrap:"anywhere"}}>${l.task}</span>
+            </div>
+            ${l.memo&&html`<div style=${{fontSize:11,color:"var(--sub)",lineHeight:1.7,marginBottom:8,
+                                          display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical",overflow:"hidden"}}>${l.memo}</div>`}
+            <div style=${{display:"flex",flexWrap:"wrap",gap:6}}>
+              ${TIME_CLASS_OPTS.map(([k,lb])=>html`
+                <button key=${k} disabled=${!!busy} onClick=${()=>pick(l,k)}
+                  style=${{padding:"6px 11px",borderRadius:20,fontSize:11.5,cursor:"pointer",fontFamily:"inherit",
+                           border:"1px solid var(--border)",background:"transparent",color:"var(--sub)"}}>${lb}</button>`)}
+            </div>
+          </div>`)}
+      </div>
+    </div>`;
+}
+
 function TimeClassPicker({value, onChange, hint}) {
   return html`
     <div class="form-grp">
@@ -1335,6 +1435,12 @@ function TimeClassPicker({value, onChange, hint}) {
                      background:on?"var(--accent-l)":"transparent",color:on?"var(--accent)":"var(--sub)"}}>${l}</button>`;
         })}
       </div>
+      <!-- ★選んだものの意味を1行で出す★（2026-08-05）
+           「目標に直結」と「将来への投資」の違いが本人に判断できず、
+           選ぶのをやめてしまう原因になっていた。 -->
+      ${value&&TIME_CLASS_NOTE[value]&&html`
+        <div style=${{fontSize:11,color:"var(--accent)",marginTop:6,lineHeight:1.7}}>
+          ${TIME_CLASS_NOTE[value]}</div>`}
       <div style=${{fontSize:10.5,color:"var(--sub)",marginTop:6,lineHeight:1.7}}>
         ${hint||"選ばなくても保存できます。あとから記録カードで変えられます"}
       </div>
@@ -4084,7 +4190,11 @@ function LogScreen({onToast, isActive}) {
   // 最後に選んだ状態を記憶して新しい時間帯のデフォルトにする（タイマーと同じ方式）
   const goalRelatedDefault = () => localStorage.getItem("jiroku_log_goal_related") === "true";
   const [goalRelated, setGoalRelated] = useState(goalRelatedDefault);
-  const [timeClass, setTimeClass] = useState("");   // 時間の5分類（選ばなければ未分類）
+  // ★前回選んだ分類を初期値にする★（2026-08-05）
+  //   毎回ゼロから選ばせると、面倒で選ばなくなる（実際、記録1,724件のうち
+  //   分類が入っているものはごくわずかだった）。直前と同じ種類の時間が続くことは
+  //   多いので、最後に選んだものを出しておき、違うときだけ押し直してもらう。
+  const [timeClass, setTimeClass] = useState(()=>localStorage.getItem("jiroku_log_time_class")||"");
   // ★分類から「目標に関連しているか」を決める★（2026-08-05）
   //   goal_related は、分類がまだ十分に付いていない期間の予備の手がかりとして
   //   採点で使われている。チェック欄を消したぶん、分類から自動で埋める。
@@ -4092,7 +4202,10 @@ function LogScreen({onToast, isActive}) {
     setTimeClass(k);
     const v = (k === "GOAL_DIRECT");
     setGoalRelated(v);
-    try{ localStorage.setItem("jiroku_log_goal_related", String(v)); }catch(e){}
+    try{
+      localStorage.setItem("jiroku_log_goal_related", String(v));
+      localStorage.setItem("jiroku_log_time_class", k);   // 次の記録の初期値にする
+    }catch(e){}
   };
   const [clsEditing, setClsEditing] = useState(null);  // 分類を選び直している記録のlog_id
   // 記録カードから分類を変える。サーバーが USER として保存し、以後ルールで上書きしない
@@ -4165,17 +4278,25 @@ function LogScreen({onToast, isActive}) {
     const existing = currentLogs.find(l => l.time_block === b);
     let v;
     if (existing) {
-      v = {task:existing.task||"", focus:existing.focus_level||"", memo:existing.memo||"", goalRelated:existing.goal_related==="true"||existing.goal_related===true};
+      // ★保存済みの分類も読み込む★（2026-08-05）
+      //   前回の分類を初期値にするようにしたので、読み込まないと
+      //   「開いた記録の分類」と「画面に出ている分類」が食い違う。
+      v = {task:existing.task||"", focus:existing.focus_level||"", memo:existing.memo||"",
+           goalRelated:existing.goal_related==="true"||existing.goal_related===true,
+           timeClass:existing.time_classification||""};
     } else {
       let draft = null;
       try{ draft = JSON.parse(localStorage.getItem(draftKey(date, b))||"null"); }catch(e){}
-      v = draft || {task:"", focus:"", memo:"", goalRelated:goalRelatedDefault()};
+      v = draft || {task:"", focus:"", memo:"", goalRelated:goalRelatedDefault(),
+                    timeClass:localStorage.getItem("jiroku_log_time_class")||""};
     }
     setTask(v.task); setFocus(v.focus); setMemo(v.memo); setGoalRelated(v.goalRelated);
+    setTimeClass(v.timeClass||"");
     lastLoadedRef.current = v;
   };
 
   // ★時間を細かく決める★ 開始・終了を5分きざみで指定できるようにする
+  const [bulkOpen, setBulkOpen] = useState(false);   // まとめて分類する画面
   const [fineOpen, setFineOpen] = useState(false);
   const [fineFrom, setFineFrom] = useState(()=>{
     const d=new Date(); const m=Math.floor(d.getMinutes()/5)*5;
@@ -4585,6 +4706,35 @@ function LogScreen({onToast, isActive}) {
             </div>`}
       </div>`;
     })()}
+
+    <!-- ★まとめて分類する★（2026-08-05 Kaiの判断）
+         記録1,724件のうち分類が入っているものはごくわずかで、
+         「時間の使い方」がほとんど採点できていなかった。
+         1件ずつ記録カードを開いて直すのは現実的でないので、
+         未分類だけを集めて、その場で連続して選べるようにする。 -->
+    ${(()=>{
+      const un = logs.filter(l=>!String(l.time_classification||"").trim());
+      if(!un.length) return "";
+      return html`
+        <button onClick=${()=>setBulkOpen(true)}
+          style=${{display:"flex",alignItems:"center",gap:10,width:"100%",marginBottom:14,padding:"12px 14px",
+                   borderRadius:12,border:"1.5px dashed var(--accent)",background:"var(--accent-l)",
+                   cursor:"pointer",fontFamily:"inherit",textAlign:"left"}}>
+          <span style=${{fontSize:17,flexShrink:0}}>🗂</span>
+          <span style=${{flex:1,minWidth:0}}>
+            <span style=${{display:"block",fontSize:13,fontWeight:700,color:"var(--accent)"}}>
+              まだ分類していない記録が ${un.length}件あります</span>
+            <span style=${{display:"block",fontSize:11,color:"var(--sub)",marginTop:2}}>
+              まとめて分類すると、時間の使い方が正しく出ます</span>
+          </span>
+          <span style=${{flexShrink:0,fontSize:14,color:"var(--accent)"}}>›</span>
+        </button>`;
+    })()}
+
+    ${bulkOpen&&html`<${BulkClassifySheet} date=${date} onClose=${()=>setBulkOpen(false)}
+      onSaved=${(id,k)=>setLogs(prev=>prev.map(x=>x.log_id===id
+        ? {...x, time_classification:k, classification_method:"USER", classification_reason_code:"USER_SELECTED"} : x))}
+      onToast=${onToast}/>`}
 
     ${logs.length>0&&html`
       <div class="card" style=${{marginBottom:24}}>
@@ -7817,7 +7967,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260805-031926";
+const APP_BUILD = "20260805-033706";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 

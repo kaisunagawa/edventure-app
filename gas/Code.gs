@@ -1950,7 +1950,7 @@ function computeDailyOpsFacts(studentEmail, dateStr, fixture) {
       parts.push(na("明日に残る量", 1, "1日に使える時間を設定すると見られます", "AVAILABLE_TIME_MISSING"));
     }
     // 休む時間。分類（回復・人間関係）か、休みと決めた日かで見る
-    const restMin = logs.filter(function (l) { return String(l.time_classification) === "RECOVERY_RELATIONSHIP"; })
+    const restMin = logs.filter(function (l) { return !!REST_CLASSES[String(l.time_classification)]; })
                         .reduce(function (a, l) { const am = Number(l.actual_minutes);
                           return a + (am > 0 ? am : timeBlockMinutes(l.time_block)); }, 0);
     const isRest = (avail && avail.day_type === "REST") || restDay || zeroDay;
@@ -10856,7 +10856,9 @@ function resolvePrimaryWeeklyGoal(studentEmail, wanted) {
 //   GOAL_DIRECT           目標に直結
 //   OPERATIONS            日常業務
 //   ASSET_BUILD           将来への投資
-//   RECOVERY_RELATIONSHIP 回復・人間関係
+//   RECOVERY             回復
+//   RELATIONSHIP         人間関係
+//   RECOVERY_RELATIONSHIP 回復・人間関係（2026-08-05より前の旧分類）
 //   UNPLANNED_LEAKAGE     計画外の時間
 //
 // ★Tasks.context（WORK/PERSONAL/LEARNING/HEALTH/OTHER）は「活動領域」で、
@@ -10873,7 +10875,19 @@ function resolvePrimaryWeeklyGoal(studentEmail, wanted) {
 // 「計画外だった」と「無駄だった」は別のことなので、機械が決めない。
 // ══════════════════════════════════════════════════════════════════
 const TIME_CLASS_VERSION = "time_classification_v1";
-const TIME_CLASSES = { GOAL_DIRECT:1, OPERATIONS:1, ASSET_BUILD:1, RECOVERY_RELATIONSHIP:1, UNPLANNED_LEAKAGE:1 };
+// ★6分類★（2026-08-05 Kaiの判断）
+//   「回復・人間関係」を「回復」と「人間関係」に分けた。
+//   休むことと人と会うことは性質が違うため、まとめると本人にも分からない。
+//   ★RECOVERY_RELATIONSHIP は残す★
+//     2026-08-05より前の記録（1,700件超）はこのキーで保存されている。
+//     一括で書き換えると事故るので、旧キーもそのまま有効な分類として扱い、
+//     休息の集計では新旧まとめて数える。画面側は表示だけ読み替える。
+const TIME_CLASSES = { GOAL_DIRECT:1, OPERATIONS:1, ASSET_BUILD:1,
+                       RECOVERY:1, RELATIONSHIP:1,
+                       RECOVERY_RELATIONSHIP:1,   // 旧分類（新規では使わない）
+                       UNPLANNED_LEAKAGE:1 };
+// 「休めたか」を見る集計は、新旧どちらのキーも休息として数える
+const REST_CLASSES = { RECOVERY:1, RECOVERY_RELATIONSHIP:1 };
 
 // ★1日の区切り（画面側の DAY_CUTOFF_HOUR と必ず同じ値にすること）★
 //   深夜0時〜この時刻までの記録は「前の日の続き」として扱う。
@@ -10891,7 +10905,7 @@ function classifyLogTime_(studentEmail, targetDate, body, current) {
 
   // 2. 明示された休息（タイマーの休憩モードなど）
   if (String(body.rest_mode || "") === "true") {
-    return { classification: "RECOVERY_RELATIONSHIP", method: "RULE", reason_code: "REST_MODE" };
+    return { classification: "RECOVERY", method: "RULE", reason_code: "REST_MODE" };
   }
 
   // 3. 強いリンクだけを根拠にする
