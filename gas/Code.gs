@@ -1740,6 +1740,38 @@ function getSelfMgmtPower(studentEmail, body) {
     const d = new Date(cur.period_start + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() - 7);
     prev = computeSelfMgmtPower(studentEmail, d.toISOString().substring(0, 10));
   }
+  // ★同じ仲間の中で上位何%か★（2026-08-05 Kai要望）
+  //   すでに計算済み（キャッシュ済み）の総合点だけを読んで比べる。
+  //   ここで全員ぶんを計算し直すと画面が開かなくなるので、計算はしない。
+  //   比べる相手が少ないと「上位50%」がほぼ無意味になるため、
+  //   自分を含めて5人ぶん揃っているときだけ出す。
+  try {
+    const mine = cur.overall_score;
+    if (mine !== null && mine !== undefined) {
+      const myCohortP = String((user && user.cohort) || "").trim();
+      const peers = sheetToObjects(getSheet("Users")).filter(function (u) {
+        return String(u.is_active || "").toUpperCase() === "TRUE" &&
+               String(u.cohort || "").trim() === myCohortP &&
+               hasFeature(u, SMP_FEATURE_KEY); });
+      const scores = [];
+      peers.forEach(function (u) {
+        const v = (u.student_email === studentEmail)
+          ? mine
+          : smpOverallCached_(u.student_email, false);   // キャッシュにあるものだけ
+        if (v !== null && v !== undefined) scores.push(Number(v));
+      });
+      if (scores.length >= 5) {
+        // 自分より上にいる人数から順位を出す（同点は同じ順位）
+        const above = scores.filter(function (v) { return v > mine; }).length;
+        const rank = above + 1;
+        cur.rank = rank;
+        cur.rank_total = scores.length;
+        // 「上位◯%」。1位なら上位1%とは書かず、素直に切り上げる
+        cur.top_percent = Math.max(1, Math.ceil(rank / scores.length * 100));
+      }
+    }
+  } catch (e) { /* 出せなくても本体は返す */ }
+
   const out = { ok: true, data: cur, prev: prev };
   try { CacheService.getScriptCache().put(ckey, JSON.stringify(out), 600); } catch (e) { /* 大きすぎるときは諦める */ }
   return out;
@@ -10668,6 +10700,8 @@ function getGoalTree(studentEmail) {
         ? Math.round(a.actual / Math.max(1, Math.min(7, elapsed)) * 10) / 10 : null,
       // 記録が1件も無い＝未入力。0件達成として扱わない
       has_records: a.logCount > 0,
+      // 数えなかった候補（数量・実測が未入力のぶん）。画面で「数えていません」と伝える
+      pending_unconfirmed: a.pendingUnconfirmed || 0,
       confidence: a.logCount === 0 ? "NONE" : (elapsed >= 4 ? "MEDIUM" : "LOW"),
       link_state: (String(w.link_sprint_id||"").trim() || String(w.link_quarterly_goal_id||"").trim())
         ? "LINKED" : "UNLINKED"
@@ -13385,6 +13419,67 @@ const PACE_STATUS_LABEL = {
 // 複数を同時に進めると、どれが今の焦点か分からなくなる。
 // 作れはするが、画面には「今のSprint」を1つだけ出す。
 // ══════════════════════════════════════════════════════════════════
+// ★2週間Sprintの進捗★（2026-08-05 Kaiの判断・A案）
+//
+//   Sprintそのものには数値目標を持たせない。
+//   「Sprintは3か月を2週間に切ったもの」なので、そこに紐づく週間目標の
+//   積み上げがそのまま進捗になる、という考え方にする。
+//   本人が入力する項目を増やさずに済むのが利点。
+//
+//   数え方：Sprint期間に含まれる各週について、紐づく週間目標の実績を足し、
+//           週の目標×週数 を分母にする。
+//           （今週ぶんの達成率の平均ではなく、期間全体に対する積み上げ。
+//             こうしないと「Sprintの何%まで来たか」にならない）
+//   週間目標が1つも紐づいていない人には null を返す（0%とは言わない）。
+function sprintProgress_(studentEmail, sprint, weeklies) {
+  const sd = String(sprint.start_date || "").slice(0, 10);
+  const ed = String(sprint.end_date || "").slice(0, 10);
+  if (!sd || !ed) return null;
+  const linked = (weeklies || []).filter(function (w) {
+    return String(w.link_sprint_id || "") === String(sprint.sprint_id) &&
+           p1Status_(w.status, "ACTIVE") !== "ARCHIVED"; });
+  if (!linked.length) return null;
+
+  // Sprint期間にかかる週（月曜始まり）を並べる
+  const weeks = [];
+  let cur = mondayOf(sd);
+  const guard = 12;   // 暴走よけ（通常は2週）
+  for (let i = 0; i < guard; i++) {
+    if (cur > ed) break;
+    weeks.push(cur);
+    const d = new Date(cur + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() + 7);
+    cur = d.toISOString().substring(0, 10);
+  }
+  if (!weeks.length) return null;
+
+  let actualSum = 0, targetSum = 0, measurable = 0;
+  const perGoal = {};
+  weeks.forEach(function (wk) {
+    const agg = aggregateWeeklyActual(studentEmail, wk);
+    linked.forEach(function (w) {
+      const t = Number(w.target_total);
+      if (isNaN(t) || t <= 0) return;              // 数値目標が無いものは数えない
+      const a = (agg[String(w.weekly_goal_id)] || {}).actual || 0;
+      actualSum += a; targetSum += t; measurable++;
+      const k = String(w.weekly_goal_id);
+      perGoal[k] = (perGoal[k] || 0) + a;
+    });
+  });
+  if (!measurable || targetSum <= 0) return null;
+
+  return {
+    percent: Math.min(999, Math.round(actualSum / targetSum * 100)),
+    actual: Math.round(actualSum * 10) / 10,
+    target: Math.round(targetSum * 10) / 10,
+    weeks: weeks.length,
+    goal_count: linked.length,
+    // 期間のどこまで来たか。進捗バーに「今いるべき位置」を出すために使う
+    elapsed_percent: (sprint.totalDays > 0 && sprint.dayIndex !== null)
+      ? Math.max(0, Math.min(100, Math.round(sprint.dayIndex / sprint.totalDays * 100))) : null,
+    source: "WEEKLY_ROLLUP"
+  };
+}
+
 function getSprints(studentEmail, body) {
   const chk = p1RequireUser(studentEmail);
   if (!chk.ok) return chk;
@@ -13419,6 +13514,14 @@ function getSprints(studentEmail, body) {
       };
     })
     .sort(function (a, b) { return String(b.start_date).localeCompare(String(a.start_date)); });
+
+  // 進捗は、いま進んでいるSprintだけ出す（終わったものまで毎回集計すると重い）
+  const weeklies = p1List("WeeklyGoals", studentEmail);
+  rows.forEach(function (r) {
+    if (!r.isCurrent) { r.progress = null; return; }
+    try { r.progress = sprintProgress_(studentEmail, r, weeklies); }
+    catch (e) { r.progress = null; }
+  });
 
   const current = rows.filter(function (x) { return x.isCurrent; });
   return { ok: true, data: rows,

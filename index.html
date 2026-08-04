@@ -1429,6 +1429,47 @@ function BulkClassifySheet({date, onClose, onSaved, onToast}) {
     </div>`;
 }
 
+// ★3階層で同じ形の進捗バー★（2026-08-05 Kaiと整理）
+//
+//   %だけを出しても「順調なのか遅れているのか」は分からない。
+//   期間のどこまで来たか（今日いるべき位置）をバーの上にマーカーで重ねると、
+//   実績がその線より右にあれば先行、左なら遅れ、と一目で読める。
+//   3か月目標・2週間Sprint・今週の目標のすべてで同じ見た目にそろえる。
+//
+//   percent … 実績の割合（0以上。100を超えることもある）
+//   pace    … 期間の経過割合（今日いるべき位置）。無ければマーカーを出さない
+function ProgressBar({percent, pace, label, sub}) {
+  const p = Math.max(0, Math.min(100, Number(percent) || 0));
+  const over = Number(percent) > 100;
+  const hasPace = pace !== null && pace !== undefined && !isNaN(Number(pace));
+  const pc = hasPace ? Math.max(0, Math.min(100, Number(pace))) : null;
+  // 予定より進んでいるか。遅れているときだけ色を変えて気づけるようにする
+  const behind = hasPace && Number(percent) < Number(pace) - 5;
+  const color = over ? "var(--green)" : behind ? "var(--amber,#BA7517)" : "var(--accent)";
+  return html`
+    <div>
+      ${(label||sub)&&html`
+        <div style=${{display:"flex",justifyContent:"space-between",alignItems:"baseline",gap:8,marginBottom:4}}>
+          <span style=${{fontSize:11.5,color:"var(--sub)"}}>${label||""}</span>
+          <span style=${{fontSize:11.5,color:"var(--sub)",whiteSpace:"nowrap"}}>${sub||""}</span>
+        </div>`}
+      <div style=${{position:"relative",height:8,background:"var(--bg)",borderRadius:99,overflow:"visible"}}>
+        <div style=${{position:"absolute",inset:0,borderRadius:99,overflow:"hidden"}}>
+          <div style=${{height:"100%",width:p+"%",background:color,borderRadius:99}}/>
+        </div>
+        ${hasPace&&html`
+          <div title="今日いるべき位置"
+            style=${{position:"absolute",left:pc+"%",top:-3,width:2,height:14,background:"var(--text)",
+                     opacity:0.55,borderRadius:2,transform:"translateX(-1px)"}}/>`}
+      </div>
+      ${hasPace&&html`
+        <div style=${{fontSize:10,color:behind?"var(--amber,#BA7517)":"var(--sub)",marginTop:4,lineHeight:1.6}}>
+          ${behind ? "予定より遅れています（今日は "+Math.round(pc)+"% あたり）"
+                   : "今日いるべき位置 "+Math.round(pc)+"%"}
+        </div>`}
+    </div>`;
+}
+
 function TimeClassPicker({value, onChange, hint}) {
   return html`
     <div class="form-grp">
@@ -2741,6 +2782,18 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
                            border:`1px solid ${k===gi?"var(--accent)":"var(--border)"}`,
                            background:k===gi?"var(--accent-l)":"transparent",color:k===gi?"var(--accent)":"var(--sub)"}}>${k+1}</button>`)}
               </div>`}
+              ${num(p.target)!==null&&html`
+                <div style=${{margin:"2px 0 10px"}}>
+                  <${ProgressBar}
+                    percent=${num(p.target)>0 ? (num(p.current)||0)/num(p.target)*100 : 0}
+                    pace=${(g.start_date&&g.end_date) ? (()=>{
+                      const s0=new Date(g.start_date+"T00:00:00"), e0=new Date(g.end_date+"T00:00:00"), n0=new Date();
+                      const tot=(e0-s0)/86400000, el=(n0-s0)/86400000;
+                      return tot>0 ? Math.max(0,Math.min(100, el/tot*100)) : null;
+                    })() : null}
+                    label=${fmt(p.current)+" / "+fmt(p.target)+(p.unit||"")}
+                    sub=${num(p.target)>0 ? Math.round((num(p.current)||0)/num(p.target)*100)+"%" : ""}/>
+                </div>`}
               ${num(p.target)!==null?html`
                 残り <b style=${{color:"var(--text)"}}>${fmt(p.remaining)}${p.unit||""}</b>
                 ${p.remainingDays!==undefined&&html` ・あと <b style=${{color:"var(--text)"}}>${p.remainingDays}日</b>`}
@@ -2803,6 +2856,20 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
           open: openRow==="sprint", onToggle: ()=>setOpenRow(openRow==="sprint"?"":"sprint"),
           children: sp && html`
             <div style=${{fontSize:11.5,color:"var(--sub)",lineHeight:1.8}}>
+              <!-- ★Sprintの進捗＝紐づく週間目標の積み上げ★（2026-08-05 Kaiの判断・A案）
+                   Sprint自体に数値目標は持たせない。週の積み上げがそのまま進捗になる。 -->
+              ${sp.progress ? html`
+                <div style=${{margin:"2px 0 10px"}}>
+                  <${ProgressBar} percent=${sp.progress.percent} pace=${sp.progress.elapsed_percent}
+                    label=${sp.progress.actual+" / "+sp.progress.target}
+                    sub=${sp.progress.percent+"%"}/>
+                  <div style=${{fontSize:10,color:"var(--sub)",marginTop:3}}>
+                    今週の目標${sp.progress.goal_count}件の積み上げ（${sp.progress.weeks}週ぶん）</div>
+                </div>`
+              : html`
+                <div style=${{background:"var(--bg)",borderRadius:9,padding:"9px 11px",margin:"2px 0 10px",lineHeight:1.7}}>
+                  このSprintに<b style=${{color:"var(--text)"}}>今週の目標</b>が紐づいていないため、進み具合を出せません。<br/>
+                  下の「今週の目標」を数字で決めると、ここに進捗が出ます。</div>`}
               あと <b style=${{color:"var(--text)"}}>${Math.max(0,sp.daysLeft)}日</b>
               ${sp.action_metric&&html`<br/>自分でやる：<b style=${{color:"var(--text)"}}>${sp.action_metric}</b>`}
               ${sp.target_state&&html`<br/>2週間後：${sp.target_state}`}
@@ -2839,15 +2906,32 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
               ${wg.length>1&&html`<div style=${{marginBottom:6,color:"var(--sub)"}}>今週の目標が${wg.length}件あります。1つずつの進み具合はこちらです。</div>`}
               ${wg.map((w,k)=>{ const t=Number(w.std_line)>0?Number(w.std_line):Number(w.target_total);
                 const u=w.unit||(w.metric_type==="DURATION"?"分":"");
-                return html`<div key=${k} style=${{marginBottom:6}}>
-                  <b style=${{color:"var(--text)"}}>${w.title}</b>
-                  ${(!isNaN(t)&&t>0)&&html` ${w.actual_value}/${t}${u}`}
-                  ${w.link_state==="UNLINKED"&&html` <span style=${{color:"var(--amber,#BA7517)"}}>未接続</span>`}
-                  <button onClick=${()=>setWgSheet(w)}
-                    style=${{marginLeft:8,background:"none",border:"none",padding:0,color:"var(--accent)",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>変更</button>
-                  <br/>${!w.has_records
+                // 週のどこまで来たか（今日いるべき位置）。7日ぶんのうち何日目か
+                const wkPace = (w.days_elapsed>0) ? Math.max(0,Math.min(100, w.days_elapsed/7*100)) : null;
+                return html`<div key=${k} style=${{marginBottom:11}}>
+                  <div style=${{display:"flex",alignItems:"baseline",gap:6,flexWrap:"wrap"}}>
+                    <b style=${{color:"var(--text)"}}>${w.title}</b>
+                    ${w.link_state==="UNLINKED"&&html`<span style=${{color:"var(--amber,#BA7517)"}}>未接続</span>`}
+                    <button onClick=${()=>setWgSheet(w)}
+                      style=${{marginLeft:"auto",background:"none",border:"none",padding:0,color:"var(--accent)",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>変更</button>
+                  </div>
+                  ${(!isNaN(t)&&t>0)
+                    ? html`<div style=${{marginTop:4}}>
+                        <${ProgressBar} percent=${(Number(w.actual_value)||0)/t*100} pace=${wkPace}
+                          label=${(Number(w.actual_value)||0)+" / "+t+u}
+                          sub=${Math.round((Number(w.actual_value)||0)/t*100)+"%"}/>
+                      </div>`
+                    : html`<div style=${{marginTop:2}}>数値が決まっていません</div>`}
+                  <div style=${{marginTop:3}}>${!w.has_records
                     ? "まだ今週の記録がありません（0ではなく、未記録という意味です）"
-                    : html`残り ${w.days_left}日${w.required_per_day>0?` ・必要 ${w.required_per_day}${u}/日`:""}${w.actual_per_day!==null?` ・実績 ${w.actual_per_day}${u}/日`:""}`}
+                    : html`残り ${w.days_left}日${w.required_per_day>0?` ・必要 ${w.required_per_day}${u}/日`:""}${w.actual_per_day!==null?` ・実績 ${w.actual_per_day}${u}/日`:""}`}</div>
+                  <!-- ★数えていない候補を出す★（2026-08-05 Kaiと整理）
+                       回数は数量、時間は実測が入っている記録だけを数える作りになっている。
+                       そのぶん「紐づけたのに増えない」が起きるので、数えなかったぶんを見せる。 -->
+                  ${w.pending_unconfirmed>0&&html`
+                    <div style=${{color:"var(--amber,#BA7517)",marginTop:3,lineHeight:1.7}}>
+                      数えていない候補が ${w.pending_unconfirmed}${u||"件"} あります
+                      （記録に数量・実測が入っていないため）</div>`}
                 </div>`; })}
               <button onClick=${()=>setWgSheet(true)}
                 style=${{padding:"7px 14px",borderRadius:8,border:"1px solid var(--border)",background:"none",color:"var(--accent)",fontSize:11.5,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>＋ 追加</button>
@@ -3839,17 +3923,31 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
                 <span style=${{fontSize:48,fontWeight:800,color:"var(--text)",lineHeight:1,letterSpacing:"-0.02em",fontVariantNumeric:"tabular-nums"}}>${ov}</span>
                 <span style=${{fontSize:15,color:"var(--sub)",fontWeight:600}}>/ 100</span>
               </div>
-              ${diff!==null&&html`
-                <div style=${{display:"inline-flex",alignItems:"center",gap:5,marginTop:9,padding:"5px 11px",
-                              borderRadius:9,border:"1px solid var(--border)",background:"var(--bg)"}}>
-                  <span style=${{fontSize:11,color:"var(--sub)",fontWeight:600}}>前週比</span>
-                  <span style=${{fontSize:13,fontWeight:800,color:diff>0?"var(--accent)":diff<0?"#F87171":"var(--sub)"}}>
-                    ${diff>0?"+":""}${diff}</span>
-                  <span style=${{fontSize:12,color:diff>0?"var(--accent)":diff<0?"#F87171":"var(--sub)"}}>
-                    ${diff>0?"↗":diff<0?"↘":"→"}</span>
-                </div>`}
+              <!-- 前週比と、仲間の中での位置。横に並べて、はみ出すときは折り返す -->
+              <div style=${{display:"flex",flexWrap:"wrap",gap:6,marginTop:9}}>
+                ${diff!==null&&html`
+                  <span style=${{display:"inline-flex",alignItems:"center",gap:5,padding:"5px 10px",
+                                borderRadius:9,border:"1px solid var(--border)",background:"var(--bg)"}}>
+                    <span style=${{fontSize:10.5,color:"var(--sub)",fontWeight:600}}>前週比</span>
+                    <span style=${{fontSize:13,fontWeight:800,color:diff>0?"var(--accent)":diff<0?"#F87171":"var(--sub)"}}>
+                      ${diff>0?"+":""}${diff}</span>
+                    <span style=${{fontSize:11,color:diff>0?"var(--accent)":diff<0?"#F87171":"var(--sub)"}}>
+                      ${diff>0?"↗":diff<0?"↘":"→"}</span>
+                  </span>`}
+                <!-- ★上位◯%★（2026-08-05 Kai要望）
+                     同じ仲間（cohort）の中での位置。比べる相手が5人に満たないときは出さない
+                     （3人中2位を「上位67%」と書いても意味がないため）。 -->
+                ${smp.data.top_percent&&html`
+                  <span title=${smp.data.rank_total+"人中"+smp.data.rank+"位"}
+                    style=${{display:"inline-flex",alignItems:"center",gap:4,padding:"5px 10px",
+                             borderRadius:9,border:"1px solid var(--accent)",background:"var(--accent-l)"}}>
+                    <span style=${{fontSize:10.5,color:"var(--accent)",fontWeight:600}}>上位</span>
+                    <span style=${{fontSize:13,fontWeight:800,color:"var(--accent)"}}>${smp.data.top_percent}%</span>
+                  </span>`}
+              </div>
               <div style=${{fontSize:10.5,color:"var(--sub)",marginTop:9,lineHeight:1.6}}>
-                測れている${smp.data.evaluated_count}項目の平均<br/>（全${smp.data.metric_count}項目）</div>
+                測れている${smp.data.evaluated_count}項目の平均（全${smp.data.metric_count}項目）
+                ${smp.data.rank_total?html`<br/>${smp.data.rank_total}人中 ${smp.data.rank}位`:""}</div>
             ` : html`
               <div style=${{fontSize:12,color:"var(--sub)",lineHeight:1.8}}>
                 記録がたまると、<br/>ここに総合スコアが出ます。</div>`}
@@ -8150,7 +8248,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260805-043147";
+const APP_BUILD = "20260805-044549";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
