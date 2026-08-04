@@ -2540,10 +2540,15 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
                 ${p.forecastWarning&&html`<br/><span style=${{color:"var(--amber,#BA7517)"}}>⚠ ${p.forecastWarning}</span>`}
               `:html`${p.note||"数値がまだ入っていません"}`}
               ${g.success_condition&&html`<br/><b style=${{color:"var(--text)"}}>できたと言える状態</b>：${g.success_condition}`}
-              <div style=${{display:"flex",gap:8,marginTop:8}}>
+              <div style=${{display:"flex",gap:8,marginTop:8,flexWrap:"wrap"}}>
+                <!-- ★数字や期限も変えられるようにする★（2026-08-04 Kai要望）
+                     これまでは深掘り（why・できたと言える状態）しか変えられなかった -->
+                <button onClick=${()=>setHomeGoalSheet(true)}
+                  style=${{padding:"7px 14px",borderRadius:8,border:"1px solid var(--border)",background:"none",color:"var(--accent)",fontSize:11.5,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
+                  目標・数字・期限を変更</button>
                 <button onClick=${()=>setDeepenGoal(g)}
                   style=${{padding:"7px 14px",borderRadius:8,border:"1px solid var(--border)",background:"none",color:"var(--accent)",fontSize:11.5,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
-                  ${g.success_condition?"編集":"5つの質問で深掘りする"}</button>
+                  ${g.success_condition?"5つの質問を見直す":"5つの質問で深掘りする"}</button>
               </div>
             </div>` })}
 
@@ -2598,6 +2603,8 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
                   <b style=${{color:"var(--text)"}}>${w.title}</b>
                   ${(!isNaN(t)&&t>0)&&html` ${w.actual_value}/${t}${u}`}
                   ${w.link_state==="UNLINKED"&&html` <span style=${{color:"var(--amber,#BA7517)"}}>未接続</span>`}
+                  <button onClick=${()=>setWgSheet(w)}
+                    style=${{marginLeft:8,background:"none",border:"none",padding:0,color:"var(--accent)",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>変更</button>
                   <br/>${!w.has_records
                     ? "まだ今週の記録がありません（0ではなく、未記録という意味です）"
                     : html`残り ${w.days_left}日${w.required_per_day>0?` ・必要 ${w.required_per_day}${u}/日`:""}${w.actual_per_day!==null?` ・実績 ${w.actual_per_day}${u}/日`:""}`}
@@ -2617,6 +2624,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
     ${wgSheet&&html`<${WeeklyGoalSheet}
       sprints=${(sprints&&sprints.data)||[]}
       goals=${((goalTree&&goalTree.goals)||[]).filter(g=>String(g.status||"ACTIVE").toUpperCase()!=="ARCHIVED")}
+      editing=${(wgSheet && wgSheet !== true) ? wgSheet : null}
       onClose=${()=>setWgSheet(false)}
       onSaved=${()=>gasApi("getGoalTree").then(r=>{ if(r&&r.ok&&r.data){ setGoalTree(r.data);
         try { localStorage.setItem("cache_goaltree", JSON.stringify(r.data)); } catch(e){} } })}
@@ -6190,13 +6198,22 @@ function GoalDeepenSheet({goal, onClose, onSaved, onToast}) {
 //   ・通信が遅いと読み込み中のまま止まる（実際に止まった）
 //   ・「スプリントから作る」と言いながらスプリントを選べない
 // という2つの問題があった。手元にあるデータだけで動かす。
-function WeeklyGoalSheet({sprints, goals, onClose, onSaved, onToast}) {
+function WeeklyGoalSheet({sprints, goals, editing, onClose, onSaved, onToast}) {
   const cur = (sprints||[]).filter(x=>x.isCurrent);
-  const [d, setD] = useState(()=>({
+  // editing が渡されたら、その週間目標を書き換える（新規と同じ画面を使う）
+  const [d, setD] = useState(()=> editing ? {
+    weekly_goal_id: editing.weekly_goal_id,
+    link_sprint_id: editing.link_sprint_id||"",
+    link_quarterly_goal_id: editing.link_quarterly_goal_id||"",
+    title: editing.title||"", metric_type: editing.metric_type||"COUNT",
+    unit: editing.unit||"件",
+    target_total: String(editing.std_line||editing.target_total||""),
+    status: editing.status||"ACTIVE"
+  } : {
     link_sprint_id: (cur[0]&&cur[0].sprint_id)||"",
     link_quarterly_goal_id: (cur[0]&&cur[0].link_quarterly_goal_id)||((goals[0]&&goals[0].quarterly_goal_id)||""),
     title:"", metric_type:"COUNT", unit:"件", target_total:"", status:"ACTIVE"
-  }));
+  });
   const [saving,setSaving]=useState(false);
   const set=(k,v)=>setD(p=>({...p,[k]:v}));
   const pickSprint=(id)=>{
@@ -6211,7 +6228,7 @@ function WeeklyGoalSheet({sprints, goals, onClose, onSaved, onToast}) {
     setSaving(true);
     const r=await gasPostJson("saveWeeklyGoal", {...d, std_line:d.target_total});
     setSaving(false);
-    if(r&&r.ok){ onToast&&onToast("今週の目標を決めました"); onSaved&&onSaved(); onClose(); }
+    if(r&&r.ok){ onToast&&onToast(editing?"今週の目標を変更しました":"今週の目標を決めました"); onSaved&&onSaved(); onClose(); }
     else onToast&&onToast((r&&r.error)||"保存できませんでした");
   };
   const sp = cur.find(x=>x.sprint_id===d.link_sprint_id);
@@ -7504,7 +7521,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260804-081449";
+const APP_BUILD = "20260804-142547";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
