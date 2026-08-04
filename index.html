@@ -1696,18 +1696,11 @@ function WeeklyEntrySheet({goal, onClose, onSave, onToast}) {
 //   そのため「追加する」を押したときは、そのSprintに紐づく今週の目標を並べて、
 //   どれをいくつ進めたのかを選べるようにする。
 //   ここで足したぶんは記録として残す（数字だけ別に足すと記録と食い違うため）。
-function SprintEntrySheet({sprint, weeklies, onClose, onAdd, onAddGoal, onToast}) {
+function SprintEntrySheet({sprint, weeklies, onClose, onPick, onAddGoal, onToast}) {
   useLockBodyScroll();
-  const [busy, setBusy] = useState("");
   const C = "#3B82F6";
   const linked = (weeklies||[]).filter(w=>String(w.link_sprint_id||"")===String(sprint.sprint_id));
   const list = linked.length ? linked : (weeklies||[]);
-  const tap = async (w) => {
-    if(busy) return;
-    setBusy(w.weekly_goal_id);
-    await onAdd(w);
-    setBusy("");
-  };
   // ★画面の外（body直下）に出す★
   //   他のモーダルと同じ作りにする。中に埋めたままだと、
   //   親側の指定によって position:fixed が効かず、後ろの画面が操作できてしまう。
@@ -1728,27 +1721,30 @@ function SprintEntrySheet({sprint, weeklies, onClose, onAdd, onAddGoal, onToast}
           <button onClick=${onClose} style=${{background:"none",border:"none",color:"var(--sub)",fontSize:22,cursor:"pointer",lineHeight:1,padding:"0 4px"}}>×</button>
         </div>
         <div style=${{fontSize:12.5,color:"var(--sub)",marginBottom:14,lineHeight:1.7}}>
-          ${sprint.name}<br/>進んだぶんを、今週の目標から選んで足します</div>
+          ${sprint.name}<br/>どれが進んだかを選ぶと、数を決めて足せます</div>
         ${list.length ? list.map(w=>{
           const t = Number(w.std_line)>0?Number(w.std_line):Number(w.target_total);
           const u = w.unit || (w.metric_type==="DURATION"?"分":"件");
           const a2 = Number(w.actual_value)||0;
-          const step = (w.metric_type==="DURATION")?30:1;
+          const pctW = (!isNaN(t)&&t>0) ? Math.min(100, a2/t*100) : 0;
           return html`
-          <div key=${w.weekly_goal_id}
-            style=${{display:"flex",alignItems:"center",gap:10,padding:"13px 0",borderBottom:"1px solid var(--border)",
-                     opacity:busy===w.weekly_goal_id?0.5:1}}>
+          <button key=${w.weekly_goal_id} onClick=${()=>onPick(w)}
+            style=${{display:"flex",alignItems:"center",gap:12,width:"100%",padding:"14px 0",
+                     background:"none",border:"none",borderBottom:"1px solid var(--border)",
+                     cursor:"pointer",fontFamily:"inherit",textAlign:"left"}}>
             <span style=${{flex:1,minWidth:0}}>
-              <span style=${{display:"block",fontSize:14,fontWeight:700,color:"var(--text)",overflowWrap:"anywhere"}}>${w.title}</span>
-              <span style=${{display:"block",fontSize:12,color:"var(--sub)",marginTop:2}}>
-                いま ${a2}${!isNaN(t)&&t>0?" / "+t:""}${u}</span>
+              <span style=${{display:"flex",alignItems:"baseline",gap:8}}>
+                <span style=${{flex:1,minWidth:0,fontSize:14,fontWeight:700,color:"var(--text)",
+                               overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>${w.title}</span>
+                <span style=${{flexShrink:0,fontSize:13,whiteSpace:"nowrap"}}>
+                  <b style=${{color:C}}>${a2}</b><span style=${{color:"var(--sub)"}}> / ${isNaN(t)?"—":t}${u}</span></span>
+              </span>
+              <span style=${{display:"block",height:6,marginTop:8,background:"var(--bg)",borderRadius:99,overflow:"hidden"}}>
+                <span style=${{display:"block",height:"100%",width:pctW+"%",background:C,borderRadius:99}}/>
+              </span>
             </span>
-            <button disabled=${!!busy} onClick=${()=>tap(w)}
-              style=${{flexShrink:0,display:"flex",alignItems:"center",gap:4,padding:"9px 14px",borderRadius:9,
-                       border:"none",background:C,color:"#fff",fontSize:13,fontWeight:700,
-                       cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>
-              ＋${step}${u}</button>
-          </div>`;
+            <span style=${{flexShrink:0,color:"var(--sub)",fontSize:16}}>›</span>
+          </button>`;
         }) : html`
           <div style=${{padding:"16px 0",fontSize:13,color:"var(--sub)",lineHeight:1.8}}>
             このSprintに紐づく今週の目標がありません。<br/>先に今週やる数字を決めてください。</div>`}
@@ -3419,7 +3415,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
           children: html`
             ${Pill({color:C_W, text:"今週の目標"})}
             ${wg.length ? html`
-              <div style=${{border:"1px solid var(--border)",borderRadius:12,overflow:"hidden",background:"transparent"}}>
+              <div>
                 ${wg.map((w,k)=>{
                   const t = Number(w.std_line)>0?Number(w.std_line):Number(w.target_total);
                   const u = w.unit || (w.metric_type==="DURATION"?"分":"件");
@@ -3438,7 +3434,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
                   //   伝わっていた。行を入れ物にして、中に別々のボタンを並べる。
                   return html`
                   <div key=${k}
-                    style=${{display:"flex",alignItems:"center",gap:10,width:"100%",padding:"13px 12px"}}>
+                    style=${{display:"flex",alignItems:"center",gap:10,width:"100%",padding:"11px 2px"}}>
                     <!-- ★バーはタイトルの下に敷く★（2026-08-05）
                          1行に アイコン・名前・バー・数字・＋ を並べると、
                          375pxの画面では名前が必ず切れる。名前を優先する。 -->
@@ -3454,7 +3450,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
                           <span style=${{flexShrink:0,fontSize:12,whiteSpace:"nowrap"}}>
                             <b style=${{color:C_W,fontWeight:800}}>${a}</b><span style=${{color:"var(--sub)"}}> / ${isNaN(t)?"—":t}${u}</span></span>
                         </span>
-                        <span style=${{display:"block",height:6,marginTop:7,background:"var(--bg)",borderRadius:99,overflow:"hidden"}}>
+                        <span style=${{display:"block",height:4,marginTop:7,background:"var(--border)",borderRadius:99,overflow:"hidden"}}>
                           <span style=${{display:"block",height:"100%",width:pct+"%",background:C_W,borderRadius:99}}/>
                         </span>
                       </span>
@@ -3549,7 +3545,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
                         ((goalTree&&goalTree.orphanWeeklyGoals)||[]).forEach(w=>out.push(w));
                         return out.filter(w=>String(w.status||"ACTIVE").toUpperCase()==="ACTIVE"); })()}
       onClose=${()=>setSprintEntry(null)}
-      onAdd=${async(w)=>{ await addWeeklyOne(w); }}
+      onPick=${(w)=>{ setSprintEntry(null); setWeeklyEntry(w); }}
       onAddGoal=${()=>{ setSprintEntry(null); setWgSheet(true); }}
       onToast=${onToast}/>`}
 
@@ -8824,7 +8820,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260805-060220";
+const APP_BUILD = "20260805-060853";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
