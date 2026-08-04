@@ -291,6 +291,23 @@ function doGet(e) {
           failureReason: days2.join(",") + " cleared=" + cleared });
         return jsonResponse({ ok: true, dates: days2, matched_rows: scanned, cleared: cleared });
       }
+      // 自己経営力の中身を読むだけのコマンド（調査用・書き込みなし）
+      case "adminSmpDump": {
+        if (!verifyAdmin(e.parameter.coachEmail)) return jsonResponse({ ok: false, error: "not admin" });
+        const em5 = String(e.parameter.email || "").trim() || adminEmail();
+        const r5 = computeSelfMgmtPower(em5, null);
+        return jsonResponse({ ok: true, email: em5,
+          period: r5.period_start + "〜" + r5.period_end,
+          overall: r5.overall_score, evaluated: r5.evaluated_count,
+          metrics: (r5.metrics || []).map(function (m) {
+            return { key: m.key, label: m.label, score: m.score,
+                     state: m.evaluation_state, provisional: m.provisional,
+                     coverage: Math.round((m.coverage || 0) * 100) / 100,
+                     status_label: m.status_label,
+                     parts: (m.components || []).map(function (c) {
+                       return c.label + "=" + (c.state === "evaluated" ? c.value : "×(" + (c.reason_code || "") + ")"); }) };
+          }) });
+      }
       case "adminScoreConsistency": {
         if (!verifyAdmin(e.parameter.coachEmail)) return jsonResponse({ ok: false, error: "not admin" });
         const em4 = String(e.parameter.email || "").trim() || adminEmail();
@@ -13029,7 +13046,7 @@ const ADMIN_SECRET_ALLOWLIST = {
   // 一斉送信（Kaiの明示的な要望により残す）
   adminBroadcastLine:1, adminBroadcastLinePending:1, adminSendStudentCampaign:1,
   // セットアップ・保守
-  adminSetupTriggers:1, adminInstallTrigger:1, adminSetupPhase1:1, adminSetupAuth:1, adminPhase4DryRun:1, adminLegacyBackfill:1, adminWritePathStats:1, adminIssueTestSession:1, adminDropTestSessions:1, adminOpsSelfTest:1, adminActualMinutesAudit:1, adminXpCorrection:1, adminStreakRecalc:1, adminGrantFeature:1, adminUserDiag:1, adminReportScoreDryRun:1, adminReportGenTest:1, adminScoreConsistency:1, adminFinalizeOps:1, adminUnfinalizeOps:1,
+  adminSetupTriggers:1, adminInstallTrigger:1, adminSetupPhase1:1, adminSetupAuth:1, adminPhase4DryRun:1, adminLegacyBackfill:1, adminWritePathStats:1, adminIssueTestSession:1, adminDropTestSessions:1, adminOpsSelfTest:1, adminActualMinutesAudit:1, adminXpCorrection:1, adminStreakRecalc:1, adminGrantFeature:1, adminUserDiag:1, adminReportScoreDryRun:1, adminReportGenTest:1, adminScoreConsistency:1, adminFinalizeOps:1, adminUnfinalizeOps:1, adminSmpDump:1,
   authSetMode:1, authSetEnforce:1, authRoleApply:1, authRoleDryRun:1, authRevokeAll:1,
   authCleanupTestData:1, adminPurgeTestUsers:1, adminMigrateTasks:1, authBreakerReset:1, rotateSessionSecret:1,
   p1Backup:1, p1BackupInfo:1, p1PurgeArchived:1, weeklyBackup:1
