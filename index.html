@@ -3787,21 +3787,15 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
       };
       return html`
       <div style=${{margin:"12px 16px 0",background:"var(--card)",borderRadius:16,border:"1px solid var(--border)",padding:"14px 16px"}}>
-        <div style=${{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8,marginBottom:12}}>
+        <!-- ★見出しは見出しだけにする★（2026-08-05 Kai指摘）
+             総合点を見出しの横へ入れたら、タイトル・数字・「詳細を見る」が
+             1行に詰まって窮屈になった。数字は5角形の中心に置く。
+             形（バランス）と数字（全体）を、目線を動かさず同時に読める。 -->
+        <div style=${{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8,marginBottom:10}}>
           <span style=${{flex:1,minWidth:0}}>
             <span style=${{display:"block",fontSize:13,fontWeight:800,color:"var(--text)"}}>今週の自己経営の状態</span>
             <span style=${{display:"block",fontSize:10.5,color:"var(--sub)",marginTop:3}}>5つの自己経営力から、今の状態を確認します</span>
           </span>
-          <!-- ★総合点★（2026-08-05 Kai要望）
-               これまで5つの力が別々に出るだけで、全体を表す1つの数字が無かった。
-               確かに測れている力の平均を出す。測れていない力は0点として混ぜない
-               （記録が少ない人ほど不当に低く出てしまうため）。 -->
-          ${smp.data.overall_score!==null&&smp.data.overall_score!==undefined&&html`
-            <span style=${{flexShrink:0,textAlign:"right",lineHeight:1.15}}>
-              <span style=${{display:"block",fontSize:9.5,color:"var(--sub)",fontWeight:700}}>総合</span>
-              <span style=${{display:"block",fontSize:24,fontWeight:800,color:"var(--text)",fontVariantNumeric:"tabular-nums"}}>${smp.data.overall_score}</span>
-              <span style=${{display:"block",fontSize:9.5,color:"var(--sub)"}}>${smp.data.evaluated_count}/${smp.data.metric_count}項目</span>
-            </span>`}
           <button onClick=${()=>setSmpDetail(true)}
             style=${{flexShrink:0,whiteSpace:"nowrap",background:"none",border:"none",color:"var(--accent)",fontSize:11.5,fontWeight:700,cursor:"pointer",fontFamily:"inherit",padding:0}}>詳細を見る</button>
         </div>
@@ -3811,7 +3805,23 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
         <div style=${{display:"flex",justifyContent:"center",marginBottom:2}}>
           <${SelfMgmtRadar} metrics=${M}/>
         </div>
-        <div style=${{marginBottom:8}}>
+        <!-- ★総合点は5角形の下★（2026-08-05 Kai指摘でここに落ち着いた）
+             ・見出しの横 … タイトルと「詳細を見る」と3つ並んで窮屈
+             ・5角形の中心 … 点数60前後だと、見せたい形そのものを数字が隠す
+             確かに測れている力の平均。測れていない力を0点として混ぜると、
+             記録が少ない人ほど不当に低く出るため、分母に入れない。 -->
+        ${smp.data.overall_score!==null&&smp.data.overall_score!==undefined&&html`
+          <div style=${{display:"flex",alignItems:"baseline",justifyContent:"center",gap:7,
+                        marginTop:4,marginBottom:2}}>
+            <span style=${{fontSize:10.5,color:"var(--sub)",fontWeight:700,letterSpacing:"0.04em"}}>総合</span>
+            <span style=${{fontSize:34,fontWeight:800,color:"var(--text)",fontVariantNumeric:"tabular-nums",lineHeight:1}}>
+              ${smp.data.overall_score}</span>
+            <span style=${{fontSize:11,color:"var(--sub)"}}>/ 100</span>
+          </div>
+          <div style=${{fontSize:10,color:"var(--sub)",textAlign:"center",marginBottom:10}}>
+            測れている${smp.data.evaluated_count}項目の平均（全${smp.data.metric_count}項目）</div>`}
+        <div style=${{marginBottom:8,paddingTop:smp.data.overall_score!=null?10:0,
+                      borderTop:smp.data.overall_score!=null?"1px solid var(--border)":"none"}}>
           <div style=${{fontSize:11,color:"var(--sub)",lineHeight:1.85,textAlign:"center"}}>
             ${(()=>{
               const ev=M.filter(m=>m.evaluation_state==="evaluated"&&m.score!==null&&!m.provisional);
@@ -7967,7 +7977,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260805-033706";
+const APP_BUILD = "20260805-034855";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
