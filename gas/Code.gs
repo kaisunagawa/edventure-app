@@ -3802,6 +3802,10 @@ function opsLatestIndex_() {
     sheetToObjects(getP1Sheet("DailyOpsReport")).forEach(function (o) {
       const em = String(o.student_email || ""), d = String(o.report_date).slice(0, 10);
       const v = String(o.operating_score || "").trim();
+      // ★確定した日だけを使う★（2026-08-05）
+      //   夜のレポートで締めていない日は、まだ動く可能性のある点数なので
+      //   ランキングや共有欄には出さない。
+      if (!String(o.finalized_at || "").trim()) return;
       if (!em || !d || v === "") return;
       if (!idx[em] || idx[em].date < d) idx[em] = { date: d, score: Number(v) };
     });
@@ -3951,13 +3955,12 @@ function getRanking(studentEmail) {
           String(todayRow.operating_score || "").trim() !== "") {
         myOps = Number(todayRow.operating_score);
       } else {
-        const f = computeDailyOpsFacts(studentEmail, today0);
-        const v = (f.operating_score !== null && f.operating_score !== undefined) ? f.operating_score : f.partial_score;
-        if (v !== null && v !== undefined) myOps = v;
-        else {
-          const idx = opsLatestIndex_()[studentEmail];
-          if (idx) myOps = idx.score;
-        }
+        // ★確定していない今日の点数はランキングに出さない★（2026-08-05 Kai報告）
+        //   夜のレポートがまだ届いていないのに「46点」と出ていた。
+        //   その場で計算した途中の点数を使っていたため。
+        //   ランキングは確定した点数どうしで比べる（途中の点数で順位を作らない）。
+        const idx = opsLatestIndex_()[studentEmail];
+        if (idx) myOps = idx.score;
       }
     }
   } catch (e) {}

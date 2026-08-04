@@ -3119,13 +3119,23 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
       const sPct = (sp && sp.progress) ? sp.progress.percent : null;
       // 今のペースのまま今週の残り日数を進めたら、Sprintの達成率はどこまで行くか
       const sForecast = (()=>{
-        if (!sp || !sp.progress || !wg.length) return null;
+        if (!sp || !sp.progress || !(sp.progress.target>0)) return null;
         let addPerDay = 0, daysLeft = 0;
         wg.forEach(w=>{ if(w.actual_per_day>0) addPerDay += Number(w.actual_per_day);
                         daysLeft = Math.max(daysLeft, Number(w.days_left)||0); });
-        if (!(addPerDay>0) || !(daysLeft>0) || !(sp.progress.target>0)) return null;
-        const projected = sp.progress.actual + addPerDay*daysLeft;
-        return { days: daysLeft, percent: Math.min(999, Math.round(projected/sp.progress.target*100)) };
+        if (!(daysLeft>0)) daysLeft = Math.max(0, sp.daysLeft||0);
+        if (!(daysLeft>0)) return null;
+        const remain = Math.max(0, sp.progress.target - sp.progress.actual);
+        // 1日あたりあと何やれば100%に届くか（これが「次の一手」になる）
+        const needPerDay = Math.round(remain/daysLeft*10)/10;
+        if (addPerDay>0) {
+          const projected = sp.progress.actual + addPerDay*daysLeft;
+          return { kind:"pace", days:daysLeft,
+                   percent: Math.min(999, Math.round(projected/sp.progress.target*100)),
+                   needPerDay: needPerDay };
+        }
+        return { kind:"need", days:daysLeft, needPerDay: needPerDay,
+                 percent: sp.progress.percent };
       })();
 
       // ── 今週の達成率（複数の目標の平均） ──
@@ -3241,7 +3251,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
                          fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>
                 <span style=${{fontSize:12,lineHeight:1}}>＋</span> 追加する</button>
             </div>
-            <div style=${{display:"flex",alignItems:"flex-end",gap:10,marginBottom:2}}>
+            <div style=${{display:"flex",alignItems:"flex-end",gap:10,marginTop:7,marginBottom:3}}>
               <button onClick=${()=>setOpenRow(openRow==="goal"?"":"goal")}
                 style=${{flex:1,minWidth:0,background:"none",border:"none",padding:0,textAlign:"left",cursor:"pointer",fontFamily:"inherit"}}>
                 <span style=${{display:"block",fontSize:14,fontWeight:800,color:"var(--text)",lineHeight:1.45}}>${g.title}</span>
@@ -3343,7 +3353,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
                          fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>
                 <span style=${{fontSize:12,lineHeight:1}}>＋</span> 追加する</button>
             </div>
-            <div style=${{display:"flex",alignItems:"flex-end",gap:10,marginBottom:2}}>
+            <div style=${{display:"flex",alignItems:"flex-end",gap:10,marginTop:7,marginBottom:3}}>
               <button onClick=${()=>setOpenRow(openRow==="sprint"?"":"sprint")}
                 style=${{flex:1,minWidth:0,background:"none",border:"none",padding:0,textAlign:"left",cursor:"pointer",fontFamily:"inherit"}}>
                 <span style=${{display:"block",fontSize:14,fontWeight:800,color:"var(--text)",lineHeight:1.45}}>${sp.name}</span>
@@ -3362,7 +3372,11 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
             ${sForecast
               ? InfoBox({ color:C_S, onClick:()=>setOpenRow(openRow==="sprint"?"":"sprint"),
                   icon: html`<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>`,
-                  children: html`今週あと <b style=${{color:C_S,fontWeight:800}}>${sForecast.days}日</b>でSprint達成率は <b style=${{color:C_S,fontWeight:800}}>${sForecast.percent}%</b> になります` })
+                  children: sForecast.kind==="pace"
+                    ? (sForecast.percent>=100
+                        ? html`このペースなら、残り <b style=${{color:C_S,fontWeight:800}}>${sForecast.days}日</b>で <b style=${{color:C_S,fontWeight:800}}>やり切れます</b>`
+                        : html`このペースだと残り <b style=${{color:C_S,fontWeight:800}}>${sForecast.days}日</b>で <b style=${{color:C_S,fontWeight:800}}>${sForecast.percent}%</b>。1日 <b style=${{color:C_S,fontWeight:800}}>${sForecast.needPerDay}</b> で最後まで届きます`)
+                    : html`残り <b style=${{color:C_S,fontWeight:800}}>${sForecast.days}日</b>。1日 <b style=${{color:C_S,fontWeight:800}}>${sForecast.needPerDay}</b> 進めれば、このSprintはやり切れます` })
               : (sPct===null ? InfoBox({ color:C_S, onClick:()=>setWgSheet(true),
                   icon: html`<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/></svg>`,
                   children: html`今週の目標を数字で決めると、ここに進み具合が出ます` }) : "")}
@@ -3410,20 +3424,27 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
                   //   伝わっていた。行を入れ物にして、中に別々のボタンを並べる。
                   return html`
                   <div key=${k}
-                    style=${{display:"flex",alignItems:"center",gap:8,width:"100%",padding:"10px 11px",
+                    style=${{display:"flex",alignItems:"center",gap:10,width:"100%",padding:"11px 12px",
                              borderTop:k?"1px solid var(--border)":"none"}}>
+                    <!-- ★バーはタイトルの下に敷く★（2026-08-05）
+                         1行に アイコン・名前・バー・数字・＋ を並べると、
+                         375pxの画面では名前が必ず切れる。名前を優先する。 -->
                     <button onClick=${()=>setWgSheet(w)}
-                      style=${{flex:1,minWidth:0,display:"flex",alignItems:"center",gap:8,
+                      style=${{flex:1,minWidth:0,display:"flex",alignItems:"center",gap:10,
                                background:"none",border:"none",padding:0,cursor:"pointer",
                                fontFamily:"inherit",textAlign:"left"}}>
                       <span style=${{flexShrink:0,color:C_W,display:"flex"}}>${ICONS[k%3]}</span>
-                      <span style=${{flex:"0 1 auto",minWidth:0,fontSize:12.5,fontWeight:600,color:"var(--text)",
-                                     overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>${w.title}</span>
-                      <span style=${{flex:"1 1 34px",minWidth:14,maxWidth:96,height:5,background:"var(--border)",borderRadius:99,overflow:"hidden",display:"block"}}>
-                        <span style=${{display:"block",height:"100%",width:pct+"%",background:C_W,borderRadius:99}}/>
+                      <span style=${{flex:1,minWidth:0}}>
+                        <span style=${{display:"flex",alignItems:"baseline",gap:8}}>
+                          <span style=${{flex:1,minWidth:0,fontSize:12.5,fontWeight:600,color:"var(--text)",
+                                         overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>${w.title}</span>
+                          <span style=${{flexShrink:0,fontSize:12,whiteSpace:"nowrap"}}>
+                            <b style=${{color:C_W,fontWeight:800}}>${a}</b><span style=${{color:"var(--sub)"}}> / ${isNaN(t)?"—":t}${u}</span></span>
+                        </span>
+                        <span style=${{display:"block",height:5,marginTop:6,background:"var(--border)",borderRadius:99,overflow:"hidden"}}>
+                          <span style=${{display:"block",height:"100%",width:pct+"%",background:C_W,borderRadius:99}}/>
+                        </span>
                       </span>
-                      <span style=${{flexShrink:0,fontSize:12,whiteSpace:"nowrap"}}>
-                        <b style=${{color:C_W,fontWeight:800}}>${a}</b><span style=${{color:"var(--sub)"}}>/${isNaN(t)?"—":t}${u}</span></span>
                     </button>
                     <!-- ★＋で実績を1件足す★ 0→1→2 と増えていく。
                          足したぶんは記録として残す（数字だけ足すと記録と食い違うため）。 -->
@@ -3437,8 +3458,9 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
               ${wPct!==null&&InfoBox({ color:C_W, onClick:()=>setOpenRow(openRow==="week"?"":"week"),
                 icon: html`<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 20V11M12 20V4M19 20v-6"/></svg>`,
                 children: html`<span style=${{display:"flex",alignItems:"baseline",justifyContent:"space-between",gap:8}}>
-                  <span>今週の達成率</span>
-                  <span style=${{color:C_W,fontWeight:800,fontSize:20}}>${wPct}<span style=${{fontSize:13}}>%</span></span></span>` })}
+                  <span style=${{fontSize:13,fontWeight:700,color:"var(--text)"}}>今週の達成率</span>
+                  <span style=${{color:C_W,fontWeight:800,fontSize:26,lineHeight:1,fontVariantNumeric:"tabular-nums"}}>
+                    ${wPct}<span style=${{fontSize:14}}>%</span></span></span>` })}
               ${openRow==="week"&&html`
                 <div style=${{fontSize:12,color:"var(--sub)",lineHeight:1.9,marginTop:9}}>
                   ${wg.map((w,k)=>{ const u=w.unit||(w.metric_type==="DURATION"?"分":"件");
@@ -8789,7 +8811,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260805-054744";
+const APP_BUILD = "20260805-055411";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
