@@ -2919,18 +2919,37 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
     // 完了済みタスクは編集画面に出していないので、ここで保持してマージする（未完了→完了の順）
     const completed = actionItems.filter(t=>isDone(t) && !editedTexts.includes(t));
     const finalList = [...editedTexts, ...completed];
-    // 想定時間マップを作り直す（編集分＋完了分の既存値を維持）
-    const est = {};
-    rows.forEach(r=>{ const m=Math.round(Number(r.min)); if(m>0 && m<=600) est[r.text]=m; });
-    completed.forEach(c=>{ const ck=idOfTitle(c)||c; if(taskEstimates[ck]>0) est[ck]=taskEstimates[ck]; });
+    // ★キーはタスクIDにそろえる★（2026-08-05 Kai報告「PCで入れた時間が携帯に出ない」）
+    //   ここだけ「タスク名」をキーにしていた。他はすべてIDキーなので食い違う。
+    //   さらに、この直後の toStored() は state を読むが、setTaskEstimates は
+    //   すぐには反映されないため、送る値が「編集前のまま」になっていた。
+    //   その結果、差分なしと判定されてサーバーへ送られず、他の端末に届かなかった。
+    //   先にIDを確定させ、そのIDで新しい値を組み立ててから送る。
+    const storedList = toStored(finalList);
+    const idByTitle = {};
+    storedList.forEach(t=>{ if(idByTitle[t.title]===undefined) idByTitle[t.title]=t.id; });
+
+    const est = {}, impMap = {}, dueMap = {};
+    rows.forEach(r=>{
+      const id = idByTitle[r.text] || r.text;
+      const m = Math.round(Number(r.min));
+      if(m>0 && m<=600) est[id]=m;
+      if(r.imp) impMap[id]=r.imp;
+      if(r.due) dueMap[id]=r.due;
+    });
+    completed.forEach(c=>{ const ck=idOfTitle(c)||c;
+      if(taskEstimates[ck]>0) est[ck]=taskEstimates[ck];
+      if(taskImportance[ck]) impMap[ck]=taskImportance[ck];
+      if(taskDue[ck]) dueMap[ck]=taskDue[ck]; });
+    // 送る中身も、いま編集した値で組み直す（state待ちにしない）
+    storedList.forEach(t=>{
+      t.est = est[t.id]!==undefined ? est[t.id] : "";
+      t.imp = impMap[t.id] || "";
+      t.due = dueMap[t.id] || "";
+    });
+
     setTaskEstimates(est);
     try { localStorage.setItem("jiroku_task_estimates_"+todayKey, JSON.stringify(est)); }catch(e){}
-    // 重要度・期限も新しい名前で作り直す（改名で失わないため）
-    const impMap = {}, dueMap = {};
-    editItems.forEach(r=>{ const t=String(r.text||"").trim(); if(!t) return;
-      if(r.imp) impMap[t]=r.imp; if(r.due) dueMap[t]=r.due; });
-    completed.forEach(c=>{ const ck=idOfTitle(c)||c; if(taskImportance[ck]) impMap[ck]=taskImportance[ck];
-                           const dk=idOfTitle(c)||c; if(taskDue[dk]) dueMap[dk]=taskDue[dk]; });
     setTaskImportance(impMap); setTaskDue(dueMap);
     try {
       localStorage.setItem("jiroku_task_importance_"+todayKey, JSON.stringify(impMap));
@@ -2942,7 +2961,6 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
     setChecked(newChecked);
     localStorage.setItem("today_actions", JSON.stringify(newChecked));
     // 空で保存したらAIアクションに戻す
-    const storedList = toStored(finalList);
     // ★編集の差分をTasksシートへ（キュー経由）★
     //   新規=CREATE / 変更があったものだけUPDATE / 消えたものはDELETE。
     //   変更のないタスクまで送ると、versionが無意味に増えて他端末と競合する。
@@ -3542,7 +3560,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
                 <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round">
                   <path d="M12 3.2l2.6 5.5 6 .8-4.4 4.2 1.1 6-5.3-2.9-5.3 2.9 1.1-6L3.4 9.5l6-.8L12 3.2z"/></svg></span>`}
           <span style=${{flex:1,minWidth:0}}>
-            <span style=${{display:"block",fontSize:12.5,fontWeight:800,color:C_STAR,marginBottom:3}}>今日のフォーカス</span>
+            <span style=${{display:"block",fontSize:12.5,fontWeight:800,color:C_STAR,marginBottom:3}}>⭐ 今日のフォーカス</span>
             ${intent
               ? html`<span style=${{display:"block",fontSize:12,color:"var(--text)",lineHeight:1.6,overflowWrap:"anywhere",
                                     textDecoration:intent.done?"line-through":"none",opacity:intent.done?0.55:1}}>${intent.intent}</span>`
@@ -9008,7 +9026,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260805-081237";
+const APP_BUILD = "20260805-082224";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
