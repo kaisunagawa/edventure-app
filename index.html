@@ -3294,7 +3294,21 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
           children: g ? html`
             <!-- 1行目：ラベルと「追加する」を左右に。2行目：目標名と% -->
             <div style=${{display:"flex",alignItems:"center",gap:8,marginBottom:2}}>
-              <span style=${{flex:1,minWidth:0}}>${Pill({color:C_Q, text:"3か月目標"})}</span>
+              <span style=${{flexShrink:0}}>${Pill({color:C_Q, text:"3か月目標"})}</span>
+              <!-- ★複数あることを、開かなくても分かるようにする★（2026-08-05 Kaiの判断）
+                   以前は行を開かないと切り替えボタンが出ず、目標が2つ以上あっても
+                   気づけなかった。ラベルの横に常に出して、押せば切り替わる。
+                   ※そもそも3か月目標は1本に絞るほど進む。気づいてもらうのが目的。 -->
+              ${goals.length>1&&html`
+                <span style=${{flexShrink:0,display:"flex",alignItems:"center",gap:5}}>
+                  ${goals.map((x,k)=>html`
+                    <button key=${k} onClick=${()=>setMainGoalIdx(k)} aria-label=${(k+1)+"つ目の目標"}
+                      title=${x.title}
+                      style=${{width:7,height:7,padding:0,borderRadius:"50%",border:"none",cursor:"pointer",
+                               background:k===gi?C_Q:"var(--border)"}}/>`)}
+                  <span style=${{fontSize:10,color:"var(--sub)",fontVariantNumeric:"tabular-nums"}}>${gi+1}/${goals.length}</span>
+                </span>`}
+              <span style=${{flex:1}}/>
               <button onClick=${()=>setEntrySheet({goal:g, entry:null})}
                 onContextMenu=${e=>{e.preventDefault(); setHistoryGoal(g);}}
                 onTouchStart=${e=>{ const t=setTimeout(()=>setHistoryGoal(g),550);
@@ -3341,12 +3355,9 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
               children: html`このペースなら達成確率は <b style=${{color:C_Q,fontWeight:800}}>${qProb}%</b> です` })}
             ${openRow==="goal"&&html`
               <div style=${{fontSize:12.5,color:"var(--sub)",lineHeight:1.9,marginTop:10}}>
-                ${goals.length>1&&html`<div style=${{display:"flex",gap:5,marginBottom:7}}>
-                  ${goals.map((x,k)=>html`<button key=${k} onClick=${()=>setMainGoalIdx(k)}
-                    style=${{padding:"3px 10px",borderRadius:20,fontSize:11,cursor:"pointer",fontFamily:"inherit",fontWeight:700,
-                             border:`1px solid ${k===gi?C_Q:"var(--border)"}`,
-                             background:k===gi?`color-mix(in srgb, ${C_Q} 16%, transparent)`:"transparent",
-                             color:k===gi?C_Q:"var(--sub)"}}>${k+1}</button>`)}
+                ${goals.length>1&&html`<div style=${{marginBottom:7}}>
+                  3か月目標が${goals.length}件あります。
+                  <b style=${{color:"var(--text)"}}>1本に絞るほど進みます</b>（上の点で切り替えられます）
                 </div>`}
                 ${num(p.target)!==null&&html`
                   ${p.remainingDays!==undefined&&html`あと <b style=${{color:"var(--text)"}}>${p.remainingDays}日</b>　`}
@@ -9026,7 +9037,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260805-082224";
+const APP_BUILD = "20260805-083303";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
