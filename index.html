@@ -7829,15 +7829,31 @@ function SprintSheet({goals, editing, onClose, onSaved, onToast}) {
 
 function GoalTreeSheet({onClose, onToast}) {
   const [tree,setTree]=useState(null);
+  const [sprints,setSprints]=useState([]);
   const [loading,setLoading]=useState(true);
   const [saving,setSaving]=useState(false);
   const [goalDraft,setGoalDraft]=useState(null);   // 3か月目標の編集中データ
   const [wgDraft,setWgDraft]=useState(null);       // 週間目標の編集中データ
+  const [spSheet,setSpSheet]=useState(null);       // 2週間Sprintの編集（null=閉）
+
+  // 段階ごとの色。ロードマップと同じにして、同じものを見ていると分かるようにする
+  const C_Q="#14B8A6", C_S="#3B82F6", C_W="#4CAF50";
 
   const load=async()=>{
     setLoading(true);
-    const r=await gasApi("getGoalTree");
-    if(r&&r.ok) setTree(r.data); else onToast&&onToast(r&&r.error?r.error:"読み込みに失敗しました");
+    // ★ロードマップと同じ3層を出す★（2026-08-05 Kai要望）
+    //   これまで一覧は「3か月目標 → 今週やること」の2層で、真ん中の
+    //   2週間Sprintが抜けていた。同じものを見ているのに構造が違っていた。
+    const r=await gasApi("getRoadmap");
+    if(r&&r.ok){
+      setTree(r.goalTree||null);
+      setSprints(((r.sprints&&r.sprints.data)||[]).filter(x=>String(x.status||"ACTIVE").toUpperCase()!=="ARCHIVED"));
+    } else {
+      const g=await gasApi("getGoalTree");
+      if(g&&g.ok) setTree(g.data); else onToast&&onToast(g&&g.error?g.error:"読み込みに失敗しました");
+      const sp=await gasApi("getSprints");
+      if(sp&&sp.ok) setSprints((sp.data||[]).filter(x=>String(x.status||"ACTIVE").toUpperCase()!=="ARCHIVED"));
+    }
     setLoading(false);
   };
   useEffect(()=>{load();},[]);
@@ -7867,6 +7883,44 @@ function GoalTreeSheet({onClose, onToast}) {
   };
 
   const goals = (tree&&tree.goals)||[];
+  const num = v => (v===null||v===undefined||v==="") ? null : Number(v);
+  const fmt = v => { const n=num(v); return n===null ? "—" : (Math.round(n*10)/10).toLocaleString(); };
+  // 週間目標の行（3か月直下でも、Sprintの下でも同じ形で出す）
+  const wgRow = (w) => (wgDraft&&wgDraft.weekly_goal_id===w.weekly_goal_id)
+    ? html`<${WeeklyGoalEditor} draft=${wgDraft} setDraft=${setWgDraft} onSave=${saveWgRow} onCancel=${()=>setWgDraft(null)} saving=${saving}/>`
+    : (()=>{
+        const t = Number(w.std_line)>0?Number(w.std_line):Number(w.target_total);
+        const u = w.unit || (w.metric_type==="DURATION"||w.metric_type==="minutes" ? "分" : "件");
+        const a = Number(w.actual_value)||0;
+        const pct = (!isNaN(t)&&t>0) ? Math.min(100, a/t*100) : null;
+        const mt = String(w.metric_type||"").toUpperCase();
+        const canAdd = (mt==="COUNT"||mt==="DURATION"||mt==="");
+        const howNote = canAdd ? "「＋」から自分で足せます"
+                      : (mt==="BOOLEAN" ? "「できた」に変えると達成になります"
+                                        : "記録した日数から自動で数えます");
+        return html`
+        <div style=${{padding:"9px 10px",background:"var(--bg)",borderRadius:9,marginBottom:6}}>
+          <div style=${{display:"flex",alignItems:"center",gap:8}}>
+            <div style=${{flex:1,minWidth:0,fontSize:12.5,fontWeight:600,color:"var(--text)",
+                          overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>${w.title}</div>
+            ${pct!==null
+              ? html`<div style=${{flexShrink:0,fontSize:12,whiteSpace:"nowrap"}}>
+                  <b style=${{color:C_W}}>${a}</b><span style=${{color:"var(--sub)"}}> / ${t}${u}</span></div>`
+              : html`<div style=${{flexShrink:0,fontSize:11,color:"var(--sub)"}}>数値なし</div>`}
+            <button onClick=${()=>setWgDraft({...EMPTY_WG,...w})} style=${{background:"none",border:"none",color:"var(--accent)",fontSize:11.5,fontWeight:700,cursor:"pointer",flexShrink:0}}>編集</button>
+            <button onClick=${()=>archive("weekly",w.weekly_goal_id)} style=${{background:"none",border:"none",color:"var(--sub)",fontSize:15,cursor:"pointer",lineHeight:1,flexShrink:0}}>×</button>
+          </div>
+          ${pct!==null&&html`
+            <div style=${{height:4,marginTop:7,background:"var(--border)",borderRadius:99,overflow:"hidden"}}>
+              <div style=${{height:"100%",width:pct+"%",background:C_W,borderRadius:99}}/>
+            </div>`}
+          <div style=${{fontSize:10.5,color:"var(--sub)",marginTop:5}}>
+            ${howNote}
+            ${(w.min_line!==""&&w.min_line!=null)?"　／　最低 "+w.min_line+u:""}
+          </div>
+        </div>`;
+      })();
+
   return html`
     <div style=${{position:"fixed",inset:0,height:"100dvh",zIndex:400,background:"var(--bg)",display:"flex",flexDirection:"column"}}>
       <div style=${{display:"flex",alignItems:"center",gap:10,padding:"14px 16px",borderBottom:"1px solid var(--border)",flexShrink:0,paddingTop:"calc(14px + var(--safe-top, 0px))"}}>
@@ -7876,8 +7930,8 @@ function GoalTreeSheet({onClose, onToast}) {
 
       <div style=${{flex:1,minHeight:0,overflowY:"auto",WebkitOverflowScrolling:"touch",padding:"14px 16px calc(28px + var(--safe-bottom, 0px))"}}>
         <div style=${{fontSize:12,color:"var(--sub)",lineHeight:1.7,marginBottom:14}}>
-          3か月後にたどり着きたい場所を決めて、その下に「今週やること」をぶら下げます。
-          毎時間の記録がどの目標につながっているかを、これから見えるようにしていきます。
+          3か月後にたどり着きたい場所を決めて、2週間・今週へ落とし込みます。
+          記録がどの目標につながったかは、それぞれの進み具合に反映されます。
         </div>
 
         ${loading&&html`<div style=${{textAlign:"center",padding:"40px 0",color:"var(--sub)",fontSize:13}}>読み込み中…</div>`}
@@ -7887,55 +7941,97 @@ function GoalTreeSheet({onClose, onToast}) {
             まだ3か月目標がありません。<br/>まずは1つだけ決めてみましょう。
           </div>`}
 
-        ${goals.map(g=>html`
+        ${goals.map(g=>{
+          const p = g.pace || {};
+          const qPct = (num(p.target)>0) ? Math.round((num(p.current)||0)/num(p.target)*100) : null;
+          const mySp = sprints.filter(x=>String(x.link_quarterly_goal_id||"")===String(g.quarterly_goal_id));
+          const linkedIds = new Set();
+          mySp.forEach(x=>((g.weeklyGoals||[]).forEach(w=>{ if(String(w.link_sprint_id||"")===String(x.sprint_id)) linkedIds.add(w.weekly_goal_id); })));
+          const looseWg = (g.weeklyGoals||[]).filter(w=>!linkedIds.has(w.weekly_goal_id));
+          return html`
           <div key=${g.quarterly_goal_id} style=${{marginBottom:14}}>
             ${goalDraft&&goalDraft.quarterly_goal_id===g.quarterly_goal_id
               ? html`<${GoalEditor} draft=${goalDraft} setDraft=${setGoalDraft} onSave=${saveGoalRow} onCancel=${()=>setGoalDraft(null)} saving=${saving}/>`
               : html`
               <div class="card" style=${{padding:14}}>
-                <div style=${{display:"flex",alignItems:"flex-start",gap:8,marginBottom:6}}>
-                  <div style=${{fontSize:14.5,fontWeight:800,color:"var(--text)",flex:1,lineHeight:1.5}}>${g.title}</div>
-                  <button onClick=${()=>setGoalDraft({...EMPTY_GOAL,...g})} style=${{background:"none",border:"none",color:"var(--accent)",fontSize:12,fontWeight:700,cursor:"pointer",flexShrink:0}}>編集</button>
+                <!-- ① 3か月目標 -->
+                <div style=${{display:"flex",alignItems:"flex-start",gap:8,marginBottom:4}}>
+                  <span style=${{flexShrink:0,fontSize:10,fontWeight:700,color:C_Q,border:`1px solid color-mix(in srgb, ${C_Q} 45%, transparent)`,borderRadius:99,padding:"1px 8px",marginTop:2}}>3か月目標</span>
+                  <button onClick=${()=>setGoalDraft({...EMPTY_GOAL,...g})} style=${{marginLeft:"auto",background:"none",border:"none",color:"var(--accent)",fontSize:12,fontWeight:700,cursor:"pointer",flexShrink:0}}>編集</button>
                   <button onClick=${()=>archive("goal",g.quarterly_goal_id)} style=${{background:"none",border:"none",color:"var(--sub)",fontSize:16,cursor:"pointer",lineHeight:1,flexShrink:0}}>×</button>
                 </div>
-                ${(g.target_value!==""&&g.target_value!=null)&&html`
-                  <div style=${{fontSize:12,color:"var(--sub)",marginBottom:4}}>目標 ${g.target_value}${g.unit||""}${g.end_date?"　/　期限 "+g.end_date:""}</div>`}
-                ${g.why&&html`<div style=${{fontSize:11.5,color:"var(--sub)",lineHeight:1.6,marginBottom:8}}>${g.why}</div>`}
-
-                <div style=${{borderTop:"1px solid var(--border)",marginTop:10,paddingTop:10}}>
-                  <div style=${{fontSize:11,fontWeight:700,color:"var(--sub)",marginBottom:8}}>今週やること</div>
-                  ${(g.weeklyGoals||[]).map(w=>html`
-                    <div key=${w.weekly_goal_id}>
-                      ${wgDraft&&wgDraft.weekly_goal_id===w.weekly_goal_id
-                        ? html`<${WeeklyGoalEditor} draft=${wgDraft} setDraft=${setWgDraft} onSave=${saveWgRow} onCancel=${()=>setWgDraft(null)} saving=${saving}/>`
-                        : html`
-                        <div style=${{display:"flex",alignItems:"center",gap:8,padding:"8px 10px",background:"var(--bg)",borderRadius:9,marginBottom:6}}>
-                          <div style=${{flex:1,minWidth:0}}>
-                            <div style=${{fontSize:12.5,fontWeight:600,color:"var(--text)"}}>${w.title}</div>
-                            <div style=${{fontSize:10.5,color:"var(--sub)",marginTop:2}}>
-                              ${w.metric_type==="boolean"?"やったかどうか":(w.target_total!==""&&w.target_total!=null?"目標 "+w.target_total+(w.unit||""):"目標未設定")}
-                              ${(w.min_line!==""&&w.min_line!=null)?"　最低 "+w.min_line+(w.unit||""):""}
-                            </div>
-                          </div>
-                          <button onClick=${()=>setWgDraft({...EMPTY_WG,...w})} style=${{background:"none",border:"none",color:"var(--accent)",fontSize:11.5,fontWeight:700,cursor:"pointer",flexShrink:0}}>編集</button>
-                          <button onClick=${()=>archive("weekly",w.weekly_goal_id)} style=${{background:"none",border:"none",color:"var(--sub)",fontSize:15,cursor:"pointer",lineHeight:1,flexShrink:0}}>×</button>
-                        </div>`}
-                    </div>
-                  `)}
-                  ${wgDraft&&!wgDraft.weekly_goal_id&&wgDraft.link_quarterly_goal_id===g.quarterly_goal_id
-                    ? html`<${WeeklyGoalEditor} draft=${wgDraft} setDraft=${setWgDraft} onSave=${saveWgRow} onCancel=${()=>setWgDraft(null)} saving=${saving}/>`
-                    : html`
-                    <button onClick=${()=>setWgDraft({...EMPTY_WG,link_quarterly_goal_id:g.quarterly_goal_id})}
-                      style=${{background:"none",border:"1.5px dashed var(--border)",borderRadius:9,padding:"8px",color:"var(--accent)",fontSize:12,fontWeight:600,cursor:"pointer",width:"100%"}}>
-                      ＋ 今週やることを足す
-                    </button>`}
+                <div style=${{display:"flex",alignItems:"flex-end",gap:10}}>
+                  <div style=${{flex:1,minWidth:0,fontSize:14.5,fontWeight:800,color:"var(--text)",lineHeight:1.5}}>${g.title}</div>
+                  ${qPct!==null&&html`<span style=${{flexShrink:0,display:"flex",alignItems:"baseline",gap:1,color:C_Q}}>
+                    <span style=${{fontSize:20,fontWeight:800,lineHeight:1,fontVariantNumeric:"tabular-nums"}}>${qPct}</span>
+                    <span style=${{fontSize:11,fontWeight:700}}>%</span></span>`}
                 </div>
-              </div>`}
-          </div>
-        `)}
+                ${qPct!==null&&html`
+                  <div style=${{height:6,marginTop:8,background:"var(--border)",borderRadius:99,overflow:"hidden"}}>
+                    <div style=${{height:"100%",width:Math.min(100,qPct)+"%",background:C_Q,borderRadius:99}}/>
+                  </div>`}
+                <div style=${{fontSize:12,color:"var(--sub)",marginTop:6}}>
+                  ${num(p.target)!==null
+                    ? html`<b style=${{color:C_Q}}>${fmt(p.current)}${p.unit||""}</b> / ${fmt(p.target)}${p.unit||""}${g.end_date?"　／　期限 "+g.end_date:""}`
+                    : html`数値が決まっていません${g.end_date?"　／　期限 "+g.end_date:""}`}
+                </div>
+                ${g.why&&html`<div style=${{fontSize:11.5,color:"var(--sub)",lineHeight:1.6,marginTop:6}}>${g.why}</div>`}
 
-        ${goalDraft&&!goalDraft.quarterly_goal_id&&html`
-          <${GoalEditor} draft=${goalDraft} setDraft=${setGoalDraft} onSave=${saveGoalRow} onCancel=${()=>setGoalDraft(null)} saving=${saving}/>`}
+                <!-- ② 2週間Sprint -->
+                <div style=${{borderTop:"1px solid var(--border)",marginTop:12,paddingTop:12}}>
+                  ${mySp.length===0&&html`
+                    <div style=${{fontSize:11.5,color:"var(--sub)",lineHeight:1.7,marginBottom:8}}>
+                      2週間Sprintがまだありません。3か月を2週間に切ると、今週やることが決まります。</div>`}
+                  ${mySp.map(sp=>{
+                    const pr = sp.progress;
+                    const spWg = (g.weeklyGoals||[]).filter(w=>String(w.link_sprint_id||"")===String(sp.sprint_id));
+                    return html`
+                    <div key=${sp.sprint_id} style=${{marginBottom:12}}>
+                      <div style=${{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
+                        <span style=${{flexShrink:0,fontSize:10,fontWeight:700,color:C_S,border:`1px solid color-mix(in srgb, ${C_S} 45%, transparent)`,borderRadius:99,padding:"1px 8px"}}>2週間Sprint</span>
+                        ${sp.isCurrent&&html`<span style=${{fontSize:10,color:C_S,fontWeight:700}}>進行中</span>`}
+                        <button onClick=${()=>setSpSheet(sp)} style=${{marginLeft:"auto",background:"none",border:"none",color:"var(--accent)",fontSize:11.5,fontWeight:700,cursor:"pointer",flexShrink:0}}>編集</button>
+                      </div>
+                      <div style=${{display:"flex",alignItems:"flex-end",gap:10}}>
+                        <div style=${{flex:1,minWidth:0,fontSize:13,fontWeight:700,color:"var(--text)",lineHeight:1.5}}>${sp.name}</div>
+                        ${pr&&html`<span style=${{flexShrink:0,display:"flex",alignItems:"baseline",gap:1,color:C_S}}>
+                          <span style=${{fontSize:17,fontWeight:800,lineHeight:1,fontVariantNumeric:"tabular-nums"}}>${pr.percent}</span>
+                          <span style=${{fontSize:10,fontWeight:700}}>%</span></span>`}
+                      </div>
+                      <div style=${{height:5,marginTop:7,background:"var(--border)",borderRadius:99,overflow:"hidden"}}>
+                        <div style=${{height:"100%",width:Math.min(100,pr?pr.percent:(sp.totalDays>0?Math.round(sp.dayIndex/sp.totalDays*100):0))+"%",
+                                      background:C_S,borderRadius:99}}/>
+                      </div>
+                      <div style=${{fontSize:11,color:"var(--sub)",marginTop:5}}>
+                        ${sp.dayIndex}日目 / ${sp.totalDays}日
+                        ${pr?"　／　今週の目標"+pr.goal_count+"件の積み上げ":"　／　今週の目標を数字で決めると進み具合が出ます"}
+                      </div>
+
+                      <!-- ③ 今週の目標（このSprintの下） -->
+                      <div style=${{marginTop:9,paddingLeft:10,borderLeft:`2px solid color-mix(in srgb, ${C_W} 40%, transparent)`}}>
+                        ${spWg.map(w=>html`<div key=${w.weekly_goal_id}>${wgRow(w)}</div>`)}
+                        ${wgDraft&&!wgDraft.weekly_goal_id&&wgDraft.link_sprint_id===sp.sprint_id
+                          ? html`<${WeeklyGoalEditor} draft=${wgDraft} setDraft=${setWgDraft} onSave=${saveWgRow} onCancel=${()=>setWgDraft(null)} saving=${saving}/>`
+                          : html`<button onClick=${()=>setWgDraft({...EMPTY_WG,link_quarterly_goal_id:g.quarterly_goal_id,link_sprint_id:sp.sprint_id})}
+                              style=${{background:"none",border:"1.5px dashed var(--border)",borderRadius:9,padding:"7px",color:C_W,fontSize:11.5,fontWeight:700,cursor:"pointer",width:"100%"}}>
+                              ＋ 今週やることを足す</button>`}
+                      </div>
+                    </div>`;
+                  })}
+                  <button onClick=${()=>setSpSheet({})}
+                    style=${{background:"none",border:`1.5px dashed color-mix(in srgb, ${C_S} 45%, transparent)`,borderRadius:9,padding:"8px",color:C_S,fontSize:12,fontWeight:700,cursor:"pointer",width:"100%"}}>
+                    ＋ 2週間Sprintを足す</button>
+                </div>
+
+                <!-- Sprintに紐づいていない今週の目標（過去に作ったもの） -->
+                ${looseWg.length>0&&html`
+                  <div style=${{borderTop:"1px solid var(--border)",marginTop:12,paddingTop:12}}>
+                    <div style=${{fontSize:11,fontWeight:700,color:"var(--sub)",marginBottom:8}}>Sprintにつながっていない今週の目標</div>
+                    ${looseWg.map(w=>html`<div key=${w.weekly_goal_id}>${wgRow(w)}</div>`)}
+                  </div>`}
+              </div>`}
+          </div>`;
+        })}
 
         ${!loading&&!goalDraft&&html`
           <button onClick=${()=>setGoalDraft({...EMPTY_GOAL})}
@@ -7946,13 +8042,16 @@ function GoalTreeSheet({onClose, onToast}) {
         ${!loading&&tree&&(tree.orphanWeeklyGoals||[]).length>0&&html`
           <div style=${{marginTop:16}}>
             <div style=${{fontSize:11,fontWeight:700,color:"var(--sub)",marginBottom:8}}>どの目標にもつながっていないもの</div>
-            ${tree.orphanWeeklyGoals.map(w=>html`
-              <div key=${w.weekly_goal_id} style=${{display:"flex",alignItems:"center",gap:8,padding:"8px 10px",background:"var(--bg)",borderRadius:9,marginBottom:6}}>
-                <div style=${{flex:1,fontSize:12.5,color:"var(--text)"}}>${w.title}</div>
-                <button onClick=${()=>setWgDraft({...EMPTY_WG,...w})} style=${{background:"none",border:"none",color:"var(--accent)",fontSize:11.5,fontWeight:700,cursor:"pointer"}}>編集</button>
-              </div>`)}
+            ${tree.orphanWeeklyGoals.map(w=>html`<div key=${w.weekly_goal_id}>${wgRow(w)}</div>`)}
           </div>`}
       </div>
+
+      ${spSheet!==null&&html`<${SprintSheet}
+        goals=${goals}
+        editing=${spSheet&&spSheet.sprint_id?spSheet:null}
+        onClose=${()=>setSpSheet(null)}
+        onSaved=${()=>{ setSpSheet(null); load(); }}
+        onToast=${onToast}/>`}
     </div>`;
 }
 
@@ -8909,7 +9008,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260805-073450";
+const APP_BUILD = "20260805-081237";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
