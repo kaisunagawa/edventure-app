@@ -1573,6 +1573,81 @@ function GoalEntrySheet({goal, entry, onClose, onSaved, onToast}) {
     </div>`;
 }
 
+// ★今週の目標に実績を入れる★（2026-08-05 Kai要望）
+//   ＋を押したら、その場で数を決められるようにする。
+//   間違えて足すこともあるので、マイナスにもできる（打ち消しの記録を1件残す）。
+function WeeklyEntrySheet({goal, onClose, onSave, onToast}) {
+  const u = goal.unit || (goal.metric_type==="DURATION" ? "分" : "件");
+  const step = (goal.metric_type==="DURATION") ? 30 : 1;
+  const cur = Number(goal.actual_value)||0;
+  const t = Number(goal.std_line)>0 ? Number(goal.std_line) : Number(goal.target_total);
+  const [n, setN] = useState(step);
+  const [saving, setSaving] = useState(false);
+  const C = "var(--green)";
+  const next = cur + (Number(n)||0);
+  const save = async () => {
+    const v = Number(n);
+    if(!v){ onToast&&onToast("0以外の数を入れてください"); return; }
+    setSaving(true);
+    await onSave(goal, v);
+    setSaving(false);
+    onClose();
+  };
+  return html`
+    <div onClick=${onClose} style=${{position:"fixed",inset:0,zIndex:441,background:"rgba(0,0,0,0.55)",
+                                     display:"flex",
+                                     alignItems:SHEET_WIDE?"stretch":"flex-end",
+                                     justifyContent:SHEET_WIDE?"flex-end":"center"}}>
+      <div onClick=${e=>e.stopPropagation()}
+        style=${SHEET_WIDE
+          ? {width:400,maxWidth:"92vw",background:"var(--card)",borderLeft:"1px solid var(--border)",
+             padding:"20px 20px 24px",height:"100%",overflowY:"auto"}
+          : {width:"100%",maxWidth:520,background:"var(--card)",borderRadius:"20px 20px 0 0",
+             border:"1px solid var(--border)",borderBottom:"none",
+             padding:"20px 20px calc(24px + var(--safe-bottom, 0px))",maxHeight:"88dvh",overflowY:"auto"}}>
+        <div style=${{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
+          <span style=${{flex:1,fontSize:17,fontWeight:800,color:"var(--text)"}}>実績を入れる</span>
+          <button onClick=${onClose} style=${{background:"none",border:"none",color:"var(--sub)",fontSize:22,cursor:"pointer",lineHeight:1,padding:"0 4px"}}>×</button>
+        </div>
+        <div style=${{fontSize:13,color:"var(--sub)",marginBottom:16,lineHeight:1.7}}>
+          ${goal.title}<br/>いま ${cur}${!isNaN(t)&&t>0?" / "+t:""}${u}</div>
+
+        <!-- 増減。マイナスにすれば間違えて足したぶんを戻せる -->
+        <div style=${{display:"flex",alignItems:"center",gap:10,marginBottom:14}}>
+          <button onClick=${()=>setN(v=>Number(v)-step)}
+            style=${{flexShrink:0,width:46,height:46,borderRadius:12,border:"1px solid var(--border)",
+                     background:"transparent",color:"var(--text)",fontSize:22,fontWeight:700,
+                     cursor:"pointer",fontFamily:"inherit",lineHeight:1}}>−</button>
+          <input class="inp" type="number" inputmode="numeric" value=${n}
+            onInput=${e=>setN(e.target.value)}
+            style=${{margin:0,flex:1,textAlign:"center",fontSize:24,fontWeight:800,padding:"10px 8px"}}/>
+          <span style=${{flexShrink:0,fontSize:14,color:"var(--sub)",width:24}}>${u}</span>
+          <button onClick=${()=>setN(v=>Number(v)+step)}
+            style=${{flexShrink:0,width:46,height:46,borderRadius:12,border:`1px solid ${C}`,
+                     background:"transparent",color:C,fontSize:22,fontWeight:700,
+                     cursor:"pointer",fontFamily:"inherit",lineHeight:1}}>＋</button>
+        </div>
+
+        <div style=${{border:"1px solid var(--border)",borderRadius:12,padding:"12px 14px",marginBottom:16}}>
+          <div style=${{fontSize:12,color:"var(--sub)",marginBottom:4}}>保存すると</div>
+          <div style=${{display:"flex",alignItems:"baseline",gap:8,fontSize:15}}>
+            <span style=${{color:"var(--sub)"}}>${cur}${u}</span>
+            <span style=${{color:"var(--sub)"}}>→</span>
+            <span style=${{fontSize:22,fontWeight:800,color:C}}>${Math.round(next*10)/10}${u}</span>
+            ${!isNaN(t)&&t>0&&html`<span style=${{color:"var(--sub)",fontSize:12}}>/ ${t}${u}</span>`}
+          </div>
+          ${Number(n)<0&&html`
+            <div style=${{fontSize:11.5,color:"var(--sub)",marginTop:6,lineHeight:1.7}}>
+              マイナスにすると、間違えて足したぶんを戻せます。<br/>
+              記録は消さず「戻した」という記録を1件残します。</div>`}
+        </div>
+
+        <button class="btn" onClick=${save} disabled=${saving||!Number(n)}
+          style=${{background:C}}>${saving?"保存中…":"保存する"}</button>
+      </div>
+    </div>`;
+}
+
 // ★Sprintの「実績を追加する」★（2026-08-05 Kai指摘）
 //   Sprintそのものには数値目標を持たせていない（進捗は週間目標の積み上げ）。
 //   そのため「追加する」を押したときは、そのSprintに紐づく今週の目標を並べて、
@@ -1839,17 +1914,20 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
   const [entrySheet, setEntrySheet] = useState(null);
   const [historyGoal, setHistoryGoal] = useState(null);
   const [sprintEntry, setSprintEntry] = useState(null);   // Sprintの「実績を追加する」
+  const [weeklyEntry, setWeeklyEntry] = useState(null);   // 今週の目標に実績を入れる
   // ★今週の目標を「＋」で1件進める★（2026-08-05）
   //   今週の実績は記録から自動で数える作りなので、ここでも記録を1件作る。
   //   数字だけ別に足すと、記録と数字が食い違う。
-  const addWeeklyOne = async (w) => {
+  const addWeeklyOne = async (w, amount) => {
     const u = w.unit || (w.metric_type==="DURATION" ? "分" : "件");
-    const step = (w.metric_type==="DURATION") ? 30 : 1;
+    const step = (amount !== undefined && amount !== null && Number(amount))
+      ? Number(amount)
+      : ((w.metric_type==="DURATION") ? 30 : 1);
     const now = new Date();
     const hm = String(now.getHours()).padStart(2,"0")+":"+String(Math.floor(now.getMinutes()/5)*5).padStart(2,"0");
     const r = await gasPostJson("saveLog", {
       time_block: hm,
-      task: w.title,
+      task: step<0 ? (w.title+"（戻した分）") : w.title,
       focus_level: "",
       memo: "",
       quantity: step,
@@ -1858,7 +1936,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
       time_classification: "GOAL_DIRECT",
     });
     if(r&&r.ok){
-      onToast&&onToast(w.title+" を +"+step+u+" 記録しました");
+      onToast&&onToast(w.title+" を "+(step>0?"+":"")+step+u+" 記録しました");
       gasApi("getGoalTree").then(x=>{ if(x&&x.ok&&x.data){ setGoalTree(x.data);
         try{ localStorage.setItem("cache_goaltree", JSON.stringify(x.data)); }catch(e){} } });
       gasApi("getSprints").then(x=>{ if(x&&x.ok){ setSprints(x);
@@ -3132,10 +3210,10 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
                                     const cl=()=>{clearTimeout(t); e.target.removeEventListener("touchend",cl); e.target.removeEventListener("touchmove",cl);};
                                     e.target.addEventListener("touchend",cl); e.target.addEventListener("touchmove",cl); }}
                 title="長押しで履歴を表示できます"
-                style=${{flexShrink:0,display:"flex",alignItems:"center",gap:4,padding:"6px 11px",borderRadius:9,
+                style=${{flexShrink:0,display:"flex",alignItems:"center",gap:3,padding:"4px 9px",borderRadius:8,
                          border:`1px solid ${C_Q}`,background:"transparent",color:C_Q,
-                         fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>
-                <span style=${{fontSize:13,lineHeight:1}}>＋</span> 追加する</button>
+                         fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>
+                <span style=${{fontSize:12,lineHeight:1}}>＋</span> 追加する</button>
             </div>
             <div>
               <span style=${{display:"block"}}>
@@ -3232,10 +3310,10 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
                   <span style=${{fontSize:22,fontWeight:800,lineHeight:1,fontVariantNumeric:"tabular-nums"}}>${sPct}</span>
                   <span style=${{fontSize:11,fontWeight:700}}>%</span></span>`}
               <button onClick=${()=>setSprintEntry(sp)}
-                style=${{flexShrink:0,display:"flex",alignItems:"center",gap:4,padding:"6px 11px",borderRadius:9,
+                style=${{flexShrink:0,display:"flex",alignItems:"center",gap:3,padding:"4px 9px",borderRadius:8,
                          border:`1px solid ${C_S}`,background:"transparent",color:C_S,
-                         fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>
-                <span style=${{fontSize:13,lineHeight:1}}>＋</span> 追加する</button>
+                         fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>
+                <span style=${{fontSize:12,lineHeight:1}}>＋</span> 追加する</button>
             </div>
             ${Bar({color:C_S, percent: sPct!==null ? sPct
                     : (sp.totalDays>0 ? Math.round(sp.dayIndex/sp.totalDays*100) : 0)})}
@@ -3311,7 +3389,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
                     </button>
                     <!-- ★＋で実績を1件足す★ 0→1→2 と増えていく。
                          足したぶんは記録として残す（数字だけ足すと記録と食い違うため）。 -->
-                    <button title=${"＋"+step+u} onClick=${()=>addWeeklyOne(w)}
+                    <button title="実績を入れる（減らすこともできます）" onClick=${()=>setWeeklyEntry(w)}
                       style=${{flexShrink:0,width:26,height:26,padding:0,border:"none",background:"none",
                                color:C_W,display:"flex",alignItems:"center",justifyContent:"center",
                                fontSize:19,fontWeight:600,cursor:"pointer",lineHeight:1,fontFamily:"inherit"}}>＋</button>
@@ -3386,6 +3464,11 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
       onClose=${()=>setEntrySheet(null)}
       onSaved=${()=>gasApi("getGoalTree").then(r=>{ if(r&&r.ok&&r.data){ setGoalTree(r.data);
         try { localStorage.setItem("cache_goaltree", JSON.stringify(r.data)); } catch(e){} } })}
+      onToast=${onToast}/>`}
+
+    ${weeklyEntry&&html`<${WeeklyEntrySheet} goal=${weeklyEntry}
+      onClose=${()=>setWeeklyEntry(null)}
+      onSave=${async(w,v)=>{ await addWeeklyOne(w, v); }}
       onToast=${onToast}/>`}
 
     ${sprintEntry&&html`<${SprintEntrySheet} sprint=${sprintEntry}
@@ -8668,7 +8751,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260805-053900";
+const APP_BUILD = "20260805-054035";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 

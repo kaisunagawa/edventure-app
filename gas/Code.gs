@@ -11537,7 +11537,10 @@ function aggregateWeeklyActual(studentEmail, weekStart) {
         const am = Number(l.actual_minutes);
         if (!isNaN(am) && am > 0) { actual += am; return; }
         const q = Number(l.quantity);
-        if (!isNaN(q) && q > 0) { actual += q; return; }
+        // ★マイナスも数える★（2026-08-05 Kai要望）
+        //   間違えて足したぶんを戻せるように、打ち消しの記録を認める。
+        //   記録を消すのではなく「戻した」という記録を残す方が、あとで追える。
+        if (!isNaN(q) && q !== 0) { actual += q; return; }
         const cand = timeBlockMinutes(l.time_block);
         if (cand > 0) pending += cand;   // 候補として持つだけ。加算しない
       });
@@ -11548,7 +11551,8 @@ function aggregateWeeklyActual(studentEmail, weekStart) {
       //   数えていないものを数えたことにしない。
       mine.forEach(l => {
         const q = Number(l.quantity);
-        if (!isNaN(q) && q > 0) actual += q;
+        // マイナスも数える（打ち消しの記録を認める。上のDURATIONと同じ理由）
+        if (!isNaN(q) && q !== 0) actual += q;
         else pending += 1;
       });
     }
