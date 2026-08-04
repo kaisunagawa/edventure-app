@@ -3169,8 +3169,20 @@ ${text}
       const impliesNow = /今まで|今の時間|今現在|現在まで|今に至|今も続|今日の今|さっきから|これまで|ずっと/.test(String(r.memo || "") + " " + String(r.task || ""));
       tb = (impliesNow && startTb < nowStr) ? startTb + "-" + nowStr : startTb;
     }
+    // ★深夜に話した「昨夜のこと」は、昨日の記録にする★（2026-08-05 Kaiの当初の指摘）
+    //   午前2時に「20時から23時まで作業した」と話すのは、まず昨夜の話。
+    //   暦の日付をそのまま使うと今日の記録になり、
+    //   20時〜23時 と 23時〜翌1時 が2日に割れてしまう。
+    //   ・いまが早朝（5時より前）で
+    //   ・話している開始時刻が昼以降（12時以降）なら
+    //   その記録だけ前の日に付ける。「1時から作業した」のような
+    //   深夜そのものの話は、今日のままにする。
+    const startH = parseInt(String(tb).slice(0, 2), 10);
+    const recDate = (hour < 5 && startH >= 12)
+      ? formatDate(new Date(new Date(today + "T00:00:00+09:00").getTime() - 86400000))
+      : today;
     const sr = saveLog(studentEmail, {
-      date: today,            // ★深夜は前日の続きとして書く★（暦の日付ではない）
+      date: recDate,
       time_block: tb,
       task: String(r.task || "記録").slice(0, 60),
       focus_level: FOCUS_LABELS[fnum],
@@ -3178,7 +3190,7 @@ ${text}
       goal_related: r.goal_related === true ? "true" : "false"
     });
     if (sr.ok) {
-      saved.push({ time_block: tb, task: r.task, focus_level: fnum, goal_related: r.goal_related === true });
+      saved.push({ time_block: tb, date: recDate, task: r.task, focus_level: fnum, goal_related: r.goal_related === true });
       if (sr.xp_gained) totalXp += sr.xp_gained;
       if (sr.level_up) { leveled = true; lastLevel = sr.level; }
     }

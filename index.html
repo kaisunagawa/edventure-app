@@ -9037,7 +9037,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260805-083303";
+const APP_BUILD = "20260805-083824";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
@@ -10245,9 +10245,12 @@ function QuickLogSheet({onClose,onToast}){
       //  カレンダーに反映されない原因になっていた）。savedAll=保存された各レコード。
       try{
         if(localStorage.getItem("cal_linked") && Array.isArray(r.savedAll)){
-          const dateStr = formatDateStr(new Date());
           r.savedAll.forEach(rec=>{
             const tb = String(rec.time_block||""); if(!tb) return;
+            // ★サーバーが決めた日付を使う★（2026-08-05）
+            //   深夜に話した「昨夜のこと」は前の日に記録される。
+            //   ここで今日の日付を使うと、カレンダーだけ別の日に入ってしまう。
+            const dateStr = String(rec.date||"").slice(0,10) || formatDateStr(new Date());
             const [startHM, endHM] = tb.split("-");
             const stt = new Date(dateStr+"T"+startHM.slice(0,5)+":00"); if(isNaN(stt)) return;
             const ett = endHM ? new Date(dateStr+"T"+endHM.slice(0,5)+":00") : null;
