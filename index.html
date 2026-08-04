@@ -8133,7 +8133,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260805-041136";
+const APP_BUILD = "20260805-041501";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
@@ -9801,6 +9801,19 @@ if('serviceWorker' in navigator){
     //   取りに行くのは version.json だけ（本体180KBの再取得はしない）。
     const latest = await window.__jirokuFetchLatestBuild();
     if (!latest || latest === APP_BUILD) return;
+    // ★読み込み直す前に、新しい本体をキャッシュへ入れておく★
+    //   （2026-08-05 Kai報告「何度開いても変わらない」）
+    //   Service Workerはキャッシュ優先なので、ただ location.reload() すると
+    //   また古い方が出てくる。新しい版だと分かった時点でこちらから取りに行き、
+    //   Service Workerが読む場所へ入れてから読み込み直す。
+    //   （Cache APIは画面側からも使える。sw.js と同じ名前・同じキーにすること）
+    try {
+      const res = await fetch("index.html?v=" + encodeURIComponent(latest), { cache: "reload" });
+      if (res.ok) {
+        const c = await caches.open("jiroku-v13-swr-fix");
+        await c.put(location.pathname.indexOf("/coach") !== -1 ? "app-shell-coach" : "app-shell", res.clone());
+      }
+    } catch (e) { /* 入れられなくても、次の起動では新しい方が出る */ }
     pendingReload = true; safeReload();
   }
   // ★起動直後にも必ず確認する★（2026-08-05 Kai報告「アプリが変わってない」）

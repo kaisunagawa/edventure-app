@@ -5,7 +5,10 @@
 // ★v10★ 2026-08-01: 通信をPOSTのJSON本文へ統一（URLにトークンを載せない）。
 // 古いフロントがキャッシュに残っていると、URLへトークンを載せる旧コードが
 // 動き続けてしまう。版を上げて確実に入れ替える。
-const CACHE = "jiroku-v12-shell-split";
+// ★v13★ 2026-08-05: 裏での取り直しがHTTPキャッシュから古いHTMLを受け取っていた。
+//   保存されるキャッシュも古いままになり、何度読み込み直しても新しい版に
+//   変わらなくなっていた（Kai報告）。名前を上げて、詰まったキャッシュを捨てる。
+const CACHE = "jiroku-v13-swr-fix";
 
 // タイマー終了などをバックグラウンドでも通知するためのFirebase Cloud Messaging。
 // 別ファイル（firebase-messaging-sw.js）として登録すると、同じスコープ('/')の
@@ -106,7 +109,11 @@ self.addEventListener('fetch', e => {
       const shellKey = url.pathname.indexOf('/coach') !== -1 ? 'app-shell-coach' : 'app-shell';
       const cached = await cache.match(shellKey);
       // 裏での取り直し。表示を待たせないので、ここではawaitしない
-      const revalidate = fetch(e.request)
+      //   ★cache:'reload' が必須★
+      //     GitHub Pages は index.html を max-age=600 で返す。ふつうに fetch すると
+      //     10分間はブラウザのHTTPキャッシュから古いHTMLが返り、それをそのまま
+      //     保存してしまうため、いつまでも新しい版に入れ替わらない。
+      const revalidate = fetch(e.request, { cache: 'reload' })
         .then(res => { if (res.ok) cache.put(shellKey, res.clone()); return res; })
         .catch(() => null);
       if (cached) {
