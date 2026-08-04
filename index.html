@@ -5590,18 +5590,18 @@ function LogScreen({onToast, isActive}) {
                 return html`<div key=${r.k} style=${{marginBottom:9}}>
                   <div style=${{display:"flex",alignItems:"center",gap:7}}>
                     <span style=${{flexShrink:0,width:24,height:24,borderRadius:"50%",
-                                   background:`color-mix(in srgb, ${c} 20%, transparent)`,
-                                   border:`1px solid color-mix(in srgb, ${c} 40%, transparent)`,
+                                   background:`color-mix(in srgb, ${c} 26%, transparent)`,
+                                   border:`1px solid color-mix(in srgb, ${c} 55%, transparent)`,
                                    color:c,display:"flex",alignItems:"center",justifyContent:"center"}}>
                       ${TIME_CLASS_ICON[r.k]||TIME_CLASS_ICON.OPERATIONS}</span>
                     <span style=${{flex:1,minWidth:0,fontSize:12,color:"var(--text)",
                                    overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>${r.label}</span>
-                    <span style=${{flexShrink:0,fontSize:11.5,fontWeight:800,color:r.m?c:"var(--sub)",
+                    <span style=${{flexShrink:0,fontSize:11.5,fontWeight:800,color:c,
                                    fontVariantNumeric:"tabular-nums"}}>${hmPlain(r.m)}</span>
                     <span style=${{flexShrink:0,width:30,textAlign:"right",fontSize:11,color:"var(--sub)",
                                    fontVariantNumeric:"tabular-nums"}}>${pct}%</span>
                   </div>
-                  <div style=${{height:4,background:"var(--border)",borderRadius:99,overflow:"hidden",marginTop:4,marginLeft:31}}>
+                  <div style=${{height:4,background:"var(--border)",borderRadius:99,overflow:"hidden",marginTop:5}}>
                     <div style=${{height:"100%",width:pct+"%",background:c,borderRadius:99}}/>
                   </div>
                 </div>`;
@@ -9130,7 +9130,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260805-085003";
+const APP_BUILD = "20260805-085916";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
