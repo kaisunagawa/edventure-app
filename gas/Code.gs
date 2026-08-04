@@ -633,7 +633,7 @@ function doGet(e) {
         for (var _k = 0; _k <= _days; _k++) { var _dd = new Date(); _dd.setDate(_dd.getDate() - _k); _dates[formatDate(_dd)] = 1; }
         var _logs = getFilteredRows("DailyLog", "student_email", studentEmail).filter(function (l) { return _dates[l.date]; });
         var _cnt = 0;
-        _logs.forEach(function (l) { if (l.time_block && String(l.task || "").trim()) { writeRecordToOwnerCalendar(studentEmail, l.date, String(l.time_block), l.task); _cnt++; } });
+        _logs.forEach(function (l) { if (l.time_block && String(l.task || "").trim()) { writeRecordToOwnerCalendar(studentEmail, l.date, String(l.time_block), l.task, l.time_classification); _cnt++; } });
         result = { ok: true, processed: _cnt };
         break;
       }
@@ -3071,7 +3071,26 @@ ${text}
 // Web appはUSER_DEPLOYING(=Kai)で動くため、Kai自身がアクセスできるカレンダーにのみ書ける
 // （他ユーザーのカレンダーはgetCalendarByIdがnullになりスキップ＝従来のクライアント書き込みに任せる）。
 var _ownerCalCache = {}, _ownerCalIdByEmail = {};
-function writeRecordToOwnerCalendar(studentEmail, dateStr, timeBlock, task) {
+// ★分類ごとのカレンダー色（サーバー書き込み側）★（2026-08-05 Kai指摘）
+//   画面側(index.html)の CAL_COLOR_BY_CLASS と同じ色になるようにそろえること。
+//   Kaiのようにサーバーから直接書き込む人は、画面側の書き込みを丸ごと止めている。
+//   そのためサーバー側にも同じ色分けを入れないと、その人だけ全部灰色のままになる。
+//   （CalendarAppのEventColorは、APIのcolorIdと同じ並び）
+function ownerCalColor_(cls) {
+  var C = CalendarApp.EventColor;
+  switch (String(cls || "").toUpperCase()) {
+    case "GOAL_DIRECT":           return C.GREEN;       // 10 濃い緑 ── いちばん良い使い方
+    case "ASSET_BUILD":           return C.PALE_GREEN;  // 2  明るい緑 ── 将来への投資
+    case "RECOVERY":              return C.CYAN;        // 7  青 ── 回復
+    case "RELATIONSHIP":          return C.YELLOW;      // 5  黄 ── 人間関係
+    case "RECOVERY_RELATIONSHIP": return C.CYAN;        // 旧分類（書き換えない昔の記録）
+    case "OPERATIONS":            return C.GRAY;        // 8  灰 ── 日常業務
+    case "UNPLANNED_LEAKAGE":     return C.RED;         // 11 赤 ── 計画外の時間
+    default:                      return C.GRAY;        // 未分類はこれまでどおり灰色
+  }
+}
+
+function writeRecordToOwnerCalendar(studentEmail, dateStr, timeBlock, task, cls) {
   try {
     if (!timeBlock || !String(task || "").trim()) return;
     var calId = _ownerCalIdByEmail[studentEmail];
@@ -3110,14 +3129,14 @@ function writeRecordToOwnerCalendar(studentEmail, dateStr, timeBlock, task) {
     if (existing.length) {
       existing[0].setTitle(title);
       try { existing[0].setTime(start, end); } catch (e) {}
-      try { existing[0].setColor(CalendarApp.EventColor.GRAY); } catch (e) {}
+      try { existing[0].setColor(ownerCalColor_(cls)); } catch (e) {}
       // 同じ開始時刻のJIROKU記録が既に複数ある＝過去の二重登録。1件だけ残して掃除する
       for (var _di = 1; _di < existing.length; _di++) { try { existing[_di].deleteEvent(); } catch (e) {} }
     } else {
       var ev = cal.createEvent(title, start, end);
       try { ev.setTag("jirokuRecord", "1"); } catch (e) {}
-      // クライアント書き込みと同じ灰色(graphite)に揃える（既定の青のままにしない）
-      try { ev.setColor(CalendarApp.EventColor.GRAY); } catch (e) {}
+      // 分類ごとの色をつける（未分類はこれまでどおり灰色）
+      try { ev.setColor(ownerCalColor_(cls)); } catch (e) {}
     }
   } catch (err) { Logger.log("writeRecordToOwnerCalendar: " + err); }
 }
@@ -3260,7 +3279,7 @@ function saveLog(studentEmail, body) {
       let grIdx = headers.indexOf("goal_related");
       if(grIdx === -1){ grIdx = headers.length; sheet.getRange(1, grIdx+1).setValue("goal_related"); }
       sheet.getRange(i+1, grIdx+1).setValue(body.goal_related || "false");
-      writeRecordToOwnerCalendar(studentEmail, targetDate, String(body.time_block), body.task);
+      writeRecordToOwnerCalendar(studentEmail, targetDate, String(body.time_block), body.task, body.time_classification);
       if (!isPast) { updateStreak(studentEmail); invalidateStatusCache(); }
 
       // 「まだXP未付与」かつ「今回きちんと評価が入っている」記録にだけ、1回だけXPを付与する。
@@ -3284,7 +3303,7 @@ function saveLog(studentEmail, body) {
   sheet.appendRow([logId, studentEmail, targetDate, "", body.task, body.focus_level, body.memo || "", now, body.goal_related || "false"]);
   sheet.getRange(newRow, 4).setNumberFormat("@").setValue(String(body.time_block));
   writeP1LogFields(sheet, newRow, studentEmail, targetDate, String(body.time_block), body);
-  writeRecordToOwnerCalendar(studentEmail, targetDate, String(body.time_block), body.task);
+  writeRecordToOwnerCalendar(studentEmail, targetDate, String(body.time_block), body.task, body.time_classification);
   let awardedIdxN = headers.indexOf("xp_awarded");
   if (awardedIdxN === -1) { awardedIdxN = headers.length; sheet.getRange(1, awardedIdxN + 1).setValue("xp_awarded"); }
 
@@ -3451,7 +3470,7 @@ function saveLogMulti(studentEmail, body) {
   }
 
   // 各ブロックをKaiのカレンダーへ直接書き込む（端末・トークンに依存しない確実な反映）
-  blocks.forEach(function (b) { writeRecordToOwnerCalendar(studentEmail, targetDate, b, body.task); });
+  blocks.forEach(function (b) { writeRecordToOwnerCalendar(studentEmail, targetDate, b, body.task, body.time_classification); });
 
   if (isPast) return { ok: true, xp_gained: 0, updated: updatedAny, count: blocks.length };
 
@@ -11231,6 +11250,16 @@ function setLogClassification(studentEmail, body) {
     set("classification_version", TIME_CLASS_VERSION);
     set("classification_reason_code", "USER_SELECTED");
     set("user_corrected_at", new Date().toISOString());
+    // ★カレンダーの色も塗り直す★（2026-08-05）
+    //   サーバーから直接書き込む人（google_calendar_id を持つ人）は、
+    //   画面側の書き込みを止めているため、ここで塗り直さないと
+    //   分類を変えてもカレンダーだけ前の色のまま残ってしまう。
+    try {
+      const iDate = headers.indexOf("date"), iTb = headers.indexOf("time_block"), iTask = headers.indexOf("task");
+      const rawD = data[i][iDate];
+      const dStr = rawD instanceof Date ? Utilities.formatDate(rawD, "Asia/Tokyo", "yyyy-MM-dd") : String(rawD).slice(0, 10);
+      writeRecordToOwnerCalendar(studentEmail, dStr, String(data[i][iTb]), String(data[i][iTask]), want);
+    } catch (e) { /* 色が変わらなくても分類の保存は成功させる */ }
     return { ok: true, log_id: logId, time_classification: want, classification_method: "USER" };
   }
   return { ok: false, error: "not found" };

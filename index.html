@@ -4244,11 +4244,23 @@ function LogScreen({onToast, isActive}) {
   const [logs, setLogs] = useState([]);
   const [saving, setSaving] = useState(false);
   const timeRef = useRef(null);
-  const timeBlocks = getTimeBlocks();
+  // ★「今の時間」は必ず出す★（2026-08-05 Kai報告）
+  //   時間帯の一覧は5時〜23時ぶんしか用意しておらず、さらに
+  //   「記録できる時間」の初期値が6〜23時だった。そのため深夜4時半に開くと
+  //   今の時間の枠が無く、いちばん後ろの23時台が選ばれてしまっていた。
+  //   設定の範囲外でも、今の時間の枠だけは足して、必ず選べるようにする。
+  const hourBlockOf = (h) => String(h).padStart(2,"0")+":00-"+String(h+1).padStart(2,"0")+":00";
+  const timeBlocks = (()=>{
+    const base = getTimeBlocks();
+    if(!isToday(date)) return base;
+    const cur = hourBlockOf(new Date().getHours());
+    if(base.indexOf(cur) !== -1) return base;
+    return base.concat([cur]).sort((a,b)=>parseInt(a)-parseInt(b));
+  })();
 
   const getCurrentBlock = () => {
     const h = new Date().getHours();
-    return timeBlocks.find(t => parseInt(t) === h) || timeBlocks[timeBlocks.length - 1] || "09:00-10:00";
+    return timeBlocks.find(t => parseInt(t) === h) || hourBlockOf(h);
   };
 
   const [block, setBlock] = useState(getCurrentBlock);
@@ -8138,7 +8150,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260805-041934";
+const APP_BUILD = "20260805-043147";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
