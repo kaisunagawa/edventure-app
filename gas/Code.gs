@@ -308,6 +308,44 @@ function doGet(e) {
                        return c.label + "=" + (c.state === "evaluated" ? c.value : "×(" + (c.reason_code || "") + ")"); }) };
           }) });
       }
+      // ★「＋」で作られてしまった時間の記録を片づける★（2026-08-05）
+      //   仕様変更前の「＋」は、実績を足すために時間の記録を1件作っていた。
+      //   実際にはやっていない「アポ6件獲得」などが記録に並んでしまうため、
+      //   その分だけを消す。見分け方は「量だけがあって、中身が無い」記録。
+      //     ・quantity が入っている
+      //     ・primary_weekly_goal_id が入っている
+      //     ・自己評価もメモも空（どちらか入っていれば本物の記録として残す）
+      //   dry=1（既定）では消さずに一覧を返す。
+      case "adminCleanupPlusLogs": {
+        if (!verifyAdmin(e.parameter.coachEmail)) return jsonResponse({ ok: false, error: "not admin" });
+        const em6 = String(e.parameter.email || "").trim() || adminEmail();
+        const dry6 = String(e.parameter.dry || "1") === "1";
+        const sh6 = getSheet("DailyLog");
+        const d6 = sh6.getDataRange().getValues();
+        const h6 = d6[0];
+        const iEm6 = h6.indexOf("student_email"), iDt6 = h6.indexOf("date"), iTb6 = h6.indexOf("time_block");
+        const iTk6 = h6.indexOf("task"), iFc6 = h6.indexOf("focus_level"), iMm6 = h6.indexOf("memo");
+        const iQt6 = h6.indexOf("quantity"), iPw6 = h6.indexOf("primary_weekly_goal_id");
+        const iDl6 = h6.indexOf("deleted_at");
+        if (iQt6 === -1 || iPw6 === -1 || iDl6 === -1) return jsonResponse({ ok: false, error: "column missing" });
+        const hits = [];
+        for (let i = 1; i < d6.length; i++) {
+          if (String(d6[i][iEm6]) !== em6) continue;
+          if (String(d6[i][iDl6] || "").trim()) continue;
+          const q = Number(d6[i][iQt6]);
+          if (isNaN(q) || q === 0) continue;
+          if (!String(d6[i][iPw6] || "").trim()) continue;
+          if (String(d6[i][iFc6] || "").trim()) continue;
+          if (String(d6[i][iMm6] || "").trim()) continue;
+          const raw6 = d6[i][iDt6];
+          const dv6 = (raw6 instanceof Date) ? Utilities.formatDate(raw6, "Asia/Tokyo", "yyyy-MM-dd") : String(raw6).slice(0, 10);
+          hits.push({ date: dv6, time_block: String(d6[i][iTb6]), task: String(d6[i][iTk6]), quantity: q });
+          if (!dry6) sh6.getRange(i + 1, iDl6 + 1).setValue(new Date().toISOString());
+        }
+        if (!dry6) authAudit("PLUS_LOG_CLEANUP", { result: "APPLIED", action: "adminCleanupPlusLogs",
+          failureReason: em6 + " removed=" + hits.length });
+        return jsonResponse({ ok: true, email: em6, dry_run: dry6, count: hits.length, rows: hits.slice(0, 50) });
+      }
       case "adminScoreConsistency": {
         if (!verifyAdmin(e.parameter.coachEmail)) return jsonResponse({ ok: false, error: "not admin" });
         const em4 = String(e.parameter.email || "").trim() || adminEmail();
@@ -13096,7 +13134,7 @@ const ADMIN_SECRET_ALLOWLIST = {
   // 一斉送信（Kaiの明示的な要望により残す）
   adminBroadcastLine:1, adminBroadcastLinePending:1, adminSendStudentCampaign:1,
   // セットアップ・保守
-  adminSetupTriggers:1, adminInstallTrigger:1, adminSetupPhase1:1, adminSetupAuth:1, adminPhase4DryRun:1, adminLegacyBackfill:1, adminWritePathStats:1, adminIssueTestSession:1, adminDropTestSessions:1, adminOpsSelfTest:1, adminActualMinutesAudit:1, adminXpCorrection:1, adminStreakRecalc:1, adminGrantFeature:1, adminUserDiag:1, adminReportScoreDryRun:1, adminReportGenTest:1, adminScoreConsistency:1, adminFinalizeOps:1, adminUnfinalizeOps:1, adminSmpDump:1,
+  adminSetupTriggers:1, adminInstallTrigger:1, adminSetupPhase1:1, adminSetupAuth:1, adminPhase4DryRun:1, adminLegacyBackfill:1, adminWritePathStats:1, adminIssueTestSession:1, adminDropTestSessions:1, adminOpsSelfTest:1, adminActualMinutesAudit:1, adminXpCorrection:1, adminStreakRecalc:1, adminGrantFeature:1, adminUserDiag:1, adminReportScoreDryRun:1, adminReportGenTest:1, adminScoreConsistency:1, adminFinalizeOps:1, adminUnfinalizeOps:1, adminSmpDump:1, adminCleanupPlusLogs:1,
   authSetMode:1, authSetEnforce:1, authRoleApply:1, authRoleDryRun:1, authRevokeAll:1,
   authCleanupTestData:1, adminPurgeTestUsers:1, adminMigrateTasks:1, authBreakerReset:1, rotateSessionSecret:1,
   p1Backup:1, p1BackupInfo:1, p1PurgeArchived:1, weeklyBackup:1
