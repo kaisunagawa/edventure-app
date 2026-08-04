@@ -3168,10 +3168,13 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
         </div>`;
 
       // ラベルのピル
+      // ★ラベルは塗りつぶさない★（2026-08-05 Kai指摘）
+      //   背景に色を敷くと、そこだけ色の塊になって浮いていた。
+      //   枠線と文字の色だけで段階を示す。
       const Pill = ({color, text}) => html`
         <span style=${{display:"inline-block",fontSize:10.5,fontWeight:700,color:color,
-                       background:`color-mix(in srgb, ${color} 16%, transparent)`,
-                       border:`1px solid color-mix(in srgb, ${color} 35%, transparent)`,
+                       background:"transparent",
+                       border:`1px solid color-mix(in srgb, ${color} 45%, transparent)`,
                        borderRadius:99,padding:"2px 10px"}}>${text}</span>`;
 
       // 太い進捗バー（点線の目盛りつき）
@@ -8786,7 +8789,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260805-054534";
+const APP_BUILD = "20260805-054744";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
