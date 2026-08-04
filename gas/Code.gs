@@ -271,10 +271,17 @@ function doGet(e) {
         const h2 = d2[0];
         const iDate = h2.indexOf("report_date"), iFin = h2.indexOf("finalized_at"), iSnap = h2.indexOf("snapshot_json");
         if (iDate === -1 || iFin === -1) return jsonResponse({ ok: false, error: "column missing" });
-        let cleared = 0;
+        let cleared = 0, scanned = 0;
         for (let i = 1; i < d2.length; i++) {
-          const dv = String(d2[i][iDate]).slice(0, 10);
+          // ★シートは日付をDate型で返すことがある★
+          //   String(Dateオブジェクト).slice(0,10) は "Wed Aug 0" になり、
+          //   "2026-08-05" と一致しない。必ず書式をそろえてから比べる。
+          const raw2 = d2[i][iDate];
+          const dv = (raw2 instanceof Date)
+            ? Utilities.formatDate(raw2, "Asia/Tokyo", "yyyy-MM-dd")
+            : String(raw2).slice(0, 10);
           if (days2.indexOf(dv) === -1) continue;
+          scanned++;
           if (!String(d2[i][iFin] || "").trim()) continue;
           sh2.getRange(i + 1, iFin + 1).setValue("");
           if (iSnap !== -1) sh2.getRange(i + 1, iSnap + 1).setValue("");
@@ -282,7 +289,7 @@ function doGet(e) {
         }
         authAudit("OPS_UNFINALIZE", { result: "APPLIED", action: "adminUnfinalizeOps",
           failureReason: days2.join(",") + " cleared=" + cleared });
-        return jsonResponse({ ok: true, dates: days2, cleared: cleared });
+        return jsonResponse({ ok: true, dates: days2, matched_rows: scanned, cleared: cleared });
       }
       case "adminScoreConsistency": {
         if (!verifyAdmin(e.parameter.coachEmail)) return jsonResponse({ ok: false, error: "not admin" });
