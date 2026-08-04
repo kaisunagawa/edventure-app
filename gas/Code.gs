@@ -646,6 +646,11 @@ function doGet(e) {
       case "shareAchievement": result = shareAchievement(studentEmail, e.parameter); break;
       case "getReport":    result = getReport(studentEmail, e.parameter); break;
       case "getReportList": result = getReportList(studentEmail); break;
+      // 実績の履歴（3か月目標の「いまの数字」を1件ずつ足していく）
+      case "addGoalEntry": result = addGoalEntry(studentEmail, e.parameter); break;
+      case "listGoalEntries": result = listGoalEntries(studentEmail, e.parameter); break;
+      case "updateGoalEntry": result = updateGoalEntry(studentEmail, e.parameter); break;
+      case "deleteGoalEntry": result = deleteGoalEntry(studentEmail, e.parameter); break;
       // レポート画面のまとめ取得（往復の回数を減らすため）
       case "getReportHome": result = getReportHome(studentEmail); break;
       case "getReportDetail": result = getReportDetail(studentEmail, e.parameter); break;
@@ -10355,8 +10360,112 @@ function formatDate(date) {
 // 設計の詳細と決定の経緯は PHASE1_BASELINE.md を参照。
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+// ══════════════════════════════════════════════════════════════════
+// 実績の履歴（2026-08-05 Kai要望）
+//
+//   これまで3か月目標の「いまの数字」は上書きするだけで、
+//   いつ・何で・いくら増えたのかが残らなかった。
+//   1件ずつ足していける形にし、あとから編集・削除もできるようにする。
+//
+//   ★current_value と履歴は必ず一緒に動かす★
+//     current_value を「履歴の合計」に置き換えてしまうと、
+//     履歴を使う前から手で入れていた数字が消える。
+//     そこで current_value は今までどおり正とし、
+//     追加・編集・削除のたびに差分だけ足し引きする。
+// ══════════════════════════════════════════════════════════════════
+const GOAL_ENTRY_CATEGORIES = { SALES:"売上", CONTRACT:"契約", OTHER:"その他" };
+
+function goalEntryBumpCurrent_(studentEmail, goalId, delta) {
+  if (!delta) return;
+  const row = p1OwnedRow("Goals", "quarterly_goal_id", goalId, studentEmail);
+  if (!row) return;
+  const cur = Number(row.current_value);
+  const next = (isNaN(cur) ? 0 : cur) + Number(delta);
+  p1Upsert("Goals", "quarterly_goal_id",
+    Object.assign({}, row, { current_value: Math.round(next * 100) / 100 }));
+}
+
+function addGoalEntry(studentEmail, body) {
+  const chk = p1RequireUser(studentEmail);
+  if (!chk.ok) return chk;
+  const goalId = String((body && body.quarterly_goal_id) || "").trim();
+  if (!goalId || !p1OwnedRow("Goals", "quarterly_goal_id", goalId, studentEmail)) {
+    return { ok: false, error: "not found" };
+  }
+  const amount = Number(body && body.amount);
+  if (isNaN(amount) || amount === 0) return { ok: false, error: "金額を入れてください" };
+  const cat = String((body && body.category) || "OTHER").toUpperCase();
+  const now = new Date().toISOString();
+  const rec = {
+    entry_id: makeP1Id("ge"),
+    student_email: studentEmail,
+    quarterly_goal_id: goalId,
+    amount: Math.round(amount * 100) / 100,
+    category: GOAL_ENTRY_CATEGORIES[cat] ? cat : "OTHER",
+    memo: p1Text_(body && body.memo, 200),
+    entry_date: p1Text_((body && body.entry_date) || formatDate(new Date()), 10),
+    created_at: now, updated_at: now, deleted_at: ""
+  };
+  p1Upsert("GoalEntries", "entry_id", rec);
+  goalEntryBumpCurrent_(studentEmail, goalId, rec.amount);
+  return { ok: true, entry: rec };
+}
+
+function listGoalEntries(studentEmail, body) {
+  const chk = p1RequireUser(studentEmail);
+  if (!chk.ok) return chk;
+  const goalId = String((body && body.quarterly_goal_id) || "").trim();
+  const rows = p1List("GoalEntries", studentEmail)
+    .filter(function (r) { return !String(r.deleted_at || "").trim(); })
+    .filter(function (r) { return !goalId || String(r.quarterly_goal_id) === goalId; })
+    .map(function (r) {
+      return { entry_id: r.entry_id, quarterly_goal_id: r.quarterly_goal_id,
+               amount: Number(r.amount) || 0, category: String(r.category || "OTHER"),
+               memo: String(r.memo || ""), entry_date: String(r.entry_date || "").slice(0, 10) }; })
+    .sort(function (a, b) { return String(b.entry_date).localeCompare(String(a.entry_date)); });
+  return { ok: true, data: rows };
+}
+
+function updateGoalEntry(studentEmail, body) {
+  const chk = p1RequireUser(studentEmail);
+  if (!chk.ok) return chk;
+  const id = String((body && body.entry_id) || "").trim();
+  const row = id ? p1OwnedRow("GoalEntries", "entry_id", id, studentEmail) : null;
+  if (!row || String(row.deleted_at || "").trim()) return { ok: false, error: "not found" };
+  const amount = Number(body && body.amount);
+  if (isNaN(amount) || amount === 0) return { ok: false, error: "金額を入れてください" };
+  const before = Number(row.amount) || 0;
+  const after = Math.round(amount * 100) / 100;
+  const cat = String((body && body.category) || row.category || "OTHER").toUpperCase();
+  p1Upsert("GoalEntries", "entry_id", Object.assign({}, row, {
+    amount: after, category: GOAL_ENTRY_CATEGORIES[cat] ? cat : "OTHER",
+    memo: p1Text_(body && body.memo, 200), updated_at: new Date().toISOString() }));
+  goalEntryBumpCurrent_(studentEmail, String(row.quarterly_goal_id), after - before);
+  return { ok: true, entry_id: id, amount: after };
+}
+
+function deleteGoalEntry(studentEmail, body) {
+  const chk = p1RequireUser(studentEmail);
+  if (!chk.ok) return chk;
+  const id = String((body && body.entry_id) || "").trim();
+  const row = id ? p1OwnedRow("GoalEntries", "entry_id", id, studentEmail) : null;
+  if (!row || String(row.deleted_at || "").trim()) return { ok: false, error: "not found" };
+  // 消しても行は残す（あとで「なぜ数字が減ったのか」を追えるようにする）
+  p1Upsert("GoalEntries", "entry_id", Object.assign({}, row, {
+    deleted_at: new Date().toISOString(), updated_at: new Date().toISOString() }));
+  goalEntryBumpCurrent_(studentEmail, String(row.quarterly_goal_id), -(Number(row.amount) || 0));
+  return { ok: true, entry_id: id };
+}
+
+
 // 新規4シートの列定義。ここを唯一の定義元とし、取得関数が無ければ自動生成する
 const P1_SHEETS = {
+  // ★実績の履歴★（2026-08-05 Kai要望）
+  //   3か月目標の「いまの数字」を上書きするだけだと、
+  //   いつ・何で・いくら増えたのかが残らない。1件ずつ足していけるようにする。
+  //   current_value は、この履歴の増減とあわせて必ず一緒に動かす。
+  GoalEntries: ["entry_id","student_email","quarterly_goal_id","amount","category","memo",
+    "entry_date","created_at","updated_at","deleted_at"],
   Goals: ["quarterly_goal_id","student_email","title","category","current_value","target_value","unit",
     "start_date","end_date","why","success_condition","evidence","guardrails","priority","status",
     "created_at","updated_at"],
@@ -12670,6 +12779,7 @@ const ACTION_POLICIES = {
 const ACTION_POLICIES_WRITE = {
   saveLog:{}, saveLogMulti:{}, quickLog:{}, deleteLog:{}, setLogClassification:{}, saveDayPlan:{}, saveWeeklyAvailable:{}, saveSettings:{}, saveOnboarding:{},
   saveTodayActions:{}, saveGoal:{}, saveWeeklyGoal:{}, archiveGoalItem:{}, migrateLocalTasks:{},
+  addGoalEntry:{}, updateGoalEntry:{}, deleteGoalEntry:{},
   saveTask:{}, deleteTask:{}, carryOverTask:{}, saveTaskMutations:{}, saveSprint:{}, migrateTasksToSheet:{},
   submitSurvey:{}, syncCalendar:{}, sendMessage:{}, saveWeeklyReflection:{}, saveContentProfile:{},
   generateWorkReport:{}, snsSaveAccount:{}, snsSaveMetrics:{}, snsSavePost:{}
@@ -12678,7 +12788,7 @@ const ACTION_POLICIES_WRITE = {
 // ランキングや「みんなの頑張り」は共有情報なのでここには入れない
 const ACTION_POLICIES_READ = {
   getUser:{}, getLogs:{}, getReport:{}, getReportList:{}, getHomeData:{}, getGoalTree:{},
-  getReportHome:{}, getReportDetail:{},
+  getReportHome:{}, getReportDetail:{}, listGoalEntries:{},
   getGameStatus:{}, getJournal:{}, getInsights:{}, getWeeklySummary:{}, getMonthlyReview:{}, getSelfMgmtPower:{}, getDailyOpsReport:{}, getDayPlan:{},
   getTimeUse:{}, getAchievements:{}, getMessages:{}, p1Status2:{}, getTasks:{}, getSprints:{}
 };

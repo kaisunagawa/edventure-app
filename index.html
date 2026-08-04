@@ -1470,6 +1470,152 @@ function ProgressBar({percent, pace, label, sub}) {
     </div>`;
 }
 
+// ★実績を追加するシート★（2026-08-05 Kai指定のデザイン）
+//   3か月目標の「いまの数字」を、1件ずつ足していく。
+//   保存すると、追加後にどう変わるかをその場で見せる。
+function GoalEntrySheet({goal, entry, onClose, onSaved, onToast}) {
+  const p = (goal && goal.pace) || {};
+  const unit = p.unit || goal.unit || "";
+  const [amount, setAmount] = useState(entry ? String(entry.amount) : "");
+  const [cat, setCat] = useState(entry ? (entry.category||"SALES") : "SALES");
+  const [memo, setMemo] = useState(entry ? (entry.memo||"") : "");
+  const [saving, setSaving] = useState(false);
+  const CATS = [["SALES","売上"],["CONTRACT","契約"],["OTHER","その他"]];
+  const C = "#14B8A6";
+  const cur = Number(p.current)||0, tgt = Number(p.target)||0;
+  const add = Number(amount)||0;
+  const next = cur + (entry ? (add - (Number(entry.amount)||0)) : add);
+  const pctNow = tgt>0 ? Math.round(cur/tgt*100) : null;
+  const pctNext = tgt>0 ? Math.round(next/tgt*100) : null;
+  const save = async () => {
+    if(!(Number(amount))) { onToast&&onToast("金額を入れてください"); return; }
+    setSaving(true);
+    const r = entry
+      ? await gasPostJson("updateGoalEntry", { entry_id: entry.entry_id, amount: Number(amount), category: cat, memo })
+      : await gasPostJson("addGoalEntry", { quarterly_goal_id: goal.quarterly_goal_id, amount: Number(amount), category: cat, memo });
+    setSaving(false);
+    if(r&&r.ok){ onToast&&onToast(entry?"実績を更新しました":"実績を追加しました！"); onSaved&&onSaved(); onClose(); }
+    else onToast&&onToast((r&&r.error)||"保存できませんでした");
+  };
+  return html`
+    <div onClick=${onClose} style=${{position:"fixed",inset:0,zIndex:440,background:"rgba(0,0,0,0.55)",
+                                     display:"flex",alignItems:"flex-end",justifyContent:"center"}}>
+      <div onClick=${e=>e.stopPropagation()}
+        style=${{width:"100%",maxWidth:520,background:"var(--card)",borderRadius:"20px 20px 0 0",
+                 border:"1px solid var(--border)",borderBottom:"none",
+                 padding:"20px 20px calc(24px + var(--safe-bottom, 0px))",maxHeight:"88dvh",overflowY:"auto"}}>
+        <div style=${{display:"flex",alignItems:"center",gap:8,marginBottom:16}}>
+          <span style=${{flex:1,fontSize:17,fontWeight:800,color:"var(--text)"}}>${entry?"実績を編集する":"実績を追加する"}</span>
+          <button onClick=${onClose} style=${{background:"none",border:"none",color:"var(--sub)",fontSize:22,cursor:"pointer",lineHeight:1,padding:"0 4px"}}>×</button>
+        </div>
+
+        <div style=${{fontSize:12.5,color:"var(--sub)",marginBottom:6}}>金額</div>
+        <div style=${{display:"flex",alignItems:"center",gap:10,marginBottom:16}}>
+          <input class="inp" type="number" inputmode="decimal" autofocus value=${amount}
+            onInput=${e=>setAmount(e.target.value)} placeholder="0"
+            style=${{margin:0,flex:1,fontSize:20,fontWeight:700,padding:"12px 14px"}}/>
+          <span style=${{flexShrink:0,fontSize:14,color:"var(--sub)"}}>${unit}</span>
+        </div>
+
+        <div style=${{fontSize:12.5,color:"var(--sub)",marginBottom:6}}>カテゴリ</div>
+        <div style=${{display:"flex",gap:8,marginBottom:16}}>
+          ${CATS.map(([k,l])=>html`
+            <button key=${k} onClick=${()=>setCat(k)}
+              style=${{flex:1,padding:"10px 4px",borderRadius:9,cursor:"pointer",fontFamily:"inherit",
+                       fontSize:13,fontWeight:700,
+                       border:`1px solid ${cat===k?C:"var(--border)"}`,
+                       background:cat===k?C:"transparent",
+                       color:cat===k?"#fff":"var(--sub)"}}>${l}</button>`)}
+        </div>
+
+        <div style=${{fontSize:12.5,color:"var(--sub)",marginBottom:6}}>メモ（任意）</div>
+        <input class="inp" value=${memo} onInput=${e=>setMemo(e.target.value)}
+          placeholder="例：AI研修契約" style=${{margin:"0 0 16px",padding:"12px 14px"}}/>
+
+        <!-- 追加後にどう変わるか、その場で見せる -->
+        ${(tgt>0 && add!==0)&&html`
+          <div style=${{border:"1px solid var(--border)",borderRadius:12,background:"#111820",padding:"14px 15px",marginBottom:16}}>
+            <div style=${{fontSize:12.5,fontWeight:700,color:C,marginBottom:8}}>追加後の反映イメージ</div>
+            <div style=${{fontSize:15,fontWeight:700,color:"var(--text)",marginBottom:8}}>${goal.title}</div>
+            <div style=${{display:"flex",alignItems:"baseline",gap:10,marginBottom:6}}>
+              <span style=${{fontSize:22,fontWeight:800,color:"var(--sub)"}}>${pctNow}<span style=${{fontSize:12}}>%</span></span>
+              <span style=${{color:"var(--sub)"}}>→</span>
+              <span style=${{fontSize:28,fontWeight:800,color:C}}>${pctNext}<span style=${{fontSize:14}}>%</span></span>
+            </div>
+            <div style=${{fontSize:13,marginBottom:8}}>
+              <span style=${{color:C,fontWeight:700}}>${cur}${unit}</span>
+              <span style=${{color:"var(--sub)"}}> → ${Math.round(next*10)/10}${unit}（${add>0?"+":""}${add}${unit}）</span>
+            </div>
+            <div style=${{height:8,background:"#1B222B",borderRadius:99,overflow:"hidden"}}>
+              <div style=${{height:"100%",width:Math.max(0,Math.min(100,pctNext||0))+"%",background:C,borderRadius:99}}/>
+            </div>
+            <div style=${{display:"flex",justifyContent:"space-between",fontSize:12,color:"var(--sub)",marginTop:6}}>
+              <span>${Math.round(next*10)/10}${unit} / ${tgt}${unit}</span>
+              <span>残り ${Math.round((tgt-next)*10)/10}${unit}</span>
+            </div>
+          </div>`}
+
+        <button class="btn" onClick=${save} disabled=${saving||!Number(amount)}
+          style=${{background:C,marginTop:0}}>${saving?"保存中…":"保存する"}</button>
+      </div>
+    </div>`;
+}
+
+// ★履歴の確認・編集★ 長押しで開く
+function GoalHistorySheet({goal, onClose, onEdit, onAdd, onChanged, onToast}) {
+  const [rows, setRows] = useState(null);
+  const unit = (goal.pace&&goal.pace.unit) || goal.unit || "";
+  const CAT_LABEL = { SALES:"売上", CONTRACT:"契約", OTHER:"その他" };
+  const load = () => gasApi("listGoalEntries",{quarterly_goal_id:goal.quarterly_goal_id})
+    .then(r=>setRows((r&&r.ok&&r.data)||[]));
+  useEffect(()=>{ load(); },[]);
+  const del = async (e2) => {
+    if(!confirm("この実績を削除しますか？（目標の数字も減ります）")) return;
+    const r = await gasPostJson("deleteGoalEntry",{entry_id:e2.entry_id});
+    if(r&&r.ok){ onToast&&onToast("削除しました"); load(); onChanged&&onChanged(); }
+    else onToast&&onToast("削除できませんでした");
+  };
+  return html`
+    <div onClick=${onClose} style=${{position:"fixed",inset:0,zIndex:440,background:"rgba(0,0,0,0.55)",
+                                     display:"flex",alignItems:"flex-end",justifyContent:"center"}}>
+      <div onClick=${e=>e.stopPropagation()}
+        style=${{width:"100%",maxWidth:520,background:"var(--card)",borderRadius:"20px 20px 0 0",
+                 border:"1px solid var(--border)",borderBottom:"none",
+                 padding:"20px 20px calc(24px + var(--safe-bottom, 0px))",maxHeight:"88dvh",overflowY:"auto"}}>
+        <div style=${{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
+          <span style=${{flex:1,fontSize:17,fontWeight:800,color:"var(--text)"}}>履歴の確認・編集</span>
+          <button onClick=${onClose} style=${{background:"none",border:"none",color:"var(--sub)",fontSize:22,cursor:"pointer",lineHeight:1,padding:"0 4px"}}>×</button>
+        </div>
+        <div style=${{fontSize:13,color:"var(--sub)",marginBottom:14}}>${goal.title} の履歴</div>
+        ${rows===null&&html`<div style=${{padding:20,textAlign:"center",color:"var(--sub)",fontSize:13}}>読み込み中…</div>`}
+        ${rows&&rows.length===0&&html`
+          <div style=${{padding:"18px 0",color:"var(--sub)",fontSize:13,lineHeight:1.8}}>
+            まだ実績が1件もありません。<br/>「＋ 実績を追加する」から記録できます。</div>`}
+        ${rows&&rows.map(e2=>html`
+          <div key=${e2.entry_id} style=${{display:"flex",alignItems:"center",gap:10,padding:"11px 0",borderBottom:"1px solid var(--border)"}}>
+            <span style=${{flex:1,minWidth:0}}>
+              <span style=${{display:"block",fontSize:13}}>
+                <span style=${{color:"var(--sub)"}}>${e2.entry_date}</span>
+                <b style=${{color:"#14B8A6",marginLeft:8}}>${e2.amount>0?"+":""}${e2.amount}${unit}</b>
+              </span>
+              <span style=${{display:"block",fontSize:11.5,color:"var(--sub)",marginTop:2}}>
+                ${CAT_LABEL[e2.category]||"その他"}${e2.memo?"・"+e2.memo:""}</span>
+            </span>
+            <button onClick=${()=>onEdit(e2)}
+              style=${{flexShrink:0,padding:"5px 11px",borderRadius:7,border:"1px solid var(--border)",background:"none",
+                       color:"var(--accent)",fontSize:11.5,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>編集</button>
+            <button onClick=${()=>del(e2)}
+              style=${{flexShrink:0,padding:"5px 11px",borderRadius:7,border:"1px solid #7f1d1d",background:"none",
+                       color:"#F87171",fontSize:11.5,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>削除</button>
+          </div>`)}
+        <button onClick=${onAdd}
+          style=${{width:"100%",marginTop:16,padding:"13px",borderRadius:11,border:"1px solid #14B8A6",
+                   background:"transparent",color:"#14B8A6",fontSize:13.5,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
+          ＋ 実績を追加する</button>
+      </div>
+    </div>`;
+}
+
 function TimeClassPicker({value, onChange, hint}) {
   return html`
     <div class="form-grp">
@@ -1602,6 +1748,37 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
   //   進み直すのは重い。ロードマップの行から数字だけ書き換えられるようにする。
   const [curValDraft, setCurValDraft] = useState(null);   // null = 編集していない
   const [curValSaving, setCurValSaving] = useState(false);
+  // ★実績を追加する／履歴を見る★（2026-08-05 Kai要望）
+  //   entrySheet … {goal, entry} を入れると開く（entryがあれば編集）
+  //   historyGoal … 長押しで開く履歴
+  const [entrySheet, setEntrySheet] = useState(null);
+  const [historyGoal, setHistoryGoal] = useState(null);
+  // ★今週の目標を「＋」で1件進める★（2026-08-05）
+  //   今週の実績は記録から自動で数える作りなので、ここでも記録を1件作る。
+  //   数字だけ別に足すと、記録と数字が食い違う。
+  const addWeeklyOne = async (w) => {
+    const u = w.unit || (w.metric_type==="DURATION" ? "分" : "件");
+    const step = (w.metric_type==="DURATION") ? 30 : 1;
+    const now = new Date();
+    const hm = String(now.getHours()).padStart(2,"0")+":"+String(Math.floor(now.getMinutes()/5)*5).padStart(2,"0");
+    const r = await gasPostJson("saveLog", {
+      time_block: hm,
+      task: w.title,
+      focus_level: "",
+      memo: "",
+      quantity: step,
+      primary_weekly_goal_id: w.weekly_goal_id,
+      goal_related: "true",
+      time_classification: "GOAL_DIRECT",
+    });
+    if(r&&r.ok){
+      onToast&&onToast(w.title+" を +"+step+u+" 記録しました");
+      gasApi("getGoalTree").then(x=>{ if(x&&x.ok&&x.data){ setGoalTree(x.data);
+        try{ localStorage.setItem("cache_goaltree", JSON.stringify(x.data)); }catch(e){} } });
+      gasApi("getSprints").then(x=>{ if(x&&x.ok){ setSprints(x);
+        try{ localStorage.setItem("cache_sprints", JSON.stringify(x)); }catch(e){} } });
+    } else onToast&&onToast("記録できませんでした");
+  };
   const [showWhy, setShowWhy] = useState(false);   // 次にやることの選定理由
   const [goalDetail, setGoalDetail] = useState(false);   // 数字の出どころ（普段は隠す）
   const [deepenGoal, setDeepenGoal] = useState(null);    // 目標の深掘り
@@ -2686,9 +2863,10 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
 
     ${showCommunity&&html`<${CommunityOverlay} onClose=${()=>setShowCommunity(false)}/>`}
 
-    <!-- ★目標ロードマップ（3か月 → 2週間 → 今週）★
-         以前は3枚のカードに分かれていて、縦に長すぎた（Kai指摘）。
-         普段は1行ずつの要約だけ。押した行だけ中身を開く。 -->
+    <!-- ★目標ロードマップ★（2026-08-05 Kai指定のデザインで作り直し）
+         色・比率・文字の大きさ・アイコンまで指定どおりに合わせている。
+         段階ごとに色を変え（3か月=ティール／2週間=青／今週=緑）、
+         左の丸アイコンと縦線＋矢印で「上から下へ落ちていく」流れを出す。 -->
     ${(()=>{
       const goals = ((goalTree&&goalTree.goals)||[]).filter(g=>String(g.status||"ACTIVE").toUpperCase()!=="ARCHIVED");
       const allSp = (sprints&&sprints.data)||[];
@@ -2697,17 +2875,27 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
       goals.forEach(g=>(g.weeklyGoals||[]).forEach(w=>ws.push({...w, parentTitle:g.title})));
       ((goalTree&&goalTree.orphanWeeklyGoals)||[]).forEach(w=>ws.push({...w, parentTitle:""}));
       const wg = ws.filter(w=>String(w.status||"ACTIVE").toUpperCase()==="ACTIVE");
+
+      // 段階ごとの色（指定どおり）
+      const C_Q = "#14B8A6";   // 3か月目標  ティール
+      const C_S = "#3B82F6";   // 2週間Sprint 青
+      const C_W = "#4CAF50";   // 今週の目標  緑
+      const C_STAR = "#F5C542";// 今日できる一歩 黄
+
       // ★目標がまだ無い人にも入口を残す★
-      //   以前はカードごと消えていたため、「あとで決める」を選ぶと
-      //   目標を決める導線がどこにも無くなっていた。
       if (!goals.length && !allSp.length) return html`
-        <div style=${{margin:"12px 16px 0",background:"var(--card)",borderRadius:16,border:"1px solid var(--border)",padding:"14px 16px"}}>
-          <div style=${{fontSize:14,fontWeight:800,color:"var(--text)"}}>目標ロードマップ</div>
-          <div style=${{fontSize:11,color:"var(--sub)",marginTop:3,lineHeight:1.7}}>
+        <div style=${{margin:"12px 16px 0",background:"var(--card)",borderRadius:20,border:"1px solid var(--border)",padding:"22px 20px"}}>
+          <div style=${{display:"flex",alignItems:"center",gap:10,marginBottom:6}}>
+            <span style=${{color:C_Q,display:"flex"}}>
+              <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round">
+                <path d="M9 4L3 6.5v13L9 17l6 2.5 6-2.5v-13L15 6.5 9 4z"/><path d="M9 4v13M15 6.5v13"/></svg></span>
+            <span style=${{fontSize:22,fontWeight:800,color:"var(--text)"}}>目標ロードマップ</span>
+          </div>
+          <div style=${{fontSize:13,color:"var(--sub)",lineHeight:1.7,marginBottom:16}}>
             3か月の目標を決めると、2週間・今週・今日にやることが順に決まります。</div>
           <button onClick=${()=>setHomeGoalSheet(true)}
-            style=${{width:"100%",marginTop:11,padding:"12px",borderRadius:10,border:"none",background:"var(--accent)",
-                     color:"#fff",fontSize:13.5,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
+            style=${{width:"100%",padding:"14px",borderRadius:12,border:"none",background:C_Q,
+                     color:"#fff",fontSize:14,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
             3か月後どうなりたいかを決める</button>
         </div>`;
 
@@ -2719,225 +2907,388 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
       const si = Math.min(sprintIdx, Math.max(0,curSp.length-1));
       const sp = curSp[si];
 
-      // ★1行の見た目（ロードマップ）★
-      //   左に色付きの丸アイコンと縦線でつなぎ、段階が上から下へ流れて見えるようにする。
-      //   行のどこを押しても中身が開く。
-      const Row = ({icon, color, label, title, right, sub, open, onToggle, onAdd, addLabel, last, children}) => html`
-        <div style=${{display:"flex",alignItems:"stretch",gap:0}}>
-          <!-- アイコンと縦線 -->
-          <div style=${{width:54,flexShrink:0,display:"flex",flexDirection:"column",alignItems:"center",paddingTop:10,paddingLeft:8}}>
-            <!-- ★行の1行目の文字と、丸アイコンの中心を合わせる★
-                 以前は少し下にずれて見えていた（行の高さが増えたため） -->
-            <div style=${{width:28,height:28,borderRadius:"50%",background:color,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,boxShadow:"0 1px 3px rgba(0,0,0,0.12)",lineHeight:0}}>${icon}</div>
-            ${!last&&html`<div style=${{flex:1,width:2,background:"var(--border)",marginTop:4,marginBottom:-2,minHeight:18}}/>`}
+      // ── 3か月目標の進み具合 ──
+      const qPct = (num(p.target)>0) ? Math.round((num(p.current)||0)/num(p.target)*100) : null;
+      // ★達成確率★ 期待値ではなく「今のペースが必要ペースに対してどれだけ足りているか」。
+      //   1.0以上なら90%、半分なら45%、というように素直に比例させる。
+      //   分からないときは出さない（それらしい数字をでっち上げない）。
+      const qProb = (()=>{
+        const req = num(p.requiredPerWeek), act = num(p.actualPerWeek);
+        if (req===null || act===null || !(req>0)) return null;
+        return Math.max(1, Math.min(99, Math.round(act/req*90)));
+      })();
+
+      // ── 2週間Sprintの進み具合 ──
+      const sPct = (sp && sp.progress) ? sp.progress.percent : null;
+      // 今のペースのまま今週の残り日数を進めたら、Sprintの達成率はどこまで行くか
+      const sForecast = (()=>{
+        if (!sp || !sp.progress || !wg.length) return null;
+        let addPerDay = 0, daysLeft = 0;
+        wg.forEach(w=>{ if(w.actual_per_day>0) addPerDay += Number(w.actual_per_day);
+                        daysLeft = Math.max(daysLeft, Number(w.days_left)||0); });
+        if (!(addPerDay>0) || !(daysLeft>0) || !(sp.progress.target>0)) return null;
+        const projected = sp.progress.actual + addPerDay*daysLeft;
+        return { days: daysLeft, percent: Math.min(999, Math.round(projected/sp.progress.target*100)) };
+      })();
+
+      // ── 今週の達成率（複数の目標の平均） ──
+      const wPct = (()=>{
+        const ok = wg.filter(w=>{ const t=Number(w.std_line)>0?Number(w.std_line):Number(w.target_total);
+                                  return !isNaN(t)&&t>0; });
+        if (!ok.length) return null;
+        const sum = ok.reduce((a,w)=>{ const t=Number(w.std_line)>0?Number(w.std_line):Number(w.target_total);
+                                       return a + Math.min(1,(Number(w.actual_value)||0)/t); }, 0);
+        return Math.round(sum/ok.length*100);
+      })();
+
+      // ── 今日できる一歩：いちばん残っている今週の目標から作る ──
+      const step = (()=>{
+        let best=null, bestRemain=0;
+        wg.forEach(w=>{ const t=Number(w.std_line)>0?Number(w.std_line):Number(w.target_total);
+          if(isNaN(t)||!(t>0)) return;
+          const r = t - (Number(w.actual_value)||0);
+          if(r>bestRemain){ bestRemain=r; best=w; } });
+        if(!best) return null;
+        const u = best.unit || (best.metric_type==="DURATION"?"分":"件");
+        const perDay = best.required_per_day>0 ? best.required_per_day : Math.ceil(bestRemain/Math.max(1,best.days_left||1));
+        return best.title+"に向けて、まず"+ (Math.round(perDay*10)/10) + u + "のアプローチをしましょう。";
+      })();
+
+      // 段の共通パーツ（丸アイコン＋縦線＋矢印）
+      const Node = ({color, icon, last, children}) => html`
+        <div style=${{display:"flex",gap:14,alignItems:"stretch"}}>
+          <div style=${{width:62,flexShrink:0,display:"flex",flexDirection:"column",alignItems:"center"}}>
+            <div style=${{width:62,height:62,borderRadius:"50%",background:color,flexShrink:0,
+                          display:"flex",alignItems:"center",justifyContent:"center",color:"#fff"}}>${icon}</div>
+            ${!last&&html`
+              <div style=${{flex:1,width:2,background:color,opacity:0.55,minHeight:26,marginTop:2}}/>
+              <svg width="16" height="12" viewBox="0 0 16 12" style=${{marginTop:-1,marginBottom:2}}>
+                <path d="M2 2l6 7 6-7" fill="none" stroke=${color} stroke-width="2"
+                      stroke-linecap="round" stroke-linejoin="round" opacity="0.8"/></svg>`}
           </div>
-          <div style=${{flex:1,minWidth:0,paddingRight:14}}>
-            <button onClick=${title?onToggle:onAdd}
-              style=${{width:"100%",display:"flex",alignItems:"flex-start",gap:9,background:"none",border:"none",
-                       padding:last?"12px 0 14px":"12px 0 11px",cursor:"pointer",textAlign:"left",fontFamily:"inherit",
-                       borderBottom:last?"none":"1px solid var(--border)"}}>
-              <span style=${{flexShrink:0,fontSize:10.5,fontWeight:700,color:color,width:68,lineHeight:1.45,paddingTop:1}}>${label}</span>
-              <span style=${{flex:1,minWidth:0}}>
-                <!-- ★切らずに折り返す★ 目標名が「会社としての売上を400…」で
-                     切れて何の目標か分からなくなっていた。2行まで見せる -->
-                <span style=${{display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical",overflow:"hidden",
-                               fontSize:13.5,fontWeight:700,lineHeight:1.45,
-                               color:title?"var(--text)":"var(--accent)",overflowWrap:"anywhere"}}>${title||addLabel}</span>
-                ${sub&&html`<span style=${{display:"block",fontSize:10.5,color:"var(--sub)",marginTop:2}}>${sub}</span>`}
-              </span>
-              ${right&&html`<span style=${{flexShrink:0,fontSize:12,color:"var(--sub)",whiteSpace:"nowrap",lineHeight:1.45,paddingTop:1}}>${right}</span>`}
-            </button>
-            ${open&&children&&html`<div style=${{padding:"0 0 12px"}}>${children}</div>`}
-          </div>
+          <div style=${{flex:1,minWidth:0,paddingBottom:last?0:14}}>${children}</div>
         </div>`;
-      // 「20 / 400万円」の左だけ濃く出す
-      // 左だけ濃いと「今の値」が強調されすぎて読みにくかったので、同じ濃さにそろえる
-      const val = (cur, tgt, unit) => html`<span>${cur} / ${tgt}${unit||""}</span>`;
+
+      // ラベルのピル
+      const Pill = ({color, text}) => html`
+        <span style=${{display:"inline-block",fontSize:12,fontWeight:700,color:color,
+                       background:`color-mix(in srgb, ${color} 16%, transparent)`,
+                       border:`1px solid color-mix(in srgb, ${color} 35%, transparent)`,
+                       borderRadius:99,padding:"3px 12px",marginBottom:8}}>${text}</span>`;
+
+      // 太い進捗バー（点線の目盛りつき）
+      const Bar = ({color, percent}) => html`
+        <div style=${{position:"relative",height:9,background:"#1B222B",borderRadius:99,overflow:"hidden",margin:"10px 0 9px"}}>
+          <div style=${{position:"absolute",inset:0,
+                        backgroundImage:"repeating-linear-gradient(90deg, transparent 0 26px, rgba(255,255,255,0.22) 26px 29px)"}}/>
+          <div style=${{position:"relative",height:"100%",width:Math.max(0,Math.min(100,percent||0))+"%",
+                        background:color,borderRadius:99}}/>
+        </div>`;
+
+      // 下に添える情報の箱（アイコン＋文＋›）
+      const InfoBox = ({color, icon, children, onClick}) => html`
+        <button onClick=${onClick||(()=>{})}
+          style=${{display:"flex",alignItems:"center",gap:11,width:"100%",marginTop:11,padding:"13px 15px",
+                   borderRadius:12,border:"1px solid var(--border)",background:"#111820",
+                   cursor:"pointer",fontFamily:"inherit",textAlign:"left"}}>
+          <span style=${{flexShrink:0,color:color,display:"flex"}}>${icon}</span>
+          <span style=${{flex:1,minWidth:0,fontSize:13.5,color:"var(--text)",lineHeight:1.5}}>${children}</span>
+          <span style=${{flexShrink:0,color:"var(--sub)",fontSize:15}}>›</span>
+        </button>`;
 
       return html`
-      <div style=${{margin:"12px 16px 0",background:"var(--card)",borderRadius:16,border:"1px solid var(--border)",overflow:"hidden"}}>
-        <div style=${{padding:"14px 14px 2px",display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
+      <div style=${{margin:"12px 16px 0",background:"var(--card)",borderRadius:20,border:"1px solid var(--border)",padding:"22px 20px 20px"}}>
+
+        <!-- 見出し -->
+        <div style=${{display:"flex",alignItems:"flex-start",gap:12,marginBottom:4}}>
+          <span style=${{flexShrink:0,color:C_Q,display:"flex",marginTop:2}}>
+            <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round">
+              <path d="M9 4L3 6.5v13L9 17l6 2.5 6-2.5v-13L15 6.5 9 4z"/><path d="M9 4v13M15 6.5v13"/></svg></span>
           <span style=${{flex:1,minWidth:0}}>
-            <span style=${{display:"block",fontSize:14,fontWeight:800,color:"var(--text)"}}>目標ロードマップ</span>
-            <span style=${{display:"block",fontSize:10.5,color:"var(--sub)",marginTop:3,lineHeight:1.5}}>3か月の目標を、今週の行動まで落とし込みます</span>
+            <span style=${{display:"block",fontSize:24,fontWeight:800,color:"var(--text)",letterSpacing:"0.01em",lineHeight:1.25}}>目標ロードマップ</span>
           </span>
           <button onClick=${()=>setHomeGoalSheet(true)}
-            style=${{flexShrink:0,whiteSpace:"nowrap",background:"none",border:"none",color:"var(--accent)",fontSize:11.5,fontWeight:700,cursor:"pointer",fontFamily:"inherit",padding:0}}>一覧</button>
+            style=${{flexShrink:0,whiteSpace:"nowrap",background:"none",border:"none",color:C_Q,
+                     fontSize:14,fontWeight:700,cursor:"pointer",fontFamily:"inherit",padding:"2px 0",marginTop:4}}>一覧を見る ›</button>
         </div>
+        <div style=${{fontSize:13.5,color:"var(--sub)",marginLeft:42,marginBottom:20,lineHeight:1.6}}>
+          3か月の目標を、今週の行動まで落とし込みます</div>
 
-        <!-- 3か月 -->
-        ${Row({ label:"3か月目標", last:false,
-          color:"#0EA5A5",
-          icon: html`<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/></svg>`,
-          title: g && g.title,
-          addLabel:"＋ 3か月後どうなりたいかを決める",
-          onAdd: ()=>setHomeGoalSheet(true),
-          right: g && (num(p.target)!==null ? val(fmt(p.current), fmt(p.target), p.unit) : "数値なし"),
-          open: openRow==="goal", onToggle: ()=>setOpenRow(openRow==="goal"?"":"goal"),
-          children: g && html`
-            <div style=${{fontSize:11.5,color:"var(--sub)",lineHeight:1.8}}>
-              ${goals.length>1&&html`<div style=${{display:"flex",gap:5,marginBottom:6}}>
-                ${goals.map((x,k)=>html`<button key=${k} onClick=${()=>setMainGoalIdx(k)}
-                  style=${{padding:"2px 9px",borderRadius:20,fontSize:10.5,cursor:"pointer",fontFamily:"inherit",fontWeight:700,
-                           border:`1px solid ${k===gi?"var(--accent)":"var(--border)"}`,
-                           background:k===gi?"var(--accent-l)":"transparent",color:k===gi?"var(--accent)":"var(--sub)"}}>${k+1}</button>`)}
-              </div>`}
-              ${num(p.target)!==null&&html`
-                <div style=${{margin:"2px 0 10px"}}>
-                  <${ProgressBar}
-                    percent=${num(p.target)>0 ? (num(p.current)||0)/num(p.target)*100 : 0}
-                    pace=${(g.start_date&&g.end_date) ? (()=>{
-                      const s0=new Date(g.start_date+"T00:00:00"), e0=new Date(g.end_date+"T00:00:00"), n0=new Date();
-                      const tot=(e0-s0)/86400000, el=(n0-s0)/86400000;
-                      return tot>0 ? Math.max(0,Math.min(100, el/tot*100)) : null;
-                    })() : null}
-                    label=${fmt(p.current)+" / "+fmt(p.target)+(p.unit||"")}
-                    sub=${num(p.target)>0 ? Math.round((num(p.current)||0)/num(p.target)*100)+"%" : ""}/>
+        <!-- ── 3か月目標 ── -->
+        ${Node({ color:C_Q, last:false,
+          icon: html`<svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="11" cy="13" r="8"/><circle cx="11" cy="13" r="3.4"/>
+            <path d="M11 13l7.5-7.5M16.5 4.2l1.2 2.6 2.6 1.2"/></svg>`,
+          children: g ? html`
+            ${Pill({color:C_Q, text:"3か月目標"})}
+            <div style=${{display:"flex",alignItems:"flex-end",gap:10}}>
+              <button onClick=${()=>setOpenRow(openRow==="goal"?"":"goal")}
+                style=${{flex:1,minWidth:0,background:"none",border:"none",padding:0,textAlign:"left",cursor:"pointer",fontFamily:"inherit"}}>
+                <span style=${{display:"block",fontSize:21,fontWeight:800,color:"var(--text)",lineHeight:1.35,overflowWrap:"anywhere"}}>${g.title}</span>
+              </button>
+              ${qPct!==null&&html`
+                <span style=${{flexShrink:0,display:"flex",alignItems:"baseline",gap:1,color:C_Q}}>
+                  <span style=${{fontSize:36,fontWeight:800,lineHeight:1,fontVariantNumeric:"tabular-nums"}}>${qPct}</span>
+                  <span style=${{fontSize:17,fontWeight:700}}>%</span></span>`}
+            </div>
+            <div style=${{display:"flex",alignItems:"center",gap:10}}>
+              <span style=${{flex:1,minWidth:0}}>
+                ${qPct!==null ? Bar({color:C_Q, percent:qPct}) : html`<div style=${{height:10}}/>`}</span>
+              <!-- ★実績を追加する★ 長押しで履歴（確認・編集・削除） -->
+              <button onClick=${()=>setEntrySheet({goal:g, entry:null})}
+                onContextMenu=${e=>{e.preventDefault(); setHistoryGoal(g);}}
+                onTouchStart=${e=>{ const t=setTimeout(()=>setHistoryGoal(g),550);
+                                    const c=()=>{clearTimeout(t); e.target.removeEventListener("touchend",c); e.target.removeEventListener("touchmove",c);};
+                                    e.target.addEventListener("touchend",c); e.target.addEventListener("touchmove",c); }}
+                title="長押しで履歴を表示できます"
+                style=${{flexShrink:0,display:"flex",alignItems:"center",gap:5,padding:"8px 14px",borderRadius:10,
+                         border:`1px solid ${C_Q}`,background:"transparent",color:C_Q,
+                         fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>
+                <span style=${{fontSize:15,lineHeight:1}}>＋</span> 追加する</button>
+            </div>
+            <div style=${{display:"flex",justifyContent:"space-between",alignItems:"baseline",gap:8,fontSize:14}}>
+              <span style=${{minWidth:0}}>
+                ${num(p.target)!==null
+                  ? html`<b style=${{color:C_Q,fontWeight:800}}>${fmt(p.current)}${p.unit||""}</b><span style=${{color:"var(--sub)"}}> / ${fmt(p.target)}${p.unit||""}</span>`
+                  : html`<span style=${{color:"var(--sub)"}}>数値が決まっていません</span>`}
+              </span>
+              ${num(p.remaining)!==null&&html`
+                <span style=${{flexShrink:0,color:"var(--sub)",fontSize:13.5}}>残り ${fmt(p.remaining)}${p.unit||""}</span>`}
+            </div>
+            ${qProb!==null&&InfoBox({ color:C_Q, onClick:()=>setOpenRow(openRow==="goal"?"":"goal"),
+              icon: html`<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17l6-6 4 4 8-8"/><path d="M15 7h6v6"/></svg>`,
+              children: html`このペースなら達成確率は <b style=${{color:C_Q,fontWeight:800}}>${qProb}%</b> です` })}
+            ${openRow==="goal"&&html`
+              <div style=${{fontSize:12.5,color:"var(--sub)",lineHeight:1.9,marginTop:10}}>
+                ${goals.length>1&&html`<div style=${{display:"flex",gap:5,marginBottom:7}}>
+                  ${goals.map((x,k)=>html`<button key=${k} onClick=${()=>setMainGoalIdx(k)}
+                    style=${{padding:"3px 10px",borderRadius:20,fontSize:11,cursor:"pointer",fontFamily:"inherit",fontWeight:700,
+                             border:`1px solid ${k===gi?C_Q:"var(--border)"}`,
+                             background:k===gi?`color-mix(in srgb, ${C_Q} 16%, transparent)`:"transparent",
+                             color:k===gi?C_Q:"var(--sub)"}}>${k+1}</button>`)}
                 </div>`}
-              ${num(p.target)!==null?html`
-                残り <b style=${{color:"var(--text)"}}>${fmt(p.remaining)}${p.unit||""}</b>
-                ${p.remainingDays!==undefined&&html` ・あと <b style=${{color:"var(--text)"}}>${p.remainingDays}日</b>`}
-                ${num(p.requiredPerWeek)!==null&&html` ・必要 <b style=${{color:"var(--text)"}}>${fmt(p.requiredPerWeek)}${p.unit||""}/週</b>`}
-                ${num(p.actualPerWeek)!==null&&html` ・実績 <b style=${{color:"var(--text)"}}>${fmt(p.actualPerWeek)}${p.unit||""}/週</b>`}
-                ${num(p.forecast)!==null&&html`<br/>このままなら <b style=${{color:"var(--text)"}}>${fmt(p.forecast)}${p.unit||""}</b> で着地`}
-                ${p.note&&html`<br/>${p.note}`}
-                ${p.forecastWarning&&html`<br/><span style=${{color:"var(--amber,#BA7517)"}}>⚠ ${p.forecastWarning}</span>`}
-              `:html`${p.note||"数値がまだ入っていません"}`}
-              ${g.success_condition&&html`<br/><b style=${{color:"var(--text)"}}>できたと言える状態</b>：${g.success_condition}`}
-              <!-- ★いまの数字だけをその場で更新する★（2026-08-05 Kai要望）
-                   目標400万に対して現在20 → 30 → 40 と伸びていくのを、
-                   ここで数字だけ書き換えて保存できるようにする。 -->
-              ${curValDraft!==null ? html`
-                <div style=${{display:"flex",gap:8,alignItems:"center",marginTop:10,flexWrap:"wrap"}}>
-                  <input class="inp" type="number" inputmode="decimal" autofocus
-                    value=${curValDraft} onInput=${e=>setCurValDraft(e.target.value)}
-                    style=${{margin:0,width:120,textAlign:"right"}}/>
-                  <span style=${{fontSize:12,color:"var(--sub)"}}>／ ${fmt(p.target)}${p.unit||""}</span>
-                  <button disabled=${curValSaving} onClick=${async()=>{
-                      setCurValSaving(true);
-                      const body = {...g};
-                      delete body.pace; delete body.paceLabel; delete body.weeklyGoals;
-                      delete body.current_value_source; delete body.evidence;
-                      body.current_value = curValDraft;
-                      const r = await gasPostJson("saveGoal", body);
-                      setCurValSaving(false);
-                      if(r&&r.ok){ setCurValDraft(null); onToast&&onToast("いまの数字を更新しました"); onGoalSaved&&onGoalSaved(); }
-                      else onToast&&onToast((r&&r.error)||"更新できませんでした");
-                    }}
-                    style=${{padding:"8px 16px",borderRadius:8,border:"none",background:"var(--accent)",color:"#fff",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
-                    ${curValSaving?"保存中…":"保存"}</button>
-                  <button onClick=${()=>setCurValDraft(null)}
-                    style=${{background:"none",border:"none",color:"var(--sub)",fontSize:12,cursor:"pointer",fontFamily:"inherit"}}>やめる</button>
-                </div>` : ""}
-              <div style=${{display:"flex",gap:8,marginTop:8,flexWrap:"wrap"}}>
-                ${curValDraft===null&&num(p.target)!==null&&html`
-                  <button onClick=${()=>setCurValDraft(num(p.current)===null?"":String(num(p.current)))}
-                    style=${{padding:"7px 14px",borderRadius:8,border:"1px solid var(--accent)",background:"var(--accent-l)",color:"var(--accent)",fontSize:11.5,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
-                    いまの数字を更新</button>`}
-                <!-- ★数字や期限も変えられるようにする★（2026-08-04 Kai要望）
-                     これまでは深掘り（why・できたと言える状態）しか変えられなかった -->
-                <button onClick=${()=>setHomeGoalSheet(true)}
-                  style=${{padding:"7px 14px",borderRadius:8,border:"1px solid var(--border)",background:"none",color:"var(--accent)",fontSize:11.5,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
-                  目標・数字・期限を変更</button>
-                <button onClick=${()=>setDeepenGoal(g)}
-                  style=${{padding:"7px 14px",borderRadius:8,border:"1px solid var(--border)",background:"none",color:"var(--accent)",fontSize:11.5,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
-                  ${g.success_condition?"5つの質問を見直す":"5つの質問で深掘りする"}</button>
-              </div>
-            </div>` })}
+                ${num(p.target)!==null&&html`
+                  ${p.remainingDays!==undefined&&html`あと <b style=${{color:"var(--text)"}}>${p.remainingDays}日</b>　`}
+                  ${num(p.requiredPerWeek)!==null&&html`必要 <b style=${{color:"var(--text)"}}>${fmt(p.requiredPerWeek)}${p.unit||""}/週</b>　`}
+                  ${num(p.actualPerWeek)!==null&&html`実績 <b style=${{color:"var(--text)"}}>${fmt(p.actualPerWeek)}${p.unit||""}/週</b>`}
+                  ${num(p.forecast)!==null&&html`<br/>このままなら <b style=${{color:"var(--text)"}}>${fmt(p.forecast)}${p.unit||""}</b> で着地`}
+                  ${p.forecastWarning&&html`<br/><span style=${{color:"var(--amber,#BA7517)"}}>⚠ ${p.forecastWarning}</span>`}`}
+                ${g.success_condition&&html`<br/><b style=${{color:"var(--text)"}}>できたと言える状態</b>：${g.success_condition}`}
+                ${curValDraft!==null ? html`
+                  <div style=${{display:"flex",gap:8,alignItems:"center",marginTop:10,flexWrap:"wrap"}}>
+                    <input class="inp" type="number" inputmode="decimal" value=${curValDraft}
+                      onInput=${e=>setCurValDraft(e.target.value)} style=${{margin:0,width:120,textAlign:"right"}}/>
+                    <span style=${{fontSize:12,color:"var(--sub)"}}>／ ${fmt(p.target)}${p.unit||""}</span>
+                    <button disabled=${curValSaving} onClick=${async()=>{
+                        setCurValSaving(true);
+                        const body = {...g};
+                        delete body.pace; delete body.paceLabel; delete body.weeklyGoals;
+                        delete body.current_value_source; delete body.evidence;
+                        body.current_value = curValDraft;
+                        const r = await gasPostJson("saveGoal", body);
+                        setCurValSaving(false);
+                        if(r&&r.ok){ setCurValDraft(null); onToast&&onToast("いまの数字を更新しました"); onGoalSaved&&onGoalSaved(); }
+                        else onToast&&onToast((r&&r.error)||"更新できませんでした");
+                      }}
+                      style=${{padding:"8px 16px",borderRadius:8,border:"none",background:C_Q,color:"#fff",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
+                      ${curValSaving?"保存中…":"保存"}</button>
+                    <button onClick=${()=>setCurValDraft(null)}
+                      style=${{background:"none",border:"none",color:"var(--sub)",fontSize:12,cursor:"pointer",fontFamily:"inherit"}}>やめる</button>
+                  </div>` : ""}
+                <div style=${{display:"flex",gap:8,marginTop:9,flexWrap:"wrap"}}>
+                  ${curValDraft===null&&num(p.target)!==null&&html`
+                    <button onClick=${()=>setCurValDraft(num(p.current)===null?"":String(num(p.current)))}
+                      style=${{padding:"7px 14px",borderRadius:8,border:`1px solid ${C_Q}`,background:`color-mix(in srgb, ${C_Q} 14%, transparent)`,color:C_Q,fontSize:11.5,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
+                      いまの数字を更新</button>`}
+                  <button onClick=${()=>setHomeGoalSheet(true)}
+                    style=${{padding:"7px 14px",borderRadius:8,border:"1px solid var(--border)",background:"none",color:"var(--accent)",fontSize:11.5,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
+                    目標・数字・期限を変更</button>
+                  <button onClick=${()=>setDeepenGoal(g)}
+                    style=${{padding:"7px 14px",borderRadius:8,border:"1px solid var(--border)",background:"none",color:"var(--accent)",fontSize:11.5,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
+                    ${g.success_condition?"5つの質問を見直す":"5つの質問で深掘りする"}</button>
+                </div>
+              </div>`}
+          ` : html`
+            ${Pill({color:C_Q, text:"3か月目標"})}
+            <button onClick=${()=>setHomeGoalSheet(true)}
+              style=${{display:"block",background:"none",border:"none",padding:0,textAlign:"left",cursor:"pointer",fontFamily:"inherit",
+                       fontSize:18,fontWeight:700,color:C_Q,lineHeight:1.4}}>＋ 3か月後どうなりたいかを決める</button>` })}
 
-        <!-- 2週間 -->
-        ${Row({ label:"2週間Sprint", last:false,
-          color:"#3B82F6",
-          icon: html`<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg>`,
-          title: sp && sp.name,
-          addLabel: goals.length ? "＋ 2週間でやることを決める" : "先に3か月目標を決めてください",
-          onAdd: ()=>{ if(goals.length) setSprintSheet({}); },
-          right: sp && val(sp.dayIndex, sp.totalDays, "日"),
-          open: openRow==="sprint", onToggle: ()=>setOpenRow(openRow==="sprint"?"":"sprint"),
-          children: sp && html`
-            <div style=${{fontSize:11.5,color:"var(--sub)",lineHeight:1.8}}>
-              <!-- ★Sprintの進捗＝紐づく週間目標の積み上げ★（2026-08-05 Kaiの判断・A案）
-                   Sprint自体に数値目標は持たせない。週の積み上げがそのまま進捗になる。 -->
-              ${sp.progress ? html`
-                <div style=${{margin:"2px 0 10px"}}>
-                  <${ProgressBar} percent=${sp.progress.percent} pace=${sp.progress.elapsed_percent}
-                    label=${sp.progress.actual+" / "+sp.progress.target}
-                    sub=${sp.progress.percent+"%"}/>
-                  <div style=${{fontSize:10,color:"var(--sub)",marginTop:3}}>
-                    今週の目標${sp.progress.goal_count}件の積み上げ（${sp.progress.weeks}週ぶん）</div>
-                </div>`
-              : html`
-                <div style=${{background:"var(--bg)",borderRadius:9,padding:"9px 11px",margin:"2px 0 10px",lineHeight:1.7}}>
-                  このSprintに<b style=${{color:"var(--text)"}}>今週の目標</b>が紐づいていないため、進み具合を出せません。<br/>
-                  下の「今週の目標」を数字で決めると、ここに進捗が出ます。</div>`}
-              あと <b style=${{color:"var(--text)"}}>${Math.max(0,sp.daysLeft)}日</b>
-              ${sp.action_metric&&html`<br/>自分でやる：<b style=${{color:"var(--text)"}}>${sp.action_metric}</b>`}
-              ${sp.target_state&&html`<br/>2週間後：${sp.target_state}`}
-              ${sp.bottleneck&&html`<br/>詰まり：${sp.bottleneck}`}
-              ${sp.if_then&&html`<br/>もし〜なら：${sp.if_then}`}
-              ${curSp.length>1&&html`<br/><span style=${{color:"var(--amber,#BA7517)"}}>⚠ 進行中が${curSp.length}本あります。1本に絞るほど進みます</span>`}
-              <div style=${{marginTop:8}}>
-                <button onClick=${()=>setSprintSheet(sp)}
-                  style=${{padding:"7px 14px",borderRadius:8,border:"1px solid var(--border)",background:"none",color:"var(--accent)",fontSize:11.5,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>編集</button>
-              </div>
-            </div>` })}
-
-        <!-- 今週 -->
-        ${Row({ label:"今週の目標", last:true,
-          color:"#22A559",
-          icon: html`<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round"><path d="M5 21V4M5 4h11l-2 4 2 4H5"/></svg>`,
-          // ★別々の目標を1つにまとめない★
-          //   以前は「アポ6件」と「テレアポ300件」を足して 0/306件 と出していた。
-          //   単位が同じでも中身は別物なので、代表の1つを出して残りは件数で示す。
-          title: wg.length ? (wg.length===1 ? wg[0].title
-                              : wg[0].title + "　ほか" + (wg.length-1) + "件") : "",
-          addLabel: curSp.length ? "＋ 今週やる数字を決める" : "先に2週間スプリントを決めてください",
-          onAdd: ()=>{ if(curSp.length) setWgSheet(true); else if(goals.length) setSprintSheet({}); },
-          right: wg.length ? (()=>{
-            // 右側も足し算をやめて、代表の1つだけを出す（複数あるときは下の内訳で見る）
-            const w0 = wg[0];
-            const t0 = Number(w0.std_line)>0 ? Number(w0.std_line) : Number(w0.target_total);
-            if(!(t0>0)) return "数値なし";
-            return val(Number(w0.actual_value)||0, t0, w0.unit||"");
-          })() : null,
-          open: openRow==="week", onToggle: ()=>setOpenRow(openRow==="week"?"":"week"),
-          children: html`
-            <div style=${{fontSize:11.5,color:"var(--sub)",lineHeight:1.8}}>
-              ${wg.length>1&&html`<div style=${{marginBottom:6,color:"var(--sub)"}}>今週の目標が${wg.length}件あります。1つずつの進み具合はこちらです。</div>`}
-              ${wg.map((w,k)=>{ const t=Number(w.std_line)>0?Number(w.std_line):Number(w.target_total);
-                const u=w.unit||(w.metric_type==="DURATION"?"分":"");
-                // 週のどこまで来たか（今日いるべき位置）。7日ぶんのうち何日目か
-                const wkPace = (w.days_elapsed>0) ? Math.max(0,Math.min(100, w.days_elapsed/7*100)) : null;
-                return html`<div key=${k} style=${{marginBottom:11}}>
-                  <div style=${{display:"flex",alignItems:"baseline",gap:6,flexWrap:"wrap"}}>
-                    <b style=${{color:"var(--text)"}}>${w.title}</b>
-                    ${w.link_state==="UNLINKED"&&html`<span style=${{color:"var(--amber,#BA7517)"}}>未接続</span>`}
-                    <button onClick=${()=>setWgSheet(w)}
-                      style=${{marginLeft:"auto",background:"none",border:"none",padding:0,color:"var(--accent)",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>変更</button>
-                  </div>
-                  ${(!isNaN(t)&&t>0)
-                    ? html`<div style=${{marginTop:4}}>
-                        <${ProgressBar} percent=${(Number(w.actual_value)||0)/t*100} pace=${wkPace}
-                          label=${(Number(w.actual_value)||0)+" / "+t+u}
-                          sub=${Math.round((Number(w.actual_value)||0)/t*100)+"%"}/>
-                      </div>`
-                    : html`<div style=${{marginTop:2}}>数値が決まっていません</div>`}
-                  <div style=${{marginTop:3}}>${!w.has_records
-                    ? "まだ今週の記録がありません（0ではなく、未記録という意味です）"
-                    : html`残り ${w.days_left}日${w.required_per_day>0?` ・必要 ${w.required_per_day}${u}/日`:""}${w.actual_per_day!==null?` ・実績 ${w.actual_per_day}${u}/日`:""}`}</div>
-                  <!-- ★数えていない候補を出す★（2026-08-05 Kaiと整理）
-                       回数は数量、時間は実測が入っている記録だけを数える作りになっている。
-                       そのぶん「紐づけたのに増えない」が起きるので、数えなかったぶんを見せる。 -->
-                  ${w.pending_unconfirmed>0&&html`
-                    <div style=${{color:"var(--amber,#BA7517)",marginTop:3,lineHeight:1.7}}>
-                      数えていない候補が ${w.pending_unconfirmed}${u||"件"} あります
-                      （記録に数量・実測が入っていないため）</div>`}
-                </div>`; })}
+        <!-- ── 2週間Sprint ── -->
+        ${Node({ color:C_S, last:false,
+          icon: html`<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="5" width="18" height="16" rx="3"/><path d="M3 10h18M8 3v4M16 3v4"/></svg>`,
+          children: sp ? html`
+            ${Pill({color:C_S, text:"2週間Sprint"})}
+            <div style=${{display:"flex",alignItems:"flex-end",gap:10}}>
+              <button onClick=${()=>setOpenRow(openRow==="sprint"?"":"sprint")}
+                style=${{flex:1,minWidth:0,background:"none",border:"none",padding:0,textAlign:"left",cursor:"pointer",fontFamily:"inherit"}}>
+                <span style=${{display:"block",fontSize:21,fontWeight:800,color:"var(--text)",lineHeight:1.35,overflowWrap:"anywhere"}}>${sp.name}</span>
+              </button>
               <button onClick=${()=>setWgSheet(true)}
-                style=${{padding:"7px 14px",borderRadius:8,border:"1px solid var(--border)",background:"none",color:"var(--accent)",fontSize:11.5,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>＋ 追加</button>
-            </div>` })}
+                style=${{flexShrink:0,display:"flex",alignItems:"center",gap:5,padding:"8px 14px",borderRadius:10,
+                         border:`1px solid ${C_S}`,background:"transparent",color:C_S,
+                         fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>
+                <span style=${{fontSize:15,lineHeight:1}}>＋</span> 追加する</button>
+            </div>
+            ${sPct!==null&&html`
+              <div style=${{display:"flex",justifyContent:"flex-end",marginTop:2}}>
+                <span style=${{display:"flex",alignItems:"baseline",gap:1,color:C_S}}>
+                  <span style=${{fontSize:36,fontWeight:800,lineHeight:1,fontVariantNumeric:"tabular-nums"}}>${sPct}</span>
+                  <span style=${{fontSize:17,fontWeight:700}}>%</span></span>
+              </div>`}
+            ${Bar({color:C_S, percent: sPct!==null ? sPct
+                    : (sp.totalDays>0 ? Math.round(sp.dayIndex/sp.totalDays*100) : 0)})}
+            <div style=${{display:"flex",justifyContent:"space-between",alignItems:"baseline",gap:8,fontSize:14}}>
+              <span><b style=${{color:C_S,fontWeight:800}}>${sp.dayIndex}日目</b><span style=${{color:"var(--sub)"}}> / ${sp.totalDays}日</span></span>
+              <span style=${{color:"var(--sub)",fontSize:13.5}}>残り ${Math.max(0,sp.daysLeft)}日</span>
+            </div>
+            ${sForecast
+              ? InfoBox({ color:C_S, onClick:()=>setOpenRow(openRow==="sprint"?"":"sprint"),
+                  icon: html`<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>`,
+                  children: html`今週あと <b style=${{color:C_S,fontWeight:800}}>${sForecast.days}日</b>でSprint達成率は <b style=${{color:C_S,fontWeight:800}}>${sForecast.percent}%</b> になります` })
+              : (sPct===null ? InfoBox({ color:C_S, onClick:()=>setWgSheet(true),
+                  icon: html`<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/></svg>`,
+                  children: html`今週の目標を数字で決めると、ここに進み具合が出ます` }) : "")}
+            ${openRow==="sprint"&&html`
+              <div style=${{fontSize:12.5,color:"var(--sub)",lineHeight:1.9,marginTop:10}}>
+                ${sp.progress&&html`今週の目標${sp.progress.goal_count}件の積み上げ（${sp.progress.weeks}週ぶん・${sp.progress.actual}/${sp.progress.target}）<br/>`}
+                ${sp.action_metric&&html`自分でやる：<b style=${{color:"var(--text)"}}>${sp.action_metric}</b><br/>`}
+                ${sp.target_state&&html`2週間後：${sp.target_state}<br/>`}
+                ${sp.bottleneck&&html`詰まり：${sp.bottleneck}<br/>`}
+                ${sp.if_then&&html`もし〜なら：${sp.if_then}<br/>`}
+                ${curSp.length>1&&html`<span style=${{color:"var(--amber,#BA7517)"}}>⚠ 進行中が${curSp.length}本あります。1本に絞るほど進みます</span><br/>`}
+                <button onClick=${()=>setSprintSheet(sp)}
+                  style=${{marginTop:6,padding:"7px 14px",borderRadius:8,border:"1px solid var(--border)",background:"none",color:"var(--accent)",fontSize:11.5,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>編集</button>
+              </div>`}
+          ` : html`
+            ${Pill({color:C_S, text:"2週間Sprint"})}
+            <button onClick=${()=>{ if(goals.length) setSprintSheet({}); }}
+              style=${{display:"block",background:"none",border:"none",padding:0,textAlign:"left",cursor:"pointer",fontFamily:"inherit",
+                       fontSize:18,fontWeight:700,color:goals.length?C_S:"var(--sub)",lineHeight:1.4}}>
+              ${goals.length?"＋ 2週間でやることを決める":"先に3か月目標を決めてください"}</button>` })}
+
+        <!-- ── 今週の目標 ── -->
+        ${Node({ color:C_W, last:true,
+          icon: html`<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M6 21V4"/><path d="M6 4h11l-2.2 4L17 12H6"/></svg>`,
+          children: html`
+            ${Pill({color:C_W, text:"今週の目標"})}
+            ${wg.length ? html`
+              <div style=${{border:"1px solid var(--border)",borderRadius:12,overflow:"hidden",background:"#111820"}}>
+                ${wg.map((w,k)=>{
+                  const t = Number(w.std_line)>0?Number(w.std_line):Number(w.target_total);
+                  const u = w.unit || (w.metric_type==="DURATION"?"分":"件");
+                  const a = Number(w.actual_value)||0;
+                  const pct = (!isNaN(t)&&t>0) ? Math.min(100, a/t*100) : 0;
+                  // 行ごとにアイコンを変えて、見分けがつくようにする
+                  const ICONS = [
+                    html`<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.6"/><path d="M5 20c0-3.6 3.1-5.6 7-5.6s7 2 7 5.6"/></svg>`,
+                    html`<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 3.5l3 .6 1 3.4-2 1.6a12 12 0 006.4 6.4l1.6-2 3.4 1 .6 3A2 2 0 0118.4 20 15.5 15.5 0 014 5.6a2 2 0 012.5-2.1z"/></svg>`,
+                    html`<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><circle cx="8.5" cy="12" r="1.1" fill="currentColor"/><circle cx="12" cy="12" r="1.1" fill="currentColor"/><circle cx="15.5" cy="12" r="1.1" fill="currentColor"/></svg>`,
+                  ];
+                  return html`
+                  <button key=${k} onClick=${()=>setWgSheet(w)}
+                    style=${{display:"flex",alignItems:"center",gap:11,width:"100%",padding:"13px 14px",
+                             background:"none",border:"none",borderTop:k?"1px solid var(--border)":"none",
+                             cursor:"pointer",fontFamily:"inherit",textAlign:"left"}}>
+                    <span style=${{flexShrink:0,color:C_W,display:"flex"}}>${ICONS[k%3]}</span>
+                    <span style=${{flex:"0 1 auto",minWidth:0,fontSize:14,fontWeight:600,color:"var(--text)",
+                                   overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>${w.title}</span>
+                    <span style=${{flex:"1 1 40px",minWidth:28,height:5,background:"#1B222B",borderRadius:99,overflow:"hidden",display:"block"}}>
+                      <span style=${{display:"block",height:"100%",width:pct+"%",background:C_W,borderRadius:99}}/>
+                    </span>
+                    <span style=${{flexShrink:0,fontSize:14,whiteSpace:"nowrap"}}>
+                      <b style=${{color:C_W,fontWeight:800}}>${a}</b><span style=${{color:"var(--sub)"}}> / ${isNaN(t)?"—":t}${u}</span></span>
+                    <!-- ★＋で実績を1件足す★
+                         記録に数量を入れると自動で数えられるが、その場で足せる道も用意する。
+                         数えたぶんは記録として残す（紐づけただけで数字が伸びないようにするため）。 -->
+                    <span onClick=${e=>{ e.stopPropagation(); addWeeklyOne(w); }}
+                      style=${{flexShrink:0,width:30,height:30,borderRadius:"50%",
+                               background:`color-mix(in srgb, ${C_W} 22%, transparent)`,
+                               border:`1px solid color-mix(in srgb, ${C_W} 45%, transparent)`,
+                               color:C_W,display:"flex",alignItems:"center",justifyContent:"center",
+                               fontSize:17,fontWeight:700,cursor:"pointer",lineHeight:1}}>＋</span>
+                  </button>`;
+                })}
+              </div>
+              ${wPct!==null&&InfoBox({ color:C_W, onClick:()=>setOpenRow(openRow==="week"?"":"week"),
+                icon: html`<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 20V11M12 20V4M19 20v-6"/></svg>`,
+                children: html`<span style=${{display:"flex",alignItems:"baseline",justifyContent:"space-between",gap:8}}>
+                  <span>今週の達成率</span>
+                  <span style=${{color:C_W,fontWeight:800,fontSize:20}}>${wPct}<span style=${{fontSize:13}}>%</span></span></span>` })}
+              ${openRow==="week"&&html`
+                <div style=${{fontSize:12,color:"var(--sub)",lineHeight:1.9,marginTop:9}}>
+                  ${wg.map((w,k)=>{ const u=w.unit||(w.metric_type==="DURATION"?"分":"件");
+                    return html`<div key=${k}>
+                      <b style=${{color:"var(--text)"}}>${w.title}</b>：
+                      ${!w.has_records ? "まだ今週の記録がありません（0ではなく、未記録という意味です）"
+                        : html`残り ${w.days_left}日${w.required_per_day>0?` ・必要 ${w.required_per_day}${u}/日`:""}${w.actual_per_day!==null?` ・実績 ${w.actual_per_day}${u}/日`:""}`}
+                      ${w.pending_unconfirmed>0&&html`<br/><span style=${{color:"var(--amber,#BA7517)"}}>数えていない候補が ${w.pending_unconfirmed}${u} あります（記録に数量・実測が入っていないため）</span>`}
+                    </div>`; })}
+                  <button onClick=${()=>setWgSheet(true)}
+                    style=${{marginTop:6,padding:"7px 14px",borderRadius:8,border:"1px solid var(--border)",background:"none",color:"var(--accent)",fontSize:11.5,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>＋ 追加</button>
+                </div>`}
+            ` : html`
+              <button onClick=${()=>{ if(curSp.length) setWgSheet(true); }}
+                style=${{display:"block",background:"none",border:"none",padding:0,textAlign:"left",cursor:"pointer",fontFamily:"inherit",
+                         fontSize:18,fontWeight:700,color:curSp.length?C_W:"var(--sub)",lineHeight:1.4}}>
+                ${curSp.length?"＋ 今週やる数字を決める":"先に2週間スプリントを決めてください"}</button>`}` })}
+
+        <!-- ── 今日のフォーカス ──
+             ★ホームにあった「今日のフォーカス」カードをここへ移した★（2026-08-05 Kai要望）
+             同じものが2か所にあると、どちらを見ればいいのか分からなくなる。
+             3か月→2週間→今週 と落ちてきた先が「今日」なので、この位置が自然。 -->
+        <div style=${{display:"flex",alignItems:"center",gap:14,marginTop:16,padding:"16px 16px",
+                      borderRadius:14,border:"1px solid var(--border)",background:"#111820"}}>
+          ${intent
+            ? html`
+              <button onClick=${toggleIntentDone} aria-label=${intent.done?"未達成に戻す":"達成にする"}
+                style=${{flexShrink:0,width:34,height:34,padding:0,borderRadius:"50%",
+                         border:`2px solid ${C_STAR}`,background:intent.done?C_STAR:"transparent",
+                         display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer"}}>
+                ${intent.done
+                  ? html`<svg width="16" height="16" viewBox="0 0 10 10" fill="none"><path d="M2 5l2.5 2.5L8 3" stroke="#111820" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`
+                  : ""}
+              </button>`
+            : html`
+              <span style=${{flexShrink:0,color:C_STAR,display:"flex"}}>
+                <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round">
+                  <path d="M12 3.2l2.6 5.5 6 .8-4.4 4.2 1.1 6-5.3-2.9-5.3 2.9 1.1-6L3.4 9.5l6-.8L12 3.2z"/></svg></span>`}
+          <span style=${{flex:1,minWidth:0}}>
+            <span style=${{display:"block",fontSize:15,fontWeight:800,color:C_STAR,marginBottom:3}}>今日のフォーカス</span>
+            ${intent
+              ? html`<span style=${{display:"block",fontSize:14,color:"var(--text)",lineHeight:1.6,overflowWrap:"anywhere",
+                                    textDecoration:intent.done?"line-through":"none",opacity:intent.done?0.55:1}}>${intent.intent}</span>`
+              : html`<span style=${{display:"block",fontSize:13,color:"var(--sub)",lineHeight:1.65}}>
+                  ${step||"今日いちばん達成したいことを1つ決めましょう。"}</span>`}
+          </span>
+          ${intent
+            ? html`<button onClick=${openEditIntent}
+                style=${{flexShrink:0,whiteSpace:"nowrap",padding:"10px 14px",borderRadius:10,
+                         border:"1px solid var(--border)",background:"none",color:"var(--text)",
+                         fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>変更 ›</button>`
+            : html`<button onClick=${()=>{ setIntentEditMode(true); setShowIntentModal(true); }}
+                style=${{flexShrink:0,whiteSpace:"nowrap",padding:"10px 14px",borderRadius:10,
+                         border:`1px solid ${C_STAR}`,background:"none",color:C_STAR,
+                         fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>決める ›</button>`}
+        </div>
       </div>`;
     })()}
+
+    ${entrySheet&&html`<${GoalEntrySheet} goal=${entrySheet.goal} entry=${entrySheet.entry}
+      onClose=${()=>setEntrySheet(null)}
+      onSaved=${()=>gasApi("getGoalTree").then(r=>{ if(r&&r.ok&&r.data){ setGoalTree(r.data);
+        try { localStorage.setItem("cache_goaltree", JSON.stringify(r.data)); } catch(e){} } })}
+      onToast=${onToast}/>`}
+
+    ${historyGoal&&html`<${GoalHistorySheet} goal=${historyGoal}
+      onClose=${()=>setHistoryGoal(null)}
+      onEdit=${(e2)=>{ setHistoryGoal(null); setEntrySheet({goal:historyGoal, entry:e2}); }}
+      onAdd=${()=>{ const g2=historyGoal; setHistoryGoal(null); setEntrySheet({goal:g2, entry:null}); }}
+      onChanged=${()=>gasApi("getGoalTree").then(r=>{ if(r&&r.ok&&r.data){ setGoalTree(r.data);
+        try { localStorage.setItem("cache_goaltree", JSON.stringify(r.data)); } catch(e){} } })}
+      onToast=${onToast}/>`}
 
     ${deepenGoal&&html`<${GoalDeepenSheet} goal=${deepenGoal}
       onClose=${()=>setDeepenGoal(null)}
@@ -2998,65 +3349,10 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
         </div>
       </div>
     `}
-    <!-- ★今日のフォーカス★
-         3か月目標のどれに効くのか、今日どれだけ進んだかを1枚で見せる。
-         関連タスクの件数から、今日の行動へ降りられるようにする。 -->
+    <!-- ★今日のフォーカスはロードマップの中へ移した★（2026-08-05 Kai要望）
+         同じものが2か所にあると、どちらを見ればいいのか分からなくなる。
+         ここには「次にやること」だけを残す。 -->
     <div style=${{margin:"12px 16px 0",background:"var(--card)",borderRadius:16,border:"1px solid var(--border)",padding:"13px 16px 14px"}}>
-      <div style=${{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:intent?2:8}}>
-        <span style=${{fontSize:13,fontWeight:800,color:"var(--text)"}}>今日のフォーカス</span>
-        ${intent
-          ? html`<button onClick=${openEditIntent}
-              style=${{background:"none",border:"none",color:"var(--accent)",fontSize:11.5,fontWeight:700,cursor:"pointer",fontFamily:"inherit",padding:0}}>編集</button>`
-          : ""}
-      </div>
-
-      ${!intent&&html`
-        <button onClick=${()=>{ setIntentEditMode(true); setShowIntentModal(true); }}
-          style=${{width:"100%",background:"none",border:"1.5px dashed var(--border)",borderRadius:10,padding:"12px",textAlign:"left",fontSize:13.5,color:"var(--sub)",cursor:"pointer",fontFamily:"inherit",lineHeight:1.6}}>
-          今日いちばん達成したいことを決める<br/>
-          <span style=${{fontSize:11.5,opacity:0.8}}>決めておくと、迷ったときにここへ戻ってこられます</span>
-        </button>`}
-
-      ${intent&&(()=>{
-        const targetH=Number(intent.hours)||dailyGoalHours;
-        const goalMins=todayLogs.filter(l=>l.goal_related==="true"||l.goal_related===true).length*60;
-        const targetMins=targetH*60;
-        const pct=Math.min(100,Math.round(goalMins/targetMins*100));
-        const hh=Math.floor(goalMins/60), mm=goalMins%60;
-        const goals2=((goalTree&&goalTree.goals)||[]).filter(g=>String(g.status||"ACTIVE").toUpperCase()!=="ARCHIVED");
-        const parent=goals2[Math.min(mainGoalIdx,Math.max(0,goals2.length-1))];
-        // 円形の進捗リング
-        const R=26, C=2*Math.PI*R;
-        return html`
-        <div style=${{display:"flex",alignItems:"center",gap:11}}>
-          <!-- ★達成の切り替えはチェックボックスに分ける★
-               文字を押すと達成になるのは分かりにくく、達成後に「達成🎉」が
-               付いて2行になるのも収まりが悪かった。印は打ち消し線だけにする -->
-          <button onClick=${toggleIntentDone} aria-label=${intent.done?"未達成に戻す":"達成にする"}
-            style=${{flexShrink:0,width:26,height:26,padding:0,borderRadius:"50%",
-                     border:`2px solid var(--accent)`,background:intent.done?"var(--accent)":"transparent",
-                     display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",transition:"all .15s"}}>
-            ${intent.done&&html`<svg width="13" height="13" viewBox="0 0 10 10" fill="none"><path d="M2 5l2.5 2.5L8 3" stroke="#fff" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>`}
-          </button>
-          <div style=${{flex:1,minWidth:0}}>
-            <span style=${{display:"block",fontSize:14.5,fontWeight:800,color:"var(--text)",lineHeight:1.45,
-                           textDecoration:intent.done?"line-through":"none",opacity:intent.done?0.55:1,overflowWrap:"anywhere"}}>
-              ${intent.intent}</span>
-
-          </div>
-          <div style=${{flexShrink:0,textAlign:"center"}}>
-            <svg width="62" height="62" viewBox="0 0 62 62">
-              <circle cx="31" cy="31" r=${R} fill="none" stroke="var(--bg)" stroke-width="6"/>
-              <circle cx="31" cy="31" r=${R} fill="none" stroke="var(--accent)" stroke-width="6" stroke-linecap="round"
-                stroke-dasharray=${C} stroke-dashoffset=${C*(1-pct/100)} transform="rotate(-90 31 31)"/>
-              <text x="31" y="35" text-anchor="middle" font-size="14" font-weight="800" fill="var(--text)">${pct}%</text>
-            </svg>
-            <div style=${{fontSize:10.5,color:"var(--sub)",marginTop:-2,whiteSpace:"nowrap"}}>
-              ${hh>0?`${hh}時間`:""}${mm}分 / ${targetH}時間</div>
-          </div>
-        </div>`;
-      })()}
-
       <!-- ★次にやること★ 迷う時間を消すために1件だけ大きく出す。
            なぜそれが選ばれたのかは隠さない（押すと理由が出る）。 -->
       ${(()=>{
@@ -3923,28 +4219,33 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
                 <span style=${{fontSize:48,fontWeight:800,color:"var(--text)",lineHeight:1,letterSpacing:"-0.02em",fontVariantNumeric:"tabular-nums"}}>${ov}</span>
                 <span style=${{fontSize:15,color:"var(--sub)",fontWeight:600}}>/ 100</span>
               </div>
-              <!-- 前週比と、仲間の中での位置。横に並べて、はみ出すときは折り返す -->
-              <div style=${{display:"flex",flexWrap:"wrap",gap:6,marginTop:9}}>
-                ${diff!==null&&html`
-                  <span style=${{display:"inline-flex",alignItems:"center",gap:5,padding:"5px 10px",
-                                borderRadius:9,border:"1px solid var(--border)",background:"var(--bg)"}}>
-                    <span style=${{fontSize:10.5,color:"var(--sub)",fontWeight:600}}>前週比</span>
-                    <span style=${{fontSize:13,fontWeight:800,color:diff>0?"var(--accent)":diff<0?"#F87171":"var(--sub)"}}>
-                      ${diff>0?"+":""}${diff}</span>
-                    <span style=${{fontSize:11,color:diff>0?"var(--accent)":diff<0?"#F87171":"var(--sub)"}}>
-                      ${diff>0?"↗":diff<0?"↘":"→"}</span>
-                  </span>`}
-                <!-- ★上位◯%★（2026-08-05 Kai要望）
-                     同じ仲間（cohort）の中での位置。比べる相手が5人に満たないときは出さない
-                     （3人中2位を「上位67%」と書いても意味がないため）。 -->
-                ${smp.data.top_percent&&html`
-                  <span title=${smp.data.rank_total+"人中"+smp.data.rank+"位"}
-                    style=${{display:"inline-flex",alignItems:"center",gap:4,padding:"5px 10px",
-                             borderRadius:9,border:"1px solid var(--accent)",background:"var(--accent-l)"}}>
-                    <span style=${{fontSize:10.5,color:"var(--accent)",fontWeight:600}}>上位</span>
-                    <span style=${{fontSize:13,fontWeight:800,color:"var(--accent)"}}>${smp.data.top_percent}%</span>
-                  </span>`}
-              </div>
+              <!-- ★2つのバッジは同じ形にそろえる★（2026-08-05 Kai指摘）
+                   片方だけ枠と背景の色を変えていたため、隣り合ったときに
+                   大きさも重さもちぐはぐに見えていた。
+                   枠・背景・文字の大きさは共通にして、変えるのは数字の色だけにする。 -->
+              ${(()=>{
+                const pill = {display:"inline-flex",alignItems:"center",gap:4,padding:"4px 9px",
+                              borderRadius:8,border:"1px solid var(--border)",background:"var(--bg)"};
+                const lbl  = {fontSize:9.5,color:"var(--sub)",fontWeight:600};
+                const valS = {fontSize:11.5,fontWeight:800};
+                return html`
+                <div style=${{display:"flex",flexWrap:"wrap",gap:6,marginTop:9}}>
+                  ${diff!==null&&html`
+                    <span style=${pill}>
+                      <span style=${lbl}>前週比</span>
+                      <span style=${{...valS,color:diff>0?"var(--accent)":diff<0?"#F87171":"var(--sub)"}}>
+                        ${diff>0?"+":""}${diff}</span>
+                      <span style=${{fontSize:10,color:diff>0?"var(--accent)":diff<0?"#F87171":"var(--sub)"}}>
+                        ${diff>0?"↗":diff<0?"↘":"→"}</span>
+                    </span>`}
+                  <!-- 同じ仲間（cohort）の中での位置。比べる相手が5人に満たないときは出さない -->
+                  ${smp.data.top_percent&&html`
+                    <span title=${smp.data.rank_total+"人中"+smp.data.rank+"位"} style=${pill}>
+                      <span style=${lbl}>上位</span>
+                      <span style=${{...valS,color:"var(--accent)"}}>${smp.data.top_percent}%</span>
+                    </span>`}
+                </div>`;
+              })()}
               <div style=${{fontSize:10.5,color:"var(--sub)",marginTop:9,lineHeight:1.6}}>
                 測れている${smp.data.evaluated_count}項目の平均（全${smp.data.metric_count}項目）
                 ${smp.data.rank_total?html`<br/>${smp.data.rank_total}人中 ${smp.data.rank}位`:""}</div>
@@ -8248,7 +8549,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260805-044549";
+const APP_BUILD = "20260805-050116";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
