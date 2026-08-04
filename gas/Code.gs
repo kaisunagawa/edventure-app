@@ -687,6 +687,7 @@ function doGet(e) {
       case "deleteGoalEntry": result = deleteGoalEntry(studentEmail, e.parameter); break;
       // レポート画面のまとめ取得（往復の回数を減らすため）
       case "getReportHome": result = getReportHome(studentEmail); break;
+      case "getRoadmap": result = getRoadmap(studentEmail); break;
       case "getReportDetail": result = getReportDetail(studentEmail, e.parameter); break;
       case "getStatusSummary": result = getStatusSummary(studentEmail); break;
       case "getSelfMgmtPower": result = getSelfMgmtPower(studentEmail, e.parameter); break;
@@ -1812,7 +1813,11 @@ function getSelfMgmtPower(studentEmail, body) {
   } catch (e) { /* 出せなくても本体は返す */ }
 
   const out = { ok: true, data: cur, prev: prev };
-  try { CacheService.getScriptCache().put(ckey, JSON.stringify(out), 600); } catch (e) { /* 大きすぎるときは諦める */ }
+  // ★取っておく時間を延ばす★（2026-08-05 起動高速化）
+  //   1回10秒近くかかる計算なので、10分ごとに作り直すと
+  //   その10分の最初に開いた人が毎回待たされる。
+  //   キーに日付が入っているので、日をまたげば必ず作り直される。
+  try { CacheService.getScriptCache().put(ckey, JSON.stringify(out), 6 * 60 * 60); } catch (e) { /* 大きすぎるときは諦める */ }
   return out;
 }
 
@@ -6937,6 +6942,8 @@ function nightlyReport() {
           // ただしレポート生成そのものを圧迫しないよう、時間に余裕がある時だけ。
           if (Date.now() - startedAt < NIGHTLY_REPORT_TIME_BUDGET_MS * 0.7) {
             try { smpOverallCached_(user.student_email, true); } catch (e2) {}
+          // 自己経営力そのものも温めておく（朝いちばんに開く人を待たせないため）
+          try { getSelfMgmtPower(user.student_email, { withPrev: "1" }); } catch (e2) {}
           }
           // 点数が画面と食い違っていないか、夜のうちに自分で確かめる（2026-08-04 Kaiの指示）
           try {
@@ -10069,6 +10076,17 @@ ${outputSpec}`;
 //   ・getReportHome   … 一覧＋週次＋月次＋時間の使い方（4回 → 1回）
 //   ・getReportDetail … その日のレポート＋記録＋新レポート（3回 → 1回）
 // ══════════════════════════════════════════════════════════════════
+// ★ロードマップのまとめ取得★（2026-08-05 起動高速化）
+//   GASは同じ人からの同時リクエストを順番に処理するので、
+//   呼び出しの本数がそのまま待ち時間になる。2本を1本にする。
+function getRoadmap(studentEmail) {
+  const out = { ok: true };
+  try { out.sprints = getSprints(studentEmail, {}); } catch (e) { out.sprints = null; }
+  try { const g = getGoalTree(studentEmail); out.goalTree = (g && g.ok) ? g.data : null; }
+  catch (e) { out.goalTree = null; }
+  return out;
+}
+
 function getReportHome(studentEmail) {
   const out = { ok: true };
   // 1つ落ちても画面全体を落とさない（レポートは出るのに月次で失敗、等を避ける）
@@ -12861,7 +12879,7 @@ const ACTION_POLICIES_WRITE = {
 // ランキングや「みんなの頑張り」は共有情報なのでここには入れない
 const ACTION_POLICIES_READ = {
   getUser:{}, getLogs:{}, getReport:{}, getReportList:{}, getHomeData:{}, getGoalTree:{},
-  getReportHome:{}, getReportDetail:{}, listGoalEntries:{},
+  getReportHome:{}, getReportDetail:{}, getRoadmap:{}, listGoalEntries:{},
   getGameStatus:{}, getJournal:{}, getInsights:{}, getWeeklySummary:{}, getMonthlyReview:{}, getSelfMgmtPower:{}, getDailyOpsReport:{}, getDayPlan:{},
   getTimeUse:{}, getAchievements:{}, getMessages:{}, p1Status2:{}, getTasks:{}, getSprints:{}
 };

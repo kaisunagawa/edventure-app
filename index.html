@@ -1924,7 +1924,13 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
   const [statusSummary, setStatusSummary] = useState(null);
   const [showStatusTip, setShowStatusTip] = useState(false);
   // 自己経営力（feature: self_mgmt_power_v1）。取れなければ従来のステータスを出す
-  const [smp, setSmp] = useState(null);
+  // ★前回の内容を持っておく★（2026-08-05 起動高速化）
+  //   自己経営力は日ごとの計算を積み上げるため1回10秒近くかかる。
+  //   毎回それを待たせると、ホーム全体が固まって見える。
+  //   まず前回の内容を出して、最新は裏で差し替える。
+  const [smp, setSmp] = useState(()=>{
+    try { return JSON.parse(localStorage.getItem("cache_smp")||"null"); } catch(e){ return null; }
+  });
   // 自己経営力が「使えない人」だけ、従来のステータスへ戻す
   const [smpOff,setSmpOff]=useState(false);
   const [smpDetail, setSmpDetail] = useState(false);
@@ -2358,21 +2364,35 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
     }).catch(legacyFetch);
     // 自己経営力。featureが無い人には feature not enabled が返るので、その時は出さない
     gasApi("getSelfMgmtPower", { withPrev: "1" }).then(r=>{
-      if(r && r.ok && r.data){ setSmp(r); setSmpOff(false); }
+      if(r && r.ok && r.data){ setSmp(r); setSmpOff(false);
+        try { localStorage.setItem("cache_smp", JSON.stringify(r)); } catch(e){} }
       // feature が無い人だけ、従来の「ステータス」を出す。
       // 通信が遅い・失敗しただけの人に古い画面を見せない（二重表示になるため）
       else if(r && r.error === "feature not enabled") setSmpOff(true);
     }).catch(()=>{});
-    // スプリント（2週間）。3か月目標と今日の間をつなぐ層
-    gasApi("getSprints").then(r=>{
-      if(r && r.ok){ setSprints(r);
-        try { localStorage.setItem("cache_sprints", JSON.stringify(r)); } catch(e){} }
-    }).catch(()=>{});
-    // 3か月目標（数値とペース）。統合APIには乗っていないので別に取る
-    gasApi("getGoalTree").then(r=>{
-      if(r && r.ok && r.data){ setGoalTree(r.data);
-        try { localStorage.setItem("cache_goaltree", JSON.stringify(r.data)); } catch(e){} }
-    }).catch(()=>{});
+    // ★ロードマップの2本は、ホームのまとめ取得に相乗りさせる★（2026-08-05 起動高速化）
+    //   GASは同じ人からの同時リクエストを順番に処理するため、本数がそのまま
+    //   待ち時間になる。getHomeData が返してくれれば追加の往復は要らない。
+    //   古い版のサーバー（まだ返さない）に当たったときだけ、個別に取りに行く。
+    gasApi("getRoadmap").then(r=>{
+      if(r && r.ok){
+        if(r.sprints){ setSprints(r.sprints);
+          try { localStorage.setItem("cache_sprints", JSON.stringify(r.sprints)); } catch(e){} }
+        if(r.goalTree){ setGoalTree(r.goalTree);
+          try { localStorage.setItem("cache_goaltree", JSON.stringify(r.goalTree)); } catch(e){} }
+        return;
+      }
+      throw new Error("no roadmap");
+    }).catch(()=>{
+      gasApi("getSprints").then(r=>{
+        if(r && r.ok){ setSprints(r);
+          try { localStorage.setItem("cache_sprints", JSON.stringify(r)); } catch(e){} }
+      }).catch(()=>{});
+      gasApi("getGoalTree").then(r=>{
+        if(r && r.ok && r.data){ setGoalTree(r.data);
+          try { localStorage.setItem("cache_goaltree", JSON.stringify(r.data)); } catch(e){} }
+      }).catch(()=>{});
+    });
 
     // カレンダー連携済みなら本人権限で直接取得（GAS経由はスクリプト所有者しか読めないためのフォールバック）
     if(localStorage.getItem("cal_linked")){
@@ -3083,15 +3103,14 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
       ((goalTree&&goalTree.orphanWeeklyGoals)||[]).forEach(w=>ws.push({...w, parentTitle:""}));
       const wg = ws.filter(w=>String(w.status||"ACTIVE").toUpperCase()==="ACTIVE");
 
-      // ★色はJIROKUの色に寄せる★（2026-08-05 Kai指摘）
-      //   青・緑・オレンジを混ぜたら、その3か所だけ浮いて見えた。
-      //   JIROKUの基本色（--accent = シアン系）を軸に、
-      //   段階が下るほど濃くしていく。色相を変えずに濃さで区別する。
-      //   段階の違いは分かるが、画面全体としては1色に見える。
-      const C_Q = "var(--accent)";                 // 3か月目標  … 基本色
-      const C_S = "color-mix(in srgb, var(--accent) 78%, #1E3A5F)";  // 2週間Sprint … 少し深く
-      const C_W = "color-mix(in srgb, var(--accent) 58%, #16324A)";  // 今週の目標  … さらに深く
-      const C_STAR = "var(--accent)";              // 今日のフォーカス … 基本色
+      // ★段階ごとに色を分ける★
+      //   一度すべて基本色の濃淡にしてみたが、差が小さすぎて
+      //   かえって中途半端に見えた（2026-08-05 Kaiの判断で元に戻した）。
+      //   段階が変わったことがはっきり分かる色を使う。
+      const C_Q = "var(--accent)";   // 3か月目標  … アプリの基本色
+      const C_S = "#3B82F6";         // 2週間Sprint … 基本色と見分けがつく青
+      const C_W = "var(--green)";    // 今週の目標  … 達成の緑
+      const C_STAR = "var(--amber)"; // 今日のフォーカス … 注目の黄
 
       // ★目標がまだ無い人にも入口を残す★
       if (!goals.length && !allSp.length) return html`
@@ -8833,7 +8852,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260805-062832";
+const APP_BUILD = "20260805-063431";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
