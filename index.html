@@ -3172,7 +3172,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
         <span style=${{display:"inline-block",fontSize:10.5,fontWeight:700,color:color,
                        background:`color-mix(in srgb, ${color} 16%, transparent)`,
                        border:`1px solid color-mix(in srgb, ${color} 35%, transparent)`,
-                       borderRadius:99,padding:"2px 10px",marginBottom:6}}>${text}</span>`;
+                       borderRadius:99,padding:"2px 10px"}}>${text}</span>`;
 
       // 太い進捗バー（点線の目盛りつき）
       // ★バーは3段とも同じ形にする★（2026-08-05 Kai指摘）
@@ -3224,17 +3224,9 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
             <circle cx="11" cy="13" r="8"/><circle cx="11" cy="13" r="3.4"/>
             <path d="M11 13l7.5-7.5M16.5 4.2l1.2 2.6 2.6 1.2"/></svg>`,
           children: g ? html`
-            ${Pill({color:C_Q, text:"3か月目標"})}
-            <button onClick=${()=>setOpenRow(openRow==="goal"?"":"goal")}
-              style=${{display:"block",width:"100%",background:"none",border:"none",padding:0,textAlign:"left",cursor:"pointer",fontFamily:"inherit"}}>
-              <span style=${{display:"block",fontSize:14,fontWeight:800,color:"var(--text)",lineHeight:1.45}}>${g.title}</span>
-            </button>
-            <div style=${{display:"flex",alignItems:"center",justifyContent:"flex-end",gap:10,marginTop:5}}>
-              ${qPct!==null&&html`
-                <span style=${{display:"flex",alignItems:"baseline",gap:1,color:C_Q,marginRight:2}}>
-                  <span style=${{fontSize:22,fontWeight:800,lineHeight:1,fontVariantNumeric:"tabular-nums"}}>${qPct}</span>
-                  <span style=${{fontSize:11,fontWeight:700}}>%</span></span>`}
-              <!-- 「追加する」はパーセントの横（タイトルの下の行）に置く（2026-08-05 Kai要望） -->
+            <!-- 1行目：ラベルと「追加する」を左右に。2行目：目標名と% -->
+            <div style=${{display:"flex",alignItems:"center",gap:8,marginBottom:2}}>
+              <span style=${{flex:1,minWidth:0}}>${Pill({color:C_Q, text:"3か月目標"})}</span>
               <button onClick=${()=>setEntrySheet({goal:g, entry:null})}
                 onContextMenu=${e=>{e.preventDefault(); setHistoryGoal(g);}}
                 onTouchStart=${e=>{ const t=setTimeout(()=>setHistoryGoal(g),550);
@@ -3245,6 +3237,16 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
                          border:`1px solid ${C_Q}`,background:"transparent",color:C_Q,
                          fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>
                 <span style=${{fontSize:12,lineHeight:1}}>＋</span> 追加する</button>
+            </div>
+            <div style=${{display:"flex",alignItems:"flex-end",gap:10,marginBottom:2}}>
+              <button onClick=${()=>setOpenRow(openRow==="goal"?"":"goal")}
+                style=${{flex:1,minWidth:0,background:"none",border:"none",padding:0,textAlign:"left",cursor:"pointer",fontFamily:"inherit"}}>
+                <span style=${{display:"block",fontSize:14,fontWeight:800,color:"var(--text)",lineHeight:1.45}}>${g.title}</span>
+              </button>
+              ${qPct!==null&&html`
+                <span style=${{flexShrink:0,display:"flex",alignItems:"baseline",gap:1,color:C_Q}}>
+                  <span style=${{fontSize:26,fontWeight:800,lineHeight:1,fontVariantNumeric:"tabular-nums"}}>${qPct}</span>
+                  <span style=${{fontSize:13,fontWeight:700}}>%</span></span>`}
             </div>
             <div>
               <span style=${{display:"block"}}>
@@ -3330,21 +3332,23 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
           icon: html`<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <rect x="3" y="5" width="18" height="16" rx="3"/><path d="M3 10h18M8 3v4M16 3v4"/></svg>`,
           children: sp ? html`
-            ${Pill({color:C_S, text:"2週間Sprint"})}
-            <button onClick=${()=>setOpenRow(openRow==="sprint"?"":"sprint")}
-              style=${{display:"block",width:"100%",background:"none",border:"none",padding:0,textAlign:"left",cursor:"pointer",fontFamily:"inherit"}}>
-              <span style=${{display:"block",fontSize:14,fontWeight:800,color:"var(--text)",lineHeight:1.45}}>${sp.name}</span>
-            </button>
-            <div style=${{display:"flex",alignItems:"center",justifyContent:"flex-end",gap:10,marginTop:5}}>
-              ${sPct!==null&&html`
-                <span style=${{display:"flex",alignItems:"baseline",gap:1,color:C_S,marginRight:2}}>
-                  <span style=${{fontSize:22,fontWeight:800,lineHeight:1,fontVariantNumeric:"tabular-nums"}}>${sPct}</span>
-                  <span style=${{fontSize:11,fontWeight:700}}>%</span></span>`}
+            <div style=${{display:"flex",alignItems:"center",gap:8,marginBottom:2}}>
+              <span style=${{flex:1,minWidth:0}}>${Pill({color:C_S, text:"2週間Sprint"})}</span>
               <button onClick=${()=>setSprintEntry(sp)}
                 style=${{flexShrink:0,display:"flex",alignItems:"center",gap:3,padding:"4px 9px",borderRadius:8,
                          border:`1px solid ${C_S}`,background:"transparent",color:C_S,
                          fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>
                 <span style=${{fontSize:12,lineHeight:1}}>＋</span> 追加する</button>
+            </div>
+            <div style=${{display:"flex",alignItems:"flex-end",gap:10,marginBottom:2}}>
+              <button onClick=${()=>setOpenRow(openRow==="sprint"?"":"sprint")}
+                style=${{flex:1,minWidth:0,background:"none",border:"none",padding:0,textAlign:"left",cursor:"pointer",fontFamily:"inherit"}}>
+                <span style=${{display:"block",fontSize:14,fontWeight:800,color:"var(--text)",lineHeight:1.45}}>${sp.name}</span>
+              </button>
+              ${sPct!==null&&html`
+                <span style=${{flexShrink:0,display:"flex",alignItems:"baseline",gap:1,color:C_S}}>
+                  <span style=${{fontSize:26,fontWeight:800,lineHeight:1,fontVariantNumeric:"tabular-nums"}}>${sPct}</span>
+                  <span style=${{fontSize:13,fontWeight:700}}>%</span></span>`}
             </div>
             ${Bar({color:C_S, percent: sPct!==null ? sPct
                     : (sp.totalDays>0 ? Math.round(sp.dayIndex/sp.totalDays*100) : 0)})}
@@ -8782,7 +8786,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260805-054342";
+const APP_BUILD = "20260805-054534";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
