@@ -257,6 +257,33 @@ function doGet(e) {
         });
         return jsonResponse({ ok: true, results: out });
       }
+      // ★確定を取り消す★（2026-08-05）
+      //   確定は「以後その日の点数を動かさない」という操作。
+      //   間違って日中に確定させてしまうと、その日は記録が増えても
+      //   点数が更新されず、夜のレポートも作り直されない。
+      //   取り消せる手段が無いと戻せないので用意する。
+      case "adminUnfinalizeOps": {
+        if (!verifyAdmin(e.parameter.coachEmail)) return jsonResponse({ ok: false, error: "not admin" });
+        const days2 = String(e.parameter.dates || "").split(",").map(function (x) { return x.trim(); }).filter(Boolean);
+        if (!days2.length) return jsonResponse({ ok: false, error: "no dates" });
+        const sh2 = getP1Sheet("DailyOpsReport");
+        const d2 = sh2.getDataRange().getValues();
+        const h2 = d2[0];
+        const iDate = h2.indexOf("report_date"), iFin = h2.indexOf("finalized_at"), iSnap = h2.indexOf("snapshot_json");
+        if (iDate === -1 || iFin === -1) return jsonResponse({ ok: false, error: "column missing" });
+        let cleared = 0;
+        for (let i = 1; i < d2.length; i++) {
+          const dv = String(d2[i][iDate]).slice(0, 10);
+          if (days2.indexOf(dv) === -1) continue;
+          if (!String(d2[i][iFin] || "").trim()) continue;
+          sh2.getRange(i + 1, iFin + 1).setValue("");
+          if (iSnap !== -1) sh2.getRange(i + 1, iSnap + 1).setValue("");
+          cleared++;
+        }
+        authAudit("OPS_UNFINALIZE", { result: "APPLIED", action: "adminUnfinalizeOps",
+          failureReason: days2.join(",") + " cleared=" + cleared });
+        return jsonResponse({ ok: true, dates: days2, cleared: cleared });
+      }
       case "adminScoreConsistency": {
         if (!verifyAdmin(e.parameter.coachEmail)) return jsonResponse({ ok: false, error: "not admin" });
         const em4 = String(e.parameter.email || "").trim() || adminEmail();
