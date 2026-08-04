@@ -1598,9 +1598,11 @@ function GoalEntrySheet({goal, entry, onClose, onSaved, onToast}) {
 function WeeklyEntrySheet({goal, onClose, onSave, onToast}) {
   useLockBodyScroll();
   const u = goal.unit || (goal.metric_type==="DURATION" ? "分" : "件");
-  const step = (goal.metric_type==="DURATION") ? 30 : 1;
   const cur = Number(goal.actual_value)||0;
   const t = Number(goal.std_line)>0 ? Number(goal.std_line) : Number(goal.target_total);
+  // −／＋の刻みも目標の大きさに合わせる（300件を1ずつ動かすのは現実的でない）
+  const step = (goal.metric_type==="DURATION") ? 30
+             : ((!isNaN(t) && t>=100) ? 10 : (!isNaN(t) && t>=40) ? 5 : 1);
   const [n, setN] = useState(step);
   const [saving, setSaving] = useState(false);
   const C = "var(--green)";
@@ -1634,6 +1636,24 @@ function WeeklyEntrySheet({goal, onClose, onSave, onToast}) {
         </div>
         <div style=${{fontSize:13,color:"var(--sub)",marginBottom:16,lineHeight:1.7}}>
           ${goal.title}<br/>いま ${cur}${!isNaN(t)&&t>0?" / "+t:""}${u}</div>
+
+        <!-- ★よく使う数をすぐ押せるようにする★（2026-08-05 Kai要望）
+             目標が300件のようなときに ＋1 を連打させない。
+             目標の大きさに合わせて刻みを変える（6件なら1/2/3、300件なら5/10/30…）。 -->
+        ${(()=>{
+          const base = (!isNaN(t)&&t>0) ? t : 10;
+          const raw = [1, Math.round(base*0.05), Math.round(base*0.1), Math.round(base*0.25)];
+          const opts = Array.from(new Set(raw.filter(v=>v>=1))).sort((a2,b2)=>a2-b2).slice(0,4);
+          if(opts.length<2) return "";
+          return html`
+            <div style=${{display:"flex",flexWrap:"wrap",gap:7,marginBottom:14}}>
+              ${opts.map(v=>html`
+                <button key=${v} onClick=${()=>setN(Number(n)+v)}
+                  style=${{flex:1,minWidth:62,padding:"9px 6px",borderRadius:9,cursor:"pointer",fontFamily:"inherit",
+                           border:`1px solid ${C}`,background:"transparent",color:C,fontSize:13,fontWeight:700}}>
+                  ＋${v}${u}</button>`)}
+            </div>`;
+        })()}
 
         <!-- 増減。マイナスにすれば間違えて足したぶんを戻せる -->
         <div style=${{display:"flex",alignItems:"center",gap:10,marginBottom:14}}>
@@ -1946,25 +1966,20 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
   const [historyGoal, setHistoryGoal] = useState(null);
   const [sprintEntry, setSprintEntry] = useState(null);   // Sprintの「実績を追加する」
   const [weeklyEntry, setWeeklyEntry] = useState(null);   // 今週の目標に実績を入れる
-  // ★今週の目標を「＋」で1件進める★（2026-08-05）
-  //   今週の実績は記録から自動で数える作りなので、ここでも記録を1件作る。
-  //   数字だけ別に足すと、記録と数字が食い違う。
+  // ★今週の目標に実績を足す★（2026-08-05 Kai指摘で作り直し）
+  //   はじめは時間の記録(DailyLog)を作っていたが、
+  //   「アポ1件取れた」は時間の記録ではない。
+  //   本日の記録に身に覚えのない行が並んでしまうので、実績は実績として別に持つ。
   const addWeeklyOne = async (w, amount) => {
     const u = w.unit || (w.metric_type==="DURATION" ? "分" : "件");
     const step = (amount !== undefined && amount !== null && Number(amount))
       ? Number(amount)
       : ((w.metric_type==="DURATION") ? 30 : 1);
-    const now = new Date();
-    const hm = String(now.getHours()).padStart(2,"0")+":"+String(Math.floor(now.getMinutes()/5)*5).padStart(2,"0");
-    const r = await gasPostJson("saveLog", {
-      time_block: hm,
-      task: step<0 ? (w.title+"（戻した分）") : w.title,
-      focus_level: "",
-      memo: "",
-      quantity: step,
-      primary_weekly_goal_id: w.weekly_goal_id,
-      goal_related: "true",
-      time_classification: "GOAL_DIRECT",
+    const r = await gasPostJson("addGoalEntry", {
+      weekly_goal_id: w.weekly_goal_id,
+      amount: step,
+      category: "OTHER",
+      memo: step<0 ? "戻した分" : "",
     });
     if(r&&r.ok){
       onToast&&onToast(w.title+" を "+(step>0?"+":"")+step+u+" 記録しました");
@@ -3246,10 +3261,10 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
                                     const cl=()=>{clearTimeout(t); e.target.removeEventListener("touchend",cl); e.target.removeEventListener("touchmove",cl);};
                                     e.target.addEventListener("touchend",cl); e.target.addEventListener("touchmove",cl); }}
                 title="長押しで履歴を表示できます"
-                style=${{flexShrink:0,display:"flex",alignItems:"center",gap:3,padding:"4px 9px",borderRadius:8,
+                style=${{flexShrink:0,display:"flex",alignItems:"center",gap:2,padding:"3px 7px",borderRadius:7,
                          border:`1px solid ${C_Q}`,background:"transparent",color:C_Q,
-                         fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>
-                <span style=${{fontSize:12,lineHeight:1}}>＋</span> 追加する</button>
+                         fontSize:9.5,fontWeight:700,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>
+                <span style=${{fontSize:10.5,lineHeight:1}}>＋</span> 追加する</button>
             </div>
             <div style=${{display:"flex",alignItems:"flex-end",gap:10,marginTop:7,marginBottom:3}}>
               <button onClick=${()=>setOpenRow(openRow==="goal"?"":"goal")}
@@ -3348,10 +3363,10 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
             <div style=${{display:"flex",alignItems:"center",gap:8,marginBottom:2}}>
               <span style=${{flex:1,minWidth:0}}>${Pill({color:C_S, text:"2週間Sprint"})}</span>
               <button onClick=${()=>setSprintEntry(sp)}
-                style=${{flexShrink:0,display:"flex",alignItems:"center",gap:3,padding:"4px 9px",borderRadius:8,
+                style=${{flexShrink:0,display:"flex",alignItems:"center",gap:2,padding:"3px 7px",borderRadius:7,
                          border:`1px solid ${C_S}`,background:"transparent",color:C_S,
-                         fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>
-                <span style=${{fontSize:12,lineHeight:1}}>＋</span> 追加する</button>
+                         fontSize:9.5,fontWeight:700,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>
+                <span style=${{fontSize:10.5,lineHeight:1}}>＋</span> 追加する</button>
             </div>
             <div style=${{display:"flex",alignItems:"flex-end",gap:10,marginTop:7,marginBottom:3}}>
               <button onClick=${()=>setOpenRow(openRow==="sprint"?"":"sprint")}
@@ -3372,11 +3387,10 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
             ${sForecast
               ? InfoBox({ color:C_S, onClick:()=>setOpenRow(openRow==="sprint"?"":"sprint"),
                   icon: html`<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>`,
-                  children: sForecast.kind==="pace"
-                    ? (sForecast.percent>=100
-                        ? html`このペースなら、残り <b style=${{color:C_S,fontWeight:800}}>${sForecast.days}日</b>で <b style=${{color:C_S,fontWeight:800}}>やり切れます</b>`
-                        : html`このペースだと残り <b style=${{color:C_S,fontWeight:800}}>${sForecast.days}日</b>で <b style=${{color:C_S,fontWeight:800}}>${sForecast.percent}%</b>。1日 <b style=${{color:C_S,fontWeight:800}}>${sForecast.needPerDay}</b> で最後まで届きます`)
-                    : html`残り <b style=${{color:C_S,fontWeight:800}}>${sForecast.days}日</b>。1日 <b style=${{color:C_S,fontWeight:800}}>${sForecast.needPerDay}</b> 進めれば、このSprintはやり切れます` })
+                  // ★1行に収める★（2026-08-05 Kai指摘）2行になると読みにくい
+                  children: (sForecast.kind==="pace" && sForecast.percent>=100)
+                    ? html`このペースならやり切れます`
+                    : html`1日 <b style=${{color:C_S,fontWeight:800}}>${sForecast.needPerDay}</b> 進めれば、やり切れます` })
               : (sPct===null ? InfoBox({ color:C_S, onClick:()=>setWgSheet(true),
                   icon: html`<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/></svg>`,
                   children: html`今週の目標を数字で決めると、ここに進み具合が出ます` }) : "")}
@@ -3424,8 +3438,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
                   //   伝わっていた。行を入れ物にして、中に別々のボタンを並べる。
                   return html`
                   <div key=${k}
-                    style=${{display:"flex",alignItems:"center",gap:10,width:"100%",padding:"11px 12px",
-                             borderTop:k?"1px solid var(--border)":"none"}}>
+                    style=${{display:"flex",alignItems:"center",gap:10,width:"100%",padding:"13px 12px"}}>
                     <!-- ★バーはタイトルの下に敷く★（2026-08-05）
                          1行に アイコン・名前・バー・数字・＋ を並べると、
                          375pxの画面では名前が必ず切れる。名前を優先する。 -->
@@ -3441,7 +3454,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
                           <span style=${{flexShrink:0,fontSize:12,whiteSpace:"nowrap"}}>
                             <b style=${{color:C_W,fontWeight:800}}>${a}</b><span style=${{color:"var(--sub)"}}> / ${isNaN(t)?"—":t}${u}</span></span>
                         </span>
-                        <span style=${{display:"block",height:5,marginTop:6,background:"var(--border)",borderRadius:99,overflow:"hidden"}}>
+                        <span style=${{display:"block",height:6,marginTop:7,background:"var(--bg)",borderRadius:99,overflow:"hidden"}}>
                           <span style=${{display:"block",height:"100%",width:pct+"%",background:C_W,borderRadius:99}}/>
                         </span>
                       </span>
@@ -8811,7 +8824,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260805-055411";
+const APP_BUILD = "20260805-060220";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 

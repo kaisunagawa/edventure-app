@@ -10392,7 +10392,16 @@ function addGoalEntry(studentEmail, body) {
   const chk = p1RequireUser(studentEmail);
   if (!chk.ok) return chk;
   const goalId = String((body && body.quarterly_goal_id) || "").trim();
-  if (!goalId || !p1OwnedRow("Goals", "quarterly_goal_id", goalId, studentEmail)) {
+  // ★週間目標のぶんも、ここに入れる★（2026-08-05 Kai指摘）
+  //   以前は「＋」で時間の記録(DailyLog)を作っていた。
+  //   だが「アポ1件取れた」は時間の記録ではないので、本日の記録に
+  //   身に覚えのない行が並んでしまっていた。実績は実績として別に持つ。
+  const wGoalId = String((body && body.weekly_goal_id) || "").trim();
+  if (wGoalId) {
+    if (!p1OwnedRow("WeeklyGoals", "weekly_goal_id", wGoalId, studentEmail)) {
+      return { ok: false, error: "not found" };
+    }
+  } else if (!goalId || !p1OwnedRow("Goals", "quarterly_goal_id", goalId, studentEmail)) {
     return { ok: false, error: "not found" };
   }
   const amount = Number(body && body.amount);
@@ -10402,7 +10411,8 @@ function addGoalEntry(studentEmail, body) {
   const rec = {
     entry_id: makeP1Id("ge"),
     student_email: studentEmail,
-    quarterly_goal_id: goalId,
+    quarterly_goal_id: wGoalId ? "" : goalId,
+    weekly_goal_id: wGoalId,
     amount: Math.round(amount * 100) / 100,
     category: GOAL_ENTRY_CATEGORIES[cat] ? cat : "OTHER",
     memo: p1Text_(body && body.memo, 200),
@@ -10410,7 +10420,8 @@ function addGoalEntry(studentEmail, body) {
     created_at: now, updated_at: now, deleted_at: ""
   };
   p1Upsert("GoalEntries", "entry_id", rec);
-  goalEntryBumpCurrent_(studentEmail, goalId, rec.amount);
+  // 3か月目標のぶんだけ「いまの数字」を動かす。週間目標は集計で拾う
+  if (!wGoalId) goalEntryBumpCurrent_(studentEmail, goalId, rec.amount);
   return { ok: true, entry: rec };
 }
 
@@ -10467,7 +10478,7 @@ const P1_SHEETS = {
   //   3か月目標の「いまの数字」を上書きするだけだと、
   //   いつ・何で・いくら増えたのかが残らない。1件ずつ足していけるようにする。
   //   current_value は、この履歴の増減とあわせて必ず一緒に動かす。
-  GoalEntries: ["entry_id","student_email","quarterly_goal_id","amount","category","memo",
+  GoalEntries: ["entry_id","student_email","quarterly_goal_id","weekly_goal_id","amount","category","memo",
     "entry_date","created_at","updated_at","deleted_at"],
   Goals: ["quarterly_goal_id","student_email","title","category","current_value","target_value","unit",
     "start_date","end_date","why","success_condition","evidence","guardrails","priority","status",
@@ -11505,6 +11516,19 @@ function aggregateWeeklyActual(studentEmail, weekStart) {
     return d >= monday && d <= sunday;
   });
 
+  // 「＋」で足した実績（時間の記録ではないもの）。この週のぶんだけ拾う
+  const entryByGoal = {};
+  try {
+    p1List("GoalEntries", studentEmail).forEach(function (e) {
+      if (String(e.deleted_at || "").trim()) return;
+      const wid = String(e.weekly_goal_id || "");
+      if (!wid) return;
+      const d = String(e.entry_date || "").slice(0, 10);
+      if (!(d >= monday && d <= sunday)) return;
+      entryByGoal[wid] = (entryByGoal[wid] || 0) + (Number(e.amount) || 0);
+    });
+  } catch (e) {}
+
   const out = {};
   weeklies.forEach(w => {
     const id = String(w.weekly_goal_id);
@@ -11560,6 +11584,8 @@ function aggregateWeeklyActual(studentEmail, weekStart) {
       });
     }
 
+    // 記録から数えたぶんに、「＋」で足したぶんを加える
+    actual += (entryByGoal[id] || 0);
     out[id] = { actual: actual, metric_type: mt, logCount: mine.length,
                 pendingUnconfirmed: pending };
   });
