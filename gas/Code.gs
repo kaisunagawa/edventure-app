@@ -14746,7 +14746,7 @@ function adminInstallTrigger(email, handler) {
   // ★setupTriggers は冒頭で全トリガーを削除して張り直すため、
   //   稼働中に使うと夜間レポート等を巻き込む。1本だけ足したい時はこちらを使う★
   const allowed = {
-    dailyOpsHealthCheck: function (b) { return b.timeBased().everyDays(1).atHour(7).nearMinute(30); },
+    dailyOpsHealthCheck: function (b) { return b.timeBased().everyDays(1).atHour(23).nearMinute(59); },
     weeklyBackup:        function (b) { return b.timeBased().everyWeeks(1).onWeekDay(ScriptApp.WeekDay.SUNDAY).atHour(3); }
   };
   if (!allowed[name]) return { ok: false, error: "許可されていないハンドラ: " + name };
@@ -14781,7 +14781,8 @@ function setupTriggers() {
   ScriptApp.newTrigger("snsAutoFetchAll").timeBased().everyDays(1).atHour(21).create();
   ScriptApp.newTrigger("dailyLineWinback").timeBased().everyDays(1).atHour(19).create();
   // 運営ヘルスチェック：夜間レポート(22時)＋穴埋めが落ち着いた翌朝7時に、前日の欠落等を管理者へ
-  ScriptApp.newTrigger("dailyOpsHealthCheck").timeBased().everyDays(1).atHour(7).nearMinute(30).create();
+  // 運営レポートは23:59（Kai要望）。22時の夜レポートが出そろってから送る
+  ScriptApp.newTrigger("dailyOpsHealthCheck").timeBased().everyDays(1).atHour(23).nearMinute(59).create();
   console.log("トリガーを設定しました（合計15個）");
 }
 
@@ -15014,7 +15015,14 @@ function dailyOpsHealthCheck(dryRun) {
   const activeEmails = new Set(users.map(u => u.student_email));
 
   const today = formatDate(new Date());
-  const yesterday = formatDate(new Date(Date.now() - 86400000));
+  // ★見る日は、動く時刻で変える★（2026-08-05 Kai要望で23:59へ移動）
+  //   夜のレポートは22時に作られる。
+  //   朝に動かすなら「昨日」、夜に動かすなら「今日」を見ないと、
+  //   ついさっき作られたレポートを見落として「欠落」と報告してしまう。
+  const runHour = Number(Utilities.formatDate(new Date(), "Asia/Tokyo", "H"));
+  const afterNightly = runHour >= 20;
+  const yesterday = afterNightly ? today : formatDate(new Date(Date.now() - 86400000));
+  const dayLabel = afterNightly ? "今日" : "昨日";
   const daysAgoStr = n => formatDate(new Date(Date.now() - n * 86400000));
   const d7 = daysAgoStr(7);
 
@@ -15108,7 +15116,7 @@ function dailyOpsHealthCheck(dryRun) {
   } catch (e) { Logger.log("auto dedupe error: " + e); }
 
   const problems = [];
-  if (missingYesterday.length > 0) problems.push("⚠️ 昨日のレポート欠落 " + missingYesterday.length + "件（記録したのに未生成）");
+  if (missingYesterday.length > 0) problems.push("⚠️ " + dayLabel + "のレポート欠落 " + missingYesterday.length + "件（記録したのに未生成）");
   if (missing7 > 0) problems.push("⚠️ 直近7日の欠落 合計" + missing7 + "件");
   if (stuckResume) problems.push("⚠️ 夜間処理が未完了のまま（再開待ち: " + stuckResume + "）");
   if (triggerCount >= 18) problems.push("⚠️ トリガー数が上限に接近（" + triggerCount + "/20）");
@@ -15127,7 +15135,7 @@ function dailyOpsHealthCheck(dryRun) {
   const lines = [head, today + "（🎓学生 / 💼コーチング）", ""];
 
   // ① 昨日のレポート
-  lines.push("📋 昨日のレポート（" + yesterday + "）");
+  lines.push("📋 " + dayLabel + "のレポート（" + yesterday + "）");
   lines.push("記録 " + loggedYesterday.size + "人 → 生成 " + generatedYesterday.length + "人" + (missingYesterday.length ? " / 欠落 " + missingYesterday.length + "人" : "（全員生成✓）") + (avgYesterday !== null ? " / 平均 " + avgYesterday + "点" : ""));
   if (generatedYesterday.length) {
     lines.push(generatedYesterday.slice(0, 20).map(x => tag(x.em) + nameOf(x.em) + " " + x.score).join(" / "));
