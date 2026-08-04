@@ -646,6 +646,9 @@ function doGet(e) {
       case "shareAchievement": result = shareAchievement(studentEmail, e.parameter); break;
       case "getReport":    result = getReport(studentEmail, e.parameter); break;
       case "getReportList": result = getReportList(studentEmail); break;
+      // レポート画面のまとめ取得（往復の回数を減らすため）
+      case "getReportHome": result = getReportHome(studentEmail); break;
+      case "getReportDetail": result = getReportDetail(studentEmail, e.parameter); break;
       case "getStatusSummary": result = getStatusSummary(studentEmail); break;
       case "getSelfMgmtPower": result = getSelfMgmtPower(studentEmail, e.parameter); break;
       case "getDailyOpsReport": result = getDailyOpsReport(studentEmail, e.parameter); break;
@@ -9927,24 +9930,99 @@ ${outputSpec}`;
 
 // レポート一覧画面の「時間の使い方」サマリー。直近14日の記録から
 // 1日平均の記録量・平均集中・目標関連の割合・よく時間を使っていることを集計する
+// ══════════════════════════════════════════════════════════════════
+// レポート画面のまとめ取得（2026-08-05 Kaiの「読み込みが遅い」報告）
+//
+//   Apps Scriptのウェブアプリは、中身が空の呼び出しでも1回およそ2.5秒かかる
+//   （302リダイレクトで接続が2回発生するため）。実測して分かった。
+//   レポート画面はこれまで7回呼んでいて、しかも
+//   「一覧を取る → 最新日が決まる → その日の中身を取る」の2段階直列だった。
+//   つまり中身が軽くても最低5秒待たされる。呼び出しの数そのものを減らす。
+//
+//   ・getReportHome   … 一覧＋週次＋月次＋時間の使い方（4回 → 1回）
+//   ・getReportDetail … その日のレポート＋記録＋新レポート（3回 → 1回）
+// ══════════════════════════════════════════════════════════════════
+function getReportHome(studentEmail) {
+  const out = { ok: true };
+  // 1つ落ちても画面全体を落とさない（レポートは出るのに月次で失敗、等を避ける）
+  try { out.list = (getReportList(studentEmail) || {}).data || []; } catch (e) { out.list = []; }
+  try { out.weekly = (getWeeklySummary(studentEmail) || {}).data || null; } catch (e) { out.weekly = null; }
+  try { out.monthly = (getMonthlyReview(studentEmail) || {}).data || null; } catch (e) { out.monthly = null; }
+  try { out.timeUse = (getTimeUseSummary(studentEmail) || {}).data || null; } catch (e) { out.timeUse = null; }
+  return out;
+}
+
+function getReportDetail(studentEmail, body) {
+  const date = String((body && body.date) || "").slice(0, 10);
+  if (!date) return { ok: false, error: "no date" };
+  const out = { ok: true, date: date };
+  try { out.report = (getReport(studentEmail, { date: date }) || {}).data || null; } catch (e) { out.report = null; }
+  try { out.logs = (getLogs(studentEmail, { date: date }) || {}).data || []; } catch (e) { out.logs = []; }
+  try {
+    const o = getDailyOpsReport(studentEmail, { date: date });
+    out.ops = (o && o.ok && o.data) ? o : null;
+  } catch (e) { out.ops = null; }
+  return out;
+}
+
 function getTimeUseSummary(studentEmail) {
+  // ★14日分の「時間の内訳」にする★（2026-08-05 Kai要望）
+  //   これまでは記録の「件数」だけを見ていて、何に時間を使った2週間だったのかが
+  //   分からなかった。記録タブの「今日の時間の内訳」と同じ形（分類ごとの時間）を
+  //   直近14日ぶんで出す。数え方も画面・夜のレポートとそろえる
+  //   （実測が無ければ時間帯の長さ。実測のある記録は1,724件中8件しかないため、
+  //    実測だけを数えるとほぼ全部0分になってしまう）。
   const cutoff = formatDate(new Date(Date.now() - 14 * 86400000));
-  const logs = getFilteredRows("DailyLog", "student_email", studentEmail).filter(l => l.date >= cutoff);
+  const logs = getFilteredRows("DailyLog", "student_email", studentEmail)
+    .filter(l => String(l.date).slice(0, 10) >= cutoff && !String(l.deleted_at || "").trim());
   if (logs.length === 0) return { ok: true, data: null };
 
-  const days = new Set(logs.map(l => l.date)).size;
+  const minsOf = function (l) {
+    const am = Number(l.actual_minutes);
+    return am > 0 ? am : timeBlockMinutes(l.time_block);
+  };
+  const days = new Set(logs.map(l => String(l.date).slice(0, 10))).size;
   const focusNums = logs.map(l => parseInt(l.focus_level) || 0).filter(n => n > 0);
-  const goalCount = logs.filter(l => l.goal_related === "true" || l.goal_related === true).length;
-  const taskHours = {};
-  logs.forEach(l => { const t = String(l.task || "").trim(); if (t) taskHours[t] = (taskHours[t] || 0) + 1; });
-  const topTasks = Object.entries(taskHours).sort((a, b) => b[1] - a[1]).slice(0, 3)
-    .map(entry => ({ task: entry[0], hours: entry[1] }));
+
+  let total = 0, measured = 0, classifiedMin = 0, unclassifiedMin = 0, classifiedCount = 0;
+  const byClass = {};
+  logs.forEach(function (l) {
+    const m = minsOf(l);
+    total += m;
+    if (Number(l.actual_minutes) > 0) measured += m;
+    const k = String(l.time_classification || "");
+    if (k) { classifiedCount++; classifiedMin += m; byClass[k] = (byClass[k] || 0) + m; }
+    else unclassifiedMin += m;
+  });
+
+  // 何に時間を使ったか（分類なしのときの手がかりとして残す）
+  const taskMin = {};
+  logs.forEach(l => { const t = String(l.task || "").trim(); if (t) taskMin[t] = (taskMin[t] || 0) + minsOf(l); });
+  const topTasks = Object.entries(taskMin).sort((a, b) => b[1] - a[1]).slice(0, 3)
+    .map(entry => ({ task: entry[0], minutes: entry[1], hours: Math.round(entry[1] / 60 * 10) / 10 }));
 
   return { ok: true, data: {
+    period_days: 14,
+    from: cutoff,
     days,
+    logs: logs.length,
     avgBlocksPerDay: Math.round(logs.length / days * 10) / 10,
     avgFocus: focusNums.length ? Math.round(focusNums.reduce((a, b) => a + b, 0) / focusNums.length * 10) / 10 : null,
-    goalPct: Math.round(goalCount / logs.length * 100),
+    total_minutes: total,
+    measured_minutes: measured,
+    unclassified_minutes: unclassifiedMin,
+    classified_pct: total > 0 ? Math.round(classifiedMin / total * 100) : 0,
+    classified_count_pct: logs.length > 0 ? Math.round(classifiedCount / logs.length * 100) : 0,
+    by_class: byClass,
+    // 目標に直結した割合。分類が半分以上入っていれば分類で、そうでなければ
+    // 従来どおり goal_related で出す（採点エンジンと同じ切り替え方）
+    goalPct: total > 0
+      ? (classifiedMin / total >= 0.5
+          ? Math.round((byClass.GOAL_DIRECT || 0) / total * 100)
+          : Math.round(logs.filter(l => l.goal_related === "true" || l.goal_related === true)
+                           .reduce((a, l) => a + minsOf(l), 0) / total * 100))
+      : 0,
+    goal_source: total > 0 && classifiedMin / total >= 0.5 ? "CLASSIFICATION" : "GOAL_RELATED",
     topTasks
   } };
 }
@@ -10892,7 +10970,9 @@ const REST_CLASSES = { RECOVERY:1, RECOVERY_RELATIONSHIP:1 };
 // ★1日の区切り（画面側の DAY_CUTOFF_HOUR と必ず同じ値にすること）★
 //   深夜0時〜この時刻までの記録は「前の日の続き」として扱う。
 //   夜通しの作業が、暦の日付をまたいだだけで2日に割れるのを防ぐ。
-const DAY_CUTOFF_HOUR_GAS = 4;
+// 0 = 暦の日付どおり（2026-08-05 Kai報告で4→0に戻した）。
+// 画面側の DAY_CUTOFF_HOUR と必ず同じ値にすること。
+const DAY_CUTOFF_HOUR_GAS = 0;
 
 function classifyLogTime_(studentEmail, targetDate, body, current) {
   // 1. 本人の選択（保存時でも、あとからの修正でも最優先）
@@ -12501,6 +12581,7 @@ const ACTION_POLICIES_WRITE = {
 // ランキングや「みんなの頑張り」は共有情報なのでここには入れない
 const ACTION_POLICIES_READ = {
   getUser:{}, getLogs:{}, getReport:{}, getReportList:{}, getHomeData:{}, getGoalTree:{},
+  getReportHome:{}, getReportDetail:{},
   getGameStatus:{}, getJournal:{}, getInsights:{}, getWeeklySummary:{}, getMonthlyReview:{}, getSelfMgmtPower:{}, getDailyOpsReport:{}, getDayPlan:{},
   getTimeUse:{}, getAchievements:{}, getMessages:{}, p1Status2:{}, getTasks:{}, getSprints:{}
 };

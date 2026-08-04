@@ -1267,7 +1267,14 @@ function Toast({msg, onDone}) {
 }
 function formatDateStr(d){ return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); }
 function addDays(s,n){ const d=new Date(s+"T00:00:00"); d.setDate(d.getDate()+n); return formatDateStr(d); }
-const DAY_CUTOFF_HOUR = 4;
+// ★0 = 暦の日付どおり★（2026-08-05 Kai報告で4→0に戻した）
+//   深夜0〜4時を「前の日の続き」として扱ってみたが、
+//   ホームは8/5・記録は8/4と表示がズレて、日付が壊れて見えた。
+//   日をまたぐ作業が割れる問題は、区切りをずらさなくても
+//   「23:00-01:00 を1件のまま扱う」(blockSpan) で解決している。
+//   ずらす必要が出たときは、ここと gas/Code.gs の DAY_CUTOFF_HOUR_GAS を
+//   必ず同じ値にすること。片方だけ変えると日付が食い違う。
+const DAY_CUTOFF_HOUR = 0;
 // ★1日の区切りは深夜4時★（2026-08-05 Kai要望・サーバーの logicalToday_ と同じ値）
 //   午前2時に記録すると、暦の上では新しい日になるが、本人の感覚では前の日の続き。
 //   夜通しの作業（20時〜23時 と 23時〜翌1時）が2日に割れないよう、
@@ -4458,14 +4465,14 @@ function LogScreen({onToast, isActive}) {
     };
     if(blocks.length>1) payload.time_blocks = blocks.join(",");
     else payload.time_block = block;
-    const res = await gasPostJson(blocks.length>1 ? "saveLogMulti" : "saveLog", payload);
-    if(!res.ok){ onToast("保存に失敗しました。もう一度お試しください"); setSaving(false); return; }
-    if(res.xp_gained){ const lv=res.level_up?`  →  Lv.${res.level} へ！`:""; onToast(`+${res.xp_gained} XP 獲得${lv}`); }
-    else onToast(res.updated?"記録を上書きしました"
-      :(blocks.length>1 ? blocks.length+"個の時間帯に保存しました"
-        : (blockMinutes(blocks[0])>60 ? blocks[0]+" を1件として保存しました" : "保存しました")));
-    // 保存内容が分かっているので再取得せず、ローカルの一覧をその場で更新する
-    // （サーバーへの往復が倍になり保存が重く感じられるのを防ぐ）
+    // ★先に画面へ反映してから送る★（2026-08-05 Kai報告「入力後の反映が遅い」）
+    //
+    //   これまではサーバーの応答を待ってから一覧を書き換えていた。
+    //   保存処理はシート全体の読み込み・カレンダー書き込み・XP計算まで行うため
+    //   数秒かかり、そのあいだ画面が止まって見えていた。
+    //   保存する内容はこちらで分かっているので、先に一覧へ入れてしまう。
+    //   失敗したときは、入れた内容を戻して知らせる（黙って無かったことにしない）。
+    const before = logs;
     let next = [...logs];
     blocks.forEach(b=>{
       const saved = {time_block:b, task:task.trim(), focus_level:focus, memo:memo.trim(), goal_related:goalRelated?"true":"false",
@@ -4473,13 +4480,25 @@ function LogScreen({onToast, isActive}) {
       const i = next.findIndex(l=>l.time_block===b);
       if(i>=0) next[i] = {...next[i], ...saved}; else next.push(saved);
     });
-    next.sort((a,b)=>a.time_block>b.time_block?1:-1);
+    next = sortLogsByTime(next);
     setLogs(next);
     try{ localStorage.setItem(LOGS_LS+date, JSON.stringify(next)); }catch(e){}
-    // 保存できたので、対象ブロック分の下書きは不要になった
     blocks.forEach(b=>{ try{ localStorage.removeItem(draftKey(date, b)); }catch(e){} });
     if(blocks.length>1){ setMultiMode(false); setExtraBlocks([]); }
-    setSaving(false);
+    setSaving(false);            // ボタンはここで戻す。送信は裏で続ける
+
+    const res = await gasPostJson(blocks.length>1 ? "saveLogMulti" : "saveLog", payload);
+    if(!res || !res.ok){
+      // 入れたものを元に戻す（サーバーに無いものを画面に残さない）
+      setLogs(before);
+      try{ localStorage.setItem(LOGS_LS+date, JSON.stringify(before)); }catch(e){}
+      onToast("保存できませんでした。もう一度お試しください");
+      return;
+    }
+    if(res.xp_gained){ const lv=res.level_up?`  →  Lv.${res.level} へ！`:""; onToast(`+${res.xp_gained} XP 獲得${lv}`); }
+    else onToast(res.updated?"記録を上書きしました"
+      :(blocks.length>1 ? blocks.length+"個の時間帯に保存しました"
+        : (blockMinutes(blocks[0])>60 ? blocks[0]+" を1件として保存しました" : "保存しました")));
     // Googleカレンダーへ書き戻し（連携済みのときだけ・待たずに裏で実行）。
     // 元の予定とタイトルが完全一致するブロックだけ、新規作成せずその予定に
     // ✅を追加する（内容が違う場合は別イベントとして作成し、予定の文言を守る）
@@ -5316,27 +5335,72 @@ function ReportScreen() {
     }catch(e){}
   };
 
+  // ★レポート画面の読み込みを速くする★（2026-08-05 Kai報告）
+  //
+  //   実測すると、Apps Scriptは中身が空の呼び出しでも1回2.5秒かかる
+  //   （302リダイレクトで接続が2回起きるため）。
+  //   これまでは7回呼んでいて、しかも
+  //   「一覧を取る → 最新日が決まる → その日の中身を取る」の2段階直列。
+  //   中身が軽くても最低5秒待たされていた。
+  //
+  //   ①呼び出しをまとめる（7回 → 2回）
+  //   ②前に見た内容を端末に持っておき、まずそれを表示する（体感ゼロ秒）
+  //     …記録タブで既にうまくいっている方式をここにも入れる
+  const RPT_LS = "jiroku_report_home";
+  const RPT_D_LS = "jiroku_report_detail_";
   useEffect(()=>{
-    gasApi("getReportList").then(r=>{
-      if(r.ok && r.data.length>0){
-        setReportList(r.data);
-        setDate(r.data[0].date);
+    // まず端末のキャッシュで画面を組み立てる
+    try{
+      const c = JSON.parse(localStorage.getItem(RPT_LS)||"null");
+      if(c){
+        if(c.list&&c.list.length){ setReportList(c.list); setDate(c.list[0].date); }
+        if(c.weekly) setWeeklySummary(c.weekly);
+        if(c.monthly) setMonthlyReview(c.monthly);
+        if(c.timeUse) setTimeUse(c.timeUse);
+        setListLoading(false);
+      }
+    }catch(e){}
+    gasApi("getReportHome").then(r=>{
+      if(r && r.ok){
+        if(r.list&&r.list.length){ setReportList(r.list); setDate(d=>d||r.list[0].date); }
+        if(r.weekly) setWeeklySummary(r.weekly);
+        if(r.monthly) setMonthlyReview(r.monthly);
+        if(r.timeUse) setTimeUse(r.timeUse);
+        try{ localStorage.setItem(RPT_LS, JSON.stringify(
+          {list:r.list||[], weekly:r.weekly||null, monthly:r.monthly||null, timeUse:r.timeUse||null})); }catch(e){}
       }
       setListLoading(false);
     });
-    gasApi("getWeeklySummary").then(r=>{ if(r.ok && r.data) setWeeklySummary(r.data); });
-    gasApi("getMonthlyReview").then(r=>{ if(r.ok && r.data) setMonthlyReview(r.data); });
-    gasApi("getTimeUseSummary").then(r=>{ if(r.ok && r.data) setTimeUse(r.data); });
   },[]);
 
   useEffect(()=>{
     if(!date) return;
-    setLoading(true); setView("report"); setExpandedBreakdown(null);
-    // 新しい日次レポート（featureがある人だけ返る）
-    gasApi("getDailyOpsReport",{date}).then(r=>{ setOps(r && r.ok && r.data ? r : null); }).catch(()=>setOps(null));
-    Promise.all([gasApi("getReport",{date}),gasApi("getLogs",{date})]).then(([r,l])=>{
-      setReport(r.ok?r.data:null); if(l.ok) setLogs(l.data); setLoading(false);
+    setView("report"); setExpandedBreakdown(null);
+    let cached = null;
+    try{ cached = JSON.parse(localStorage.getItem(RPT_D_LS+date)||"null"); }catch(e){}
+    if(cached){
+      setReport(cached.report||null); setLogs(cached.logs||[]); setOps(cached.ops||null);
+      setLoading(false);                    // 前に見た内容をすぐ出す
+    } else {
+      setReport(null); setLogs([]); setOps(null); setLoading(true);
+    }
+    let alive = true;
+    gasApi("getReportDetail",{date}).then(r=>{
+      if(!alive) return;
+      if(r && r.ok){
+        setReport(r.report||null); setLogs(r.logs||[]); setOps(r.ops||null);
+        // 確定したレポートは変わらないので、そのまま取っておいてよい。
+        // 確定前の日も、次に開いた時にすぐ出したいので同じように持つ（裏で更新される）
+        try{
+          localStorage.setItem(RPT_D_LS+date, JSON.stringify({report:r.report||null, logs:r.logs||[], ops:r.ops||null}));
+          const limit = addDays(logicalTodayStr(), -30);
+          Object.keys(localStorage).forEach(k=>{
+            if(k.startsWith(RPT_D_LS) && k.slice(RPT_D_LS.length) < limit) localStorage.removeItem(k); });
+        }catch(e){}
+      }
+      setLoading(false);
     });
+    return ()=>{ alive=false; };
   },[date]);
 
   const fmtDate = d => {
@@ -5421,19 +5485,57 @@ function ReportScreen() {
               </div>
             `}
             <${ScoreTrend} list=${reportList}/>
-            ${timeUse&&html`
+            <!-- ★時間の使い方は「2週間ぶんの内訳」にする★（2026-08-05 Kai要望）
+                 これまでは記録の件数（1日平均◯時間帯）だけで、
+                 何に時間を使った2週間だったのかが分からなかった。
+                 記録タブの「今日の時間の内訳」と同じ形を14日ぶんで出す。 -->
+            ${timeUse&&(()=>{
+              const total = timeUse.total_minutes||0;
+              const hm = m => m>=60 ? (Math.floor(m/60)+"時間"+(m%60?(m%60)+"分":"")) : (m+"分");
+              const by = timeUse.by_class||{};
+              // 旧分類（回復・人間関係）で保存された記録も、そのまま行として出す
+              const keys = TIME_CLASS_OPTS.map(([k])=>k)
+                .concat(Object.keys(by).filter(k=>!TIME_CLASS_LABEL[k]||!TIME_CLASS_OPTS.some(([o])=>o===k)));
+              const seen = {};
+              return html`
               <div class="card" style=${{marginBottom:8}}>
                 <div class="card-label">時間の使い方（直近14日・記録${timeUse.days}日分）</div>
-                <div style=${{display:"flex",gap:8,marginBottom:12}}>
-                  ${[["1日平均",timeUse.avgBlocksPerDay+"時間帯"],["平均集中",timeUse.avgFocus!==null?timeUse.avgFocus+" / 5":"−"],["目標関連",timeUse.goalPct+"%"]].map(([l,v])=>html`
-                    <div key=${l} style=${{flex:1,background:"var(--bg)",borderRadius:10,padding:"10px 6px",textAlign:"center"}}>
-                      <div style=${{fontSize:13,fontWeight:800,color:"var(--accent)",lineHeight:1.3}}>${v}</div>
-                      <div style=${{fontSize:10,color:"var(--sub)",marginTop:3}}>${l}</div>
+                ${total===0
+                  ? html`<div style=${{fontSize:12,color:"var(--sub)",lineHeight:1.8}}>
+                      まだ時間が記録されていません。</div>`
+                  : html`
+                    ${keys.map(k=>{
+                      if(seen[k]) return "";
+                      seen[k]=1;
+                      const m = by[k]||0;
+                      const pct = total>0?Math.round(m/total*100):0;
+                      return html`<div key=${k} style=${{marginBottom:8}}>
+                        <div style=${{display:"flex",justifyContent:"space-between",alignItems:"baseline",fontSize:12,marginBottom:4}}>
+                          <span style=${{color:m?"var(--text)":"var(--sub)",fontWeight:m?600:500}}>${TIME_CLASS_LABEL[k]||k}</span>
+                          <span style=${{color:"var(--sub)"}}>${m?hm(m):"—"}${m?"（"+pct+"%）":""}</span>
+                        </div>
+                        <div style=${{height:6,background:"var(--bg)",borderRadius:99,overflow:"hidden"}}>
+                          <div style=${{height:"100%",width:pct+"%",background:"var(--accent)",borderRadius:99}}/>
+                        </div>
+                      </div>`;
+                    })}
+                    ${timeUse.unclassified_minutes>0&&html`
+                      <div style=${{fontSize:12,color:"var(--sub)",marginTop:10,lineHeight:1.8}}>
+                        未分類 ${hm(timeUse.unclassified_minutes)}（記録タブの「まとめて分類する」から選べます）</div>`}
+                    <div style=${{display:"flex",gap:8,margin:"12px 0 4px"}}>
+                      ${[["合計",hm(total)],["平均集中",timeUse.avgFocus!==null?timeUse.avgFocus+" / 5":"−"],
+                         ["目標に直結",timeUse.goalPct+"%"]].map(([l,v])=>html`
+                        <div key=${l} style=${{flex:1,background:"var(--bg)",borderRadius:10,padding:"10px 6px",textAlign:"center"}}>
+                          <div style=${{fontSize:13,fontWeight:800,color:"var(--accent)",lineHeight:1.3}}>${v}</div>
+                          <div style=${{fontSize:10,color:"var(--sub)",marginTop:3}}>${l}</div>
+                        </div>`)}
                     </div>
-                  `)}
-                </div>
-                ${timeUse.topTasks.length>0&&html`
-                  <div style=${{fontSize:11,color:"var(--sub)",fontWeight:500,marginBottom:7}}>よく時間を使っていること</div>
+                    <div style=${{fontSize:10.5,color:"var(--sub)",lineHeight:1.8,marginBottom:4}}>
+                      分類できた時間 ${timeUse.classified_pct}%・件数 ${timeUse.classified_count_pct}%
+                      ${timeUse.goal_source==="GOAL_RELATED"?html`<br/>分類が半分に届いていないため、「目標に直結」は旧方式で出しています`:""}
+                    </div>`}
+                ${timeUse.topTasks&&timeUse.topTasks.length>0&&html`
+                  <div style=${{fontSize:11,color:"var(--sub)",fontWeight:500,margin:"10px 0 7px"}}>よく時間を使っていること</div>
                   <div style=${{display:"flex",flexDirection:"column",gap:6}}>
                     ${timeUse.topTasks.map(t=>html`
                       <div key=${t.task} style=${{display:"flex",alignItems:"center",gap:8}}>
@@ -5441,13 +5543,13 @@ function ReportScreen() {
                         <div style=${{width:80,height:6,background:"var(--bg)",borderRadius:99,flexShrink:0}}>
                           <div style=${{width:Math.min(100,t.hours/timeUse.topTasks[0].hours*100)+"%",height:"100%",borderRadius:99,background:"var(--accent)"}}/>
                         </div>
-                        <div style=${{fontSize:11,color:"var(--sub)",width:30,textAlign:"right",flexShrink:0}}>${t.hours}h</div>
+                        <div style=${{fontSize:11,color:"var(--sub)",width:36,textAlign:"right",flexShrink:0}}>${t.hours}h</div>
                       </div>
                     `)}
                   </div>
                 `}
-              </div>
-            `}
+              </div>`;
+            })()}
             ${(()=>{
               // 月ごとにグループ化して表示（例: 2026-07 → 「2026年7月」）。
               // reportListは新しい順で届くので、月グループも自然に新しい月が上になる
@@ -7977,7 +8079,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260805-034855";
+const APP_BUILD = "20260805-035815";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
