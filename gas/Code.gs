@@ -6824,6 +6824,40 @@ function nightlyReport() {
       appendReportRow(job.date, user.student_email, report, logs.length);
       haveReport.add(user.student_email + "|" + job.date);
       reportLogCount.set(user.student_email + "|" + job.date, logs.length);
+
+      // ★新しい5項目のレポートの点数を、この夜のうちに確定させる★（2026-08-05）
+      //
+      //   これまでこの処理は手動実行用の adminRunNightlyReport にしか入っておらず、
+      //   実際に毎晩動く側（この関数）には入っていなかった。そのため
+      //   ・LINEには古いAIの点数が送られ、アプリの画面と食い違う
+      //   ・「一度作られたレポートは変わらない」が効かない
+      //   という状態だった。機能を全員に開くにあたって、こちらへ移す。
+      try {
+        if (hasFeature(user, OPS_FEATURE_KEY)) {
+          const ops = getDailyOpsReport(user.student_email, { date: job.date });
+          if (ops && ops.ok && ops.data && ops.data.displayed_score !== null &&
+              ops.data.displayed_score !== undefined) {
+            report.__ops_score = ops.data.displayed_score;   // LINEにも同じ点数を送る
+          }
+          finalizeDailyOpsReport(user.student_email, job.date);   // 以後この日の点数は動かない
+          // 自己経営力ランキング用の総合点を温めておく（1人数秒かかるため）。
+          // ただしレポート生成そのものを圧迫しないよう、時間に余裕がある時だけ。
+          if (Date.now() - startedAt < NIGHTLY_REPORT_TIME_BUDGET_MS * 0.7) {
+            try { smpOverallCached_(user.student_email, true); } catch (e2) {}
+          }
+          // 点数が画面と食い違っていないか、夜のうちに自分で確かめる（2026-08-04 Kaiの指示）
+          try {
+            const dv = (ops && ops.ok && ops.data) ? ops.data.displayed_score : null;
+            const lst = getReportList(user.student_email);
+            const lrow = (lst.data || []).find(function (x) { return String(x.date).slice(0, 10) === job.date; });
+            const lv = lrow ? lrow.score : null;
+            if (dv !== null && lv !== null && Number(dv) !== Number(lv)) {
+              authAudit("SCORE_MISMATCH", { result: "DENY", action: "nightlyReport",
+                failureReason: user.student_email + " " + job.date + " detail=" + dv + " list=" + lv });
+            }
+          } catch (e3) {}
+        }
+      } catch (e) { /* 新レポートが作れなくても、従来の配信は止めない */ }
       // 穴埋め分は当日の文脈で送ると混乱するため、LINE/コーチ通知は当日分のみ
       if (!job.backfill) {
         sendReportLineMessage(user, report);
