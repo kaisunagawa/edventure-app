@@ -79,8 +79,23 @@ function fetchWithTimeout(req, ms) {
 self.addEventListener('fetch', e => {
   const url = new URL(e.request.url);
 
-  // アプリ本体(HTML): ネットワーク優先（2.5秒でキャッシュにフォールバック）。
-  // デプロイ直後は最新が表示され、回線が遅い時はキャッシュで即起動する
+  // 版番号だけの小さなファイル。ここは必ず最新を見る（キャッシュしない）
+  if (url.pathname.indexOf('/version.json') !== -1) {
+    e.respondWith(fetch(e.request, { cache: 'no-store' }).catch(() => new Response('{}', { headers: { 'Content-Type': 'application/json' } })));
+    return;
+  }
+
+  // アプリ本体(HTML): キャッシュ優先で即表示し、裏で最新を取り直す
+  // （stale-while-revalidate）。
+  //
+  // ★なぜネットワーク優先をやめたか★（2026-08-05）
+  //   以前は毎回ネットワークを最大2.5秒待ってから表示していた。回線が普通に
+  //   繋がっている端末ほど「毎回きっちり待たされる」ことになり、起動が重い
+  //   最大の原因だった（本体は約180KB）。
+  //   新しい版が届かなくなるのでは、という心配は要らない。裏で取り直した結果は
+  //   次の起動で使われるうえ、アプリ側が version.json（数十バイト）で版番号を
+  //   見張っていて、変わっていればその場で読み込み直す。
+  //   つまり「表示は即座・更新は確実」の両方が成り立つ。
   if (e.request.mode === 'navigate') {
     e.respondWith((async () => {
       const cache = await caches.open(CACHE);
@@ -89,15 +104,21 @@ self.addEventListener('fetch', e => {
       //   コーチ画面を開くと本体のキャッシュが置き換わり、通信が遅いときに
       //   別の画面が返って「開かない・回り続ける」ことがあった（2026-08-03）。
       const shellKey = url.pathname.indexOf('/coach') !== -1 ? 'app-shell-coach' : 'app-shell';
-      try {
-        const res = await fetchWithTimeout(e.request, 2500);
-        if (res.ok) cache.put(shellKey, res.clone());
-        return res;
-      } catch {
-        const cached = await cache.match(shellKey);
-        if (cached) return cached;
-        return fetch(e.request);
+      const cached = await cache.match(shellKey);
+      // 裏での取り直し。表示を待たせないので、ここではawaitしない
+      const revalidate = fetch(e.request)
+        .then(res => { if (res.ok) cache.put(shellKey, res.clone()); return res; })
+        .catch(() => null);
+      if (cached) {
+        e.waitUntil(revalidate);   // 応答を返した後もSWを生かして取り直しを完了させる
+        return cached;
       }
+      // 初回訪問（キャッシュなし）だけはネットワークを待つ
+      const res = await revalidate;
+      if (res) return res;
+      return fetchWithTimeout(e.request, 8000).catch(() => new Response(
+        '<meta charset="utf-8"><p style="font-family:sans-serif;padding:24px">通信できませんでした。電波の良い場所でもう一度開いてください。</p>',
+        { headers: { 'Content-Type': 'text/html; charset=utf-8' } }));
     })());
     return;
   }

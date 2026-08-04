@@ -283,6 +283,19 @@ sys.exit(1 if missing else 0)
     fi
   fi
 
+  # ★version.json と APP_BUILD は必ず同じ値★（2026-08-05）
+  #   更新の検知は version.json（数十バイト）を見るようにした。
+  #   ここがずれると「更新が届かない」か「毎回リロードし続ける」のどちらかになる。
+  build_html=$(grep -o '^const APP_BUILD = "[^"]*"' ../index.html | head -1 | sed 's/.*"\(.*\)"/\1/')
+  build_json=$(grep -o '"build"[[:space:]]*:[[:space:]]*"[^"]*"' ../version.json 2>/dev/null | head -1 | sed 's/.*"\([^"]*\)"$/\1/')
+  if [ -z "$build_json" ]; then
+    ng "version.json が無い/読めない ─ 更新検知が働かない"
+  elif [ "$build_html" != "$build_json" ]; then
+    ng "version.json($build_json) と APP_BUILD($build_html) が違う ─ 更新が届かないか、再読み込みが止まらなくなる"
+  else
+    ok "version.json と APP_BUILD が一致"
+  fi
+
   # ★定義していない定数を参照していないか★（2026-08-03）
   #   SMP_SHORT を参照だけ入れて定義を忘れ、レポート画面が真っ赤になった。
   #   構文としては正しいので node --check では見つからない。

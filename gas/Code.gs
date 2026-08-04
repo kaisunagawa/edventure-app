@@ -1701,7 +1701,18 @@ function computeSelfMgmtPower(studentEmail, weekStart) {
       calculation_version: SMP_VERSION, calculated_at: calculatedAt
     };
   });
-  return { period_start: monday, period_end: sunday, version: SMP_VERSION, metrics: rows };
+  // ★自己経営力の総合点★（2026-08-05 Kai要望）
+  //   これまで5つの力が別々に出るだけで、「全体としてどうなのか」を表す
+  //   1つの数字が無かった。確かに測れている（暫定でない）力の平均を総合点にする。
+  //   測れていない力を0点として混ぜると、記録が少ない人ほど不当に低く出るため、
+  //   分母には入れない。何本ぶんの平均なのかを evaluated_count で添える。
+  const solid = rows.filter(function (m) {
+    return m.evaluation_state === "evaluated" && m.score !== null && !m.provisional; });
+  const overall = solid.length
+    ? Math.round(solid.reduce(function (a, m) { return a + Number(m.score); }, 0) / solid.length)
+    : null;
+  return { period_start: monday, period_end: sunday, version: SMP_VERSION, metrics: rows,
+           overall_score: overall, evaluated_count: solid.length, metric_count: rows.length };
 }
 
 function getSelfMgmtPower(studentEmail, body) {
@@ -2860,7 +2871,12 @@ function quickLog(studentEmail, body) {
   const pad2 = (n) => String(n).padStart(2, "0");
   const curBlock = pad2(hour) + ":00";
   const nowStr = pad2(hour) + ":" + pad2(now.getMinutes());
-  const today = formatDate(now);
+  // ★1日の区切りは深夜4時★（2026-08-05 Kai要望）
+  //   午前2時55分に「3時間前から作業していた」と話すと、暦の上では前日23時台になる。
+  //   そのまま前日へ書くと、20時〜23時と23時〜翌1時が別々の日に割れてしまい、
+  //   ひと続きの夜の作業が2日に分断されていた。
+  //   深夜0時〜4時は「前の日の続き」として、同じ日付にまとめる。
+  const today = logicalToday_(now);
 
   const user = sheetToObjects(getSheet("Users")).find(u => u.student_email === studentEmail);
   const goalsText = user ? effectiveGoalsText(user.student_email, user) : "";
@@ -3020,6 +3036,7 @@ ${text}
       tb = (impliesNow && startTb < nowStr) ? startTb + "-" + nowStr : startTb;
     }
     const sr = saveLog(studentEmail, {
+      date: today,            // ★深夜は前日の続きとして書く★（暦の日付ではない）
       time_block: tb,
       task: String(r.task || "記録").slice(0, 60),
       focus_level: FOCUS_LABELS[fnum],
@@ -3157,9 +3174,20 @@ function dedupeOwnerJirokuEvents(days) {
   return { ok: true, scanned: scanned, removed: removed, calendars: perCal, events: debugList.sort() };
 }
 
+// ★「いまはどの日として数えるか」★（2026-08-05）
+//   深夜0時〜DAY_CUTOFF_HOUR_GAS時は、暦の上では新しい日だが、
+//   本人の感覚では前の日の続きである。記録の日付・XP・連続記録は
+//   すべてこの「1日」で数える。暦の日付をそのまま使うと、
+//   夜通しの作業が2日に割れ、深夜の記録にXPが付かなくなる。
+function logicalToday_(base) {
+  const d = base ? new Date(base) : new Date();
+  const h = Number(Utilities.formatDate(d, "Asia/Tokyo", "H"));
+  return formatDate(h < DAY_CUTOFF_HOUR_GAS ? new Date(d.getTime() - 24 * 60 * 60 * 1000) : d);
+}
+
 function saveLog(studentEmail, body) {
   const sheet = getSheet("DailyLog");
-  const today = formatDate(new Date());
+  const today = logicalToday_();
   const now = new Date().toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" });
 
   // 対象日: 指定があれば過去日の編集も可（未来日は不可）
@@ -3340,7 +3368,7 @@ function saveLogMulti(studentEmail, body) {
     headers = headers.concat(["xp_awarded"]);
   }
 
-  const today = formatDate(new Date());
+  const today = logicalToday_();   // 深夜は前日の続きとして数える（saveLogと同じ区切り）
   const targetDate = (body.date && /^\d{4}-\d{2}-\d{2}$/.test(String(body.date)) && String(body.date) <= today)
     ? String(body.date) : today;
   const isPast = targetDate !== today;
@@ -3753,7 +3781,49 @@ function buildReportRankingSet(emailSet, allReports, windowDays) {
       source: v.source, date: v.date });
   });
   scores.sort(function (a, b) { return (b.score - a.score) || (b.precise - a.precise); });
-  return { latestDate: latestDate, cutoff: cutoff, scores: scores };
+  return { latestDate: latestDate, cutoff: cutoff, scores: scores,
+           prev: buildPrevRankingScores_(has, allReports, latestDate, windowDays) };
+}
+
+// ★前回のランキングの並び★（↑↓の判定に使う）
+//
+// なぜ必要か（2026-08-05 Kai指摘）:
+//   これまで ↑↓ は「自分の点数が前回より上がったか」で出していた。
+//   だが利用者が見ているのは順位である。全員の点数が下がった日に
+//   自分だけ下がり幅が小さければ、2位→1位に上がっているのに ▼ が出る。
+//   実際にKaiの画面でそうなった。順位の増減で判定するのが正しい。
+//
+// 「前回」＝最新日より前で、その人がいちばん最後にレポートを書いた日。
+// 今の点数（新レポート）は混ぜない。当時の点数どうしで並べる。
+function buildPrevRankingScores_(has, allReports, latestDate, windowDays) {
+  if (!latestDate) return [];
+  const prevByEmail = new Map();
+  allReports.forEach(function (r) {
+    if (!has(r.student_email)) return;
+    if (!(String(r.date) < String(latestDate))) return;   // 最新日そのものは除く
+    const cur = prevByEmail.get(r.student_email);
+    if (!cur || r.date > cur.date) prevByEmail.set(r.student_email, r);
+  });
+  let prevDate = null;
+  prevByEmail.forEach(function (r) { if (!prevDate || r.date > prevDate) prevDate = r.date; });
+  if (!prevDate) return [];
+  const noWindow = !(windowDays > 0);
+  const cutoff = noWindow ? null
+    : formatDate(new Date(new Date(prevDate + "T00:00:00").getTime() - (windowDays - 1) * 86400000));
+  const out = [];
+  prevByEmail.forEach(function (r, email) {
+    if (!(noWindow || r.date >= cutoff)) return;
+    const s = Number(r.score) || 0;
+    out.push({ email: email, score: s, precise: Number(r.score_precise) || s });
+  });
+  out.sort(function (a, b) { return (b.score - a.score) || (b.precise - a.precise); });
+  return out;
+}
+
+// 並び順の中での順位（1始まり）。居なければ null
+function rankInScores_(scores, email) {
+  for (let i = 0; i < (scores || []).length; i++) if (scores[i].email === email) return i + 1;
+  return null;
 }
 
 function getRanking(studentEmail) {
@@ -3762,7 +3832,8 @@ function getRanking(studentEmail) {
   const allUsersForCohort = sheetToObjects(getSheet("Users"));
   const meU = allUsersForCohort.find(u => u.student_email === studentEmail);
   const myCohort = String((meU && meU.cohort) || "").trim();
-  const CACHE_KEY = "ranking_scores_v6_" + (myCohort || "main");
+  // v7: 前回の並び(prev)を持つようになったため、旧キャッシュと混ぜない
+  const CACHE_KEY = "ranking_scores_v7_" + (myCohort || "main");
   let payload;
   const cached = CacheService.getScriptCache().get(CACHE_KEY);
   if (cached) {
@@ -3779,19 +3850,32 @@ function getRanking(studentEmail) {
     // 一度書いたきり止まっている人がいつまでも分母に残らないようにするための期間しばり。
     // 一度も記録がない人はそもそもレポートが無いので、これまで通り対象外
     const cur = buildReportRankingSet(active, allReports, RANKING_WINDOW_DAYS);
-    payload = { date: cur.latestDate, scores: cur.scores };
+    payload = { date: cur.latestDate, scores: cur.scores, prev: cur.prev || [] };
     try { CacheService.getScriptCache().put(CACHE_KEY, JSON.stringify(payload), 300); } catch (e) { /* サイズ超過時は無視 */ }
   }
 
   const scores = payload.scores || [];
   if (scores.length < 2) return { ok: true, data: null };
 
-  // トレンド（↑↓）は本人の直近2回のレポートのスコア推移で判定する
+  // ★トレンド（▲▼）は「順位」の増減で出す★（2026-08-05 Kai指摘で修正）
+  //   以前は点数の増減で出していたため、2位→1位に上がった日でも
+  //   点数が前日より低ければ ▼ になっていた。見ている人は順位の話をしている。
   const myReports = getFilteredRows("Reports", "student_email", studentEmail).sort((a, b) => b.date > a.date ? 1 : -1);
-  const myTrend = () => {
+  const prevScores = payload.prev || [];
+  const myPrevRank = () => {
+    if (!prevScores.length) return null;
+    const r = rankInScores_(prevScores, studentEmail);
+    if (r) return r;
+    // 共有オフなどで並びに入っていない人は、当時の自分の点数から位置を出す
     if (myReports.length < 2) return null;
-    const cs = Number(myReports[0].score) || 0, ps = Number(myReports[1].score) || 0;
-    return cs > ps ? "up" : cs < ps ? "down" : "same";
+    const ps = Number(myReports[1].score) || 0;
+    return prevScores.filter(function (s) { return s.score > ps; }).length + 1;
+  };
+  const myTrend = (curRank) => {
+    if (!curRank) return null;
+    const pr = myPrevRank();
+    if (!pr) return null;                       // 前回が無い＝初参加。印は出さない
+    return curRank < pr ? "up" : curRank > pr ? "down" : "same";   // 順位は小さいほど上位
   };
 
   // ★見ている本人の点数は、画面と必ず同じにする★（2026-08-03 Kai指摘）
@@ -3824,7 +3908,7 @@ function getRanking(studentEmail) {
     const myScore = (myOps === null) ? scores[idx].score : myOps;
     const rank = (myOps === null) ? (idx + 1)
       : (scores.filter(function (s) { return s.email !== studentEmail && s.score > myScore; }).length + 1);
-    return { ok: true, data: { rank: rank, total: scores.length, score: myScore, trend: myTrend() } };
+    return { ok: true, data: { rank: rank, total: scores.length, score: myScore, trend: myTrend(rank) } };
   }
 
   // 「みんなの頑張り」を非表示にしている本人は共有scoresから除外されるため、ここで個別救済。
@@ -3832,7 +3916,7 @@ function getRanking(studentEmail) {
   if (myReports.length) {
     const myScore = Number(myReports[0].score) || 0;
     const rank = scores.filter(s => s.score > myScore).length + 1;
-    return { ok: true, data: { rank, total: scores.length + 1, score: myScore, trend: myTrend() } };
+    return { ok: true, data: { rank, total: scores.length + 1, score: myScore, trend: myTrend(rank) } };
   }
   // まだレポートが無い人（＝未記録）にも「今の参加人数」は見せる。rank=nullで
   // 「◯人が参加中・記録するとランキングに載る」と案内できるようにする
@@ -3844,6 +3928,27 @@ function getRanking(studentEmail) {
 // 「みんなの頑張り」のランキングは、ホームの「ステータス」と同じ累計基準。
 // 見ている場所によって基準がバラバラだと分かりにくいため一本化している。
 // レポートスコア（直近レポートの点数）のランキングも別途あわせて返す。
+// ★自己経営力の総合点（キャッシュ付き）★（2026-08-05）
+//   週次の計算は1人あたり数秒かかる。ランキングで全員ぶん毎回回すと画面が開かない。
+//   計算結果を6時間だけ取っておき、無ければ（かつ時間に余裕があれば）その場で計算する。
+//   allowCompute=false のときは、キャッシュに無ければ null を返してすぐ諦める。
+function smpOverallCached_(studentEmail, allowCompute) {
+  const key = "smpall_" + sha256Hex(studentEmail + "|" + SMP_VERSION + "|" + OPS_CALC_VERSION +
+                                    "|" + mondayOf(formatDate(new Date()))).slice(0, 40);
+  try {
+    const hit = CacheService.getScriptCache().get(key);
+    if (hit !== null && hit !== undefined) return hit === "" ? null : Number(hit);
+  } catch (e) {}
+  if (!allowCompute) return null;
+  let v = null;
+  try {
+    const r = computeSelfMgmtPower(studentEmail, null);
+    v = (r && r.overall_score !== null && r.overall_score !== undefined) ? r.overall_score : null;
+  } catch (e) { v = null; }
+  try { CacheService.getScriptCache().put(key, v === null ? "" : String(v), 6 * 60 * 60); } catch (e) {}
+  return v;
+}
+
 function getCommunity(studentEmail) {
   // ラインの分離：学生（cohort付き）は学生同士、クライアントはクライアント同士だけが見える
   const allUsersC = sheetToObjects(getSheet("Users"));
@@ -3878,19 +3983,35 @@ function getCommunity(studentEmail) {
     return v ? v.score : null;
   };
 
+  // ★ステータスランキングを「自己経営力ランキング」に置き換える★（2026-08-05 Kai要望）
+  //   旧ステータスは XP・記録数など「量」の指標で、いま見せている
+  //   自己経営の状態（5つの力）と別物だった。同じ画面に別の物差しが2本あると
+  //   どちらを見ればいいのか分からなくなるため、自己経営力の総合点に統一する。
+  //   総合点が出ていない人（記録が少なく、確かに測れた力が1つも無い人）は
+  //   ランキングに載せない。0点として並べると、始めたばかりの人が最下位に固定される。
+  //   1人ぶんの計算に数秒かかるため、全員ぶんをその場で回すと画面が開かない。
+  //   6時間キャッシュし、1回のリクエストで新しく計算するのは時間の許す範囲だけにする。
+  //   夜のレポート生成時にも温めておくので、通常は全員ぶんキャッシュに乗っている。
+  const commStart = Date.now();
+  const smpTotalOf = function (email) {
+    const uu = allUsersC.find(function (x) { return x.student_email === email; });
+    if (!hasFeature(uu, SMP_FEATURE_KEY)) return null;
+    return smpOverallCached_(email, Date.now() - commStart < 45000);
+  };
   const list = users.map(u => {
     const isMe = u.student_email === studentEmail;
-    const status = statuses[u.student_email];
-    const latestReport = latestReportByEmail.get(u.student_email);
     return {
       isMe,
+      email: u.student_email,
       nickname: maskName(u, isMe),
       avatar: maskAvatar(u, isMe),
       streak: Number(u.streak || 0),
-      score: status ? status.score : 0,
+      score: smpTotalOf(u.student_email),
       reportScore: reportScoreOf(u.student_email)
     };
-  }).sort((a, b) => b.score - a.score);
+  }).filter(x => x.score !== null)
+    .map(x => { delete x.email; return x; })
+    .sort((a, b) => b.score - a.score);
 
   // レポートランキングは「その人の最新レポートの点数」で競う場（合計/継続はステータス側が担う）。
   // 直近7日以内にレポートがある人だけを対象にし、ホームの getRanking と基準を統一している
@@ -6767,6 +6888,10 @@ function adminRunNightlyReport(email) {
           }
           // ここで締める。以後この日の点数は動かない
           finalizeDailyOpsReport(user.student_email, targetDate);
+          // ★自己経営力ランキング用の総合点を、この夜のうちに計算しておく★（2026-08-05）
+          //   1人あたり数秒かかるため、利用者が「みんなの頑張り」を開いた時に
+          //   その場で全員ぶん回すと画面が開かない。夜のうちに温めておく。
+          try { smpOverallCached_(user.student_email, true); } catch (e) {}
           // ★毎晩、点数が食い違っていないか自分で確かめる★（2026-08-04 Kaiの指示）
           //   画面ごとに違う数字が出ていたことがあるため、夜のうちに気づけるようにする
           try {
@@ -10749,6 +10874,11 @@ function resolvePrimaryWeeklyGoal(studentEmail, wanted) {
 // ══════════════════════════════════════════════════════════════════
 const TIME_CLASS_VERSION = "time_classification_v1";
 const TIME_CLASSES = { GOAL_DIRECT:1, OPERATIONS:1, ASSET_BUILD:1, RECOVERY_RELATIONSHIP:1, UNPLANNED_LEAKAGE:1 };
+
+// ★1日の区切り（画面側の DAY_CUTOFF_HOUR と必ず同じ値にすること）★
+//   深夜0時〜この時刻までの記録は「前の日の続き」として扱う。
+//   夜通しの作業が、暦の日付をまたいだだけで2日に割れるのを防ぐ。
+const DAY_CUTOFF_HOUR_GAS = 4;
 
 function classifyLogTime_(studentEmail, targetDate, body, current) {
   // 1. 本人の選択（保存時でも、あとからの修正でも最優先）

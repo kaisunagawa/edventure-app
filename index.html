@@ -12,8 +12,18 @@
   <meta name="apple-mobile-web-app-title" content="JIROKU" />
   <meta name="theme-color" content="#FAFAF9" media="(prefers-color-scheme: light)" />
   <meta name="theme-color" content="#101417" media="(prefers-color-scheme: dark)" />
+  <!-- ★接続だけ先に始めておく★（2026-08-05 起動高速化）
+       つなぎ始めるのに毎回100〜300msかかる。HTMLを読んでいる間に済ませておく。 -->
+  <link rel="preconnect" href="https://unpkg.com" crossorigin />
+  <link rel="preconnect" href="https://script.google.com" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <!-- ★フォントで表示を止めない★
+       以前は、この1行の読み込みが終わるまで画面が真っ白のままだった。
+       まず端末のフォントで表示し、DM Sansは届いた時点で差し替える。 -->
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap"
+        rel="stylesheet" media="print" onload="this.media='all'" />
+  <noscript><link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" /></noscript>
   <script src="https://accounts.google.com/gsi/client" async defer></script>
   <script crossorigin="anonymous" integrity="sha384-DGyLxAyjq0f9SPpVevD6IgztCFlnMF6oW/XQGmfe+IsZ8TqEiDrcHkMLKI6fiB/Z" src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"></script>
   <script crossorigin="anonymous" integrity="sha384-gTGxhz21lVGYNMcdJOyq01Edg0jhn/c22nsx0kyqP0TxaV5WVdsSH1fSDUf5YJj1" src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
@@ -618,6 +628,9 @@ function enqueueTaskMutation(op, taskId, changes, baseValues){
   if (!taskId) return;
   const q = loadTaskQueue();
   const m = { mid: "m_"+Date.now()+"_"+Math.random().toString(36).slice(2,8),
+              // いつ積んだか。送信待ちが古いまま居座っても、他端末との同期を
+              // 止めっぱなしにしないための判断に使う
+              queued_at: Date.now(),
               op: op, task_id: taskId, changes: changes||{}, tries: 0, state: "pending" };
   // ★フィールド単位の競合検出★
   //   「変える項目について、自分が見ていた値」を一緒に送る。
@@ -975,19 +988,31 @@ async function flushCalendarQueue(){
   try{
     for(const it of q.slice()){
       // upsertCalendarEvent側が成功時にdequeue、失敗時に再enqueueするので、ここでは呼ぶだけ
-      await upsertCalendarEvent(it.dateStr, it.key, it.startISO, it.endISO, it.title, it.exactOriginalEventId||null, true);
+      await upsertCalendarEvent(it.dateStr, it.key, it.startISO, it.endISO, it.title, it.exactOriginalEventId||null, true, it.cls||"");
     }
   }catch(e){}
   _calFlushing = false;
 }
-// 実際にやったこと（JIROKUが書き込む/更新する予定）は色を統一し、予定していただけの
-// 予定と見分けられるようにする（8 = Graphite、目立たない灰色。✅マークで判別できるため
-// 色自体は主張しすぎないものにする）
+// ★時間の使い方ごとに色を分ける★（2026-08-05 Kai要望）
+//   これまでは記録をすべて灰色(8=Graphite)で書いていたため、カレンダーを開いても
+//   「何に時間を使った1日だったか」が色で分からなかった。
+//   良い使い方ほど落ち着いた緑〜青、望ましくない「計画外の時間」は赤にして、
+//   1週間を俯瞰したときに色の偏りだけで傾向が読めるようにする。
+//   （GoogleカレンダーのcolorIdは1〜11の固定パレット）
+const CAL_COLOR_BY_CLASS = {
+  GOAL_DIRECT:           "10", // Basil   濃い緑 ── いちばん良い使い方
+  ASSET_BUILD:           "2",  // Sage    明るい緑 ── 将来への投資
+  RECOVERY_RELATIONSHIP: "7",  // Peacock 青 ── 回復・人間関係（消耗ではなく充電）
+  OPERATIONS:            "8",  // Graphite 灰 ── 日常業務（良くも悪くもない）
+  UNPLANNED_LEAKAGE:     "11", // Tomato  赤 ── 計画外の時間（いちばん減らしたい）
+};
+// 分類がまだ決まっていない記録は、これまでどおり灰色にしておく
 const JIROKU_RECORD_COLOR_ID = "8";
+const calColorFor = (cls) => CAL_COLOR_BY_CLASS[String(cls||"").toUpperCase()] || JIROKU_RECORD_COLOR_ID;
 // 通信エラーやトークンの一時的な失効で書き込みに失敗すると、以前は何の痕跡も残らず
 // 静かに諦めていたため、原因が特定できなかった。1回だけ再試行し、それでも失敗したら
 // コンソールにログを残す（ユーザー体験は変えず、次に同じ問題が起きた時に調査できるように）
-async function upsertCalendarEvent(dateStr, key, startISO, endISO, title, exactOriginalEventId, isRetry){
+async function upsertCalendarEvent(dateStr, key, startISO, endISO, title, exactOriginalEventId, isRetry, cls){
   try{
     // サーバー(Kai権限)がカレンダー書き込みを担う本人は、クライアント側では書かない（二重登録防止）
     if(localStorage.getItem("server_calendar")) return;
@@ -995,9 +1020,9 @@ async function upsertCalendarEvent(dateStr, key, startISO, endISO, title, exactO
     const token = await getCalendarToken(false);
     if(!token) {
       if(!isRetry) console.warn("[JIROKU calendar] token取得失敗、1秒後に再試行", {dateStr, key, title});
-      if(!isRetry) return setTimeout(()=>upsertCalendarEvent(dateStr, key, startISO, endISO, title, exactOriginalEventId, true), 1000);
+      if(!isRetry) return setTimeout(()=>upsertCalendarEvent(dateStr, key, startISO, endISO, title, exactOriginalEventId, true, cls), 1000);
       console.error("[JIROKU calendar] token取得に再試行しても失敗→キューに退避", {dateStr, key, title});
-      enqueueCalWrite({dateStr, key, startISO, endISO, title, exactOriginalEventId});
+      enqueueCalWrite({dateStr, key, startISO, endISO, title, exactOriginalEventId, cls});
       return;
     }
     let map = {};
@@ -1011,8 +1036,9 @@ async function upsertCalendarEvent(dateStr, key, startISO, endISO, title, exactO
     // extendedProperties.private.jirokuRecordで「JIROKUの記録から書き込んだ/更新した予定」と
     // 印を付けておく。カレンダー上は普通の予定として見えるが、アプリ側の「今日の予定」
     // 表示や自動入力では、既に完了したことをまた"予定"として出さないようこの印で除外する
+    const colorId = calColorFor(cls);
     const body = JSON.stringify({ summary: recordTitle, start:{ dateTime:startISO }, end:{ dateTime:endISO },
-      colorId: JIROKU_RECORD_COLOR_ID, extendedProperties:{ private:{ jirokuRecord:"1" } } });
+      colorId, extendedProperties:{ private:{ jirokuRecord:"1" } } });
 
     // 元の予定と記録内容のタイトルが文字通り完全一致する場合だけ、新規に別イベントを
     // 作らずその予定へ✅マークを追加する（内容が同じなので上書きしても情報は失われない）。
@@ -1021,7 +1047,7 @@ async function upsertCalendarEvent(dateStr, key, startISO, endISO, title, exactO
     const alreadyClaimed = Object.values(map).includes(exactOriginalEventId);
     if(exactOriginalEventId && !map[key] && !alreadyClaimed){
       const titleOnlyBody = JSON.stringify({ summary: recordTitle,
-        colorId: JIROKU_RECORD_COLOR_ID, extendedProperties:{ private:{ jirokuRecord:"1" } } });
+        colorId, extendedProperties:{ private:{ jirokuRecord:"1" } } });
       const r0 = await fetch(base+"/"+encodeURIComponent(exactOriginalEventId), { method:"PATCH", headers, body:titleOnlyBody });
       if(r0.ok){
         map[key] = exactOriginalEventId;
@@ -1040,10 +1066,10 @@ async function upsertCalendarEvent(dateStr, key, startISO, endISO, title, exactO
       if(r.status!==404 && r.status!==410){
         if(!isRetry){
           console.warn("[JIROKU calendar] 更新失敗、1秒後に再試行", {dateStr, key, title, status:r.status});
-          setTimeout(()=>upsertCalendarEvent(dateStr, key, startISO, endISO, title, exactOriginalEventId, true), 1000);
+          setTimeout(()=>upsertCalendarEvent(dateStr, key, startISO, endISO, title, exactOriginalEventId, true, cls), 1000);
         } else {
           console.error("[JIROKU calendar] 更新に再試行しても失敗→キューに退避", {dateStr, key, title, status:r.status});
-          enqueueCalWrite({dateStr, key, startISO, endISO, title, exactOriginalEventId});
+          enqueueCalWrite({dateStr, key, startISO, endISO, title, exactOriginalEventId, cls});
         }
         return;
       }
@@ -1056,18 +1082,18 @@ async function upsertCalendarEvent(dateStr, key, startISO, endISO, title, exactO
       dequeueCalWrite(dateStr, key);
     } else if(!isRetry){
       console.warn("[JIROKU calendar] 新規作成失敗、1秒後に再試行", {dateStr, key, title, status:r2.status});
-      setTimeout(()=>upsertCalendarEvent(dateStr, key, startISO, endISO, title, exactOriginalEventId, true), 1000);
+      setTimeout(()=>upsertCalendarEvent(dateStr, key, startISO, endISO, title, exactOriginalEventId, true, cls), 1000);
     } else {
       console.error("[JIROKU calendar] 新規作成に再試行しても失敗→キューに退避", {dateStr, key, title, status:r2.status});
-      enqueueCalWrite({dateStr, key, startISO, endISO, title, exactOriginalEventId});
+      enqueueCalWrite({dateStr, key, startISO, endISO, title, exactOriginalEventId, cls});
     }
   }catch(e){
     if(!isRetry){
       console.warn("[JIROKU calendar] 書き込み中に例外、1秒後に再試行", {dateStr, key, title, error:String(e)});
-      setTimeout(()=>upsertCalendarEvent(dateStr, key, startISO, endISO, title, exactOriginalEventId, true), 1000);
+      setTimeout(()=>upsertCalendarEvent(dateStr, key, startISO, endISO, title, exactOriginalEventId, true, cls), 1000);
     } else {
       console.error("[JIROKU calendar] 再試行しても例外→キューに退避", {dateStr, key, title, error:String(e)});
-      enqueueCalWrite({dateStr, key, startISO, endISO, title, exactOriginalEventId});
+      enqueueCalWrite({dateStr, key, startISO, endISO, title, exactOriginalEventId, cls});
     }
   }
 }
@@ -1084,7 +1110,7 @@ async function reconcileCalendarForDate(dateStr, logs){
     const stt=new Date(dateStr+"T"+String(s).slice(0,5)+":00"); if(isNaN(stt)) continue;
     const ett=e?new Date(dateStr+"T"+String(e).slice(0,5)+":00"):null;
     const endDt=(ett&&ett>stt)?ett:new Date(stt.getTime()+3600000);
-    await upsertCalendarEvent(dateStr, tb, stt.toISOString(), endDt.toISOString(), l.task||"記録", null);
+    await upsertCalendarEvent(dateStr, tb, stt.toISOString(), endDt.toISOString(), l.task||"記録", null, false, l.time_classification||"");
   }
 }
 // 取得戦略: メモリ → 端末キャッシュ → 本人認証で取得 → サーバーの共有キャッシュ
@@ -1239,7 +1265,18 @@ function Toast({msg, onDone}) {
 }
 function formatDateStr(d){ return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); }
 function addDays(s,n){ const d=new Date(s+"T00:00:00"); d.setDate(d.getDate()+n); return formatDateStr(d); }
-function isToday(s){ return s===formatDateStr(new Date()); }
+const DAY_CUTOFF_HOUR = 4;
+// ★1日の区切りは深夜4時★（2026-08-05 Kai要望・サーバーの logicalToday_ と同じ値）
+//   午前2時に記録すると、暦の上では新しい日になるが、本人の感覚では前の日の続き。
+//   夜通しの作業（20時〜23時 と 23時〜翌1時）が2日に割れないよう、
+//   深夜0〜4時は前の日として扱う。
+//   ※ここを変えるときは gas/Code.gs の DAY_CUTOFF_HOUR_GAS も必ず同じ値にすること。
+function logicalTodayStr(){
+  const d = new Date();
+  if (d.getHours() < DAY_CUTOFF_HOUR) d.setDate(d.getDate() - 1);
+  return formatDateStr(d);
+}
+function isToday(s){ return s===logicalTodayStr(); }
 
 const DOT = {"5":"#46C98B","4":"#7B6FE8","3":"#F5A84B","2":"#EF7070","1":"#EF7070"};
 
@@ -1334,6 +1371,41 @@ const getDailyGoalHours = () => Number(localStorage.getItem("jiroku_daily_goal_h
 const getTimeBlocks = () => { const {start,end}=getLogHours(); return ALL_TIME_BLOCKS.filter(b=>parseInt(b)>=start&&parseInt(b)<=end); };
 const TIME_BLOCKS = getTimeBlocks();
 
+// ── 記録の時間帯キーを扱う道具 ────────────────────────────────
+// 時間帯キーは3種類ある：
+//   "14:00-15:00" … 手動記録の1時間枠
+//   "13:00-15:40" … 「時間を細かく」やタイマーで測った実測の範囲
+//   "14:00"       … 開始だけ（1時間とみなす）
+const HM_TO_MIN = (v) => { const p=String(v||"").split(":"); return (Number(p[0])||0)*60+(Number(p[1])||0); };
+// 開始・終了を「その日の0時からの分」で返す。日をまたぐ範囲（23:00-01:00）は
+// 終了に24時間を足して、必ず 終了 > 開始 になるようにする
+const blockSpan = (tb) => {
+  const s = String(tb||"").trim();
+  const m = s.match(/^(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})$/);
+  if(m){
+    const st = Number(m[1])*60+Number(m[2]);
+    let en = Number(m[3])*60+Number(m[4]);
+    if(en <= st) en += 1440;             // 日をまたいだ記録
+    return {start:st, end:en};
+  }
+  if(/^\d{1,2}:\d{2}/.test(s)){ const st=HM_TO_MIN(s.slice(0,5)); return {start:st, end:st+60}; }
+  return null;
+};
+const blockMinutes = (tb) => { const sp=blockSpan(tb); return sp ? sp.end-sp.start : 0; };
+// 並び順のためのキー。深夜0〜4時の記録は、その日のいちばん後ろへ回す
+const blockSortKey = (tb) => {
+  const sp = blockSpan(tb);
+  if(!sp) return 0;
+  return sp.start < DAY_CUTOFF_HOUR*60 ? sp.start + 1440 : sp.start;
+};
+const sortLogsByTime = (arr) => [...arr].sort((a,b)=>blockSortKey(a.time_block)-blockSortKey(b.time_block));
+// 2つの時間帯が重なっているか（1分でも重なれば true）
+const blocksOverlap = (a, b) => {
+  const x = blockSpan(a), y = blockSpan(b);
+  if(!x || !y) return false;
+  return x.start < y.end && y.start < x.end;
+};
+
 // ── Home ──
 function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, studentCohort, recordDays, onGoTimer, onToast, onGoSettings}) {
   const [report, setReport] = useState(null);
@@ -1371,6 +1443,11 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
   const [wgSheet, setWgSheet] = useState(false);          // 今週の目標をつくる
   const [sprintIdx, setSprintIdx] = useState(0);
   const [openRow, setOpenRow] = useState("");   // 目標ロードマップで開いている行
+  // ★いまの数字だけをその場で直す★（2026-08-05 Kai要望）
+  //   「20 → 30 → 40」と伸びるたびに、目標設定のウィザードを最後まで
+  //   進み直すのは重い。ロードマップの行から数字だけ書き換えられるようにする。
+  const [curValDraft, setCurValDraft] = useState(null);   // null = 編集していない
+  const [curValSaving, setCurValSaving] = useState(false);
   const [showWhy, setShowWhy] = useState(false);   // 次にやることの選定理由
   const [goalDetail, setGoalDetail] = useState(false);   // 数字の出どころ（普段は隠す）
   const [deepenGoal, setDeepenGoal] = useState(null);    // 目標の深掘り
@@ -1419,6 +1496,11 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
       return norm;
     } catch(e){ return null; }
   });
+  // ★タスクの読み込みが「終わったかどうか」を持つ★（2026-08-05 Kai報告）
+  //   これまでは読み込み状態が無く、「レポートがあるのに一覧が空」というだけで
+  //   『タスクを取得中...』と表示していた。実際には何も取得しておらず、
+  //   その表示のまま永久に変わらなかった。取得が終わったかどうかで出し分ける。
+  const [tasksLoaded, setTasksLoaded] = useState(false);
   const [editMode, setEditMode] = useState(false);
   const [editItems, setEditItems] = useState([]); // [{text, min}]（minは想定時間・分、任意）
   // タスクごとの想定時間（分）。タスク文字列をキーに持つ並行マップ。
@@ -1602,7 +1684,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
     if(cachedStatus) { try { setStatusSummary(JSON.parse(cachedStatus)); } catch(e){} }
 
     // ホームに必要なデータの適用処理（統合API・従来APIのどちらから来ても同じ形で受ける）
-    const todayStr = formatDateStr(new Date());
+    const todayStr = logicalTodayStr();   // 深夜0〜4時は前の日の続きとして扱う
     const applyHome = (d)=>{
       if(d.report){ setReport(d.report); localStorage.setItem("cache_report", JSON.stringify(d.report)); }
       if(d.game){
@@ -2016,6 +2098,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
     if (editMode || detailTask) return;
     const r = await gasApi("getTasks", { includeDone: "1" });
     if (!r || !r.ok || !Array.isArray(r.data)) return;
+    setTasksLoaded(true);        // 応答が返った＝読み込みは終わっている（0件でも同じ）
     if (editMode || detailTask) return;   // 通信中に開いたら適用しない
     const hold = {};   // 送信待ち・競合中のタスクは端末の値を保つ
     const deleting = {}; // ★削除の送信待ち★ サーバーにはまだ残っているので、ここで外す
@@ -2111,13 +2194,28 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
     //   他のタスクの同期まで道連れにしない。以前は「キューが空のときだけ
     //   取得」にしていたため、確認待ち3件が居座るとスマホが一切
     //   同期しなくなった（実際に起きた）。
-    const refetch = () => { if (!loadTaskQueue().some(x=>x.state==="pending")) applyTasksFromServer(); };
+    // ★送信待ちがあっても、いつまでも取得を止めない★（2026-08-05 Kai報告）
+    //   送信待ちが1件でもあると取得を丸ごと止めていたため、
+    //   送れないものが1つ居座るだけで、その端末だけ永久に古いままになっていた。
+    //   送信待ちのタスクは applyTasksFromServer 側が個別に守る（hold）ので、
+    //   他のタスクまで巻き添えにする必要はない。
+    //   直後の二重取得だけ避けたいので、10秒以内にできた送信待ちがある時だけ見送る。
+    const refetch = () => {
+      const q = loadTaskQueue();
+      const fresh = q.some(x => x.state==="pending" && (Date.now() - Number(x.queued_at||0)) < 10000);
+      if (!fresh) applyTasksFromServer();
+    };
     const onVis = () => { if (document.visibilityState === "visible") refetch(); };
     window.addEventListener("jiroku:taskflushed", refetch);
     document.addEventListener("visibilitychange", onVis);
+    // ★PCは visibilitychange が起きにくい★
+    //   ウィンドウを切り替えただけでは発火しないため、PCだけ古いままになる。
+    //   focus でも取りに行く。
+    window.addEventListener("focus", refetch);
     const timer = setInterval(refetch, 60000);   // 画面を開きっぱなしでも1分ごとに追いつく
     return () => { window.removeEventListener("jiroku:taskflushed", refetch);
                    document.removeEventListener("visibilitychange", onVis);
+                   window.removeEventListener("focus", refetch);
                    clearInterval(timer); };
   });
 
@@ -2414,9 +2512,9 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
               <span style=${{display:"flex",alignItems:"baseline",gap:3,fontSize:13,color:"#fff",fontWeight:700,whiteSpace:"nowrap"}}>
                 ${ranking.rank!=null
                   ? html`${ranking.total}人中<b style=${{fontSize:15}}>${ranking.rank}位</b>
-                    ${ranking.trend==="up"&&html`<span style=${{fontSize:12,color:"#4ADE80",fontWeight:800}}>▲</span>`}
-                    ${ranking.trend==="down"&&html`<span style=${{fontSize:12,color:"#F87171",fontWeight:800}}>▼</span>`}
-                    ${ranking.trend==="same"&&html`<span style=${{fontSize:11,color:"rgba(255,255,255,0.6)",fontWeight:800}}>―</span>`}`
+                    ${ranking.trend==="up"&&html`<span title="前回より順位が上がりました" style=${{fontSize:12,color:"#4ADE80",fontWeight:800}}>▲</span>`}
+                    ${ranking.trend==="down"&&html`<span title="前回より順位が下がりました" style=${{fontSize:12,color:"#F87171",fontWeight:800}}>▼</span>`}
+                    ${ranking.trend==="same"&&html`<span title="前回と同じ順位です" style=${{fontSize:11,color:"rgba(255,255,255,0.6)",fontWeight:800}}>―</span>`}`
                   : html`<b style=${{fontSize:15}}>${ranking.total}人</b>が参加中`}
               </span>
               ${ranking.rank==null&&html`<span style=${{display:"block",fontSize:9.5,color:"rgba(255,255,255,0.7)",whiteSpace:"nowrap"}}>記録すると参加できます</span>`}
@@ -2540,7 +2638,36 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
                 ${p.forecastWarning&&html`<br/><span style=${{color:"var(--amber,#BA7517)"}}>⚠ ${p.forecastWarning}</span>`}
               `:html`${p.note||"数値がまだ入っていません"}`}
               ${g.success_condition&&html`<br/><b style=${{color:"var(--text)"}}>できたと言える状態</b>：${g.success_condition}`}
+              <!-- ★いまの数字だけをその場で更新する★（2026-08-05 Kai要望）
+                   目標400万に対して現在20 → 30 → 40 と伸びていくのを、
+                   ここで数字だけ書き換えて保存できるようにする。 -->
+              ${curValDraft!==null ? html`
+                <div style=${{display:"flex",gap:8,alignItems:"center",marginTop:10,flexWrap:"wrap"}}>
+                  <input class="inp" type="number" inputmode="decimal" autofocus
+                    value=${curValDraft} onInput=${e=>setCurValDraft(e.target.value)}
+                    style=${{margin:0,width:120,textAlign:"right"}}/>
+                  <span style=${{fontSize:12,color:"var(--sub)"}}>／ ${fmt(p.target)}${p.unit||""}</span>
+                  <button disabled=${curValSaving} onClick=${async()=>{
+                      setCurValSaving(true);
+                      const body = {...g};
+                      delete body.pace; delete body.paceLabel; delete body.weeklyGoals;
+                      delete body.current_value_source; delete body.evidence;
+                      body.current_value = curValDraft;
+                      const r = await gasPostJson("saveGoal", body);
+                      setCurValSaving(false);
+                      if(r&&r.ok){ setCurValDraft(null); onToast&&onToast("いまの数字を更新しました"); onGoalSaved&&onGoalSaved(); }
+                      else onToast&&onToast((r&&r.error)||"更新できませんでした");
+                    }}
+                    style=${{padding:"8px 16px",borderRadius:8,border:"none",background:"var(--accent)",color:"#fff",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
+                    ${curValSaving?"保存中…":"保存"}</button>
+                  <button onClick=${()=>setCurValDraft(null)}
+                    style=${{background:"none",border:"none",color:"var(--sub)",fontSize:12,cursor:"pointer",fontFamily:"inherit"}}>やめる</button>
+                </div>` : ""}
               <div style=${{display:"flex",gap:8,marginTop:8,flexWrap:"wrap"}}>
+                ${curValDraft===null&&num(p.target)!==null&&html`
+                  <button onClick=${()=>setCurValDraft(num(p.current)===null?"":String(num(p.current)))}
+                    style=${{padding:"7px 14px",borderRadius:8,border:"1px solid var(--accent)",background:"var(--accent-l)",color:"var(--accent)",fontSize:11.5,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
+                    いまの数字を更新</button>`}
                 <!-- ★数字や期限も変えられるようにする★（2026-08-04 Kai要望）
                      これまでは深掘り（why・できたと言える状態）しか変えられなかった -->
                 <button onClick=${()=>setHomeGoalSheet(true)}
@@ -3028,7 +3155,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
           })()}
         </div>`}
       ${actionItems.length===0
-        ? html`<div style=${{padding:"16px",fontSize:13,color:"var(--sub)",lineHeight:1.7}}>${report?"タスクを取得中...":"「＋ タスクを追加」で今日やることを登録できます"}</div>`
+        ? html`<div style=${{padding:"16px",fontSize:13,color:"var(--sub)",lineHeight:1.7}}>${tasksLoaded?"「＋ タスクを追加」で今日やることを登録できます":"読み込み中…"}</div>`
         : !boardWide
         ? (()=>{
           // モバイルは元のシンプルなチェックリスト表示（未完了→完了フォルダ）。
@@ -3443,7 +3570,15 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
           </div>
           <div style=${{fontSize:13,fontWeight:800,color:"var(--text)",marginBottom:3}}>
             ${smpWeek==="prev"?"先週":"今週"}の自己経営の状態</div>
-          <div style=${{fontSize:11,color:"var(--sub)",marginBottom:14}}>対象期間 ${src.period_start} 〜 ${src.period_end}</div>
+          <div style=${{fontSize:11,color:"var(--sub)",marginBottom:10}}>対象期間 ${src.period_start} 〜 ${src.period_end}</div>
+          ${src.overall_score!==null&&src.overall_score!==undefined&&html`
+            <div style=${{display:"flex",alignItems:"baseline",gap:8,background:"var(--card)",border:"1px solid var(--border)",
+                          borderRadius:12,padding:"11px 14px",marginBottom:14}}>
+              <span style=${{fontSize:12,fontWeight:700,color:"var(--sub)"}}>総合点</span>
+              <span style=${{fontSize:26,fontWeight:800,color:"var(--text)",fontVariantNumeric:"tabular-nums"}}>${src.overall_score}</span>
+              <span style=${{fontSize:11,color:"var(--sub)",flex:1,textAlign:"right",lineHeight:1.6}}>
+                確かに測れた${src.evaluated_count}項目の平均（全${src.metric_count}項目）</span>
+            </div>`}
 
           <!-- 5角形も詳細に置く（ホームと同じ見え方でそろえる） -->
           <div style=${{display:"flex",justifyContent:"center",marginBottom:6}}>
@@ -3502,9 +3637,15 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
                 ・確からしさ ${CONF[m.confidence]||m.confidence}
                 ${m.provisional?html`<br/><span style=${{color:"var(--amber,#BA7517)"}}>測れている要素が半分未満のため、参考値です。ホームには点数を出していません</span>`:""}
               </div>
-              ${m.evaluation_state==="evaluated"&&html`
+              ${m.evaluation_state==="evaluated"&&(()=>{
+                // 一般論ではなく、いちばん低い内訳に紐づけた打ち手を出す
+                const ex = smpExplain(m, HINT[m.key]);
+                return html`
                 <div style=${{fontSize:11.5,color:"var(--text)",lineHeight:1.7,marginTop:9,background:"var(--bg)",borderRadius:9,padding:"9px 11px"}}>
-                  <b style=${{color:"var(--sub)",fontSize:10.5}}>改善のヒント</b><br/>${HINT[m.key]||""}</div>`}
+                  ${ex.weakest&&html`<div style=${{color:"var(--sub)",marginBottom:5}}>
+                    いま足を引っぱっているのは <b style=${{color:"var(--text)"}}>${ex.weakest.label}</b>（${ex.weakest.value}）です。</div>`}
+                  <b style=${{color:"var(--sub)",fontSize:10.5}}>どうすれば上がるか</b><br/>${ex.how}</div>`;
+              })()}
             </div>`;})}
         </div>
       </div>`;
@@ -3545,6 +3686,16 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
             <span style=${{display:"block",fontSize:13,fontWeight:800,color:"var(--text)"}}>今週の自己経営の状態</span>
             <span style=${{display:"block",fontSize:10.5,color:"var(--sub)",marginTop:3}}>5つの自己経営力から、今の状態を確認します</span>
           </span>
+          <!-- ★総合点★（2026-08-05 Kai要望）
+               これまで5つの力が別々に出るだけで、全体を表す1つの数字が無かった。
+               確かに測れている力の平均を出す。測れていない力は0点として混ぜない
+               （記録が少ない人ほど不当に低く出てしまうため）。 -->
+          ${smp.data.overall_score!==null&&smp.data.overall_score!==undefined&&html`
+            <span style=${{flexShrink:0,textAlign:"right",lineHeight:1.15}}>
+              <span style=${{display:"block",fontSize:9.5,color:"var(--sub)",fontWeight:700}}>総合</span>
+              <span style=${{display:"block",fontSize:24,fontWeight:800,color:"var(--text)",fontVariantNumeric:"tabular-nums"}}>${smp.data.overall_score}</span>
+              <span style=${{display:"block",fontSize:9.5,color:"var(--sub)"}}>${smp.data.evaluated_count}/${smp.data.metric_count}項目</span>
+            </span>`}
           <button onClick=${()=>setSmpDetail(true)}
             style=${{flexShrink:0,whiteSpace:"nowrap",background:"none",border:"none",color:"var(--accent)",fontSize:11.5,fontWeight:700,cursor:"pointer",fontFamily:"inherit",padding:0}}>詳細を見る</button>
         </div>
@@ -3585,6 +3736,8 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
             </div>
             ${fact&&html`<div style=${{fontSize:11,color:"var(--sub)",lineHeight:1.7,marginTop:3}}>${fact}</div>`}
           </div>`;
+          // ホームは一覧に徹する。理由と打ち手は「詳細を見る」の中で出す
+          //（2026-08-05 Kai: ホームで開くやつは要らない）
           return html`
           <div key=${m.key} style=${{display:"flex",alignItems:"center",gap:10,padding:"9px 0",
                                      borderTop:i?"1px solid var(--border)":"none"}}>
@@ -3809,7 +3962,12 @@ function CommunityOverlay({onClose}) {
         `}
 
         <div style=${{background:"var(--card)",borderRadius:16,border:"1px solid var(--border)",overflow:"hidden",marginBottom:16}}>
-          <div style=${{padding:"14px 16px",borderBottom:"1px solid var(--border)",fontSize:12,fontWeight:700,color:"var(--text)"}}>ステータスランキング</div>
+          <!-- ★ステータスランキング → 自己経営力ランキング★（2026-08-05 Kai要望）
+               XPや記録数の「量」ではなく、いま画面に出している自己経営の状態で競う -->
+          <div style=${{padding:"14px 16px",borderBottom:"1px solid var(--border)"}}>
+            <div style=${{fontSize:12,fontWeight:700,color:"var(--text)"}}>自己経営力ランキング</div>
+            <div style=${{fontSize:10.5,color:"var(--sub)",marginTop:2}}>今週の5つの力の総合点。測れている力がまだ無い人は載りません</div>
+          </div>
           ${list===null&&html`<div style=${{padding:20,textAlign:"center",color:"var(--sub)",fontSize:13}}>読み込み中...</div>`}
           ${list&&(()=>{
             const {top,me,meRank}=trimRanking(list);
@@ -3901,7 +4059,7 @@ function CommunityOverlay({onClose}) {
 
 // ── Log ──
 function LogScreen({onToast, isActive}) {
-  const todayStr = formatDateStr(new Date());
+  const todayStr = logicalTodayStr();   // 深夜0〜4時は前の日の続きとして扱う
   const [date, setDate] = useState(todayStr);
   const [logs, setLogs] = useState([]);
   const [saving, setSaving] = useState(false);
@@ -3927,6 +4085,15 @@ function LogScreen({onToast, isActive}) {
   const goalRelatedDefault = () => localStorage.getItem("jiroku_log_goal_related") === "true";
   const [goalRelated, setGoalRelated] = useState(goalRelatedDefault);
   const [timeClass, setTimeClass] = useState("");   // 時間の5分類（選ばなければ未分類）
+  // ★分類から「目標に関連しているか」を決める★（2026-08-05）
+  //   goal_related は、分類がまだ十分に付いていない期間の予備の手がかりとして
+  //   採点で使われている。チェック欄を消したぶん、分類から自動で埋める。
+  const setTimeClassAndGoal = (k) => {
+    setTimeClass(k);
+    const v = (k === "GOAL_DIRECT");
+    setGoalRelated(v);
+    try{ localStorage.setItem("jiroku_log_goal_related", String(v)); }catch(e){}
+  };
   const [clsEditing, setClsEditing] = useState(null);  // 分類を選び直している記録のlog_id
   // 記録カードから分類を変える。サーバーが USER として保存し、以後ルールで上書きしない
   const saveClass = async (l, k) => {
@@ -3934,7 +4101,21 @@ function LogScreen({onToast, isActive}) {
     setLogs(prev=>prev.map(x=>x.log_id===l.log_id
       ? {...x, time_classification:k, classification_method:"USER", classification_reason_code:"USER_SELECTED"} : x));
     const r = await gasPostJson("setLogClassification", { log_id: l.log_id, time_classification: k });
-    if(!r || !r.ok) onToast("分類を変更できませんでした");
+    if(!r || !r.ok){ onToast("分類を変更できませんでした"); return; }
+    // ★カレンダーの色も塗り直す★（2026-08-05）
+    //   分類を変えたのに、カレンダー側だけ前の色のまま残ると食い違う。
+    //   既に書き込んだ予定があれば、同じキーで色だけ更新される。
+    try{
+      if(localStorage.getItem("cal_linked")){
+        const tb = String(l.time_block||"");
+        const stt = new Date(date+"T"+tb.slice(0,5)+":00");
+        if(!isNaN(stt)){
+          const mins = blockMinutes(tb) || 60;
+          upsertCalendarEvent(date, tb, stt.toISOString(),
+            new Date(stt.getTime()+mins*60000).toISOString(), l.task||"記録", null, false, k);
+        }
+      }
+    }catch(e){}
   };
 
   // カレンダー予定の自動入力。端末キャッシュ→本人認証→サーバー共有
@@ -4016,7 +4197,14 @@ function LogScreen({onToast, isActive}) {
 
   // チップタップ: 通常は選択切り替え。まとめて記録モード中は追加選択のON/OFF
   const handleChipTap = (b) => {
-    if(!multiMode){ handleBlockSelect(b); return; }
+    if(!multiMode){
+      // ★またいでいる記録に含まれる時間なら、その1件を開く★
+      //   例: 13:00-15:40 の記録がある状態で 14:00 を押したとき、
+      //   空の14:00枠を新しく作ると同じ内容が2件になる。元の1件を開く。
+      const cover = logs.find(l => l.time_block!==b && blocksOverlap(l.time_block, b));
+      handleBlockSelect(cover ? cover.time_block : b);
+      return;
+    }
     if(b===block) return; // 基準ブロックは外せない
     setExtraBlocks(prev => prev.includes(b) ? prev.filter(x=>x!==b) : [...prev, b]);
   };
@@ -4085,6 +4273,35 @@ function LogScreen({onToast, isActive}) {
     });
   },[date, isActive]);
 
+  // ★記録も、画面に戻るたびに取り直す★（2026-08-05 Kai報告）
+  //   これまで記録の取得は「タブを開いた瞬間」の1回だけだった。
+  //   そのため、パソコンで開きっぱなしにしていると、スマホで足した記録が
+  //   いつまでも出てこず、端末によって中身が違う状態になっていた。
+  //   入力中に画面を書き換えないよう、フォームに手が入っていない時だけ差し替える。
+  useEffect(()=>{
+    if(!isActive) return;
+    let alive = true;
+    const pull = () => {
+      if(!alive || document.visibilityState !== "visible") return;
+      const at = saveVersionRef.current;
+      gasApi("getLogs",{date}).then(r=>{
+        if(!alive || !r.ok || saveVersionRef.current !== at) return;
+        setLogs(r.data);
+        try{ localStorage.setItem(LOGS_LS+date, JSON.stringify(r.data)); }catch(e){}
+        const f=formRef.current, l=lastLoadedRef.current;
+        if(f.task===l.task && f.focus===l.focus && f.memo===l.memo && f.goalRelated===l.goalRelated){
+          loadBlockData(curBlockRef.current, r.data);
+        }
+      });
+    };
+    const onVis = () => { if(document.visibilityState === "visible") pull(); };
+    document.addEventListener("visibilitychange", onVis);
+    window.addEventListener("focus", pull);      // PCはこちらが主
+    const t = setInterval(pull, 60000);
+    return ()=>{ alive=false; document.removeEventListener("visibilitychange", onVis);
+                 window.removeEventListener("focus", pull); clearInterval(t); };
+  },[date, isActive]);
+
   const save = async ()=>{
     if(!task.trim()) return;
     setSaving(true);
@@ -4092,7 +4309,16 @@ function LogScreen({onToast, isActive}) {
     // まとめて記録: 選択された全ブロックを1回のリクエストで保存する。
     // メモが長くなるとURLの長さ制限に引っかかる可能性があるため、GETのURL
     // パラメータではなくPOSTのボディで送る（gasPostJson）
-    const blocks = [block, ...extraBlocks].sort((a,b)=>a>b?1:-1);
+    let blocks = [block, ...extraBlocks].sort((a,b)=>a>b?1:-1);
+    // ★連続した時間帯は1件にまとめる★（2026-08-05 Kai要望）
+    //   13時・14時・15時を選ぶと、これまでは同じ内容の記録が3件できていた。
+    //   実際にやったのは「13:00-16:00 の1つのこと」なので、1件として残す。
+    //   飛び飛びに選んだ場合（13時と17時など）は別々の出来事なので、従来どおり分けて保存する。
+    if(blocks.length>1 && blocks.every(isFullHourBlock)){
+      const spans = blocks.map(blockSpan);
+      const contiguous = spans.every((sp,i)=> i===0 || sp.start===spans[i-1].end);
+      if(contiguous) blocks = [blocks[0].slice(0,5)+"-"+blocks[blocks.length-1].slice(6,11)];
+    }
     const payload = {
       date,
       task: task.trim(), focus_level: focus, memo: memo.trim(),
@@ -4104,7 +4330,9 @@ function LogScreen({onToast, isActive}) {
     const res = await gasPostJson(blocks.length>1 ? "saveLogMulti" : "saveLog", payload);
     if(!res.ok){ onToast("保存に失敗しました。もう一度お試しください"); setSaving(false); return; }
     if(res.xp_gained){ const lv=res.level_up?`  →  Lv.${res.level} へ！`:""; onToast(`+${res.xp_gained} XP 獲得${lv}`); }
-    else onToast(res.updated?"記録を上書きしました":(blocks.length>1?blocks.length+"個の時間帯に保存しました":"保存しました"));
+    else onToast(res.updated?"記録を上書きしました"
+      :(blocks.length>1 ? blocks.length+"個の時間帯に保存しました"
+        : (blockMinutes(blocks[0])>60 ? blocks[0]+" を1件として保存しました" : "保存しました")));
     // 保存内容が分かっているので再取得せず、ローカルの一覧をその場で更新する
     // （サーバーへの往復が倍になり保存が重く感じられるのを防ぐ）
     let next = [...logs];
@@ -4129,7 +4357,9 @@ function LogScreen({onToast, isActive}) {
       const stt = new Date(date+"T"+b.slice(0,5)+":00");
       if(isNaN(stt)) return;
       const exactMatch = exactEventForBlock(dayEvents, b, taskTrimmed);
-      upsertCalendarEvent(date, b, stt.toISOString(), new Date(stt.getTime()+3600000).toISOString(), taskTrimmed, exactMatch ? exactMatch.id : null);
+      // またいだ記録は、実際の長さぶんの予定として書く（1時間固定にしない）
+      const mins = blockMinutes(b) || 60;
+      upsertCalendarEvent(date, b, stt.toISOString(), new Date(stt.getTime()+mins*60000).toISOString(), taskTrimmed, exactMatch ? exactMatch.id : null, false, timeClass);
     });
   };
 
@@ -4151,16 +4381,23 @@ function LogScreen({onToast, isActive}) {
     setSaving(false);
   };
 
-  // タイマー記録は分単位の時間帯キー(例: 14:05-14:20)で保存されるため、手動記録の
-  // 1時間枠チップ(例: 14:00-15:00)と文字列が一致しない。チップの「済み」表示は、
-  // その時間帯の開始時が枠の1時間以内に収まっているログがあれば済みとみなす
-  const recordedHours = new Set(logs.map(l => String(l.time_block||"").slice(0,2)).filter(Boolean));
-  const recorded = { has: t => recordedHours.has(t.slice(0,2)) };
+  // ★またいだ記録を「1件のまま」扱う★（2026-08-05 Kai要望）
+  //   13:00-15:40 のように複数の時間にまたがる記録を、1時間ごとにコピーして
+  //   持つのはやめた（同じ内容が3件並び、件数も実績時間も水増しされる）。
+  //   代わりに、記録は1件のまま置き、チップ側が「この時間は、あの記録に
+  //   含まれている」と分かるようにする。
+  //   ・またいでいる時間のチップは全て「済み」になる
+  //   ・その時間のチップを押すと、元の1件がそのまま開く（新しい空の枠を作らない）
+  const logCovering = (t) => logs.find(l => blocksOverlap(l.time_block, t));
+  const recorded = { has: t => !!logCovering(t) };
   // 手動記録は「HH:00-HH:00」の1時間枠、タイマー記録は実測の分単位キーで保存されるため、
   // 同じ1時間の中に複数の記録が混在しうる。選択中のブロックと同じ時間の他の記録を
   // 一覧で見せて、上書きではなく別記録として追加される旨も明示する
   const isFullHourBlock = tb => /^\d{2}:00-\d{2}:00$/.test(String(tb||""));
-  const hourSiblingLogs = logs.filter(l => l.time_block!==block && String(l.time_block||"").slice(0,2)===block.slice(0,2));
+  const hourSiblingLogs = logs.filter(l => l.time_block!==block && blocksOverlap(l.time_block, block));
+  // いま選んでいるのが「複数の時間にまたがる1件」かどうか
+  const spanMinutes = blockMinutes(block);
+  const isSpanBlock = spanMinutes > 60;
 
   return html`<div>
     <div class="ph">
@@ -4218,8 +4455,14 @@ function LogScreen({onToast, isActive}) {
                          border:"1px solid var(--border)",background:"transparent",color:"var(--sub)"}}>${m}分</button>`)}
             </div>
             <button class="btn" style=${{marginTop:10,opacity:fineMinutes>0?1:0.5}} disabled=${!(fineMinutes>0)}
-              onClick=${()=>{ handleBlockSelect(fineFrom+"-"+fineTo); setFineOpen(false); }}>
-              この時間で記録する</button>
+              onClick=${()=>{
+                // ★1件として記録する★
+                //   ここで「まとめて記録」が残っていると、同じ内容が時間帯ごとに
+                //   コピーされてしまう。細かい時間を決めた時点で必ず解除する。
+                setMultiMode(false); setExtraBlocks([]);
+                handleBlockSelect(fineFrom+"-"+fineTo); setFineOpen(false);
+              }}>
+              この時間で記録する（${fineMinutes>=60?Math.floor(fineMinutes/60)+"時間"+(fineMinutes%60?fineMinutes%60+"分":""):fineMinutes+"分"}を1件として）</button>
           </div>`}
         ${calNeedsTap&&html`
           <button onClick=${loadCalByTap} style=${{display:"flex",alignItems:"center",gap:8,width:"100%",padding:"10px 14px",marginBottom:12,borderRadius:10,border:"1.5px dashed var(--accent)",background:"var(--accent-l)",color:"var(--accent)",fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>
@@ -4248,15 +4491,10 @@ function LogScreen({onToast, isActive}) {
             </div>
           `}
         </div>
-        <div class="form-grp">
-          <button onClick=${()=>{const v=!goalRelated;setGoalRelated(v);localStorage.setItem("jiroku_log_goal_related",String(v));}} style=${{display:"flex",alignItems:"center",gap:8,background:"none",border:`1.5px solid ${goalRelated?"var(--accent)":"var(--border)"}`,borderRadius:9,padding:"7px 11px",width:"100%",cursor:"pointer",transition:"all .15s",backgroundColor:goalRelated?"var(--accent-l)":"transparent"}}>
-            <div style=${{width:16,height:16,borderRadius:5,border:`2px solid ${goalRelated?"var(--accent)":"var(--border)"}`,background:goalRelated?"var(--accent)":"transparent",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,transition:"all .15s"}}>
-              ${goalRelated&&html`<svg width="10" height="10" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="white" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`}
-            </div>
-            <span style=${{fontSize:12.5,fontWeight:500,color:goalRelated?"var(--accent)":"var(--sub)"}}>この時間は目標に関連している</span>
-          </button>
-        </div>
-        <${TimeClassPicker} value=${timeClass} onChange=${setTimeClass}/>
+        <!-- ★「この時間は目標に関連している」のチェックは廃止★（2026-08-05 Kai要望）
+             すぐ下の分類で「目標に直結」を選べば同じことが言えるため、
+             同じ質問を2回されている状態だった。分類から自動で決める。 -->
+        <${TimeClassPicker} value=${timeClass} onChange=${setTimeClassAndGoal}/>
         <div class="form-grp">
           <label class="form-lbl">自己評価</label>
           <${EvalPicker} value=${focus} onChange=${setFocus}/>
@@ -4272,13 +4510,22 @@ function LogScreen({onToast, isActive}) {
             ref=${el=>{if(el){el.style.height="auto";el.style.height=Math.min(el.scrollHeight,280)+"px";}}} />
         </div>
         ${(()=>{
-          const isEditing = recorded.has(block);
-          const cleared = !task.trim() && !memo.trim();
-          // 既存の記録で、内容を空にした状態＝削除の意図。ボタンを「削除」に切り替えて有効化する
-          if(isEditing && cleared){
-            return html`<button class="btn" onClick=${del} disabled=${saving} style=${{background:"var(--red)"}}>${saving?html`<span class="spin"/>`:"この記録を削除する"}</button>`;
-          }
-          return html`<button class="btn" onClick=${save} disabled=${!task.trim()||!memo.trim()||saving}>${saving?html`<span class="spin"/>`:isEditing?"更新する":"保存する"}</button>`;
+          // この時間帯に、実際に保存済みの記録があるか（またいだ記録の一部ではなく、
+          // いま開いているキーそのものの記録があるときだけ削除できる）
+          const savedHere = logs.some(l => l.time_block === block);
+          return html`
+            <button class="btn" onClick=${save} disabled=${!task.trim()||!memo.trim()||saving}>
+              ${saving?html`<span class="spin"/>`:savedHere?"更新する":"保存する"}</button>
+            <!-- ★削除は「全部消してから」ではなく、いつでも押せる★（2026-08-05 Kai要望）
+                 ただし誤タップで記録が消えるのが一番困るので、目立つ赤いボタンにはせず、
+                 保存ボタンの下に小さな文字リンクとして置く（押すと確認が出る）。 -->
+            ${savedHere&&html`
+              <div style=${{textAlign:"center",marginTop:10}}>
+                <button onClick=${del} disabled=${saving}
+                  style=${{background:"none",border:"none",padding:"6px 10px",fontSize:12,fontFamily:"inherit",
+                           color:"var(--sub)",textDecoration:"underline",cursor:"pointer"}}>
+                  この記録（${block}）を削除する</button>
+              </div>`}`;
         })()}
       </div>
     </div>
@@ -4287,12 +4534,19 @@ function LogScreen({onToast, isActive}) {
          分類ごとの実績時間と、まだ測れていない分をそのまま見せる。
          未分類を「日常業務」などへ勝手に振り分けない。 -->
     ${logs.length>0&&(()=>{
-      const mins = l => { const n=Number(l.actual_minutes); return n>0?n:null; };
-      const total = logs.reduce((a,l)=>a+(mins(l)||0),0);
-      const byCls = {}; let unclassifiedMin=0, unconfirmed=0, classifiedCount=0;
+      // ★時間の数え方をサーバーと同じにする★（2026-08-05 Kai報告）
+      //   これまでは actual_minutes（タイマーで測った記録だけに入る値）しか数えず、
+      //   手で書いた記録は全部0分扱いだった。そのため、タイマーを1回使った分類が
+      //   100%、他は全部0%という極端な見え方になっていた。
+      //   夜のレポート側は「実測が無ければ時間帯の長さ」で数えている。
+      //   画面とレポートで違う数字が出るのはおかしいので、こちらを合わせる。
+      const mins = l => { const n=Number(l.actual_minutes); return n>0 ? n : (blockMinutes(l.time_block)||0); };
+      const isMeasured = l => Number(l.actual_minutes) > 0;
+      const total = logs.reduce((a,l)=>a+mins(l),0);
+      const byCls = {}; let unclassifiedMin=0, unconfirmed=0, classifiedCount=0, measuredMin=0;
       logs.forEach(l=>{
         const m=mins(l);
-        if(m===null) unconfirmed++;
+        if(isMeasured(l)) measuredMin+=m; else unconfirmed++;
         const k=String(l.time_classification||"");
         if(k){ classifiedCount++; if(m) byCls[k]=(byCls[k]||0)+m; }
         else if(m) unclassifiedMin+=m;
@@ -4306,7 +4560,7 @@ function LogScreen({onToast, isActive}) {
         <div class="card-label">${isToday(date)?"今日の時間の内訳":date+" の時間の内訳"}</div>
         ${total===0
           ? html`<div style=${{fontSize:12,color:"var(--sub)",lineHeight:1.8}}>
-              実績時間がまだ記録されていません。タイマーで測ると、ここに積み上がります。</div>`
+              まだ時間が記録されていません。記録するとここに積み上がります。</div>`
           : html`
             ${TIME_CLASS_OPTS.map(([k,label])=>{
               const m=byCls[k]||0;
@@ -4325,9 +4579,9 @@ function LogScreen({onToast, isActive}) {
               <div style=${{fontSize:12,color:"var(--sub)",marginTop:10,lineHeight:1.8}}>
                 未分類 ${hm(unclassifiedMin)}（記録カードの「分類」から選べます）</div>`}
             <div style=${{fontSize:11,color:"var(--sub)",marginTop:8,lineHeight:1.8,borderTop:"1px solid var(--border)",paddingTop:8}}>
-              実績時間の合計 ${hm(total)}<br/>
+              合計 ${hm(total)}（うちタイマーで実測 ${hm(measuredMin)}）<br/>
               分類できた時間 ${timeCov}%・分類できた件数 ${cntCov}%
-              ${unconfirmed>0?html`<br/>実績時間が未確認の記録 ${unconfirmed}件（0分としては数えていません）`:""}
+              ${unconfirmed>0?html`<br/>実測していない記録 ${unconfirmed}件は、時間帯の長さで数えています`:""}
             </div>`}
       </div>`;
     })()}
@@ -4588,6 +4842,48 @@ function BreakdownRadar({breakdown}) {
 // 5角形のラベル。長いと枠から出て切れるので短くする
 const SMP_SHORT = { result_power:"成果", time_allocation_power:"時間配分",
                     execution_power:"実行", continuity_power:"継続", recovery_power:"立て直し" };
+
+// ★「なぜこの数字なのか」「どうすれば上がるのか」★（2026-08-05 Kai要望）
+//
+//   これまでは「要改善」とだけ出ていて、理由も打ち手も見えなかった。
+//   点数は内訳（components）の積み上げで決まっているので、
+//   ・いちばん足を引っぱっている内訳はどれか
+//   ・その内訳を上げるには、明日なにをすればいいのか
+//   を、そのまま言葉にして出す。一般論ではなく、その人の内訳に紐づける。
+const SMP_ADVICE = {
+  "目標に向けた時間":         "記録するとき、分類で「目標に直結」を選べる時間を1つ増やしましょう。朝いちばんの1時間をそこに充てるのが、いちばん効きます。",
+  "目標に直結した時間の割合": "1日のうち、目標に直結する時間の枠を先に決めてから、他の予定を入れてみましょう。",
+  "今日いちばんの達成":       "今日のフォーカスを1つだけ決めて、それが終わったら記録に書きましょう。",
+  "大事なタスクが進んだか":   "重要と決めたタスクを、その日の最初に着手する順番に変えてみましょう。",
+  "予定したタスクの実行":     "予定を減らして、必ず終わる量にしてみましょう。3つ立てて1つ終わるより、1つ立てて1つ終わるほうが上がります。",
+  "期限に間に合った割合":     "期限が来ているタスクを先に片づけ、間に合わないものは期限を引き直しましょう。",
+  "翌日に残さなかった割合":   "終わらなかったタスクは翌日へ送るのではなく、その場で小さく割ってから残しましょう。",
+  "明日に残る量":             "1日の終わりに、残ったタスクを見直して量を減らしましょう。",
+  "5分類での配分":            "記録の分類を選ぶ習慣をつけると、配分が正確に出ます。未分類が多いと実態より低く出ます。",
+  "計画外に流れた時間の少なさ":"割り込みが入った時間を「計画外」で記録しておくと、何に取られているかが見えます。まずは1つ断ってみましょう。",
+  "集中して使えた時間の割合": "タイマーを使って測る時間を1日1回つくりましょう。実測が入ると数字が安定します。",
+  "集中できた時間":           "集中できた時間を増やすより、まず測る回数を増やすと正確になります。",
+  "予定を詰め込みすぎていないか":"使える時間に対して予定が多すぎます。今日やることを1つ減らしましょう。",
+  "休む時間があったか":       "休んだ時間も記録しましょう。分類の「回復・人間関係」を選べば、休息として数えられます。",
+  "ふりかえりを書いた割合":   "メモを1行でいいので毎回書きましょう。「できた／できなかった」だけでも数えられます。",
+  "ふりかえりの中身":         "メモに「次はこうする」を1文だけ足してみましょう。改善が書かれている記録は高く数えます。",
+  "持ち越したことの立て直し": "前の日に終わらなかったことを、翌日の最初に小さく再開しましょう。",
+};
+// 内訳から「理由」と「打ち手」を組み立てる
+function smpExplain(m, fallbackHint) {
+  const comps = (m.components || []).filter(c => c.state === "evaluated" && c.label !== "測れた日");
+  const why = comps.map(c => ({
+    label: c.label,
+    value: c.value,
+    detail: c.detail || "",
+    // 100点満点でない内訳（％など）もあるが、低いものほど足を引っぱっているのは同じ
+    n: Number(c.value)
+  }));
+  // いちばん低い内訳＝いま点数を下げている原因
+  const weakest = why.filter(x => !isNaN(x.n)).sort((a, b) => a.n - b.n)[0];
+  const how = (weakest && SMP_ADVICE[weakest.label]) || fallbackHint || "";
+  return { why, weakest, how };
+}
 function SelfMgmtRadar({metrics}) {
   const M = (metrics || []).slice(0, 5);
   const N = M.length || 5;
@@ -4804,7 +5100,7 @@ function SecondBrainScreen({isActive}){
 }
 
 function ReportScreen() {
-  const todayStr=formatDateStr(new Date());
+  const todayStr=logicalTodayStr();   // 深夜0〜4時は前の日の続きとして扱う
   const [date, setDate]=useState(null); // null = list view
   const [report, setReport]=useState(null);
   const [logs, setLogs]=useState([]);
@@ -5422,6 +5718,13 @@ function TimerScreen({onToast, isActive}) {
   const [logMemo, setLogMemo]         = useState("");
   const [logGoalRelated, setLogGoalRelated] = useState(()=>localStorage.getItem("jiroku_timer_goal_related")!=="false");
   const [logTimeClass, setLogTimeClass] = useState("");   // 時間の5分類
+  // 分類から「目標に関連しているか」を自動で決める（チェック欄は廃止した）
+  const setLogTimeClassAndGoal = (k) => {
+    setLogTimeClass(k);
+    const v = (k === "GOAL_DIRECT");
+    setLogGoalRelated(v);
+    try{ localStorage.setItem("jiroku_timer_goal_related", String(v)); }catch(e){}
+  };
   const [saving, setSaving]           = useState(false);
   // 今回のセッションの実測結果（予定◯分に対して実際◯分集中したか）。
   // 途中で終えた場合も分単位で記録できるよう、モーダルを開く時点で確定させる
@@ -5667,7 +5970,7 @@ function TimerScreen({onToast, isActive}) {
     else onToast(res.updated?"記録を更新しました":"記録しました");
     // タイマー記録は1時間枠ではなく「実際に集中した開始〜終了時刻」でカレンダーに書き戻す
     // （同じ時間帯キーを使うので、手動記録側で作ったイベントがあれば実測時刻に更新される）
-    upsertCalendarEvent(formatDateStr(st), timeBlock, st.toISOString(), endDt.toISOString(), calTitle);
+    upsertCalendarEvent(formatDateStr(st), timeBlock, st.toISOString(), endDt.toISOString(), calTitle, null, false, logTimeClass);
     setSaving(false); setShowModal(false); setLogMemo(""); setTask(""); setSessionResult(null);
     setExecId(null); setLinkTaskId(null); setLogTimeClass("");   // 保存できたので、このセッションは終わり
     goToBreakOrReset();
@@ -5841,15 +6144,8 @@ function TimerScreen({onToast, isActive}) {
             <input class="inp" value=${task} onInput=${e=>setTask(e.target.value)}
               placeholder="例：資料作成"/>
           </div>
-          <div class="form-grp">
-            <button onClick=${()=>{const v=!logGoalRelated;setLogGoalRelated(v);localStorage.setItem("jiroku_timer_goal_related",String(v));}} style=${{display:"flex",alignItems:"center",gap:8,background:logGoalRelated?"var(--accent-l)":"none",border:`1.5px solid ${logGoalRelated?"var(--accent)":"var(--border)"}`,borderRadius:9,padding:"7px 11px",width:"100%",cursor:"pointer",transition:"all .15s"}}>
-              <div style=${{width:16,height:16,borderRadius:5,border:`2px solid ${logGoalRelated?"var(--accent)":"var(--border)"}`,background:logGoalRelated?"var(--accent)":"transparent",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,transition:"all .15s"}}>
-                ${logGoalRelated&&html`<svg width="10" height="10" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="white" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`}
-              </div>
-              <span style=${{fontSize:12.5,fontWeight:500,color:logGoalRelated?"var(--accent)":"var(--sub)"}}>この時間は目標に関連している</span>
-            </button>
-          </div>
-          <${TimeClassPicker} value=${logTimeClass} onChange=${setLogTimeClass}
+          <!-- 「目標に関連している」のチェックは廃止（2026-08-05 Kai要望）。下の分類で決まる -->
+          <${TimeClassPicker} value=${logTimeClass} onChange=${setLogTimeClassAndGoal}
             hint=${linkTaskId?"タスクから始めたので、目標に紐づいていれば自動で「目標に直結」になります":""}/>
           <div class="form-grp">
             <label class="form-lbl">自己評価</label>
@@ -5952,7 +6248,7 @@ const FAQ_CATEGORIES = [
   ]},
   { cat:"みんなの頑張り・ランキング", icon:"🏆", items:[
     { q:"「みんなの頑張り」では何が見られる？",
-      a:"ホームの「みんなの頑張り」から、3つのランキング（ステータス／レポート／連続記録）と、みんなのシェア投稿が見られます。\n自分の頑張りをシェアして、お互いに応援し合える場所です。" },
+      a:"ホームの「みんなの頑張り」から、3つのランキング（自己経営力／レポート／連続記録）と、みんなのシェア投稿が見られます。\n自分の頑張りをシェアして、お互いに応援し合える場所です。" },
     { q:"「連続記録ランキング」って何？",
       a:"🔥連続で記録している日数の長い順に並ぶランキングです。名前の横の🧊は、その人が持っているフリーズの数です。\n記録が途切れている（0日の）人は載らないので、続けている人だけが表示されます。" },
     { q:"「最新レポートランキング（〇人中〇位）」って何？",
@@ -7521,7 +7817,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260804-142547";
+const APP_BUILD = "20260805-031926";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
@@ -8736,7 +9032,7 @@ function QuickLogSheet({onClose,onToast}){
             const stt = new Date(dateStr+"T"+startHM.slice(0,5)+":00"); if(isNaN(stt)) return;
             const ett = endHM ? new Date(dateStr+"T"+endHM.slice(0,5)+":00") : null;
             const endDt = (ett && ett>stt) ? ett : new Date(stt.getTime()+3600000);
-            upsertCalendarEvent(dateStr, tb, stt.toISOString(), endDt.toISOString(), rec.task||"記録", null);
+            upsertCalendarEvent(dateStr, tb, stt.toISOString(), endDt.toISOString(), rec.task||"記録", null, false, rec.time_classification||"");
           });
         }
       }catch(e){}
@@ -9076,40 +9372,19 @@ try {
 //   直した内容が「アプリを開き直すまで反映されない」状態を放置しない。
 //   画面に戻ってきたタイミングで配信中の版を確かめ、違っていたら
 //   入力中でなければその場で読み込み直す。入力中なら小さな案内だけ出す。
-(function () {
-  var CHECK_MIN = 20 * 60 * 1000;   // 20分に1回まで
-  var last = 0, banner = null;
-  function busy() {
-    var a = document.activeElement;
-    if (a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)) return true;
-    return !!document.querySelector('[data-modal-open="1"]');
-  }
-  function showBanner() {
-    if (banner) return;
-    banner = document.createElement("button");
-    banner.setAttribute("style", "position:fixed;left:12px;right:12px;bottom:78px;z-index:9990;"
-      + "padding:12px;border:none;border-radius:12px;background:#0891B2;color:#fff;font-size:13px;"
-      + "font-weight:700;box-shadow:0 6px 20px rgba(0,0,0,.2);font-family:inherit");
-    banner.textContent = "新しい版があります。タップして更新";
-    banner.onclick = function () { location.reload(); };
-    document.body.appendChild(banner);
-  }
-  async function check() {
-    if (Date.now() - last < CHECK_MIN) return;
-    last = Date.now();
-    try {
-      var res = await fetch(location.pathname + "?buildcheck=" + Date.now(), { cache: "no-store" });
-      if (!res.ok) return;
-      var txt = await res.text();
-      var m = txt.match(/APP_BUILD = "([^"]+)"/);
-      if (!m || m[1] === APP_BUILD) return;
-      if (busy()) showBanner(); else location.reload();
-    } catch (e) { /* 通信できないときは何もしない */ }
-  }
-  document.addEventListener("visibilitychange", function () { if (!document.hidden) check(); });
-  window.addEventListener("focus", check);
-  setTimeout(check, 60000);
-})();
+//   ★2026-08-05: 版の確認を version.json（数十バイト）1本にまとめた★
+//     以前はここと下のService Worker側の2か所で、それぞれ index.html（約180KB）を
+//     丸ごと取り直して版番号を読んでいた。起動のたびに本体を3回ダウンロードして
+//     いたことになり、これが「読み込みが遅い」の主因だった。
+//     版番号を見るだけなら、版番号だけのファイルを見ればよい。
+window.__jirokuFetchLatestBuild = async function () {
+  try {
+    var res = await fetch("version.json?t=" + Date.now(), { cache: "no-store" });
+    if (!res.ok) return null;
+    var j = await res.json();
+    return (j && j.build) ? String(j.build) : null;
+  } catch (e) { return null; }   // 通信できないときは何もしない
+};
 
 // ★端末の不具合をサーバーへ残す★
 //   これまでは画面側のエラーが誰にも見えず、利用者の報告があるまで
@@ -9200,26 +9475,21 @@ if('serviceWorker' in navigator){
   // (index.html)だけの更新はこちらで検知する。起動時に自分自身のHTMLを取得して
   // ハッシュを控え、アプリを前面に戻すたび（最短10分間隔）に取り直して比較。
   // 変わっていたら新バージョンが公開されたということなので再読み込みする
-  let baselineHtmlHash = null, lastVerCheck = 0;
+  let lastVerCheck = 0;
   async function checkAppUpdate(){
-    try{
-      const now = Date.now();
-      if (now - lastVerCheck < 5*60*1000) return;
-      lastVerCheck = now;
-      const res = await fetch("index.html", { cache: "no-store" });
-      if (!res.ok) return;
-      const text = await res.text();
-      // ★「今動いている版」と「サーバーにある版」を比べる★
-      //   以前は起動時にサーバーのファイルを取って、それを基準にしていた。
-      //   古い版で動いていてもサーバーの版と自分を比べるので、
-      //   差が出ず永久に更新されなかった（実際にそうなった）。
-      //   埋め込んだ版番号どうしを比べれば、確実に分かる。
-      const m = text.match(/const APP_BUILD = "([^"]+)"/);
-      if (!m) return;
-      if (m[1] !== APP_BUILD) { pendingReload = true; safeReload(); }
-    }catch(e){}
+    const now = Date.now();
+    if (now - lastVerCheck < 5*60*1000) return;
+    lastVerCheck = now;
+    // ★「今動いている版」と「配信中の版」を比べる★
+    //   埋め込んだ版番号どうしを比べれば確実に分かる。
+    //   取りに行くのは version.json だけ（本体180KBの再取得はしない）。
+    const latest = await window.__jirokuFetchLatestBuild();
+    if (!latest || latest === APP_BUILD) return;
+    pendingReload = true; safeReload();
   }
-  checkAppUpdate(); // 起動時に基準ハッシュを取得
+  // ★起動直後は確認しない★（2026-08-05 起動高速化）
+  //   たった今このHTMLを読み込んだところなので、その瞬間に版を確かめる意味がない。
+  //   確認は「アプリに戻ってきた時」と「5分ごと」に任せる。
   const runUpdateCheck = () => {
     // 新版が見つかっているが入力中で保留していた場合、手が空いた今のタイミングで再読み込み
     if (pendingReload && !swReloaded){ safeReload(); if (swReloaded) return; }
