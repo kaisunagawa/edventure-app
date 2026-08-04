@@ -7353,33 +7353,74 @@ function GoalField({label, hint, children}) {
     </div>`;
 }
 
-const EMPTY_GOAL = {quarterly_goal_id:"",title:"",category:"",target_value:"",unit:"",start_date:"",end_date:"",why:"",success_condition:"",guardrails:"",priority:3};
+const EMPTY_GOAL = {quarterly_goal_id:"",title:"",category:"",target_value:"",current_value:"",unit:"",start_date:"",end_date:"",why:"",success_condition:"",guardrails:"",priority:3};
 const EMPTY_WG = {weekly_goal_id:"",link_quarterly_goal_id:"",title:"",metric_type:"count",unit:"",target_total:"",min_line:"",std_line:"",stretch_line:""};
 const METRIC_LABELS = {count:"回数（何回やるか）", minutes:"時間（何分やるか）", boolean:"やったかどうか"};
 
+// ★編集画面はSprintと同じ形にそろえる★（2026-08-05 Kaiの判断・A案）
+//   新規作成は1問ずつ考えてもらうウィザードのまま。
+//   編集のときだけ、Sprintの編集画面と同じ「丸アイコン＋見出し＋必須バッジ」で
+//   全項目を1画面に並べる。直したい所へ直接たどり着けるようにするため。
+function EditHead({color, icon, text, req}) {
+  return html`
+    <div style=${{display:"flex",alignItems:"center",gap:7,marginBottom:7,marginTop:14}}>
+      <span style=${{width:22,height:22,borderRadius:"50%",background:color,display:"flex",
+                     alignItems:"center",justifyContent:"center",flexShrink:0}}>${icon}</span>
+      <span style=${{fontSize:13,fontWeight:800,color:"var(--text)"}}>${text}</span>
+      ${req&&html`<span style=${{fontSize:9.5,fontWeight:700,color:"var(--accent)",background:"var(--accent-l)",
+                                borderRadius:20,padding:"2px 7px",marginLeft:6}}>必須</span>`}
+    </div>`;
+}
+const EDIT_IC = {
+  goal: html`<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/></svg>`,
+  bar:  html`<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round"><path d="M5 20V10M12 20V4M19 20v-7"/></svg>`,
+  cal:  html`<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg>`,
+  me:   html`<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg>`,
+  flag: html`<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round"><path d="M5 21V4M5 4h11l-2 4 2 4H5"/></svg>`,
+  shield: html`<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5" stroke-linejoin="round"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6l8-3z"/></svg>`,
+};
+
 function GoalEditor({draft, setDraft, onSave, onCancel, saving}) {
   const f=(k)=>(e)=>setDraft({...draft,[k]:e.target.value});
+  const C = "#14B8A6";   // 3か月目標の色（ロードマップと同じ）
+  const hint = (t)=>html`<div style=${{fontSize:11,color:"var(--sub)",lineHeight:1.7,marginBottom:6}}>${t}</div>`;
   return html`
-    <div style=${{background:"var(--bg)",borderRadius:12,padding:14,border:"1px solid var(--border)",marginBottom:10}}>
-      <${GoalField} label="3か月で達成したいこと">
-        <textarea class="txa" placeholder="例：月商100万円を安定して出せるようにする" value=${draft.title}
-          onChange=${f("title")} style=${{minHeight:44,padding:"9px 12px",resize:"none"}}/>
-      <//>
+    <div style=${{background:"var(--bg)",borderRadius:12,padding:"4px 14px 14px",border:"1px solid var(--border)",marginBottom:10}}>
+      ${EditHead({color:C, icon:EDIT_IC.goal, text:"3か月で達成したいこと", req:true})}
+      <textarea class="txa" placeholder="例：月商100万円を安定して出せるようにする" value=${draft.title}
+        onChange=${f("title")} style=${{minHeight:44,padding:"9px 12px",resize:"none"}}/>
+
+      ${EditHead({color:C, icon:EDIT_IC.bar, text:"数字で追う"})}
+      ${hint("増えるほど良い数字を1つだけ。いまの数字も入れておくと、進み具合とペースが出ます。")}
       <div style=${{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
         <${GoalField} label="目標の数値"><input class="inp" type="number" inputmode="decimal" placeholder="100" value=${draft.target_value} onChange=${f("target_value")}/><//>
         <${GoalField} label="単位"><input class="inp" placeholder="万円 / 件 / kg" value=${draft.unit} onChange=${f("unit")}/><//>
+        <${GoalField} label="いまの数値"><input class="inp" type="number" inputmode="decimal" placeholder="0" value=${draft.current_value} onChange=${f("current_value")}/><//>
+        <div/>
+      </div>
+
+      ${EditHead({color:C, icon:EDIT_IC.cal, text:"いつまで"})}
+      <div style=${{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
         <${GoalField} label="開始日"><input class="inp" type="date" value=${draft.start_date} onChange=${f("start_date")}/><//>
         <${GoalField} label="期限"><input class="inp" type="date" value=${draft.end_date} onChange=${f("end_date")}/><//>
       </div>
-      <${GoalField} label="なぜこれをやるのか" hint="迷ったときに立ち返る場所です。うまく書けなくても大丈夫。">
-        <textarea class="txa" placeholder="例：家族との時間を増やしたいから、収入を仕組みで作れるようにしたい" value=${draft.why}
-          onChange=${f("why")} style=${{minHeight:44,padding:"9px 12px",resize:"none"}}/>
-      <//>
-      <${GoalField} label="達成したと言える条件" hint="「なんとなく頑張った」で終わらせないための線引きです。">
-        <textarea class="txa" placeholder="例：3か月連続で月商100万円を超えている" value=${draft.success_condition}
-          onChange=${f("success_condition")} style=${{minHeight:44,padding:"9px 12px",resize:"none"}}/>
-      <//>
-      <div style=${{display:"flex",gap:8}}>
+
+      ${EditHead({color:C, icon:EDIT_IC.me, text:"なぜこれをやるのか"})}
+      ${hint("迷ったときに立ち返る場所です。うまく書けなくても大丈夫。")}
+      <textarea class="txa" placeholder="例：家族との時間を増やしたいから、収入を仕組みで作れるようにしたい" value=${draft.why}
+        onChange=${f("why")} style=${{minHeight:44,padding:"9px 12px",resize:"none"}}/>
+
+      ${EditHead({color:C, icon:EDIT_IC.flag, text:"達成したと言える条件"})}
+      ${hint("「なんとなく頑張った」で終わらせないための線引きです。")}
+      <textarea class="txa" placeholder="例：3か月連続で月商100万円を超えている" value=${draft.success_condition}
+        onChange=${f("success_condition")} style=${{minHeight:44,padding:"9px 12px",resize:"none"}}/>
+
+      ${EditHead({color:C, icon:EDIT_IC.shield, text:"これは犠牲にしない"})}
+      ${hint("目標を追ううちに壊しがちなものを、先に決めておきます。空欄でも構いません。")}
+      <textarea class="txa" placeholder="例：睡眠6時間、週1回は家族と夕食" value=${draft.guardrails}
+        onChange=${f("guardrails")} style=${{minHeight:44,padding:"9px 12px",resize:"none"}}/>
+
+      <div style=${{display:"flex",gap:8,marginTop:14}}>
         <button class="btn" onClick=${onSave} disabled=${saving} style=${{flex:1,opacity:saving?.6:1}}>${saving?"保存中…":"保存する"}</button>
         <button onClick=${onCancel} style=${{background:"none",border:"1px solid var(--border)",borderRadius:10,padding:"0 16px",color:"var(--sub)",fontSize:13,fontWeight:600,cursor:"pointer"}}>やめる</button>
       </div>
@@ -7389,26 +7430,31 @@ function GoalEditor({draft, setDraft, onSave, onCancel, saving}) {
 function WeeklyGoalEditor({draft, setDraft, onSave, onCancel, saving}) {
   const f=(k)=>(e)=>setDraft({...draft,[k]:e.target.value});
   const isBool = draft.metric_type==="boolean";
+  const C = "#4CAF50";   // 今週の目標の色（ロードマップと同じ）
+  const hint = (t)=>html`<div style=${{fontSize:11,color:"var(--sub)",lineHeight:1.7,marginBottom:6}}>${t}</div>`;
   return html`
-    <div style=${{background:"var(--card)",borderRadius:10,padding:12,border:"1px dashed var(--accent)",marginBottom:8}}>
-      <${GoalField} label="今週やること">
-        <input class="inp" placeholder="例：見込み客に提案を出す" value=${draft.title} onChange=${f("title")}/>
-      <//>
-      <${GoalField} label="何で測るか">
-        <select class="inp" value=${draft.metric_type} onChange=${f("metric_type")}>
-          ${Object.keys(METRIC_LABELS).map(k=>html`<option key=${k} value=${k}>${METRIC_LABELS[k]}</option>`)}
-        </select>
-      <//>
+    <div style=${{background:"var(--card)",borderRadius:10,padding:"2px 12px 12px",border:"1px dashed var(--accent)",marginBottom:8}}>
+      ${EditHead({color:C, icon:EDIT_IC.flag, text:"今週やること", req:true})}
+      <input class="inp" placeholder="例：見込み客に提案を出す" value=${draft.title} onChange=${f("title")}/>
+
+      ${EditHead({color:C, icon:EDIT_IC.bar, text:"何で測るか"})}
+      ${hint("「回数」と「時間」は記録から自動で数えます。「やったかどうか」は自分で達成に変えます。")}
+      <select class="inp" value=${draft.metric_type} onChange=${f("metric_type")}>
+        ${Object.keys(METRIC_LABELS).map(k=>html`<option key=${k} value=${k}>${METRIC_LABELS[k]}</option>`)}
+      </select>
+
       ${!isBool&&html`
+        ${EditHead({color:C, icon:EDIT_IC.goal, text:"今週の目標", req:true})}
         <div style=${{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-          <${GoalField} label="今週の目標"><input class="inp" type="number" inputmode="numeric" placeholder="10" value=${draft.target_total} onChange=${f("target_total")}/><//>
+          <${GoalField} label="いくつ"><input class="inp" type="number" inputmode="numeric" placeholder="10" value=${draft.target_total} onChange=${f("target_total")}/><//>
           <${GoalField} label="単位"><input class="inp" placeholder=${draft.metric_type==="minutes"?"分":"件"} value=${draft.unit} onChange=${f("unit")}/><//>
         </div>
-        <${GoalField} label="最低ここまでやる" hint="調子が悪い週でも、ここを超えれば連続記録は途切れません。">
-          <input class="inp" type="number" inputmode="numeric" placeholder="3" value=${draft.min_line} onChange=${f("min_line")}/>
-        <//>
+        ${EditHead({color:C, icon:EDIT_IC.shield, text:"最低ここまでやる"})}
+        ${hint("調子が悪い週でも、ここを超えれば連続記録は途切れません。")}
+        <input class="inp" type="number" inputmode="numeric" placeholder="3" value=${draft.min_line} onChange=${f("min_line")}/>
       `}
-      <div style=${{display:"flex",gap:8}}>
+
+      <div style=${{display:"flex",gap:8,marginTop:14}}>
         <button class="btn" onClick=${onSave} disabled=${saving} style=${{flex:1,opacity:saving?.6:1}}>${saving?"保存中…":"保存"}</button>
         <button onClick=${onCancel} style=${{background:"none",border:"1px solid var(--border)",borderRadius:10,padding:"0 14px",color:"var(--sub)",fontSize:12.5,fontWeight:600,cursor:"pointer"}}>やめる</button>
       </div>
@@ -8861,7 +8907,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260805-070609";
+const APP_BUILD = "20260805-071954";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
