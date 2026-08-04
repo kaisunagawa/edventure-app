@@ -1695,8 +1695,40 @@ function computeSelfMgmtPower(studentEmail, weekStart) {
         reference: counts.length ? ("記録件数 最多" + max + "件 / 平均" + (Math.round(avg * 10) / 10) + "件（参考）") : "" }));
     // ★測れていないものを明示して分母に入れる★ これを省くと coverage が
     //   1.0 になり、休息や予定量を見ていないのに「確からしさ 高」と出る
-    parts.push(Object.assign(na("休息・回復の時間を分類する機能を準備しています", "TIME_CLASSIFICATION_UNAVAILABLE"),
-                             { weight: 1, label: "休息と回復のバランス" }));
+    // ★休息と回復のバランス★（2026-08-05 実装漏れを解消）
+    //   「分類する機能を準備しています」のまま固定になっていたが、
+    //   6分類で「回復」を選べるようになっているので、実際に数えられる。
+    //   測れないままにしておくと、継続力がいつまでも暫定扱いになり
+    //   ホームに点数が出ない（Kaiの「継続力が消えた」の正体）。
+    //   ただし分類がほとんど入っていない週は、0%と断定せず測らない。
+    (function () {
+      const minsOf = function (l) {
+        const am = Number(l.actual_minutes);
+        return am > 0 ? am : timeBlockMinutes(l.time_block);
+      };
+      let total = 0, classified = 0, rest = 0;
+      logs.forEach(function (l) {
+        const m = minsOf(l); if (!(m > 0)) return;
+        total += m;
+        const k = String(l.time_classification || "");
+        if (!k) return;
+        classified += m;
+        if (REST_CLASSES[k]) rest += m;
+      });
+      // 分類が3割に届かない週は「休めたか」を判断できない
+      if (!(total > 0) || classified / total < 0.3) {
+        parts.push(Object.assign(na("分類のついた記録がまだ少ないため、休息の割合を出せません",
+                                    "REST_COVERAGE_LOW"),
+                                 { weight: 1, label: "休息と回復のバランス" }));
+        return;
+      }
+      const pct = rest / total * 100;
+      // 1割前後を目安にする。多すぎても少なすぎても続かないので、上は頭打ちにする
+      const score = Math.max(0, Math.min(100, Math.round(pct / 10 * 100)));
+      parts.push({ value: score, state: "evaluated", weight: 1, sample: logs.length,
+                   label: "休息と回復のバランス",
+                   detail: Math.round(pct) + "%（回復・人間関係にあてた時間）" });
+    })();
     parts.push(Object.assign(na("1日に使える時間の設定がないため、予定の詰めすぎを判定できません", "AVAILABLE_TIME_MISSING"),
                              { weight: 1, label: "予定量の適切さ" }));
     const r = smpRoll(parts);
