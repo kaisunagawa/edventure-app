@@ -726,7 +726,7 @@ function doGet(e) {
       case "adminListRecentRegistrations": result = adminListRecentRegistrations(e.parameter.coachEmail, e.parameter.days); break;
       case "adminBackfillReports": result = adminBackfillReports(e.parameter.coachEmail, e.parameter.days, e.parameter.limit, e.parameter.dryRun); break;
       case "adminOpsHealthCheck": result = verifyAdmin(e.parameter.coachEmail) ? (dailyOpsHealthCheck(e.parameter.dryRun === "1") || {ok:true}) : {ok:false,error:"not admin"}; break;
-      case "adminInstallTrigger": result = adminInstallTrigger(e.parameter.coachEmail, e.parameter.handler); break;
+      case "adminInstallTrigger": result = adminInstallTrigger(e.parameter.coachEmail, e.parameter.handler, e.parameter.replace); break;
       case "adminSendStudentCampaign": result = adminSendStudentCampaign(e.parameter.coachEmail, e.parameter); break;
       case "adminSystemHealth": result = verifyAdmin(e.parameter.coachEmail) ? systemHealthCheck(e.parameter.deep === "1") : {ok:false,error:"not admin"}; break;
       case "generateTalentReport": result = generateTalentReport(e.parameter.coachEmail, e.parameter.targetEmail); break;
@@ -14739,7 +14739,7 @@ function adminSetupTriggers(email) {
 
 // 特定のハンドラのトリガーが無ければ1本だけ追加する（全張り直しを避けたい時用）。
 // 既にあれば何もしない。新しい定期処理を1つ足す時に安全に使える
-function adminInstallTrigger(email, handler) {
+function adminInstallTrigger(email, handler, replaceFlag) {
   if (!verifyAdmin(email)) return { ok: false, error: "not admin" };
   const name = String(handler || "").trim();
   // 追加してよいハンドラと、その時刻をここで決める。
@@ -14750,8 +14750,13 @@ function adminInstallTrigger(email, handler) {
     weeklyBackup:        function (b) { return b.timeBased().everyWeeks(1).onWeekDay(ScriptApp.WeekDay.SUNDAY).atHour(3); }
   };
   if (!allowed[name]) return { ok: false, error: "許可されていないハンドラ: " + name };
-  const exists = ScriptApp.getProjectTriggers().some(t => t.getHandlerFunction() === name);
-  if (exists) return { ok: true, data: { added: false, note: "既に登録済み" } };
+  // ★時刻を変えたいときは張り直す★（2026-08-05）
+  //   コードの時刻を変えても、既に作られたトリガーは動かない。
+  //   replace=1 のときだけ、その1本を消してから作り直す。
+  const replace = String(replaceFlag || "") === "1";
+  const olds = ScriptApp.getProjectTriggers().filter(t => t.getHandlerFunction() === name);
+  if (olds.length && !replace) return { ok: true, data: { added: false, note: "既に登録済み（張り直すなら replace=1）" } };
+  if (olds.length && replace) olds.forEach(t => { try { ScriptApp.deleteTrigger(t); } catch (e) {} });
   if (ScriptApp.getProjectTriggers().length >= 20) return { ok: false, error: "トリガー上限(20)に達しています" };
   allowed[name](ScriptApp.newTrigger(name)).create();
   return { ok: true, data: { added: true, handler: name,
