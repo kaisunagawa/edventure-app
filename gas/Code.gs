@@ -10425,8 +10425,14 @@ function addGoalEntry(studentEmail, body) {
   //   身に覚えのない行が並んでしまっていた。実績は実績として別に持つ。
   const wGoalId = String((body && body.weekly_goal_id) || "").trim();
   if (wGoalId) {
-    if (!p1OwnedRow("WeeklyGoals", "weekly_goal_id", wGoalId, studentEmail)) {
-      return { ok: false, error: "not found" };
+    const wRow = p1OwnedRow("WeeklyGoals", "weekly_goal_id", wGoalId, studentEmail);
+    if (!wRow) return { ok: false, error: "not found" };
+    // ★数で数える目標だけ受け付ける★（2026-08-05）
+    //   「できた/できていない」や「何日やったか」で数える目標に数を足すと、
+    //   記録から数えたぶんと二重になる。画面をすり抜けても入らないようにする。
+    const mt2 = normalizeMetricType(wRow.metric_type);
+    if (mt2 !== "COUNT" && mt2 !== "DURATION") {
+      return { ok: false, error: "この目標は記録から自動で数えます" };
     }
   } else if (!goalId || !p1OwnedRow("Goals", "quarterly_goal_id", goalId, studentEmail)) {
     return { ok: false, error: "not found" };
@@ -12998,7 +13004,7 @@ const ADMIN_SECRET_ALLOWLIST = {
   // 一斉送信（Kaiの明示的な要望により残す）
   adminBroadcastLine:1, adminBroadcastLinePending:1, adminSendStudentCampaign:1,
   // セットアップ・保守
-  adminSetupTriggers:1, adminInstallTrigger:1, adminSetupPhase1:1, adminSetupAuth:1, adminPhase4DryRun:1, adminLegacyBackfill:1, adminWritePathStats:1, adminIssueTestSession:1, adminDropTestSessions:1, adminOpsSelfTest:1, adminActualMinutesAudit:1, adminXpCorrection:1, adminStreakRecalc:1, adminGrantFeature:1, adminUserDiag:1, adminReportScoreDryRun:1, adminReportGenTest:1, adminScoreConsistency:1, adminFinalizeOps:1,
+  adminSetupTriggers:1, adminInstallTrigger:1, adminSetupPhase1:1, adminSetupAuth:1, adminPhase4DryRun:1, adminLegacyBackfill:1, adminWritePathStats:1, adminIssueTestSession:1, adminDropTestSessions:1, adminOpsSelfTest:1, adminActualMinutesAudit:1, adminXpCorrection:1, adminStreakRecalc:1, adminGrantFeature:1, adminUserDiag:1, adminReportScoreDryRun:1, adminReportGenTest:1, adminScoreConsistency:1, adminFinalizeOps:1, adminUnfinalizeOps:1,
   authSetMode:1, authSetEnforce:1, authRoleApply:1, authRoleDryRun:1, authRevokeAll:1,
   authCleanupTestData:1, adminPurgeTestUsers:1, adminMigrateTasks:1, authBreakerReset:1, rotateSessionSecret:1,
   p1Backup:1, p1BackupInfo:1, p1PurgeArchived:1, weeklyBackup:1

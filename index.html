@@ -1727,8 +1727,9 @@ function SprintEntrySheet({sprint, weeklies, onClose, onPick, onAddGoal, onToast
           const u = w.unit || (w.metric_type==="DURATION"?"分":"件");
           const a2 = Number(w.actual_value)||0;
           const pctW = (!isNaN(t)&&t>0) ? Math.min(100, a2/t*100) : 0;
+          const canAdd = (w.metric_type==="COUNT"||w.metric_type==="DURATION"||!w.metric_type);
           return html`
-          <button key=${w.weekly_goal_id} onClick=${()=>onPick(w)}
+          <button key=${w.weekly_goal_id} disabled=${!canAdd} onClick=${()=>canAdd&&onPick(w)}
             style=${{display:"flex",alignItems:"center",gap:12,width:"100%",padding:"14px 0",
                      background:"none",border:"none",borderBottom:"1px solid var(--border)",
                      cursor:"pointer",fontFamily:"inherit",textAlign:"left"}}>
@@ -1743,7 +1744,7 @@ function SprintEntrySheet({sprint, weeklies, onClose, onPick, onAddGoal, onToast
                 <span style=${{display:"block",height:"100%",width:pctW+"%",background:C,borderRadius:99}}/>
               </span>
             </span>
-            <span style=${{flexShrink:0,color:"var(--sub)",fontSize:16}}>›</span>
+            <span style=${{flexShrink:0,color:"var(--sub)",fontSize:canAdd?16:11.5}}>${canAdd?"›":"自動"}</span>
           </button>`;
         }) : html`
           <div style=${{padding:"16px 0",fontSize:13,color:"var(--sub)",lineHeight:1.8}}>
@@ -3082,13 +3083,15 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
       ((goalTree&&goalTree.orphanWeeklyGoals)||[]).forEach(w=>ws.push({...w, parentTitle:""}));
       const wg = ws.filter(w=>String(w.status||"ACTIVE").toUpperCase()==="ACTIVE");
 
-      // ★段階ごとの色は、アプリの基本の色から取る★（2026-08-05 Kai指摘）
-      //   最初は見本の色をそのまま直書きしていたが、他の画面と並べると浮いていた。
-      //   段階の違いは残しつつ、アプリが元から持っている色に合わせる。
-      const C_Q = "var(--accent)";   // 3か月目標  … アプリの基本色
-      const C_S = "#3B82F6";         // 2週間Sprint … 基本色と見分けがつく青
-      const C_W = "var(--green)";    // 今週の目標  … 達成の緑
-      const C_STAR = "var(--amber)"; // 今日のフォーカス … 注目の黄
+      // ★色はJIROKUの色に寄せる★（2026-08-05 Kai指摘）
+      //   青・緑・オレンジを混ぜたら、その3か所だけ浮いて見えた。
+      //   JIROKUの基本色（--accent = シアン系）を軸に、
+      //   段階が下るほど濃くしていく。色相を変えずに濃さで区別する。
+      //   段階の違いは分かるが、画面全体としては1色に見える。
+      const C_Q = "var(--accent)";                 // 3か月目標  … 基本色
+      const C_S = "color-mix(in srgb, var(--accent) 78%, #1E3A5F)";  // 2週間Sprint … 少し深く
+      const C_W = "color-mix(in srgb, var(--accent) 58%, #16324A)";  // 今週の目標  … さらに深く
+      const C_STAR = "var(--accent)";              // 今日のフォーカス … 基本色
 
       // ★目標がまだ無い人にも入口を残す★
       if (!goals.length && !allSp.length) return html`
@@ -3136,16 +3139,19 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
                         daysLeft = Math.max(daysLeft, Number(w.days_left)||0); });
         if (!(daysLeft>0)) daysLeft = Math.max(0, sp.daysLeft||0);
         if (!(daysLeft>0)) return null;
-        const remain = Math.max(0, sp.progress.target - sp.progress.actual);
-        // 1日あたりあと何やれば100%に届くか（これが「次の一手」になる）
-        const needPerDay = Math.round(remain/daysLeft*10)/10;
+        // ★%で言う★（2026-08-05 Kai指摘）
+        //   Sprintの進捗は、単位の違う週間目標（6件・300件・1件…）を
+        //   足した数字なので、「1日1834」のように人が読めない値になっていた。
+        //   割合なら単位が要らず、どの目標でも同じ意味で読める。
+        const remainPct = Math.max(0, 100 - (sp.progress.percent||0));
+        const needPctPerDay = Math.max(0.1, Math.round(remainPct/daysLeft*10)/10);
         if (addPerDay>0) {
           const projected = sp.progress.actual + addPerDay*daysLeft;
           return { kind:"pace", days:daysLeft,
                    percent: Math.min(999, Math.round(projected/sp.progress.target*100)),
-                   needPerDay: needPerDay };
+                   needPctPerDay: needPctPerDay };
         }
-        return { kind:"need", days:daysLeft, needPerDay: needPerDay,
+        return { kind:"need", days:daysLeft, needPctPerDay: needPctPerDay,
                  percent: sp.progress.percent };
       })();
 
@@ -3385,8 +3391,9 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
                   icon: html`<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>`,
                   // ★1行に収める★（2026-08-05 Kai指摘）2行になると読みにくい
                   children: (sForecast.kind==="pace" && sForecast.percent>=100)
+                    // 残り日数はすぐ上に出ているので繰り返さない（1行に収めるため）
                     ? html`このペースならやり切れます`
-                    : html`1日 <b style=${{color:C_S,fontWeight:800}}>${sForecast.needPerDay}</b> 進めれば、やり切れます` })
+                    : html`1日 <b style=${{color:C_S,fontWeight:800}}>${sForecast.needPctPerDay}%</b> ずつでやり切れます` })
               : (sPct===null ? InfoBox({ color:C_S, onClick:()=>setWgSheet(true),
                   icon: html`<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/></svg>`,
                   children: html`今週の目標を数字で決めると、ここに進み具合が出ます` }) : "")}
@@ -3455,12 +3462,18 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
                         </span>
                       </span>
                     </button>
-                    <!-- ★＋で実績を1件足す★ 0→1→2 と増えていく。
-                         足したぶんは記録として残す（数字だけ足すと記録と食い違うため）。 -->
-                    <button title="実績を入れる（減らすこともできます）" onClick=${()=>setWeeklyEntry(w)}
-                      style=${{flexShrink:0,width:26,height:26,padding:0,border:"none",background:"none",
-                               color:C_W,display:"flex",alignItems:"center",justifyContent:"center",
-                               fontSize:19,fontWeight:600,cursor:"pointer",lineHeight:1,fontFamily:"inherit"}}>＋</button>
+                    <!-- ★数で数える目標だけ「＋」を出す★（2026-08-05）
+                         「できた/できていない」で見る目標や、「何日やったか」で
+                         数える目標に数を足すと、二重に数えてしまう。
+                         数え方が合わないものには＋を出さず、押し間違いを防ぐ。 -->
+                    ${(w.metric_type==="COUNT"||w.metric_type==="DURATION"||!w.metric_type)
+                      ? html`<button title="実績を入れる（減らすこともできます）" onClick=${()=>setWeeklyEntry(w)}
+                          style=${{flexShrink:0,width:26,height:26,padding:0,border:"none",background:"none",
+                                   color:C_W,display:"flex",alignItems:"center",justifyContent:"center",
+                                   fontSize:19,fontWeight:600,cursor:"pointer",lineHeight:1,fontFamily:"inherit"}}>＋</button>`
+                      : html`<span title=${w.metric_type==="DAYS"?"記録した日数で自動的に数えます":"「できた」に変えると達成になります"}
+                          style=${{flexShrink:0,width:26,height:26,display:"flex",alignItems:"center",
+                                   justifyContent:"center",color:"var(--sub)",fontSize:13}}>自動</span>`}
                   </div>`;
                 })}
               </div>
