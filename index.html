@@ -1358,6 +1358,7 @@ const CLASS_REASON_TEXT = {
 //   1件選ぶごとにその場で保存し、選んだ行は静かに消えていく（押し直しはできる）。
 //   保存に失敗したら、その行は消さずに残す（黙って無かったことにしない）。
 function BulkClassifySheet({date, onClose, onSaved, onToast}) {
+  useLockBodyScroll();
   const [rows, setRows] = useState(null);   // null = 読み込み中
   const [busy, setBusy] = useState("");
   const [doneCount, setDoneCount] = useState(0);
@@ -1393,7 +1394,10 @@ function BulkClassifySheet({date, onClose, onSaved, onToast}) {
     setRows(prev=>prev.filter(x=>x.log_id!==l.log_id));
   };
 
-  return html`
+  // ★画面の外（body直下）に出す★
+  //   他のモーダルと同じ作りにする。中に埋めたままだと、
+  //   親側の指定によって position:fixed が効かず、後ろの画面が操作できてしまう。
+  return ReactDOM.createPortal(html`
     <div style=${{position:"fixed",inset:0,height:"100dvh",zIndex:430,background:"var(--bg)",display:"flex",flexDirection:"column"}}>
       <div style=${{display:"flex",alignItems:"center",gap:10,padding:"14px 16px",borderBottom:"1px solid var(--border)",flexShrink:0,paddingTop:"calc(14px + var(--safe-top, 0px))"}}>
         <div style=${{flex:1,minWidth:0}}>
@@ -1426,7 +1430,7 @@ function BulkClassifySheet({date, onClose, onSaved, onToast}) {
             </div>
           </div>`)}
       </div>
-    </div>`;
+    </div>`, document.body);
 }
 
 // ★3階層で同じ形の進捗バー★（2026-08-05 Kaiと整理）
@@ -1470,6 +1474,17 @@ function ProgressBar({percent, pace, label, sub}) {
     </div>`;
 }
 
+// シートを開いている間は、後ろの画面をスクロールさせない
+function useLockBodyScroll(){
+  useEffect(()=>{
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    document.documentElement.setAttribute("data-modal-open","1");
+    return ()=>{ document.body.style.overflow = prev;
+                 document.documentElement.removeAttribute("data-modal-open"); };
+  },[]);
+}
+
 // 画面が広いかどうか。広ければ右側のパネル、狭ければ下から出るシートにする
 const SHEET_WIDE_PX = 860;
 Object.defineProperty(window, "SHEET_WIDE", { get(){ return window.innerWidth >= SHEET_WIDE_PX; } });
@@ -1478,6 +1493,7 @@ Object.defineProperty(window, "SHEET_WIDE", { get(){ return window.innerWidth >=
 //   3か月目標の「いまの数字」を、1件ずつ足していく。
 //   保存すると、追加後にどう変わるかをその場で見せる。
 function GoalEntrySheet({goal, entry, onClose, onSaved, onToast}) {
+  useLockBodyScroll();
   const p = (goal && goal.pace) || {};
   const unit = p.unit || goal.unit || "";
   const [amount, setAmount] = useState(entry ? String(entry.amount) : "");
@@ -1501,7 +1517,10 @@ function GoalEntrySheet({goal, entry, onClose, onSaved, onToast}) {
     if(r&&r.ok){ onToast&&onToast(entry?"実績を更新しました":"実績を追加しました！"); onSaved&&onSaved(); onClose(); }
     else onToast&&onToast((r&&r.error)||"保存できませんでした");
   };
-  return html`
+  // ★画面の外（body直下）に出す★
+  //   他のモーダルと同じ作りにする。中に埋めたままだと、
+  //   親側の指定によって position:fixed が効かず、後ろの画面が操作できてしまう。
+  return ReactDOM.createPortal(html`
     <!-- ★広い画面では右側のパネルとして出す★（2026-08-05 Kai要望）
          スマホは下から出るシート、パソコンは右に寄せたパネル。
          指定いただいた画像の並び（左に本体・右に入力）に合わせる。 -->
@@ -1570,13 +1589,14 @@ function GoalEntrySheet({goal, entry, onClose, onSaved, onToast}) {
         <button class="btn" onClick=${save} disabled=${saving||!Number(amount)}
           style=${{background:C,marginTop:0}}>${saving?"保存中…":"保存する"}</button>
       </div>
-    </div>`;
+    </div>`, document.body);
 }
 
 // ★今週の目標に実績を入れる★（2026-08-05 Kai要望）
 //   ＋を押したら、その場で数を決められるようにする。
 //   間違えて足すこともあるので、マイナスにもできる（打ち消しの記録を1件残す）。
 function WeeklyEntrySheet({goal, onClose, onSave, onToast}) {
+  useLockBodyScroll();
   const u = goal.unit || (goal.metric_type==="DURATION" ? "分" : "件");
   const step = (goal.metric_type==="DURATION") ? 30 : 1;
   const cur = Number(goal.actual_value)||0;
@@ -1593,7 +1613,10 @@ function WeeklyEntrySheet({goal, onClose, onSave, onToast}) {
     setSaving(false);
     onClose();
   };
-  return html`
+  // ★画面の外（body直下）に出す★
+  //   他のモーダルと同じ作りにする。中に埋めたままだと、
+  //   親側の指定によって position:fixed が効かず、後ろの画面が操作できてしまう。
+  return ReactDOM.createPortal(html`
     <div onClick=${onClose} style=${{position:"fixed",inset:0,zIndex:441,background:"rgba(0,0,0,0.55)",
                                      display:"flex",
                                      alignItems:SHEET_WIDE?"stretch":"flex-end",
@@ -1645,7 +1668,7 @@ function WeeklyEntrySheet({goal, onClose, onSave, onToast}) {
         <button class="btn" onClick=${save} disabled=${saving||!Number(n)}
           style=${{background:C}}>${saving?"保存中…":"保存する"}</button>
       </div>
-    </div>`;
+    </div>`, document.body);
 }
 
 // ★Sprintの「実績を追加する」★（2026-08-05 Kai指摘）
@@ -1654,6 +1677,7 @@ function WeeklyEntrySheet({goal, onClose, onSave, onToast}) {
 //   どれをいくつ進めたのかを選べるようにする。
 //   ここで足したぶんは記録として残す（数字だけ別に足すと記録と食い違うため）。
 function SprintEntrySheet({sprint, weeklies, onClose, onAdd, onAddGoal, onToast}) {
+  useLockBodyScroll();
   const [busy, setBusy] = useState("");
   const C = "#3B82F6";
   const linked = (weeklies||[]).filter(w=>String(w.link_sprint_id||"")===String(sprint.sprint_id));
@@ -1664,7 +1688,10 @@ function SprintEntrySheet({sprint, weeklies, onClose, onAdd, onAddGoal, onToast}
     await onAdd(w);
     setBusy("");
   };
-  return html`
+  // ★画面の外（body直下）に出す★
+  //   他のモーダルと同じ作りにする。中に埋めたままだと、
+  //   親側の指定によって position:fixed が効かず、後ろの画面が操作できてしまう。
+  return ReactDOM.createPortal(html`
     <div onClick=${onClose} style=${{position:"fixed",inset:0,zIndex:440,background:"rgba(0,0,0,0.55)",
                                      display:"flex",
                                      alignItems:SHEET_WIDE?"stretch":"flex-end",
@@ -1710,11 +1737,12 @@ function SprintEntrySheet({sprint, weeklies, onClose, onAdd, onAddGoal, onToast}
                    background:"transparent",color:C,fontSize:13.5,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
           ＋ 今週の目標を追加する</button>
       </div>
-    </div>`;
+    </div>`, document.body);
 }
 
 // ★履歴の確認・編集★ 長押しで開く
 function GoalHistorySheet({goal, onClose, onEdit, onAdd, onChanged, onToast}) {
+  useLockBodyScroll();
   const [rows, setRows] = useState(null);
   const unit = (goal.pace&&goal.pace.unit) || goal.unit || "";
   const CAT_LABEL = { SALES:"売上", CONTRACT:"契約", OTHER:"その他" };
@@ -1727,7 +1755,10 @@ function GoalHistorySheet({goal, onClose, onEdit, onAdd, onChanged, onToast}) {
     if(r&&r.ok){ onToast&&onToast("削除しました"); load(); onChanged&&onChanged(); }
     else onToast&&onToast("削除できませんでした");
   };
-  return html`
+  // ★画面の外（body直下）に出す★
+  //   他のモーダルと同じ作りにする。中に埋めたままだと、
+  //   親側の指定によって position:fixed が効かず、後ろの画面が操作できてしまう。
+  return ReactDOM.createPortal(html`
     <!-- ★広い画面では右側のパネルとして出す★（2026-08-05 Kai要望）
          スマホは下から出るシート、パソコンは右に寄せたパネル。
          指定いただいた画像の並び（左に本体・右に入力）に合わせる。 -->
@@ -1773,7 +1804,7 @@ function GoalHistorySheet({goal, onClose, onEdit, onAdd, onChanged, onToast}) {
                    background:"transparent",color:"var(--accent)",fontSize:13.5,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
           ＋ 実績を追加する</button>
       </div>
-    </div>`;
+    </div>`, document.body);
 }
 
 function TimeClassPicker({value, onChange, hint}) {
@@ -8751,7 +8782,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260805-054035";
+const APP_BUILD = "20260805-054342";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
