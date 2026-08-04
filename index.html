@@ -1344,6 +1344,26 @@ const TIME_CLASS_NOTE = {
 //   書き換えはしない（1,700件を触ると事故る）。表示だけ読み替える。
 const TIME_CLASS_LEGACY = { RECOVERY_RELATIONSHIP: "回復・人間関係" };
 const TIME_CLASS_LABEL = Object.assign({}, TIME_CLASS_LEGACY, Object.fromEntries(TIME_CLASS_OPTS));
+// ★分類ごとの色とアイコン★（2026-08-05 Kai指定の画像どおり）
+//   この画面・レポートの14日分・Googleカレンダーで同じ色を使う。
+const TIME_CLASS_COLOR = {
+  GOAL_DIRECT:           "#3B82F6",  // 目標に直結   青
+  ASSET_BUILD:           "#8B5CF6",  // 将来への投資 紫
+  RECOVERY:              "#22C55E",  // 回復         緑
+  RELATIONSHIP:          "#F59E0B",  // 人間関係     橙
+  RECOVERY_RELATIONSHIP: "#22C55E",  // 旧分類（回復・人間関係）
+  OPERATIONS:            "#22D3EE",  // 日常業務     水色
+  UNPLANNED_LEAKAGE:     "#64748B",  // 計画外の時間 灰
+};
+const TIME_CLASS_ICON = {
+  GOAL_DIRECT:  html`<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="3.5"/><circle cx="12" cy="12" r="1" fill="currentColor" stroke="none"/></svg>`,
+  ASSET_BUILD:  html`<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 19h16"/><path d="M7 19v-6M12 19V8M17 19v-9"/></svg>`,
+  RECOVERY:     html`<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 20s-7-4.4-7-9a4 4 0 017-2.6A4 4 0 0119 11c0 4.6-7 9-7 9z"/></svg>`,
+  RELATIONSHIP: html`<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="9" cy="9" r="3"/><path d="M3 19c0-3 2.7-4.6 6-4.6s6 1.6 6 4.6"/><path d="M16 7.5a3 3 0 010 5.4M17.5 19c0-2-.8-3.4-2-4.3"/></svg>`,
+  RECOVERY_RELATIONSHIP: html`<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 20s-7-4.4-7-9a4 4 0 017-2.6A4 4 0 0119 11c0 4.6-7 9-7 9z"/></svg>`,
+  OPERATIONS:   html`<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M9 7V5.5A1.5 1.5 0 0110.5 4h3A1.5 1.5 0 0115 5.5V7"/></svg>`,
+  UNPLANNED_LEAKAGE: html`<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/><path d="M10 15l4 3M14 15l-4 3"/></svg>`,
+};
 const CLASS_REASON_TEXT = {
   LINKED_WEEKLY_GOAL:        "今週の目標に紐づいているため",
   LINKED_TASK_TO_WEEKLY_GOAL:"このタスクが今週の目標に紐づいているため",
@@ -5490,23 +5510,16 @@ function LogScreen({onToast, isActive}) {
       </div>
     </div>
 
-    <!-- ★今日の時間の内訳（B7）★
-         分類ごとの実績時間と、まだ測れていない分をそのまま見せる。
-         未分類を「日常業務」などへ勝手に振り分けない。 -->
+    <!-- ★今日の時間の内訳★（2026-08-05 Kai指定のデザインで作り直し）
+         ドーナツで全体の形を、右の一覧で内訳を見せる。
+         分類ごとの色は、この画面・レポートの14日分・Googleカレンダーで同じにする。 -->
     ${logs.length>0&&(()=>{
-      // ★時間の数え方をサーバーと同じにする★（2026-08-05 Kai報告）
-      //   これまでは actual_minutes（タイマーで測った記録だけに入る値）しか数えず、
-      //   手で書いた記録は全部0分扱いだった。そのため、タイマーを1回使った分類が
-      //   100%、他は全部0%という極端な見え方になっていた。
-      //   夜のレポート側は「実測が無ければ時間帯の長さ」で数えている。
-      //   画面とレポートで違う数字が出るのはおかしいので、こちらを合わせる。
       const mins = l => { const n=Number(l.actual_minutes); return n>0 ? n : (blockMinutes(l.time_block)||0); };
-      const isMeasured = l => Number(l.actual_minutes) > 0;
       const total = logs.reduce((a,l)=>a+mins(l),0);
       const byCls = {}; let unclassifiedMin=0, unconfirmed=0, classifiedCount=0, measuredMin=0;
       logs.forEach(l=>{
         const m=mins(l);
-        if(isMeasured(l)) measuredMin+=m; else unconfirmed++;
+        if(Number(l.actual_minutes)>0) measuredMin+=m; else unconfirmed++;
         const k=String(l.time_classification||"");
         if(k){ classifiedCount++; if(m) byCls[k]=(byCls[k]||0)+m; }
         else if(m) unclassifiedMin+=m;
@@ -5514,103 +5527,183 @@ function LogScreen({onToast, isActive}) {
       const classifiedMin = Object.values(byCls).reduce((a,b)=>a+b,0);
       const timeCov = total>0 ? Math.round(classifiedMin/total*100) : 0;
       const cntCov = logs.length>0 ? Math.round(classifiedCount/logs.length*100) : 0;
-      const hm = m => m>=60 ? (Math.floor(m/60)+"時間"+(m%60?(m%60)+"分":"")) : (m+"分");
+      const hm = m => m>=60 ? html`${Math.floor(m/60)}<span style=${{fontSize:"0.62em",fontWeight:700}}>時間</span>${m%60?html`${m%60}<span style=${{fontSize:"0.62em",fontWeight:700}}>分</span>`:""}`
+                            : html`${m}<span style=${{fontSize:"0.62em",fontWeight:700}}>分</span>`;
+      const hmPlain = m => m>=60 ? (Math.floor(m/60)+"時間"+(m%60?(m%60)+"分":"")) : (m+"分");
+
+      // 多いものから並べる（0のものは下にそのまま残して、全部の枠が見えるようにする）
+      const rows = TIME_CLASS_OPTS.map(([k,label])=>({k,label,m:byCls[k]||0}))
+        .concat(Object.keys(byCls).filter(k=>!TIME_CLASS_OPTS.some(([o])=>o===k))
+          .map(k=>({k,label:TIME_CLASS_LABEL[k]||k,m:byCls[k]})))
+        .sort((a,b)=>b.m-a.m);
+
+      // ドーナツ
+      const R=49, SW=13, CIRC=2*Math.PI*R;
+      let acc=0;
+      const segs = rows.filter(r=>r.m>0).map(r=>{
+        const frac = total>0 ? r.m/total : 0;
+        const seg = { k:r.k, dash:CIRC*frac, offset:-CIRC*acc };
+        acc += frac; return seg;
+      });
+      const restFrac = Math.max(0, 1-acc);
+
       return html`
-      <div class="card" style=${{marginBottom:14}}>
-        <div class="card-label">${isToday(date)?"今日の時間の内訳":date+" の時間の内訳"}</div>
+      <div style=${{margin:"0 0 14px",background:"var(--card)",borderRadius:18,border:"1px solid var(--border)",padding:"18px 16px 14px"}}>
+        <div style=${{display:"flex",alignItems:"center",gap:10,marginBottom:14}}>
+          <span style=${{flexShrink:0,color:"#22D3EE",display:"flex"}}>
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+              <circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.2 2"/></svg></span>
+          <span style=${{flex:1,minWidth:0,fontSize:17,fontWeight:800,color:"var(--text)"}}>
+            ${isToday(date)?"今日の時間の内訳":date+" の時間の内訳"}</span>
+          <button onClick=${()=>setBulkOpen(true)}
+            style=${{flexShrink:0,whiteSpace:"nowrap",background:"none",border:"none",color:"#22D3EE",
+                     fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit",padding:0}}>詳細を見る ›</button>
+        </div>
+
         ${total===0
-          ? html`<div style=${{fontSize:12,color:"var(--sub)",lineHeight:1.8}}>
+          ? html`<div style=${{fontSize:12.5,color:"var(--sub)",lineHeight:1.8}}>
               まだ時間が記録されていません。記録するとここに積み上がります。</div>`
           : html`
-            ${TIME_CLASS_OPTS.map(([k,label])=>{
-              const m=byCls[k]||0;
-              const pct=total>0?Math.round(m/total*100):0;
-              return html`<div key=${k} style=${{marginBottom:8}}>
-                <div style=${{display:"flex",justifyContent:"space-between",alignItems:"baseline",fontSize:12,marginBottom:4}}>
-                  <span style=${{color:m?"var(--text)":"var(--sub)",fontWeight:m?600:500}}>${label}</span>
-                  <span style=${{color:"var(--sub)"}}>${m?hm(m):"—"}${m?"（"+pct+"%）":""}</span>
-                </div>
-                <div style=${{height:6,background:"var(--bg)",borderRadius:99,overflow:"hidden"}}>
-                  <div style=${{height:"100%",width:pct+"%",background:"var(--accent)",borderRadius:99}}/>
-                </div>
-              </div>`;
-            })}
-            ${unclassifiedMin>0&&html`
-              <div style=${{fontSize:12,color:"var(--sub)",marginTop:10,lineHeight:1.8}}>
-                未分類 ${hm(unclassifiedMin)}（記録カードの「分類」から選べます）</div>`}
-            <div style=${{fontSize:11,color:"var(--sub)",marginTop:8,lineHeight:1.8,borderTop:"1px solid var(--border)",paddingTop:8}}>
-              合計 ${hm(total)}（うちタイマーで実測 ${hm(measuredMin)}）<br/>
-              分類できた時間 ${timeCov}%・分類できた件数 ${cntCov}%
-              ${unconfirmed>0?html`<br/>実測していない記録 ${unconfirmed}件は、時間帯の長さで数えています`:""}
-            </div>`}
+          <div style=${{display:"flex",alignItems:"center",gap:10}}>
+            <!-- ドーナツ -->
+            <div style=${{position:"relative",flexShrink:0,width:122,height:122}}>
+              <svg width="122" height="122" viewBox="0 0 122 122" style=${{transform:"rotate(-90deg)"}}>
+                <circle cx="61" cy="61" r=${R} fill="none" stroke="var(--border)" stroke-width=${SW}/>
+                ${segs.map((sg,i)=>html`
+                  <circle key=${i} cx="61" cy="61" r=${R} fill="none"
+                    stroke=${TIME_CLASS_COLOR[sg.k]||"#64748B"} stroke-width=${SW}
+                    stroke-dasharray=${sg.dash+" "+(CIRC-sg.dash)} stroke-dashoffset=${sg.offset}/>`)}
+              </svg>
+              <div style=${{position:"absolute",inset:0,display:"flex",flexDirection:"column",
+                            alignItems:"center",justifyContent:"center",pointerEvents:"none"}}>
+                <div style=${{fontSize:10,color:"var(--sub)",marginBottom:1}}>合計</div>
+                <div style=${{fontSize:17,fontWeight:800,color:"var(--text)",lineHeight:1.15,fontVariantNumeric:"tabular-nums"}}>${hm(total)}</div>
+                <div style=${{fontSize:10.5,color:"var(--sub)",marginTop:2}}>(${Math.round((1-restFrac)*100)}%)</div>
+              </div>
+            </div>
+
+            <!-- 内訳 -->
+            <div style=${{flex:1,minWidth:0}}>
+              ${rows.map(r=>{
+                const c = TIME_CLASS_COLOR[r.k]||"#64748B";
+                const pct = total>0?Math.round(r.m/total*100):0;
+                return html`<div key=${r.k} style=${{marginBottom:9}}>
+                  <div style=${{display:"flex",alignItems:"center",gap:7}}>
+                    <span style=${{flexShrink:0,width:24,height:24,borderRadius:"50%",
+                                   background:`color-mix(in srgb, ${c} 20%, transparent)`,
+                                   border:`1px solid color-mix(in srgb, ${c} 40%, transparent)`,
+                                   color:c,display:"flex",alignItems:"center",justifyContent:"center"}}>
+                      ${TIME_CLASS_ICON[r.k]||TIME_CLASS_ICON.OPERATIONS}</span>
+                    <span style=${{flex:1,minWidth:0,fontSize:12,color:"var(--text)",
+                                   overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>${r.label}</span>
+                    <span style=${{flexShrink:0,fontSize:11.5,fontWeight:800,color:r.m?c:"var(--sub)",
+                                   fontVariantNumeric:"tabular-nums"}}>${hmPlain(r.m)}</span>
+                    <span style=${{flexShrink:0,width:30,textAlign:"right",fontSize:11,color:"var(--sub)",
+                                   fontVariantNumeric:"tabular-nums"}}>${pct}%</span>
+                  </div>
+                  <div style=${{height:4,background:"var(--border)",borderRadius:99,overflow:"hidden",marginTop:4,marginLeft:31}}>
+                    <div style=${{height:"100%",width:pct+"%",background:c,borderRadius:99}}/>
+                  </div>
+                </div>`;
+              })}
+            </div>
+          </div>
+
+          ${unclassifiedMin>0&&html`
+            <div style=${{fontSize:12.5,color:"var(--sub)",marginTop:4,lineHeight:1.8}}>
+              未分類 ${hmPlain(unclassifiedMin)}（「詳細を見る」からまとめて分類できます）</div>`}
+
+          <div style=${{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",
+                        borderTop:"1px solid var(--border)",marginTop:10,paddingTop:11}}>
+            <span style=${{flexShrink:0,color:"#22D3EE",display:"flex"}}>
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round">
+                <path d="M12 3a9 9 0 109 9h-9V3z"/><path d="M15 3.6A9 9 0 0120.4 9H15V3.6z"/></svg></span>
+            <span style=${{fontSize:12.5,color:"var(--sub)"}}>
+              分類できた時間 <b style=${{color:"#22D3EE"}}>${timeCov}%</b>
+              　・分類できた件数 <b style=${{color:"#22D3EE"}}>${cntCov}%</b></span>
+            ${unconfirmed>0&&html`
+              <span title="実測していない記録は、時間帯の長さで数えています"
+                style=${{marginLeft:"auto",flexShrink:0,fontSize:12.5,color:"var(--sub)",display:"flex",alignItems:"center",gap:5}}>
+                実測していない記録 ${unconfirmed}件
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01" stroke-linecap="round"/></svg>
+              </span>`}
+          </div>`}
       </div>`;
     })()}
 
-    <!-- ★まとめて分類する★（2026-08-05 Kaiの判断）
-         記録1,724件のうち分類が入っているものはごくわずかで、
-         「時間の使い方」がほとんど採点できていなかった。
-         1件ずつ記録カードを開いて直すのは現実的でないので、
-         未分類だけを集めて、その場で連続して選べるようにする。 -->
-    ${(()=>{
-      const un = logs.filter(l=>!String(l.time_classification||"").trim());
-      if(!un.length) return "";
-      return html`
-        <button onClick=${()=>setBulkOpen(true)}
-          style=${{display:"flex",alignItems:"center",gap:10,width:"100%",marginBottom:14,padding:"12px 14px",
-                   borderRadius:12,border:"1.5px dashed var(--accent)",background:"var(--accent-l)",
-                   cursor:"pointer",fontFamily:"inherit",textAlign:"left"}}>
-          <span style=${{fontSize:17,flexShrink:0}}>🗂</span>
-          <span style=${{flex:1,minWidth:0}}>
-            <span style=${{display:"block",fontSize:13,fontWeight:700,color:"var(--accent)"}}>
-              まだ分類していない記録が ${un.length}件あります</span>
-            <span style=${{display:"block",fontSize:11,color:"var(--sub)",marginTop:2}}>
-              まとめて分類すると、時間の使い方が正しく出ます</span>
-          </span>
-          <span style=${{flexShrink:0,fontSize:14,color:"var(--accent)"}}>›</span>
-        </button>`;
-    })()}
-
-    ${bulkOpen&&html`<${BulkClassifySheet} date=${date} onClose=${()=>setBulkOpen(false)}
-      onSaved=${(id,k)=>setLogs(prev=>prev.map(x=>x.log_id===id
-        ? {...x, time_classification:k, classification_method:"USER", classification_reason_code:"USER_SELECTED"} : x))}
-      onToast=${onToast}/>`}
-
+    <!-- ★本日の記録★（2026-08-05 Kai指定のデザイン）
+         左に時刻の線を通し、1件ずつを時系列に見せる。 -->
     ${logs.length>0&&html`
-      <div class="card" style=${{marginBottom:24}}>
-        <div class="card-label">${isToday(date)?"本日の記録":date+" の記録"}</div>
-        ${logs.map((l,i)=>{
+      <div style=${{margin:"0 0 24px",background:"var(--card)",borderRadius:18,border:"1px solid var(--border)",padding:"18px 16px 16px"}}>
+        <div style=${{display:"flex",alignItems:"center",gap:10,marginBottom:14}}>
+          <span style=${{flexShrink:0,color:"#22D3EE",display:"flex"}}>
+            <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round">
+              <rect x="5" y="4" width="14" height="17" rx="2.5"/><path d="M9 4V3h6v1" stroke-linecap="round"/>
+              <path d="M9 10h6M9 14h4" stroke-linecap="round"/></svg></span>
+          <span style=${{flex:1,minWidth:0,fontSize:17,fontWeight:800,color:"var(--text)"}}>
+            ${isToday(date)?"本日の記録":date+" の記録"}</span>
+        </div>
+
+        ${sortLogsByTime(logs).map((l,i,arr)=>{
           const num=l.focus_level?.charAt(0);
-          const isTimer = !isFullHourBlock(l.time_block);
-          // 集中度「5 — 完璧にできた」を「数字」と「ラベル」に分解して、チップに整える
           const focusStr = String(l.focus_level||"");
           const focusLabel = focusStr.replace(/^\s*\d+\s*[—–-]\s*/,"").trim();
-          return html`<div key=${i} class="log-row" style=${{cursor:"pointer"}} onClick=${()=>{handleBlockSelect(l.time_block);window.scrollTo?.(0,0);}}>
-            <div class="log-time">${isTimer?"⏱ ":""}${l.time_block}</div>
-            <div>
-              <div class="log-task">${l.task}</div>
-              ${focusStr&&html`<span class="log-focus"><span class="dot" style=${{background:DOT[num]||"var(--sub)"}}/>${num?num+"・":""}${focusLabel||focusStr}</span>`}
-              ${l.memo&&html`<div class="log-memo">${l.memo}</div>`}
-              <!-- 分類チップ。押すと選び直せる（本人が選んだ分類はルールで上書きされない） -->
-              <div style=${{display:"flex",flexWrap:"wrap",gap:5,marginTop:5}} onClick=${e=>e.stopPropagation()}>
+          const isTimer = !isFullHourBlock(l.time_block);
+          const tb = String(l.time_block||"");
+          const shown = tb.indexOf("-")!==-1 ? tb.replace("-", " - ") : tb;
+          const last = i===arr.length-1;
+          return html`
+          <div key=${l.log_id||i} style=${{display:"flex",gap:12}}>
+            <!-- 時刻の線 -->
+            <div style=${{width:14,flexShrink:0,display:"flex",flexDirection:"column",alignItems:"center",paddingTop:5}}>
+              <span style=${{width:12,height:12,borderRadius:"50%",background:"#22D3EE",flexShrink:0}}/>
+              ${!last&&html`<span style=${{flex:1,width:2,background:"var(--border)",marginTop:3}}/>`}
+            </div>
+            <div style=${{flex:1,minWidth:0,paddingBottom:last?2:14,
+                          borderBottom:last?"none":"1px solid var(--border)",marginBottom:last?0:14}}>
+              <button onClick=${()=>{handleBlockSelect(l.time_block);window.scrollTo?.(0,0);}}
+                style=${{display:"flex",alignItems:"flex-start",gap:10,width:"100%",background:"none",border:"none",
+                         padding:0,cursor:"pointer",fontFamily:"inherit",textAlign:"left"}}>
+                <span style=${{flex:1,minWidth:0}}>
+                  <span style=${{display:"block",fontSize:14,fontWeight:700,color:"#22D3EE",
+                                 fontVariantNumeric:"tabular-nums",marginBottom:3}}>${isTimer?"⏱ ":""}${shown}</span>
+                  <span style=${{display:"block",fontSize:15,fontWeight:700,color:"var(--text)",
+                                 lineHeight:1.45,overflowWrap:"anywhere"}}>${l.task}</span>
+                </span>
+                <span style=${{flexShrink:0,color:"var(--sub)",fontSize:16,paddingTop:18}}>›</span>
+              </button>
+              ${focusStr&&html`
+                <span style=${{display:"inline-flex",alignItems:"center",gap:6,marginTop:7,padding:"4px 11px",
+                               borderRadius:99,background:"var(--bg)",border:"1px solid var(--border)"}}>
+                  <span style=${{width:10,height:10,borderRadius:"50%",background:DOT[num]||"var(--sub)",flexShrink:0}}/>
+                  <span style=${{fontSize:12.5,color:"var(--text)"}}>${num?num+"・":""}${focusLabel||focusStr}</span>
+                </span>`}
+              ${l.memo&&html`
+                <div style=${{fontSize:13,color:"var(--sub)",lineHeight:1.75,marginTop:7,overflowWrap:"anywhere"}}>${l.memo}</div>`}
+              <div style=${{display:"flex",flexWrap:"wrap",gap:6,marginTop:8}}>
                 ${clsEditing===l.log_id
                   ? TIME_CLASS_OPTS.map(([k,lb])=>html`
                       <button key=${k} onClick=${()=>saveClass(l,k)}
-                        style=${{padding:"4px 9px",borderRadius:20,fontSize:10.5,cursor:"pointer",fontFamily:"inherit",
-                                 border:`1px solid ${l.time_classification===k?"var(--accent)":"var(--border)"}`,
-                                 background:l.time_classification===k?"var(--accent-l)":"transparent",
-                                 color:l.time_classification===k?"var(--accent)":"var(--sub)"}}>${lb}</button>`)
+                        style=${{padding:"5px 11px",borderRadius:99,fontSize:11.5,cursor:"pointer",fontFamily:"inherit",
+                                 border:`1px solid ${l.time_classification===k?(TIME_CLASS_COLOR[k]||"#22D3EE"):"var(--border)"}`,
+                                 background:"transparent",
+                                 color:l.time_classification===k?(TIME_CLASS_COLOR[k]||"#22D3EE"):"var(--sub)"}}>${lb}</button>`)
                   : html`<button onClick=${()=>setClsEditing(l.log_id)}
-                      style=${{padding:"3px 9px",borderRadius:20,fontSize:10.5,cursor:"pointer",fontFamily:"inherit",
-                               border:`1px solid ${l.time_classification?"var(--accent)":"var(--border)"}`,
-                               background:"transparent",color:l.time_classification?"var(--accent)":"var(--sub)"}}>
-                      ${l.time_classification?TIME_CLASS_LABEL[l.time_classification]:"分類を選ぶ"}</button>
-                    ${l.time_classification&&l.classification_method==="RULE"&&l.classification_reason_code&&html`
-                      <span style=${{fontSize:10,color:"var(--sub)",alignSelf:"center"}}>
-                        ${CLASS_REASON_TEXT[l.classification_reason_code]||""}</span>`}`}
+                      style=${{padding:"5px 12px",borderRadius:99,fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit",
+                               border:`1px solid ${l.time_classification?(TIME_CLASS_COLOR[l.time_classification]||"#22D3EE"):"var(--border)"}`,
+                               background:"transparent",
+                               color:l.time_classification?(TIME_CLASS_COLOR[l.time_classification]||"#22D3EE"):"var(--sub)"}}>
+                      ${l.time_classification?TIME_CLASS_LABEL[l.time_classification]:"分類を選ぶ"}</button>`}
               </div>
             </div>
           </div>`;
         })}
+
+        <button onClick=${()=>{ handleBlockSelect(getCurrentBlock()); window.scrollTo?.(0,0); }}
+          style=${{display:"flex",alignItems:"center",justifyContent:"center",gap:9,width:"100%",marginTop:6,
+                   padding:"14px",borderRadius:12,border:"1px solid #22D3EE",background:"transparent",
+                   color:"#22D3EE",fontSize:14,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
+          <span style=${{fontSize:17,lineHeight:1}}>＋</span> 記録を追加する</button>
       </div>
     `}
   </div>`;
@@ -9037,7 +9130,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260805-083824";
+const APP_BUILD = "20260805-085003";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
