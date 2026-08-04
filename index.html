@@ -3831,7 +3831,8 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
 
         <!-- 総合スコア（左）と5角形（右）を並べる -->
         <div style=${{display:"flex",alignItems:"center",gap:2,marginBottom:12}}>
-          <div style=${{flex:"1 1 auto",minWidth:0}}>
+          <!-- 左端に貼りつくと窮屈に見えるので、少し内側へ寄せる（2026-08-05 Kai指摘） -->
+          <div style=${{flex:"1 1 auto",minWidth:0,paddingLeft:10}}>
             ${ov!==null&&ov!==undefined ? html`
               <div style=${{fontSize:12,fontWeight:700,color:"var(--accent)",marginBottom:2}}>総合スコア</div>
               <div style=${{display:"flex",alignItems:"baseline",gap:3}}>
@@ -3907,13 +3908,17 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
                     <span style=${{display:"block",height:"100%",width:Math.max(0,Math.min(100,m.score))+"%",
                                    background:"var(--accent)",borderRadius:99}}/>
                   </span>
-                  <span style=${{flexShrink:0,display:"flex",alignItems:"baseline",gap:1}}>
+                  <!-- ★点数とバッジは幅を固定してそろえる★（2026-08-05 Kai指摘）
+                       バッジの文字数（強み／改善優先）で幅が変わり、
+                       点数の位置が行ごとに横へずれて見えていた。 -->
+                  <span style=${{flexShrink:0,width:54,display:"flex",alignItems:"baseline",justifyContent:"flex-end",gap:1}}>
                     <span style=${{fontSize:16,fontWeight:800,color:"var(--text)",fontVariantNumeric:"tabular-nums"}}>${m.score}</span>
                     <span style=${{fontSize:10,color:"var(--sub)"}}>/100</span>
                   </span>`
                 : html`<span style=${{flex:1,minWidth:0,fontSize:11,color:"var(--sub)",textAlign:"right"}}>${v.label}</span>`}
               ${num&&html`
-                <span style=${{flexShrink:0,fontSize:10.5,fontWeight:700,padding:"3px 8px",borderRadius:7,
+                <span style=${{flexShrink:0,width:58,textAlign:"center",fontSize:10.5,fontWeight:700,
+                               padding:"3px 0",borderRadius:7,
                                color:bc.fg,background:bc.bg,whiteSpace:"nowrap"}}>${band}</span>`}
             </div>`; })}
         </div>
@@ -8133,7 +8138,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260805-041501";
+const APP_BUILD = "20260805-041934";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
