@@ -3792,95 +3792,147 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
         continuity_power: "1日に詰め込みすぎず、日をまたいで分けましょう。",
         recovery_power: "崩れた翌日に、小さく1つだけ再開してみましょう。"
       };
+      // ★このカードのUIはKaiの指定した形で作る★（2026-08-05）
+      //   左に総合スコアと前週比、右に5角形。その下に「伸びている／のびしろ」、
+      //   さらに下に5項目の一覧（丸アイコン・バー・点数・状態）。最後に改善ポイント。
+      const ov = smp.data.overall_score;
+      const prevOv = (smp.prev && smp.prev.overall_score !== null && smp.prev.overall_score !== undefined)
+        ? smp.prev.overall_score : null;
+      const diff = (ov !== null && ov !== undefined && prevOv !== null) ? ov - prevOv : null;
+      // 状態バッジの色。サーバーの smpBand（強み80/安定65/要確認50/改善優先）に合わせる
+      const BADGE = {
+        "強み":     {fg:"#38BDF8", bg:"rgba(56,189,248,0.14)"},
+        "安定":     {fg:"#34D399", bg:"rgba(52,211,153,0.13)"},
+        "要確認":   {fg:"var(--sub)", bg:"rgba(148,163,184,0.14)"},
+        "改善優先": {fg:"#F59E0B", bg:"rgba(245,158,11,0.15)"},
+        "暫定":     {fg:"var(--sub)", bg:"rgba(148,163,184,0.14)"},
+      };
+      const ICON = {
+        result_power: html`<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/><circle cx="12" cy="12" r="1" fill="currentColor" stroke="none"/></svg>`,
+        time_allocation_power: html`<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2" stroke-linecap="round"/></svg>`,
+        execution_power: html`<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M8 12.5l2.5 2.5L16 9.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+        continuity_power: html`<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 12a3 3 0 105 2.2l4-4.4A3 3 0 1117 12a3 3 0 01-5-2.2l-4 4.4A3 3 0 017 12z" stroke-linejoin="round"/></svg>`,
+        recovery_power: html`<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 109-9 9 9 0 00-6.4 2.6L3 8" stroke-linecap="round" stroke-linejoin="round"/><path d="M3 4v4h4" stroke-linecap="round" stroke-linejoin="round"/><path d="M12 8v4.5l3 1.8" stroke-linecap="round"/></svg>`,
+      };
+      const ev2 = M.filter(m=>m.evaluation_state==="evaluated"&&m.score!==null&&!m.provisional);
+      const best2 = ev2.slice().sort((a,b)=>b.score-a.score)[0];
+      const worst2 = ev2.slice().sort((a,b)=>a.score-b.score)[0];
+      const pend2 = M.filter(m=>!(m.evaluation_state==="evaluated"&&m.score!==null&&!m.provisional)).map(m=>m.label);
       return html`
-      <div style=${{margin:"12px 16px 0",background:"var(--card)",borderRadius:16,border:"1px solid var(--border)",padding:"14px 16px"}}>
-        <!-- ★見出しは見出しだけにする★（2026-08-05 Kai指摘）
-             総合点を見出しの横へ入れたら、タイトル・数字・「詳細を見る」が
-             1行に詰まって窮屈になった。数字は5角形の中心に置く。
-             形（バランス）と数字（全体）を、目線を動かさず同時に読める。 -->
-        <div style=${{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8,marginBottom:10}}>
+      <div style=${{margin:"12px 16px 0",background:"var(--card)",borderRadius:16,border:"1px solid var(--border)",padding:"16px 16px 14px"}}>
+        <div style=${{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8,marginBottom:6}}>
           <span style=${{flex:1,minWidth:0}}>
-            <span style=${{display:"block",fontSize:13,fontWeight:800,color:"var(--text)"}}>今週の自己経営の状態</span>
-            <span style=${{display:"block",fontSize:10.5,color:"var(--sub)",marginTop:3}}>5つの自己経営力から、今の状態を確認します</span>
+            <span style=${{display:"block",fontSize:15,fontWeight:800,color:"var(--text)"}}>今週の自己経営の状態</span>
+            <span style=${{display:"block",fontSize:11,color:"var(--sub)",marginTop:4,lineHeight:1.5}}>5つの自己経営力から、今の状態を確認します</span>
           </span>
           <button onClick=${()=>setSmpDetail(true)}
-            style=${{flexShrink:0,whiteSpace:"nowrap",background:"none",border:"none",color:"var(--accent)",fontSize:11.5,fontWeight:700,cursor:"pointer",fontFamily:"inherit",padding:0}}>詳細を見る</button>
+            style=${{flexShrink:0,whiteSpace:"nowrap",background:"none",border:"none",color:"var(--accent)",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit",padding:0}}>詳細を見る ›</button>
         </div>
 
-        <!-- ステータスと同じ5角形。測れていない軸は点線にして、面に含めない。
-             ★横に文字を置くとラベルと重なるため、上下に分ける★（2026-08-03 Kai指摘） -->
-        <div style=${{display:"flex",justifyContent:"center",marginBottom:2}}>
-          <${SelfMgmtRadar} metrics=${M}/>
-        </div>
-        <!-- ★総合点は5角形の下★（2026-08-05 Kai指摘でここに落ち着いた）
-             ・見出しの横 … タイトルと「詳細を見る」と3つ並んで窮屈
-             ・5角形の中心 … 点数60前後だと、見せたい形そのものを数字が隠す
-             確かに測れている力の平均。測れていない力を0点として混ぜると、
-             記録が少ない人ほど不当に低く出るため、分母に入れない。 -->
-        ${smp.data.overall_score!==null&&smp.data.overall_score!==undefined&&html`
-          <div style=${{display:"flex",alignItems:"baseline",justifyContent:"center",gap:7,
-                        marginTop:4,marginBottom:2}}>
-            <span style=${{fontSize:10.5,color:"var(--sub)",fontWeight:700,letterSpacing:"0.04em"}}>総合</span>
-            <span style=${{fontSize:34,fontWeight:800,color:"var(--text)",fontVariantNumeric:"tabular-nums",lineHeight:1}}>
-              ${smp.data.overall_score}</span>
-            <span style=${{fontSize:11,color:"var(--sub)"}}>/ 100</span>
+        <!-- 総合スコア（左）と5角形（右）を並べる -->
+        <div style=${{display:"flex",alignItems:"center",gap:2,marginBottom:12}}>
+          <div style=${{flex:"1 1 auto",minWidth:0}}>
+            ${ov!==null&&ov!==undefined ? html`
+              <div style=${{fontSize:12,fontWeight:700,color:"var(--accent)",marginBottom:2}}>総合スコア</div>
+              <div style=${{display:"flex",alignItems:"baseline",gap:3}}>
+                <span style=${{fontSize:48,fontWeight:800,color:"var(--text)",lineHeight:1,letterSpacing:"-0.02em",fontVariantNumeric:"tabular-nums"}}>${ov}</span>
+                <span style=${{fontSize:15,color:"var(--sub)",fontWeight:600}}>/ 100</span>
+              </div>
+              ${diff!==null&&html`
+                <div style=${{display:"inline-flex",alignItems:"center",gap:5,marginTop:9,padding:"5px 11px",
+                              borderRadius:9,border:"1px solid var(--border)",background:"var(--bg)"}}>
+                  <span style=${{fontSize:11,color:"var(--sub)",fontWeight:600}}>前週比</span>
+                  <span style=${{fontSize:13,fontWeight:800,color:diff>0?"var(--accent)":diff<0?"#F87171":"var(--sub)"}}>
+                    ${diff>0?"+":""}${diff}</span>
+                  <span style=${{fontSize:12,color:diff>0?"var(--accent)":diff<0?"#F87171":"var(--sub)"}}>
+                    ${diff>0?"↗":diff<0?"↘":"→"}</span>
+                </div>`}
+              <div style=${{fontSize:10.5,color:"var(--sub)",marginTop:9,lineHeight:1.6}}>
+                測れている${smp.data.evaluated_count}項目の平均<br/>（全${smp.data.metric_count}項目）</div>
+            ` : html`
+              <div style=${{fontSize:12,color:"var(--sub)",lineHeight:1.8}}>
+                記録がたまると、<br/>ここに総合スコアが出ます。</div>`}
           </div>
-          <div style=${{fontSize:10,color:"var(--sub)",textAlign:"center",marginBottom:10}}>
-            測れている${smp.data.evaluated_count}項目の平均（全${smp.data.metric_count}項目）</div>`}
-        <div style=${{marginBottom:8,paddingTop:smp.data.overall_score!=null?10:0,
-                      borderTop:smp.data.overall_score!=null?"1px solid var(--border)":"none"}}>
-          <div style=${{fontSize:11,color:"var(--sub)",lineHeight:1.85,textAlign:"center"}}>
-            ${(()=>{
-              const ev=M.filter(m=>m.evaluation_state==="evaluated"&&m.score!==null&&!m.provisional);
-              if(!ev.length) return "記録がたまると、ここに形が出ます。";
-              const best=ev.slice().sort((a,b)=>b.score-a.score)[0];
-              const worst=ev.slice().sort((a,b)=>a.score-b.score)[0];
-              const pend=M.filter(m=>!(m.evaluation_state==="evaluated"&&m.score!==null&&!m.provisional)).map(m=>m.label);
-              return html`
-                <div style=${{display:"flex",justifyContent:"center",flexWrap:"wrap",gap:"2px 14px"}}>
-                  <span>いま伸びている <b style=${{color:"var(--text)"}}>${best.label} ${best.score}</b></span>
-                  ${ev.length>1&&html`<span>のびしろ <b style=${{color:"var(--text)"}}>${worst.label} ${worst.score}</b></span>`}
-                </div>
-                ${pend.length>0&&html`<div style=${{opacity:0.85,marginTop:3}}>点線の軸（${pend.join("・")}）は、まだ測っていません</div>`}`;
-            })()}
+          <div style=${{flexShrink:0,marginLeft:"auto"}}>
+            <${SelfMgmtRadar} metrics=${M} size=${186}/>
           </div>
         </div>
 
-        ${M.map((m,i)=>{ const v=view(m);
-          // ★測れている範囲が半分未満のときは、点数をホームに出さない★
-          //   数字だけが一人歩きするため、代わりに「測れた事実」を見せる
-          const ev=(m.components||[]).filter(c=>c.state==="evaluated");
-          const fact=ev.length?(ev[0].label+(ev[0].detail?"（"+ev[0].detail+"）":"")):"";
-          if(v.kind==="num"&&m.provisional) return html`
-          <div key=${m.key} style=${{padding:"9px 0",borderTop:i?"1px solid var(--border)":"none"}}>
-            <div style=${{display:"flex",alignItems:"center",gap:10}}>
-              <span style=${{flex:1,minWidth:0,fontSize:12.5,fontWeight:700,color:"var(--text)"}}>${m.label}</span>
-              <span style=${{flexShrink:0,fontSize:11.5,color:"var(--sub)"}}>データ蓄積中</span>
+        <!-- いま伸びている ／ のびしろ -->
+        ${ev2.length>0&&html`
+          <div style=${{display:"flex",alignItems:"stretch",border:"1px solid var(--border)",borderRadius:12,
+                        background:"var(--bg)",padding:"11px 6px",marginBottom:10}}>
+            <div style=${{flex:1,minWidth:0,display:"flex",alignItems:"center",gap:9,padding:"0 8px"}}>
+              <span style=${{flexShrink:0,color:"var(--accent)",display:"flex"}}>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M3 17l6-6 4 4 8-8" stroke-linecap="round" stroke-linejoin="round"/>
+                  <path d="M15 7h6v6" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+              <span style=${{minWidth:0}}>
+                <span style=${{display:"block",fontSize:10.5,color:"var(--sub)"}}>いま伸びている</span>
+                <span style=${{display:"block",fontSize:13,fontWeight:800,color:"var(--accent)",marginTop:1}}>
+                  ${best2.label} ${best2.score}</span>
+              </span>
             </div>
-            ${fact&&html`<div style=${{fontSize:11,color:"var(--sub)",lineHeight:1.7,marginTop:3}}>${fact}</div>`}
-          </div>`;
-          // ホームは一覧に徹する。理由と打ち手は「詳細を見る」の中で出す
-          //（2026-08-05 Kai: ホームで開くやつは要らない）
-          return html`
-          <div key=${m.key} style=${{display:"flex",alignItems:"center",gap:10,padding:"9px 0",
-                                     borderTop:i?"1px solid var(--border)":"none"}}>
-            <span style=${{flex:1,minWidth:0,fontSize:12.5,fontWeight:700,color:"var(--text)"}}>${m.label}</span>
-            ${v.kind==="num"
-              ? html`
-                <span style=${{flexShrink:0,display:"flex",alignItems:"center",gap:8}}>
-                  <span style=${{width:64,height:4,background:"var(--bg)",borderRadius:99,overflow:"hidden",display:"block"}}>
-                    <span style=${{display:"block",height:"100%",width:Math.max(0,Math.min(100,m.score))+"%",background:"var(--accent)",borderRadius:99}}/>
-                  </span>
-                  <span style=${{fontSize:14,fontWeight:800,color:"var(--text)",minWidth:26,textAlign:"right"}}>${m.score}</span>
-                  <span style=${{fontSize:11,color:"var(--sub)",minWidth:52,textAlign:"right"}}>${v.label}</span>
-                </span>`
-              : html`<span style=${{flexShrink:0,fontSize:11.5,color:"var(--sub)"}}>${v.label}</span>`}
-          </div>`; })}
+            ${ev2.length>1&&html`
+              <div style=${{width:1,background:"var(--border)",flexShrink:0}}/>
+              <div style=${{flex:1,minWidth:0,display:"flex",alignItems:"center",gap:9,padding:"0 8px"}}>
+                <span style=${{flexShrink:0,color:"var(--accent)",display:"flex"}}>
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M6 3h12M6 21h12" stroke-linecap="round"/>
+                    <path d="M8 3v3.5L12 11l4-4.5V3M8 21v-3.5L12 13l4 4.5V21" stroke-linejoin="round"/></svg></span>
+                <span style=${{minWidth:0}}>
+                  <span style=${{display:"block",fontSize:10.5,color:"var(--sub)"}}>のびしろ</span>
+                  <span style=${{display:"block",fontSize:13,fontWeight:800,color:"var(--accent)",marginTop:1}}>
+                    ${worst2.label} ${worst2.score}</span>
+                </span>
+              </div>`}
+          </div>`}
 
+        <!-- 5項目の一覧 -->
+        <div style=${{border:"1px solid var(--border)",borderRadius:12,overflow:"hidden",marginBottom:10}}>
+          ${M.map((m,i)=>{ const v=view(m);
+            const num = v.kind==="num" && !m.provisional;
+            const band = m.status_label||"";
+            const bc = BADGE[band]||BADGE["要確認"];
+            return html`
+            <div key=${m.key} style=${{display:"flex",alignItems:"center",gap:10,padding:"11px 12px",
+                                       borderTop:i?"1px solid var(--border)":"none"}}>
+              <span style=${{flexShrink:0,width:32,height:32,borderRadius:"50%",background:"var(--bg)",
+                             display:"flex",alignItems:"center",justifyContent:"center",color:"var(--accent)"}}>
+                ${ICON[m.key]||""}</span>
+              <span style=${{flexShrink:0,width:66,fontSize:12.5,fontWeight:700,color:"var(--text)"}}>${m.label}</span>
+              ${num
+                ? html`
+                  <span style=${{flex:1,minWidth:16,height:6,background:"var(--bg)",borderRadius:99,overflow:"hidden",display:"block"}}>
+                    <span style=${{display:"block",height:"100%",width:Math.max(0,Math.min(100,m.score))+"%",
+                                   background:"var(--accent)",borderRadius:99}}/>
+                  </span>
+                  <span style=${{flexShrink:0,display:"flex",alignItems:"baseline",gap:1}}>
+                    <span style=${{fontSize:16,fontWeight:800,color:"var(--text)",fontVariantNumeric:"tabular-nums"}}>${m.score}</span>
+                    <span style=${{fontSize:10,color:"var(--sub)"}}>/100</span>
+                  </span>`
+                : html`<span style=${{flex:1,minWidth:0,fontSize:11,color:"var(--sub)",textAlign:"right"}}>${v.label}</span>`}
+              ${num&&html`
+                <span style=${{flexShrink:0,fontSize:10.5,fontWeight:700,padding:"3px 8px",borderRadius:7,
+                               color:bc.fg,background:bc.bg,whiteSpace:"nowrap"}}>${band}</span>`}
+            </div>`; })}
+        </div>
+
+        ${pend2.length>0&&html`
+          <div style=${{fontSize:10.5,color:"var(--sub)",lineHeight:1.7,marginBottom:10}}>
+            点線の軸（${pend2.join("・")}）は、まだ測っていません</div>`}
+
+        <!-- 今週の改善ポイント -->
         ${weak&&html`
-          <div style=${{borderTop:"1px solid var(--border)",marginTop:4,paddingTop:11}}>
-            <div style=${{fontSize:11,fontWeight:700,color:"var(--sub)",marginBottom:4}}>今週の改善ポイント</div>
-            <div style=${{fontSize:12.5,color:"var(--text)",lineHeight:1.7}}>
+          <div style=${{border:"1px solid var(--border)",borderRadius:12,background:"var(--bg)",padding:"12px 14px"}}>
+            <div style=${{display:"flex",alignItems:"center",gap:6,marginBottom:5}}>
+              <span style=${{color:"var(--accent)",display:"flex"}}>
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M9 18h6M10 21h4" stroke-linecap="round"/>
+                  <path d="M12 3a6 6 0 00-3.5 10.9c.5.4.8 1 .9 1.6h5.2c.1-.6.4-1.2.9-1.6A6 6 0 0012 3z" stroke-linejoin="round"/></svg></span>
+              <span style=${{fontSize:12,fontWeight:800,color:"var(--accent)"}}>今週の改善ポイント</span>
+            </div>
+            <div style=${{fontSize:12.5,color:"var(--text)",lineHeight:1.8}}>
               今週は<b>${weak.label}</b>に改善の余地があります。${HINT[weak.key]||""}
             </div>
           </div>`}
@@ -5063,9 +5115,11 @@ function smpExplain(m, fallbackHint) {
   const how = (weakest && SMP_ADVICE[weakest.label]) || fallbackHint || "";
   return { why, weakest, how };
 }
-function SelfMgmtRadar({metrics}) {
+function SelfMgmtRadar({metrics, size}) {
   const M = (metrics || []).slice(0, 5);
   const N = M.length || 5;
+  // ホームでは総合スコアと横に並べるため、少し小さくして描く（既定は従来どおり）
+  const k = (Number(size) || 190) / 190;
   const cx = 95, cy = 88, maxR = 52;
   const start = -Math.PI / 2, step = (Math.PI * 2) / N;
   const pt = (i, frac) => [cx + Math.cos(start + i * step) * maxR * frac,
@@ -5078,7 +5132,7 @@ function SelfMgmtRadar({metrics}) {
   const poly = okIdx.map(i => pt(i, Math.max(0.04, Math.min(100, M[i].score) / 100)).join(",")).join(" ");
   const labels = M.map((_, i) => pt(i, 1.3));
   return html`
-    <svg width="190" height="176" viewBox="0 0 190 176" style=${{flexShrink:0,overflow:"visible"}}>
+    <svg width=${190*k} height=${176*k} viewBox="0 0 190 176" style=${{flexShrink:0,overflow:"visible"}}>
       <defs>
         <linearGradient id="smpGrad" x1="0%" y1="0%" x2="100%" y2="100%">
           <stop offset="0%" stop-color="var(--hero1)"/><stop offset="100%" stop-color="var(--hero2)"/>
@@ -8079,7 +8133,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260805-035815";
+const APP_BUILD = "20260805-040911";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
