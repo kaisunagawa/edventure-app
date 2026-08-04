@@ -8133,7 +8133,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260805-040911";
+const APP_BUILD = "20260805-041136";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
@@ -9803,9 +9803,16 @@ if('serviceWorker' in navigator){
     if (!latest || latest === APP_BUILD) return;
     pendingReload = true; safeReload();
   }
-  // ★起動直後は確認しない★（2026-08-05 起動高速化）
-  //   たった今このHTMLを読み込んだところなので、その瞬間に版を確かめる意味がない。
-  //   確認は「アプリに戻ってきた時」と「5分ごと」に任せる。
+  // ★起動直後にも必ず確認する★（2026-08-05 Kai報告「アプリが変わってない」）
+  //
+  //   Service Workerをキャッシュ優先にしたので、起動時に表示されるのは
+  //   「前回の版」で、新しい版は裏で取り直して次回に回る。
+  //   そこで起動直後の確認まで外してしまったため、直したものが
+  //   次に開き直すまで届かなくなっていた（実際にそうなった）。
+  //
+  //   確認するのは version.json（数十バイト）だけなので、起動を邪魔しない。
+  //   画面を出しきってから動くよう、少しだけ遅らせて実行する。
+  setTimeout(function(){ checkAppUpdate(); }, 1500);
   const runUpdateCheck = () => {
     // 新版が見つかっているが入力中で保留していた場合、手が空いた今のタイミングで再読み込み
     if (pendingReload && !swReloaded){ safeReload(); if (swReloaded) return; }
