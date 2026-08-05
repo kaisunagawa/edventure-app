@@ -1308,13 +1308,14 @@ function isToday(s){ return s===logicalTodayStr(); }
 const DOT = {"5":"#46C98B","4":"#7B6FE8","3":"#F5A84B","2":"#EF7070","1":"#EF7070"};
 
 // ── 階級定義 ──
+// 6段階のまま、レベル100に合わせて割り直す（2026-08-05 Kaiの判断）
 const RANKS = [
-  { minLv:1,  maxLv:1,  name:"ルーキー",   sub:"はじめの一歩", color:"#64748B", bg:"#F1F5F9", emoji:"🌱" },
-  { minLv:2,  maxLv:3,  name:"チャレンジャー", sub:"習慣を作り始める", color:"#22C55E", bg:"#F0FDF4", emoji:"🔥" },
-  { minLv:4,  maxLv:6,  name:"コンシステント", sub:"継続が身についた", color:"#3B82F6", bg:"#EFF6FF", emoji:"⚡" },
-  { minLv:7,  maxLv:10, name:"習慣マスター",  sub:"本物の継続力", color:"#F59E0B", bg:"#FFFBEB", emoji:"🌟" },
-  { minLv:11, maxLv:15, name:"エキスパート",  sub:"圧倒的な実行力", color:"#8B5CF6", bg:"#F5F3FF", emoji:"🏆" },
-  { minLv:16, maxLv:999,name:"レジェンド",   sub:"超人的な記録力", color:"#EC4899", bg:"#FDF2F8", emoji:"👑" },
+  { minLv:1,  maxLv:5,  name:"ルーキー",   sub:"はじめの一歩", color:"#64748B", bg:"#F1F5F9", emoji:"🌱" },
+  { minLv:6,  maxLv:15, name:"チャレンジャー", sub:"習慣を作り始める", color:"#22C55E", bg:"#F0FDF4", emoji:"🔥" },
+  { minLv:16, maxLv:30, name:"コンシステント", sub:"継続が身についた", color:"#3B82F6", bg:"#EFF6FF", emoji:"⚡" },
+  { minLv:31, maxLv:50, name:"習慣マスター",  sub:"本物の継続力", color:"#F59E0B", bg:"#FFFBEB", emoji:"⭐️" },
+  { minLv:51, maxLv:75, name:"エキスパート",  sub:"圧倒的な実行力", color:"#8B5CF6", bg:"#F5F3FF", emoji:"🏆" },
+  { minLv:76, maxLv:100,name:"レジェンド",   sub:"超人的な記録力", color:"#EC4899", bg:"#FDF2F8", emoji:"👑" },
 ];
 // ★階級ごとのキャラクター画像★（2026-08-05 Kai要望）
 //   ファイルを assets/rank/ に置いて、ここに名前→パスを書けば表示される。
@@ -3255,8 +3256,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
         const rank = game ? getRank(game.level) : null;
         const art  = rank ? rankArt(rank.name) : "";
         const lvLabel = rank
-          ? (rank.maxLv >= 999 ? `Lv.${rank.minLv}+`
-             : rank.minLv === rank.maxLv ? `Lv.${game.level}` : `Lv.${game.level}`)
+          ? `Lv.${game.level}`
           : "";
         const inLv  = game ? getXpInLevel(game.xp) : 0;
         const forNxt= game ? getXpForNextLevel(game.xp) : 0;
@@ -9033,7 +9033,7 @@ function SettingsScreen({onToast,onLogout,onGoalSaved,profile,onProfileSaved,onC
   // RANKS定数から生成
   const RANK_RULES = RANKS.map(r => ({
     ...r,
-    lv: r.maxLv >= 999 ? `Lv.${r.minLv}+` : r.minLv === r.maxLv ? `Lv.${r.minLv}` : `Lv.${r.minLv}–${r.maxLv}`
+    lv: r.minLv === r.maxLv ? `Lv.${r.minLv}` : `Lv.${r.minLv}–${r.maxLv}`
   }));
 
   const SectionHeader = ({icon, title}) => html`
@@ -9613,11 +9613,27 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260805-131106";
+const APP_BUILD = "20260805-131749";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
-const XP_THRESHOLDS = [0, 500, 1200, 2200, 3500, 5200, 7500, 10000, 13000, 17000, 21000, 25500, 30500, 36000, 42000, 49000];
+// ★レベルは100まで★（2026-08-05 Kaiの判断）
+//   もとは16段階だった。レジェンド＝Lv.100 を頂点にする。
+//   XPの稼ぎ方は変えない。伸び方は XP(L)=13.415*(L-1)^1.9（最初は速く、後半はゆっくり）。
+//   いまのレジェンド到達点(49,000XP)を新しいレジェンドの入口(Lv.76)に合わせてあるので、
+//   すでに貯めた人が階級で降格することはない。
+const XP_THRESHOLDS = [
+  0, 13, 50, 108, 187, 286, 404, 541, 697, 872,
+  1066, 1277, 1507, 1754, 2019, 2302, 2603, 2920, 3255, 3608,
+  3977, 4363, 4766, 5186, 5623, 6077, 6547, 7033, 7537, 8056,
+  8592, 9145, 9713, 10298, 10899, 11516, 12149, 12799, 13464, 14145,
+  14842, 15555, 16284, 17028, 17789, 18565, 19356, 20163, 20986, 21825,
+  22679, 23548, 24434, 25334, 26250, 27181, 28128, 29090, 30067, 31060,
+  32068, 33091, 34129, 35183, 36251, 37335, 38434, 39548, 40677, 41821,
+  42980, 44154, 45343, 46547, 47766, 49000, 50249, 51512, 52791, 54084,
+  55392, 56715, 58053, 59406, 60773, 62155, 63552, 64963, 66389, 67830,
+  69285, 70755, 72240, 73739, 75253, 76781, 78324, 79881, 81453, 83040
+];
 const getXpLevel = xp => { let lv=1; for(let i=1;i<XP_THRESHOLDS.length;i++){ if(xp>=XP_THRESHOLDS[i]) lv=i+1; else break; } return lv; };
 const getXpInLevel = xp => xp - (XP_THRESHOLDS[getXpLevel(xp)-1]||0);
 const getXpForNextLevel = xp => { const lv=getXpLevel(xp); return lv<XP_THRESHOLDS.length ? XP_THRESHOLDS[lv]-(XP_THRESHOLDS[lv-1]||0) : null; };
