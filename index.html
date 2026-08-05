@@ -1519,27 +1519,36 @@ Object.defineProperty(window, "SHEET_WIDE", { get(){ return window.innerWidth >=
 // ★実績を追加するシート★（2026-08-05 Kai指定のデザイン）
 //   3か月目標の「いまの数字」を、1件ずつ足していく。
 //   保存すると、追加後にどう変わるかをその場で見せる。
-function GoalEntrySheet({goal, entry, onClose, onSaved, onToast}) {
+// weekly=true のときは「今週の目標」の実績を直す画面として使う（2026-08-05）
+//   3か月目標は「金額＋カテゴリ」だが、今週の目標は件数・分なのでカテゴリは出さない。
+function GoalEntrySheet({goal, entry, weekly, onClose, onSaved, onToast}) {
   useLockBodyScroll();
-  const p = (goal && goal.pace) || {};
-  const unit = p.unit || goal.unit || "";
+  const p = weekly ? {} : ((goal && goal.pace) || {});
+  const unit = weekly
+    ? (goal.unit || (goal.metric_type==="DURATION" ? "分" : "件"))
+    : (p.unit || goal.unit || "");
   const [amount, setAmount] = useState(entry ? String(entry.amount) : "");
   const [cat, setCat] = useState(entry ? (entry.category||"SALES") : "SALES");
   const [memo, setMemo] = useState(entry ? (entry.memo||"") : "");
   const [saving, setSaving] = useState(false);
   const CATS = [["SALES","売上"],["CONTRACT","契約"],["OTHER","その他"]];
   const C = "var(--accent)";
-  const cur = Number(p.current)||0, tgt = Number(p.target)||0;
+  const cur = weekly ? (Number(goal.actual_value)||0) : (Number(p.current)||0);
+  const tgt = weekly
+    ? (Number(goal.std_line)>0 ? Number(goal.std_line) : (Number(goal.target_total)||0))
+    : (Number(p.target)||0);
   const add = Number(amount)||0;
   const next = cur + (entry ? (add - (Number(entry.amount)||0)) : add);
   const pctNow = tgt>0 ? Math.round(cur/tgt*100) : null;
   const pctNext = tgt>0 ? Math.round(next/tgt*100) : null;
   const save = async () => {
-    if(!(Number(amount))) { onToast&&onToast("金額を入れてください"); return; }
+    if(!(Number(amount))) { onToast&&onToast(weekly?"数を入れてください":"金額を入れてください"); return; }
     setSaving(true);
     const r = entry
       ? await gasPostJson("updateGoalEntry", { entry_id: entry.entry_id, amount: Number(amount), category: cat, memo })
-      : await gasPostJson("addGoalEntry", { quarterly_goal_id: goal.quarterly_goal_id, amount: Number(amount), category: cat, memo });
+      : await gasPostJson("addGoalEntry", weekly
+          ? { weekly_goal_id: goal.weekly_goal_id, amount: Number(amount), category: "OTHER", memo }
+          : { quarterly_goal_id: goal.quarterly_goal_id, amount: Number(amount), category: cat, memo });
     setSaving(false);
     if(r&&r.ok){ onToast&&onToast(entry?"実績を更新しました":"実績を追加しました！"); onSaved&&onSaved(); onClose(); }
     else onToast&&onToast((r&&r.error)||"保存できませんでした");
@@ -1567,7 +1576,7 @@ function GoalEntrySheet({goal, entry, onClose, onSaved, onToast}) {
           <button onClick=${onClose} style=${{background:"none",border:"none",color:"var(--sub)",fontSize:22,cursor:"pointer",lineHeight:1,padding:"0 4px"}}>×</button>
         </div>
 
-        <div style=${{fontSize:12.5,color:"var(--sub)",marginBottom:6}}>金額</div>
+        <div style=${{fontSize:12.5,color:"var(--sub)",marginBottom:6}}>${weekly?"数":"金額"}</div>
         <div style=${{display:"flex",alignItems:"center",gap:10,marginBottom:16}}>
           <input class="inp" type="number" inputmode="decimal" autofocus value=${amount}
             onInput=${e=>setAmount(e.target.value)} placeholder="0"
@@ -1575,8 +1584,9 @@ function GoalEntrySheet({goal, entry, onClose, onSaved, onToast}) {
           <span style=${{flexShrink:0,fontSize:14,color:"var(--sub)"}}>${unit}</span>
         </div>
 
-        <div style=${{fontSize:12.5,color:"var(--sub)",marginBottom:6}}>カテゴリ</div>
-        <div style=${{display:"flex",gap:8,marginBottom:16}}>
+        <!-- 今週の目標（件数・分）にはカテゴリが無いので出さない -->
+        ${!weekly&&html`<div style=${{fontSize:12.5,color:"var(--sub)",marginBottom:6}}>カテゴリ</div>`}
+        ${!weekly&&html`<div style=${{display:"flex",gap:8,marginBottom:16}}>
           ${CATS.map(([k,l])=>html`
             <button key=${k} onClick=${()=>setCat(k)}
               style=${{flex:1,padding:"10px 4px",borderRadius:9,cursor:"pointer",fontFamily:"inherit",
@@ -1584,7 +1594,7 @@ function GoalEntrySheet({goal, entry, onClose, onSaved, onToast}) {
                        border:`1px solid ${cat===k?C:"var(--border)"}`,
                        background:cat===k?C:"transparent",
                        color:cat===k?"#fff":"var(--sub)"}}>${l}</button>`)}
-        </div>
+        </div>`}
 
         <div style=${{fontSize:12.5,color:"var(--sub)",marginBottom:6}}>メモ（任意）</div>
         <input class="inp" value=${memo} onInput=${e=>setMemo(e.target.value)}
@@ -2000,6 +2010,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
   const [historyGoal, setHistoryGoal] = useState(null);
   const [sprintEntry, setSprintEntry] = useState(null);   // Sprintの「実績を追加する」
   const [weeklyEntry, setWeeklyEntry] = useState(null);   // 今週の目標に実績を入れる
+  const [historyWeekly, setHistoryWeekly] = useState(null); // 今週の目標の履歴（長押しで開く）
   // ★今週の目標に実績を足す★（2026-08-05 Kai指摘で作り直し）
   //   はじめは時間の記録(DailyLog)を作っていたが、
   //   「アポ1件取れた」は時間の記録ではない。
@@ -2279,6 +2290,18 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
         localStorage.setItem("cache_ranking", JSON.stringify(d.ranking));
       }
       if(d.status){ setStatusSummary(d.status); localStorage.setItem("cache_status", JSON.stringify(d.status)); }
+      // ★getHomeData に相乗りしてきたロードマップと自己経営力★（2026-08-05 起動高速化）
+      if(d.roadmap){
+        if(d.roadmap.sprints){ setSprints(d.roadmap.sprints);
+          try { localStorage.setItem("cache_sprints", JSON.stringify(d.roadmap.sprints)); } catch(e){} }
+        if(d.roadmap.goalTree){ setGoalTree(d.roadmap.goalTree);
+          try { localStorage.setItem("cache_goaltree", JSON.stringify(d.roadmap.goalTree)); } catch(e){} }
+      }
+      if(d.smp){
+        if(d.smp.ok && d.smp.data){ setSmp(d.smp); setSmpOff(false);
+          try { localStorage.setItem("cache_smp", JSON.stringify(d.smp)); } catch(e){} }
+        else if(d.smp.error === "feature not enabled") setSmpOff(true);
+      }
       if(d.weekly){
         setWeekly(d.weekly);
         if(d.weekly.reflection) setWeekReflection(d.weekly.reflection);
@@ -2287,7 +2310,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
       // ★Tasksシートを正とした反映（Phase 3）★
       //   下の Journal.actions 同期より後に走らせる（あとに適用した方が勝つため、
       //   Tasksシートの内容が最終的な画面になる）。
-      setTimeout(()=>{ Promise.resolve(applyTasksFromServer()).catch(e=>{ console.error("[JIROKU] タスク同期の取得に失敗:", e); }); }, 0);
+      setTimeout(()=>{ Promise.resolve(applyTasksFromServer(d.tasks)).catch(e=>{ console.error("[JIROKU] タスク同期の取得に失敗:", e); }); }, 0);
       // 今日のアクションの端末間同期
       if(d.todayActions){
         // ★タスク一覧はサーバーと突き合わせて1つにまとめる★
@@ -2389,11 +2412,9 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
       gasApi("getTodayActions").then(r=>{ if(r.ok&&r.data) applyHome({todayActions:r.data}); });
       gasApi("getIntent").then(r=>{ applyHome({intent:(r.ok&&r.data)?r.data:null}); });
     };
-    gasApi("getHomeData").then(r=>{
-      if(r && r.ok && r.data) applyHome(r.data);
-      else legacyFetch();
-    }).catch(legacyFetch);
-    // 自己経営力。featureが無い人には feature not enabled が返るので、その時は出さない
+    // 相乗りで来なかったぶんだけ、あとから個別に取りに行く。
+    // 古い版のサーバーに当たったときの保険で、ふだんは動かない。
+    const fetchSmp = ()=>{
     gasApi("getSelfMgmtPower", { withPrev: "1" }).then(r=>{
       if(r && r.ok && r.data){ setSmp(r); setSmpOff(false);
         try { localStorage.setItem("cache_smp", JSON.stringify(r)); } catch(e){} }
@@ -2401,10 +2422,8 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
       // 通信が遅い・失敗しただけの人に古い画面を見せない（二重表示になるため）
       else if(r && r.error === "feature not enabled") setSmpOff(true);
     }).catch(()=>{});
-    // ★ロードマップの2本は、ホームのまとめ取得に相乗りさせる★（2026-08-05 起動高速化）
-    //   GASは同じ人からの同時リクエストを順番に処理するため、本数がそのまま
-    //   待ち時間になる。getHomeData が返してくれれば追加の往復は要らない。
-    //   古い版のサーバー（まだ返さない）に当たったときだけ、個別に取りに行く。
+    };
+    const fetchRoadmap = ()=>{
     gasApi("getRoadmap").then(r=>{
       if(r && r.ok){
         if(r.sprints){ setSprints(r.sprints);
@@ -2424,6 +2443,15 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
           try { localStorage.setItem("cache_goaltree", JSON.stringify(r.data)); } catch(e){} }
       }).catch(()=>{});
     });
+    };
+
+    gasApi("getHomeData").then(r=>{
+      if(r && r.ok && r.data){
+        applyHome(r.data);
+        if(!r.data.smp)     fetchSmp();
+        if(!r.data.roadmap) fetchRoadmap();
+      } else { legacyFetch(); fetchSmp(); fetchRoadmap(); }
+    }).catch(()=>{ legacyFetch(); fetchSmp(); fetchRoadmap(); });
 
     // カレンダー連携済みなら本人権限で直接取得（GAS経由はスクリプト所有者しか読めないためのフォールバック）
     if(localStorage.getItem("cal_linked")){
@@ -2679,13 +2707,15 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
   //   食い違いが残り続けた。今後はTasksシートが正。
   //   ただし、この端末で既に操作を始めていたら適用しない。
   //   読み込みが遅れて届いたとき、いま入力した内容を消してしまうため。
-  const applyTasksFromServer = async () => {
+  const applyTasksFromServer = async (preloaded) => {
     // ★守る範囲を絞る★（以前は「何か操作したら以後すべて適用しない」だった）
     //   ・編集モーダルや詳細を開いている間 → 適用しない（入力中の値を消さないため）
     //   ・送信待ち／競合のタスク → そのタスクだけ適用しない
     //   ・それ以外 → サーバーの値へ更新する（古い端末が永久に残らないように）
     if (editMode || detailTask) return;
-    const r = await gasApi("getTasks", { includeDone: "1" });
+    // getHomeData に相乗りしてきた分があれば、もう一度取りに行かない（2026-08-05 起動高速化）
+    const r = Array.isArray(preloaded) ? { ok: true, data: preloaded }
+                                       : await gasApi("getTasks", { includeDone: "1" });
     if (!r || !r.ok || !Array.isArray(r.data)) return;
     setTasksLoaded(true);        // 応答が返った＝読み込みは終わっている（0件でも同じ）
     if (editMode || detailTask) return;   // 通信中に開いたら適用しない
@@ -3547,7 +3577,11 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
                          数える目標に数を足すと、二重に数えてしまう。
                          数え方が合わないものには＋を出さず、押し間違いを防ぐ。 -->
                     ${(w.metric_type==="COUNT"||w.metric_type==="DURATION"||!w.metric_type)
-                      ? html`<button title="実績を入れる（減らすこともできます）" onClick=${()=>setWeeklyEntry(w)}
+                      ? html`<button title="実績を入れる（長押しで履歴）" onClick=${()=>setWeeklyEntry(w)}
+                          onContextMenu=${e=>{e.preventDefault(); setHistoryWeekly(w);}}
+                          onTouchStart=${e=>{ const t=setTimeout(()=>setHistoryWeekly(w),550);
+                                              const cl=()=>{clearTimeout(t); e.target.removeEventListener("touchend",cl); e.target.removeEventListener("touchmove",cl);};
+                                              e.target.addEventListener("touchend",cl); e.target.addEventListener("touchmove",cl); }}
                           style=${{flexShrink:0,width:26,height:26,padding:0,border:"none",background:"none",
                                    color:C_W,display:"flex",alignItems:"center",justifyContent:"center",
                                    fontSize:19,fontWeight:600,cursor:"pointer",lineHeight:1,fontFamily:"inherit"}}>＋</button>`
@@ -3628,14 +3662,33 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
     })()}
 
     ${entrySheet&&html`<${GoalEntrySheet} goal=${entrySheet.goal} entry=${entrySheet.entry}
+      weekly=${!!entrySheet.weekly}
       onClose=${()=>setEntrySheet(null)}
-      onSaved=${()=>gasApi("getGoalTree").then(r=>{ if(r&&r.ok&&r.data){ setGoalTree(r.data);
-        try { localStorage.setItem("cache_goaltree", JSON.stringify(r.data)); } catch(e){} } })}
+      onSaved=${()=>{
+        gasApi("getGoalTree").then(r=>{ if(r&&r.ok&&r.data){ setGoalTree(r.data);
+          try { localStorage.setItem("cache_goaltree", JSON.stringify(r.data)); } catch(e){} } });
+        if(entrySheet.weekly) gasApi("getSprints").then(r=>{ if(r&&r.ok){ setSprints(r);
+          try { localStorage.setItem("cache_sprints", JSON.stringify(r)); } catch(e){} } });
+      }}
       onToast=${onToast}/>`}
 
     ${weeklyEntry&&html`<${WeeklyEntrySheet} goal=${weeklyEntry}
       onClose=${()=>setWeeklyEntry(null)}
       onSave=${async(w,v)=>{ await addWeeklyOne(w, v); }}
+      onToast=${onToast}/>`}
+
+    <!-- ★今週の目標の履歴★（2026-08-05）
+         間違えて足したときに、打ち消しで足すしかなかった。ここから直せるようにする。 -->
+    ${historyWeekly&&html`<${GoalHistorySheet} goal=${historyWeekly} weekly=${true}
+      onClose=${()=>setHistoryWeekly(null)}
+      onEdit=${(e2)=>{ setHistoryWeekly(null); setEntrySheet({goal:historyWeekly, weekly:true, entry:e2}); }}
+      onAdd=${()=>{ const w2=historyWeekly; setHistoryWeekly(null); setWeeklyEntry(w2); }}
+      onChanged=${()=>{
+        gasApi("getGoalTree").then(r=>{ if(r&&r.ok&&r.data){ setGoalTree(r.data);
+          try { localStorage.setItem("cache_goaltree", JSON.stringify(r.data)); } catch(e){} } });
+        gasApi("getSprints").then(r=>{ if(r&&r.ok){ setSprints(r);
+          try { localStorage.setItem("cache_sprints", JSON.stringify(r)); } catch(e){} } });
+      }}
       onToast=${onToast}/>`}
 
     ${sprintEntry&&html`<${SprintEntrySheet} sprint=${sprintEntry}
@@ -3763,7 +3816,9 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
               <span style=${{display:"block",fontSize:13.5,fontWeight:800,color:"var(--text)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>${next}</span>
               <span style=${{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap",marginTop:2}}>
                 ${estOf(next)>0&&html`<span style=${{fontSize:10.5,color:"var(--sub)"}}>⏱ 想定 ${estOf(next)}分</span>`}
-                <span style=${{fontSize:10,fontWeight:700,color:L.color,border:"1px solid "+L.color,borderRadius:20,padding:"1px 6px"}}>${L.icon}${L.label}</span>
+                <!-- 分類が決まらないときは空の枠だけが残ってしまうので出さない（2026-08-05 Kai指摘） -->
+                ${(L.icon||L.label)&&html`
+                  <span style=${{fontSize:10,fontWeight:700,color:L.color,border:"1px solid "+L.color,borderRadius:20,padding:"1px 6px"}}>${L.icon}${L.label}</span>`}
               </span>
             </button>
             <button onClick=${()=>goToTimerWith(next)}
@@ -4697,6 +4752,15 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
             ${(num&&m.provisional&&notYet.length>0)&&html`
               <div style=${{fontSize:10,color:"var(--sub)",lineHeight:1.7,marginTop:4,marginLeft:42}}>
                 まだ測れていません：${notYet.join("・")}</div>`}
+            <!-- ★設定への導線★（2026-08-05 Kai指摘）
+                 「1日に使える時間を設定すると見られます」と出るのに、
+                 そこから設定へ行けず、押しても何も起きなかった。 -->
+            ${(m.components||[]).some(c2=>c2.reason_code==="AVAILABLE_TIME_MISSING")&&html`
+              <button onClick=${()=>onGoSettings&&onGoSettings("capacity")}
+                style=${{marginTop:5,marginLeft:42,padding:"5px 10px",borderRadius:8,
+                         border:"1px solid var(--accent)",background:"transparent",color:"var(--accent)",
+                         fontSize:10.5,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
+                1日に使える時間を設定する ›</button>`}
             </div>`; })}
         </div>
 
@@ -8397,15 +8461,25 @@ function AvailableTimeSection({onToast}) {
   const [wk, setWk] = useState(null);          // 曜日ごとの既定（分）
   const [day, setDay] = useState(null);        // 今日の設定
   const [busy, setBusy] = useState(false);
-  useEffect(()=>{ (async()=>{
-    const r = await authedPost("getDayPlan", { date: todayKey2 });
+  const [failed, setFailed] = useState(false);
+  // 読み込みに失敗したときに「読み込み中…」のまま固まると、
+  // 何も押せない画面になってしまう。失敗はそう出して、押し直せるようにする。
+  const load = async () => {
+    setFailed(false);
+    let r = null;
+    try { r = await authedPost("getDayPlan", { date: todayKey2 }); } catch(e) { r = null; }
     if (r && r.ok && r.data) {
       setWk(r.data.weekly_available_minutes || {});
       setDay({ day_type: r.data.day_type || "NORMAL", available_minutes: r.data.available_minutes,
                resolved: r.data.resolved });
-    } else { setWk({}); setDay({ day_type:"NORMAL", available_minutes:null }); }
-  })(); },[]);
-  if (wk === null) return html`<div style=${{fontSize:12.5,color:"var(--sub)"}}>読み込み中…</div>`;
+    } else {
+      setWk({}); setDay({ day_type:"NORMAL", available_minutes:null });
+      if (!r || !r.ok) setFailed(true);
+    }
+  };
+  useEffect(()=>{ load(); },[]);
+  if (wk === null) return html`
+    <div style=${{fontSize:12.5,color:"var(--sub)"}}>読み込み中…</div>`;
 
   const hh = (m) => m === null || m === undefined || m === "" ? "未設定"
                     : (Math.floor(m/60) + "時間" + (m%60 ? (m%60)+"分" : ""));
@@ -8426,6 +8500,14 @@ function AvailableTimeSection({onToast}) {
   };
 
   return html`
+    ${failed&&html`
+      <div style=${{fontSize:11.5,color:"var(--sub)",lineHeight:1.7,marginBottom:10,
+                    padding:"9px 11px",borderRadius:9,border:"1px solid var(--border)"}}>
+        いまの設定を読み込めませんでした。押して設定すると保存はできます。
+        <button onClick=${load} style=${{marginLeft:8,padding:"3px 9px",borderRadius:7,
+          border:"1px solid var(--accent)",background:"none",color:"var(--accent)",
+          fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>読み込み直す</button>
+      </div>`}
     <div style=${{fontSize:12,color:"var(--sub)",lineHeight:1.8,marginBottom:12}}>
       その日に「仕事や勉強へ回せる時間」の目安です。決めておくと、
       予定を詰め込みすぎていないかが分かります。休む日は休む日として記録できます。
@@ -9178,7 +9260,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260805-094524";
+const APP_BUILD = "20260805-103317";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
@@ -10668,7 +10750,7 @@ function App() {
       ${!calLinked && !calBannerDismissed && !isServerCalendar() && html`<${CalendarLinkBanner} onGoToSettings=${()=>setTab("settings")} onDismiss=${()=>setCalBannerDismissed(true)}/>`}
       <div style=${{position:"relative",flex:1,minHeight:0}}>
         <div class="screen">
-          <div style=${{display:tab==="home"?"block":"none"}}><${HomeScreen} goalData=${goalData} onGoalSaved=${setGoalData} profile=${profile} isActive=${tab==="home"} showInCommunity=${user.showInCommunity!==false} studentCohort=${user.cohort||""} recordDays=${user.recordDays} onGoTimer=${()=>setTab("timer")} onToast=${setToast} onGoSettings=${()=>setTab("settings")}/></div>
+          <div style=${{display:tab==="home"?"block":"none"}}><${HomeScreen} goalData=${goalData} onGoalSaved=${setGoalData} profile=${profile} isActive=${tab==="home"} showInCommunity=${user.showInCommunity!==false} studentCohort=${user.cohort||""} recordDays=${user.recordDays} onGoTimer=${()=>setTab("timer")} onToast=${setToast} onGoSettings=${(sec)=>{ if(sec) setSettingsJump(sec); setTab("settings"); }}/></div>
           <div style=${{display:tab==="log"?"block":"none"}}><${LogScreen} onToast=${setToast} isActive=${tab==="log"}/></div>
           <div style=${{display:tab==="report"?"block":"none"}}><${ReportScreen}/></div>
           <div style=${{display:tab==="brain"?"block":"none"}}><${SecondBrainScreen} isActive=${tab==="brain"}/></div>

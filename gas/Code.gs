@@ -1343,6 +1343,23 @@ function getHomeData(studentEmail) {
       intent:       safe(function () { return getIntent(studentEmail); }),
       todayActions: safe(function () { return getTodayActions(studentEmail); })
     };
+    // ★ロードマップと自己経営力もここに載せる★（2026-08-05 起動高速化）
+    //   GASは同じ人からのリクエストを順番に処理するので、本数がそのまま待ち時間になる。
+    //   ホームで必ず要る2本を相乗りさせて、起動の往復を3回→1回にする。
+    //   1つ落ちても画面全体を落とさない。落ちたら client 側が個別に取りに行く。
+    try {
+      const rm = getRoadmap(studentEmail);
+      if (rm && rm.ok) data.roadmap = { sprints: rm.sprints || null, goalTree: rm.goalTree || null };
+    } catch (err) { Logger.log("getHomeData roadmap: " + err); }
+    try {
+      const sp = getSelfMgmtPower(studentEmail, { withPrev: "1", cacheOnly: "1" });
+      if (sp) data.smp = sp;   // 未計算なら null。client があとから取りに行く
+    } catch (err) { Logger.log("getHomeData smp: " + err); }
+    // タスク一覧も同じ理由でここに載せる（起動直後に必ず1本呼んでいた）
+    try {
+      const tk = getTasks(studentEmail, { includeDone: "1" });
+      if (tk && tk.ok && Array.isArray(tk.data)) data.tasks = tk.data;
+    } catch (err) { Logger.log("getHomeData tasks: " + err); }
     return { ok: true, data: data };
   } finally { _sheetReadCacheOn = false; _sheetReadCache = {}; }
 }
@@ -1867,6 +1884,11 @@ function getSelfMgmtPower(studentEmail, body) {
     try { const hit = CacheService.getScriptCache().get(ckey);
       if (hit) return JSON.parse(hit); } catch (e) {}
   }
+  // ★キャッシュにある時だけ返す★（2026-08-05 起動高速化）
+  //   ホームのまとめ取得（getHomeData）から呼ぶときに使う。
+  //   計算は10秒以上かかるので、まだ無いときは相乗りさせず、
+  //   画面が出たあとで個別に取りに行かせる。
+  if (String((body && body.cacheOnly) || "") === "1") return null;
   const cur = computeSelfMgmtPower(studentEmail, weekStart);
   let prev = null;
   if (String((body && body.withPrev) || "") === "1") {
