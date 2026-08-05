@@ -492,6 +492,18 @@ function doGet(e) {
         }
         return jsonResponse({ ok: true, dry: dryT, count: fixed.length, fixed: fixed });
       }
+      // みんなの頑張りが何秒かかっているかを測る（読むだけ・書き込みなし）
+      //   bash gas/ops.sh adminCommunityTiming
+      case "adminCommunityTiming": {
+        if (!verifyAdmin(e.parameter.coachEmail)) return jsonResponse({ ok: false, error: "not admin" });
+        const t0 = Date.now();
+        const r0 = getCommunity(adminEmail());
+        const t1 = Date.now();
+        return jsonResponse({ ok: true, ms: t1 - t0,
+          counts: { list: (r0.data||[]).length, level: (r0.levelRanking||[]).length,
+                    streak: (r0.streakRanking||[]).length, report: (r0.reportRanking||[]).length,
+                    recent: (r0.recentLoggers||[]).length } });
+      }
       // 古いchallengeを捨てる（ログインの遅さ対策）
       //   bash gas/ops.sh adminPurgeChallenges
       case "adminPurgeChallenges": {
@@ -4904,7 +4916,10 @@ function getCommunity(studentEmail) {
   const maskName = (u, isMe) => (callerHidden && !isMe) ? "匿名さん" : (u.nickname || "名無しさん");
   const maskAvatar = (u, isMe) => (callerHidden && !isMe) ? "🙈" : (u.avatar || "🦊");
 
-  const statuses = computeAllStatuses();
+  // ★computeAllStatuses は呼ばない★（2026-08-05 Kai報告「開くのが遅すぎる」）
+  //   ステータスランキングを自己経営力ランキングに置き換えたとき、
+  //   この呼び出しだけが残った。結果はどこにも使っていないのに、
+  //   全員ぶんの DailyLog を日ごとに減衰計算する、この画面で一番重い処理だった。
   const allReports = sheetToObjects(getSheet("Reports"));
   const latestReportByEmail = new Map();
   allReports.forEach(r => {
@@ -5018,11 +5033,32 @@ function getCommunity(studentEmail) {
   const recentLoggers = (function () {
     const emails = new Set(users.map(u => u.student_email));
     const byEmail = {};
-    sheetToObjects(getSheet("DailyLog")).forEach(function (l) {
-      if (emails.has(l.student_email) && String(l.date) >= recentCut) {
-        byEmail[l.student_email] = (byEmail[l.student_email] || 0) + 1;
+    // ★DailyLog を丸ごとオブジェクトにしない★（2026-08-05 Kai報告「開くのが遅すぎる」）
+    //   ここで欲しいのは「直近2日に誰が何件記録したか」だけなのに、
+    //   全行を50列ぶんのオブジェクトへ変換していた。
+    //   必要な2列だけを読み、追記順（古い→新しい）を利用して後ろから見て、
+    //   古い日が続いたら打ち切る。
+    const dl = getSheet("DailyLog");
+    const lastRow = dl.getLastRow();
+    if (lastRow > 1) {
+      const hdr = dl.getRange(1, 1, 1, dl.getLastColumn()).getValues()[0];
+      const iEm = hdr.indexOf("student_email"), iDt = hdr.indexOf("date");
+      if (iEm !== -1 && iDt !== -1) {
+        const lo = Math.min(iEm, iDt), hi = Math.max(iEm, iDt);
+        const block = dl.getRange(2, lo + 1, lastRow - 1, hi - lo + 1).getValues();
+        const cEm = iEm - lo, cDt = iDt - lo;
+        let oldRun = 0;
+        for (let i = block.length - 1; i >= 0; i--) {
+          const raw = block[i][cDt];
+          const d = raw instanceof Date ? Utilities.formatDate(raw, "Asia/Tokyo", "yyyy-MM-dd")
+                                        : String(raw).slice(0, 10);
+          if (d < recentCut) { if (++oldRun > 300) break; continue; }
+          oldRun = 0;
+          const em = String(block[i][cEm] || "");
+          if (emails.has(em)) byEmail[em] = (byEmail[em] || 0) + 1;
+        }
       }
-    });
+    }
     return users
       .filter(u => byEmail[u.student_email])
       .map(u => {
@@ -14146,7 +14182,7 @@ const ADMIN_SECRET_ALLOWLIST = {
   // 一斉送信（Kaiの明示的な要望により残す）
   adminBroadcastLine:1, adminBroadcastLinePending:1, adminSendStudentCampaign:1,
   // セットアップ・保守
-  adminSetupTriggers:1, adminInstallTrigger:1, adminSetupPhase1:1, adminSetupAuth:1, adminPhase4DryRun:1, adminLegacyBackfill:1, adminWritePathStats:1, adminIssueTestSession:1, adminDropTestSessions:1, adminOpsSelfTest:1, adminActualMinutesAudit:1, adminXpCorrection:1, adminStreakRecalc:1, adminGrantFeature:1, adminUserDiag:1, adminReportScoreDryRun:1, adminReportGenTest:1, adminScoreConsistency:1, adminFinalizeOps:1, adminUnfinalizeOps:1, adminSmpDump:1, adminSmpWarmAll:1, adminLevelAudit:1, adminXpRestore:1, adminCleanupPlusLogs:1, adminClassAudit:1, adminRecolorCalendar:1, adminFixTokenVersion:1, adminPurgeChallenges:1, adminJiroBackfill:1,
+  adminSetupTriggers:1, adminInstallTrigger:1, adminSetupPhase1:1, adminSetupAuth:1, adminPhase4DryRun:1, adminLegacyBackfill:1, adminWritePathStats:1, adminIssueTestSession:1, adminDropTestSessions:1, adminOpsSelfTest:1, adminActualMinutesAudit:1, adminXpCorrection:1, adminStreakRecalc:1, adminGrantFeature:1, adminUserDiag:1, adminReportScoreDryRun:1, adminReportGenTest:1, adminScoreConsistency:1, adminFinalizeOps:1, adminUnfinalizeOps:1, adminSmpDump:1, adminSmpWarmAll:1, adminLevelAudit:1, adminXpRestore:1, adminCleanupPlusLogs:1, adminClassAudit:1, adminRecolorCalendar:1, adminFixTokenVersion:1, adminPurgeChallenges:1, adminJiroBackfill:1, adminCommunityTiming:1,
   authSetMode:1, authSetEnforce:1, authRoleApply:1, authRoleDryRun:1, authRevokeAll:1,
   authCleanupTestData:1, adminPurgeTestUsers:1, adminMigrateTasks:1, authBreakerReset:1, rotateSessionSecret:1,
   p1Backup:1, p1BackupInfo:1, p1PurgeArchived:1, weeklyBackup:1
