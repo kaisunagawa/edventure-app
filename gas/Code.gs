@@ -1523,9 +1523,16 @@ function getReportList(studentEmail) {
         const d = String(r.report_date).slice(0, 10);
         if (!d) return;
         const full = String(r.operating_score || "").trim();
-        const part = String(r.partial_score || "").trim();
-        if (full !== "") opsByDate[d] = Number(full);
-        else if (part !== "") opsByDate[d] = Number(part);
+        if (full !== "") { opsByDate[d] = Number(full); return; }
+        // ★部分点は列に無く、snapshot_json の中にしか入っていない★
+        //   ここを見ていなかったため、全体の点数が出ない日は
+        //   一覧だけ旧方式の点数へ落ちて、詳細と食い違っていた。
+        try {
+          const snap = JSON.parse(r.snapshot_json || "null");
+          const dsp = snap && (snap.displayed_score !== null && snap.displayed_score !== undefined
+                                ? snap.displayed_score : snap.partial_score);
+          if (dsp !== null && dsp !== undefined && dsp !== "") opsByDate[d] = Number(dsp);
+        } catch (e3) {}
       });
       // ★今日だけは計算し直す★
       //   保存した後に記録を足すと、保存済みの点数（一覧）と、開いたときに
@@ -4670,7 +4677,8 @@ function opsLatestIndex_() {
     if (last < 2) return idx;
     const hdr = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0];
     // partial_score も読む（全体の点数が出ない日は部分点を使う。詳細・一覧と同じ）
-    const cols = ["student_email", "report_date", "operating_score", "finalized_at", "partial_score"];
+    // 部分点は列に無く snapshot_json の中にあるので、それも読む
+    const cols = ["student_email", "report_date", "operating_score", "finalized_at", "snapshot_json"];
     const ii = cols.map(function (c) { return hdr.indexOf(c); });
     if (ii.some(function (x) { return x === -1; })) return opsLatestIndexSlow_();
     const lo = Math.min.apply(null, ii), hi = Math.max.apply(null, ii);
@@ -4682,10 +4690,18 @@ function opsLatestIndex_() {
                   report_date: rawD instanceof Date
                     ? Utilities.formatDate(rawD, "Asia/Tokyo", "yyyy-MM-dd") : rawD,
                   operating_score: row[c[2]], finalized_at: row[c[3]],
-                  partial_score: row[c[4]] };
+                  snapshot_json: row[c[4]] };
       const em = String(o.student_email || ""), d = String(o.report_date).slice(0, 10);
       const vFull = String(o.operating_score || "").trim();
-      const v = vFull !== "" ? vFull : String(o.partial_score || "").trim();
+      let v = vFull;
+      if (v === "") {
+        try {
+          const snap = JSON.parse(o.snapshot_json || "null");
+          const dsp = snap && (snap.displayed_score !== null && snap.displayed_score !== undefined
+                                ? snap.displayed_score : snap.partial_score);
+          if (dsp !== null && dsp !== undefined) v = String(dsp);
+        } catch (e4) {}
+      }
       // ★確定した日だけを使う★（2026-08-05）
       //   夜のレポートで締めていない日は、まだ動く可能性のある点数なので
       //   ランキングや共有欄には出さない。
@@ -4703,9 +4719,17 @@ function opsLatestIndexSlow_() {
   try {
     sheetToObjects(getP1Sheet("DailyOpsReport")).forEach(function (o) {
       const em = String(o.student_email || ""), d = String(o.report_date).slice(0, 10);
-      // 全体の点数が無い日は部分点を使う（速い方の経路と同じ）
+      // 全体の点数が無い日は部分点を使う（部分点は snapshot_json の中）
       const vFull = String(o.operating_score || "").trim();
-      const v = vFull !== "" ? vFull : String(o.partial_score || "").trim();
+      let v = vFull;
+      if (v === "") {
+        try {
+          const snap = JSON.parse(o.snapshot_json || "null");
+          const dsp = snap && (snap.displayed_score !== null && snap.displayed_score !== undefined
+                                ? snap.displayed_score : snap.partial_score);
+          if (dsp !== null && dsp !== undefined) v = String(dsp);
+        } catch (e5) {}
+      }
       if (!String(o.finalized_at || "").trim()) return;
       if (!em || !d || v === "") return;
       if (!idx[em] || idx[em].date < d) idx[em] = { date: d, score: Number(v) };
