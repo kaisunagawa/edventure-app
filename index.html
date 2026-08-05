@@ -1329,6 +1329,15 @@ const RANK_ART = {
   "レジェンド":     "assets/rank/legend.png",
 };
 
+// 画像は端末にキャッシュされる。差し替えても古い絵が出続けるので、
+// 版（APP_BUILD）をURLに付けて別物として取り直させる。
+// ★関数にしておくこと★ RANK_ART は APP_BUILD より前にあるので、
+//   定数の中で APP_BUILD を参照すると「初期化前に参照した」で落ちる。
+function rankArt(name) {
+  const p = RANK_ART[name];
+  return p ? (p + "?v=" + APP_BUILD) : "";
+}
+
 function getRank(level) {
   return RANKS.find(r => level >= r.minLv && level <= r.maxLv) || RANKS[0];
 }
@@ -3244,7 +3253,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
            階級が上がってもキャラの大きさは変わらないよう、絵の側でそろえてある。 -->
       ${(()=>{
         const rank = game ? getRank(game.level) : null;
-        const art  = rank ? RANK_ART[rank.name] : "";
+        const art  = rank ? rankArt(rank.name) : "";
         const lvLabel = rank
           ? (rank.maxLv >= 999 ? `Lv.${rank.minLv}+`
              : rank.minLv === rank.maxLv ? `Lv.${game.level}` : `Lv.${game.level}`)
@@ -3266,15 +3275,15 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
                           overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
               ${profile?.nickname||CURRENT_USER.name}</div>
             ${rank&&html`
-              <div style=${{display:"inline-flex",alignItems:"center",gap:5,marginTop:7,
-                            background:rank.color,borderRadius:20,padding:"4px 12px"}}>
-                <span style=${{fontSize:11,lineHeight:1}}>${rank.emoji}</span>
-                <span style=${{fontSize:12,fontWeight:800,color:"#fff",whiteSpace:"nowrap"}}>
+              <div style=${{display:"inline-flex",alignItems:"center",gap:4,marginTop:6,
+                            background:rank.color,borderRadius:20,padding:"3px 10px"}}>
+                <span style=${{fontSize:9.5,lineHeight:1}}>${rank.emoji}</span>
+                <span style=${{fontSize:10.5,fontWeight:800,color:"#fff",whiteSpace:"nowrap"}}>
                   ${lvLabel} ${rank.name}</span>
               </div>
               <!-- 次のレベルまでの進み具合 -->
-              <div style=${{height:6,borderRadius:99,background:"rgba(255,255,255,0.25)",
-                            overflow:"hidden",marginTop:8}}>
+              <div style=${{height:5,borderRadius:99,background:"rgba(255,255,255,0.25)",
+                            overflow:"hidden",marginTop:7}}>
                 <div style=${{height:"100%",width:pct+"%",borderRadius:99,background:rank.color}}/>
               </div>`}
             ${game&&html`
@@ -9345,7 +9354,7 @@ function SettingsScreen({onToast,onLogout,onGoalSaved,profile,onProfileSaved,onC
             // ★まだ上がっていない階級は、姿を見せない★（2026-08-05 Kai要望）
             //   先に全部見えていると、上がったときの楽しみが無くなる。
             const reached = myLevel > 0 && myLevel >= r.minLv;
-            const art = reached ? (RANK_ART[r.name] || "") : "";
+            const art = reached ? rankArt(r.name) : "";
             return html`
               <div key=${r.name}>
                 <div style=${{display:"flex",alignItems:"center",gap:6,marginBottom:6,flexWrap:"wrap"}}>
@@ -9583,7 +9592,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260805-121615";
+const APP_BUILD = "20260805-122140";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 

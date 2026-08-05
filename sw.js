@@ -8,7 +8,7 @@
 // ★v13★ 2026-08-05: 裏での取り直しがHTTPキャッシュから古いHTMLを受け取っていた。
 //   保存されるキャッシュも古いままになり、何度読み込み直しても新しい版に
 //   変わらなくなっていた（Kai報告）。名前を上げて、詰まったキャッシュを捨てる。
-const CACHE = "jiroku-v14-rank-art";
+const CACHE = "jiroku-v15-rank-art2";
 
 // タイマー終了などをバックグラウンドでも通知するためのFirebase Cloud Messaging。
 // 別ファイル（firebase-messaging-sw.js）として登録すると、同じスコープ('/')の
