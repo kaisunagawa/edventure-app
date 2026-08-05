@@ -3380,7 +3380,18 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
                                background:k===gi?C_Q:"var(--border)"}}/>`)}
                   <span style=${{fontSize:10,color:"var(--sub)",fontVariantNumeric:"tabular-nums"}}>${gi+1}/${goals.length}</span>
                 </span>`}
-              <span style=${{flex:1}}/>
+              <!-- ★期限を出す★（2026-08-05 Kai要望）
+                   チップと「追加する」の間が空いていたので、いつまでの目標かをここに置く。 -->
+              ${(()=>{
+                const ed = String(g.end_date||"").slice(0,10);
+                if(!ed) return html`<span style=${{flex:1}}/>`;
+                const [,m,d] = ed.split("-");
+                const left = (g.pace && g.pace.remainingDays !== undefined && g.pace.remainingDays !== null)
+                  ? Number(g.pace.remainingDays) : null;
+                return html`<span style=${{flex:1,minWidth:0,marginLeft:8,fontSize:10,color:"var(--sub)",
+                                           whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>
+                  〜${Number(m)}/${Number(d)}${left!==null?`（あと${left}日）`:""}</span>`;
+              })()}
               <button onClick=${()=>setEntrySheet({goal:g, entry:null})}
                 onContextMenu=${e=>{e.preventDefault(); setHistoryGoal(g);}}
                 onTouchStart=${e=>{ const t=setTimeout(()=>setHistoryGoal(g),550);
@@ -3813,12 +3824,13 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
             <div style=${{fontSize:13.5,fontWeight:800,color:"var(--text)",marginTop:1,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>${value}</div>
           </div>`;
         return html`
-        <div style=${{borderTop:"1px solid var(--border)",marginTop:11,paddingTop:11}}>
+        <!-- 上の区切り線は無くていい（2026-08-05 Kai指摘） -->
+        <div style=${{marginTop:11}}>
           <div style=${{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
             <span style=${{fontSize:12,fontWeight:800,color:"var(--text)"}}>次にやること</span>
             <button onClick=${()=>setShowWhy(v=>!v)}
               style=${{background:"none",border:"none",color:"var(--accent)",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit",padding:0}}>
-              ${showWhy?"選定理由を隠す ▲":"選定理由を表示 ▼"}</button>
+              ${showWhy?"閉じる ▲":"なぜこれから？ ▼"}</button>
           </div>
           <div style=${{display:"flex",alignItems:"center",gap:9,marginBottom:showWhy?8:11}}>
             <span style=${{flexShrink:0,width:26,height:26,borderRadius:"50%",background:"var(--accent)",color:"#fff",fontSize:12,fontWeight:800,display:"flex",alignItems:"center",justifyContent:"center"}}>1</span>
@@ -3836,9 +3848,49 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
               style=${{flexShrink:0,padding:"8px 12px",borderRadius:99,border:"none",background:"var(--accent)",color:"#fff",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>
               ▶ 始める</button>
           </div>
-          ${showWhy&&html`
-            <div style=${{background:"var(--accent-l)",color:"var(--accent)",borderRadius:9,padding:"7px 10px",fontSize:11,marginBottom:11,lineHeight:1.6}}>
-              理由: ${why}</div>`}
+          <!-- ★選び方そのものを見せる★（2026-08-05 Kai指摘）
+               「理由: 上から順番に」の一行だけでは、どう選んでいるのか分からなかった。
+               3段階の決め方を並べ、当てはまった段にしるしを付ける。
+               ここに書く順番は、上の next の選び方と必ず同じにすること。 -->
+          ${showWhy&&(()=>{
+            const hit = q0.overdue ? 0 : (q0.quadrant==="DO_NOW" ? 1 : 2);
+            const RULES = [
+              ["期限が過ぎているもの",   "遅れているぶんから片づけます"],
+              ["重要 かつ 緊急のもの",   "後回しにすると影響が大きいものです"],
+              ["一覧のいちばん上",       "急ぎのものが無いので、並び順のとおりです"],
+            ];
+            const facts = [];
+            facts.push("重要度 " + (IMPORTANCE_LABEL[q0.importance] || "中"));
+            const dl = dueLabel(dueOf(next), q0.overdue);
+            facts.push(dl || "期限なし");
+            if (estOf(next) > 0) facts.push("想定 " + estOf(next) + "分");
+            return html`
+              <div style=${{border:"1px solid var(--border)",borderRadius:11,padding:"11px 12px",marginBottom:11}}>
+                <div style=${{fontSize:11,fontWeight:700,color:"var(--text)",marginBottom:8}}>
+                  上から順に当てはまるものを選んでいます</div>
+                ${RULES.map(([t,d],i)=>html`
+                  <div key=${i} style=${{display:"flex",gap:8,alignItems:"flex-start",marginBottom:i===2?0:7}}>
+                    <span style=${{flexShrink:0,width:16,height:16,borderRadius:"50%",marginTop:1,
+                                   display:"flex",alignItems:"center",justifyContent:"center",
+                                   fontSize:9.5,fontWeight:800,
+                                   background:i===hit?"var(--accent)":"transparent",
+                                   border:i===hit?"none":"1px solid var(--border)",
+                                   color:i===hit?"#fff":"var(--sub)"}}>${i+1}</span>
+                    <span style=${{flex:1,minWidth:0}}>
+                      <span style=${{display:"block",fontSize:11,lineHeight:1.5,
+                                     fontWeight:i===hit?700:500,
+                                     color:i===hit?"var(--accent)":"var(--sub)"}}>${t}</span>
+                      ${i===hit&&html`<span style=${{display:"block",fontSize:10.5,color:"var(--sub)",lineHeight:1.6,marginTop:1}}>${d}</span>`}
+                    </span>
+                  </div>`)}
+                <div style=${{borderTop:"1px solid var(--border)",marginTop:9,paddingTop:8,
+                              fontSize:10.5,color:"var(--sub)",lineHeight:1.7}}>
+                  このタスク：${facts.join(" ・ ")}
+                  ${taskWhy[idOfTitle(next)]?html`<br/>${taskWhy[idOfTitle(next)]}`:""}
+                  <br/>並び順は「一覧」から入れ替えられます。
+                </div>
+              </div>`;
+          })()}
           <div style=${{display:"flex",gap:5}}>
             ${tile(overdue>0?"var(--red,#d33)":"var(--sub)", "⚠", "超過", overdue+"件")}
             ${tile("var(--amber,#BA7517)", "🕐", "今日中", dueToday+"件")}
@@ -5259,6 +5311,36 @@ function LogScreen({onToast, isActive}) {
     loadBlockData(b, logs);
   };
 
+  // ★「＋ 記録を追加する」の行き先★（2026-08-05 Kai指摘）
+  //   これまでは今の時間帯を選び直すだけだった。最初からそこが選ばれているので、
+  //   押しても画面が何も変わらず、壊れているように見えていた。
+  //   まだ記録の無い枠を探して開き、入力欄まで寄せる。
+  const taskInputRef = useRef(null);
+  const firstEmptyBlock = () => {
+    const covered = (b) => logs.some(l => l.time_block === b || blocksOverlap(l.time_block, b));
+    const cur = getCurrentBlock();
+    if (!covered(cur)) return cur;
+    const i = timeBlocks.indexOf(cur);
+    // まず今より前（記録し忘れた時間）を新しい順に見る
+    for (let k = i - 1; k >= 0; k--) if (!covered(timeBlocks[k])) return timeBlocks[k];
+    // それも無ければ、今より後ろ
+    for (let k = i + 1; k < timeBlocks.length; k++) if (!covered(timeBlocks[k])) return timeBlocks[k];
+    return null;   // 全部埋まっている
+  };
+  const addRecord = () => {
+    const b = firstEmptyBlock();
+    if (!b) { onToast && onToast("今日の時間はすべて記録済みです。直したい時間を押してください"); return; }
+    handleBlockSelect(b);
+    // 画面の上（入力欄）まで寄せて、そのまま書き始められるようにする
+    setTimeout(()=>{
+      try {
+        const el = taskInputRef.current;
+        if (el) { el.scrollIntoView({ behavior:"smooth", block:"center" }); el.focus({ preventScroll:true }); }
+        else window.scrollTo?.({ top:0, behavior:"smooth" });
+      } catch(e) { window.scrollTo?.(0,0); }
+    }, 60);
+  };
+
   // チップタップ: 通常は選択切り替え。まとめて記録モード中は追加選択のON/OFF
   const handleChipTap = (b) => {
     if(!multiMode){
@@ -5560,7 +5642,7 @@ function LogScreen({onToast, isActive}) {
         `}
         <div class="form-grp">
           <label class="form-lbl">何をしましたか？</label>
-          <input class="inp" placeholder="例：資料作成、家事、勉強など" value=${task} onInput=${e=>setTask(e.target.value)} />
+          <input class="inp" ref=${taskInputRef} placeholder="例：資料作成、家事、勉強など" value=${task} onInput=${e=>setTask(e.target.value)} />
           ${task!==""&&task===autoFillRef.current&&html`
             <div style=${{fontSize:11,color:"var(--accent)",marginTop:5,display:"flex",alignItems:"center",gap:4}}>
               📅 カレンダーの予定から自動入力しました（編集できます）
@@ -5827,7 +5909,7 @@ function LogScreen({onToast, isActive}) {
           </div>`;
         })}
 
-        <button onClick=${()=>{ handleBlockSelect(getCurrentBlock()); window.scrollTo?.(0,0); }}
+        <button onClick=${addRecord}
           style=${{display:"flex",alignItems:"center",justifyContent:"center",gap:9,width:"100%",marginTop:6,
                    padding:"14px",borderRadius:12,border:"1px solid var(--cyan)",background:"transparent",
                    color:"var(--cyan)",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
@@ -9294,7 +9376,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260805-105335";
+const APP_BUILD = "20260805-110245";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 

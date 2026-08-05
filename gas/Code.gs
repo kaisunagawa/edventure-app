@@ -1694,7 +1694,11 @@ function computeSelfMgmtPower(studentEmail, weekStart) {
       const t = Number(w.std_line) > 0 ? Number(w.std_line) : Number(w.target_total);
       if (isNaN(t) || t <= 0) return false;
       const a = agg[String(w.weekly_goal_id)] || {};
-      return Number(a.logCount || 0) > 0;   // 記録があるものだけ評価する
+      // 「＋ 追加する」で入れた実績も「記録あり」として数える（2026-08-05）。
+      // DailyLog だけを見ていたため、追加するで進めた目標が評価から丸ごと
+      // 外れていた（点はつかないのに、本人は進めている）。
+      const rc = (a.recordCount !== undefined) ? a.recordCount : Number(a.logCount || 0);
+      return Number(rc) > 0;   // 記録があるものだけ評価する
     });
     if (wgEval.length) {
       let acc = 0, n = 0;
@@ -11119,7 +11123,8 @@ function getGoalTree(studentEmail) {
   // 達成の判定は最低ライン(min_line)を超えたかどうかを基準にする
   // （調子が悪い週でも最低ラインを超えれば continue 扱いにできるようにするため）
   const withProgress = (w) => {
-    const a = agg[String(w.weekly_goal_id)] || { actual: 0, logCount: 0 };
+    const a = agg[String(w.weekly_goal_id)] || { actual: 0, logCount: 0, entryCount: 0, recordCount: 0 };
+    const recCount = (a.recordCount !== undefined) ? a.recordCount : (a.logCount || 0);
     const target = Number(w.target_total);
     const min = Number(w.min_line);
     // ★今週のペース★ 残り日数と、1日あたりあとどれだけ要るか。
@@ -11145,13 +11150,13 @@ function getGoalTree(studentEmail) {
         ? Math.max(0, Math.round((Number(w.stretch_line) - a.actual) * 10) / 10) : null,
       required_per_day: (hasGoal && daysLeft > 0)
         ? Math.round((goalLine - a.actual) / daysLeft * 10) / 10 : null,
-      actual_per_day: a.logCount > 0
+      actual_per_day: recCount > 0
         ? Math.round(a.actual / Math.max(1, Math.min(7, elapsed)) * 10) / 10 : null,
       // 記録が1件も無い＝未入力。0件達成として扱わない
-      has_records: a.logCount > 0,
+      has_records: recCount > 0,
       // 数えなかった候補（数量・実測が未入力のぶん）。画面で「数えていません」と伝える
       pending_unconfirmed: a.pendingUnconfirmed || 0,
-      confidence: a.logCount === 0 ? "NONE" : (elapsed >= 4 ? "MEDIUM" : "LOW"),
+      confidence: recCount === 0 ? "NONE" : (elapsed >= 4 ? "MEDIUM" : "LOW"),
       link_state: (String(w.link_sprint_id||"").trim() || String(w.link_quarterly_goal_id||"").trim())
         ? "LINKED" : "UNLINKED"
     });
@@ -11853,7 +11858,9 @@ function aggregateWeeklyActual(studentEmail, weekStart) {
       if (!wid) return;
       const d = String(e.entry_date || "").slice(0, 10);
       if (!(d >= monday && d <= sunday)) return;
-      entryByGoal[wid] = (entryByGoal[wid] || 0) + (Number(e.amount) || 0);
+      if (!entryByGoal[wid]) entryByGoal[wid] = { sum: 0, count: 0 };
+      entryByGoal[wid].sum += (Number(e.amount) || 0);
+      entryByGoal[wid].count++;
     });
   } catch (e) {}
 
@@ -11913,8 +11920,14 @@ function aggregateWeeklyActual(studentEmail, weekStart) {
     }
 
     // 記録から数えたぶんに、「＋」で足したぶんを加える
-    actual += (entryByGoal[id] || 0);
-    out[id] = { actual: actual, metric_type: mt, logCount: mine.length,
+    const ent = entryByGoal[id] || { sum: 0, count: 0 };
+    actual += ent.sum;
+    // ★「記録があるか」は「＋」で足したぶんも数える★（2026-08-05 Kai指摘）
+    //   時間の記録（DailyLog）だけを見ていたため、「追加する」で実績を入れた人が
+    //   数字は増えているのに「まだ今週の記録がありません」と言われていた。
+    out[id] = { actual: actual, metric_type: mt,
+                logCount: mine.length, entryCount: ent.count,
+                recordCount: mine.length + ent.count,
                 pendingUnconfirmed: pending };
   });
   return out;
