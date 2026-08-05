@@ -4687,7 +4687,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
             })()}
           </div>
 
-          ${Sec("いまの状態", "", html`
+          ${Sec("いまの状態", "押すと切り替わります。タイマーで計測を終えると、自動で完了になります", html`
           <div style=${{display:"flex",gap:8,marginBottom:16}}>
             ${STS.map(([k,lb,em])=>{
               const on=st===k;
@@ -4778,7 +4778,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
               </div>`}
           </div>`)}
 
-          ${Sec("メモ", "", html`
+          ${Sec("メモ", "手順・持ち物・つまずいたことなど。パソコンと携帯で同じ内容が見られます", html`
           <textarea class="inp" placeholder="このタスクのメモ・詳細・持ち物など" value=${taskNotes[idOfTitle(t)]||taskNotes[t]||""}
             onInput=${e=>setTaskNote(t, e.target.value)}
             style=${{minHeight:90,resize:"vertical",lineHeight:1.6,fontFamily:"inherit",margin:0}}/>`)}
@@ -10097,7 +10097,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260805-200818";
+const APP_BUILD = "20260805-212543";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
