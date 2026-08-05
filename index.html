@@ -9989,14 +9989,20 @@ function SettingsScreen({onToast,onLogout,onGoalSaved,profile,onProfileSaved,onC
             </div>
             <!-- ★表紙は絵だけにする★（2026-08-05 Kai要望）
                  中の説明は開いてから読めばよいので、閉じているあいだは表紙だけ見せる。 -->
+            <!-- 表紙は縦長なので、四角い枠に入れると左右が大きく空いて
+                 本が小さく貧相に見える（2026-08-05 Kai指摘）。
+                 背景を本と同じ紺にして、棚に置いてあるように見せる。
+                 絵は切らない（全体が見えている）。 -->
             <button type="button" onClick=${()=>setGuideOpen(true)} aria-label="攻略本を開く"
                     style=${{position:"relative",borderRadius:14,width:"100%",padding:0,
-                          border:"1px solid var(--border)",background:"var(--bg)",
+                          border:"1px solid #16305B",
+                          background:"linear-gradient(160deg,#1E3A6B 0%,#12244A 55%,#0C1A38 100%)",
                           aspectRatio:"1 / 1",boxSizing:"border-box",overflow:"hidden",
                           display:"flex",alignItems:"center",justifyContent:"center",
                           cursor:"pointer",fontFamily:"inherit"}}>
               <img src=${"assets/rank/guidebook.png?v="+APP_BUILD} alt="攻略本" loading="lazy"
-                style=${{maxWidth:"94%",maxHeight:"94%",objectFit:"contain",display:"block"}}/>
+                style=${{maxWidth:"100%",maxHeight:"100%",objectFit:"contain",display:"block",
+                         filter:"drop-shadow(0 6px 14px rgba(0,0,0,0.45))"}}/>
             </button>
             <div style=${{fontSize:10.5,color:"var(--accent)",marginTop:5,fontWeight:700}}>タップで開く</div>
           </div>
@@ -10210,7 +10216,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260805-222521";
+const APP_BUILD = "20260805-223144";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
