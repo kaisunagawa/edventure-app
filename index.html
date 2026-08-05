@@ -10000,8 +10000,14 @@ function SettingsScreen({onToast,onLogout,onGoalSaved,profile,onProfileSaved,onC
                           aspectRatio:"1 / 1",boxSizing:"border-box",overflow:"hidden",
                           display:"flex",alignItems:"center",justifyContent:"center",
                           cursor:"pointer",fontFamily:"inherit"}}>
+              <!-- ★割合の高さ(max-height:100%)に頼らない★（2026-08-05 Kai指摘）
+                   aspect-ratio で作られた高さに対して、Safari は割合の高さを
+                   解決しないことがある。その結果 iPhone だけ画像が幅いっぱいに
+                   広がり、表紙の上下が切れていた（Chromeでは再現しない）。
+                   枠に貼り付けて object-fit に任せると、どの端末でも収まる。 -->
               <img src=${"assets/rank/guidebook.png?v="+APP_BUILD} alt="攻略本" loading="lazy"
-                style=${{maxWidth:"100%",maxHeight:"100%",objectFit:"contain",display:"block",
+                style=${{position:"absolute",inset:0,width:"100%",height:"100%",
+                         objectFit:"contain",display:"block",
                          filter:"drop-shadow(0 6px 14px rgba(0,0,0,0.45))"}}/>
             </button>
             <div style=${{fontSize:10.5,color:"var(--accent)",marginTop:5,fontWeight:700}}>タップで開く</div>
@@ -10216,7 +10222,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260805-223144";
+const APP_BUILD = "20260805-223627";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 

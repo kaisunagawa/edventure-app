@@ -4979,7 +4979,9 @@ function adminSmpWarmAll(coachEmail) {
 function getCommunity(studentEmail) {
   // ★開くたびに作り直さない★（2026-08-05 Kai報告「表示が遅すぎる。2秒で開きたい」）
   //   中身は「みんなの状況」なので、数分ずれても困らない。
-  //   1人ぶん作るのに数秒かかるため、2分間だけ持ち回す。
+  //   1人ぶん作るのに数秒かかるため、しばらく持ち回す。
+  //   シートの読み込みは1回ごとに0.3〜0.6秒かかり、この画面では5回必要なので、
+  //   毎回作り直すかぎり2秒には入らない（実測3秒前後）。
   //   本人の記録やシェアはこの画面から書き換えないので、古い値が悪さをしない。
   //   （シェア投稿だけは shareAchievement 側でこのキーを消して即反映させる）
   const _ckC = "community_v2_" + studentEmail;
@@ -4988,7 +4990,7 @@ function getCommunity(studentEmail) {
     if (_hit) { const o = JSON.parse(_hit); o.cached = true; return o; }
   } catch (e) { /* キャッシュが読めなくても本処理へ進む */ }
   const _r = getCommunityFresh_(studentEmail);
-  try { CacheService.getScriptCache().put(_ckC, JSON.stringify(_r), 120); } catch (e) {}
+  try { CacheService.getScriptCache().put(_ckC, JSON.stringify(_r), 600); } catch (e) {}
   return _r;
 }
 
