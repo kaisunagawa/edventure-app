@@ -9357,19 +9357,23 @@ function SettingsScreen({onToast,onLogout,onGoalSaved,profile,onProfileSaved,onC
             const art = reached ? rankArt(r.name) : "";
             return html`
               <div key=${r.name}>
-                <div style=${{display:"flex",alignItems:"center",gap:6,marginBottom:6,flexWrap:"wrap"}}>
-                  <span style=${{width:8,height:8,borderRadius:"50%",background:r.color,flexShrink:0}}/>
-                  <span style=${{fontSize:12,fontWeight:800,color:"var(--text)"}}>${r.name}</span>
-                  <span style=${{fontSize:9.5,fontWeight:700,color:"#fff",background:r.color,
-                                 borderRadius:20,padding:"1px 7px",whiteSpace:"nowrap"}}>${r.lv}</span>
+                <!-- 名前とレベルは1行に収める。折り返すと下のカードに重なる -->
+                <div style=${{display:"flex",alignItems:"center",gap:5,marginBottom:6,
+                              minWidth:0,overflow:"hidden"}}>
+                  <span style=${{width:7,height:7,borderRadius:"50%",background:r.color,flexShrink:0}}/>
+                  <span style=${{fontSize:11.5,fontWeight:800,color:"var(--text)",
+                                 overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>${r.name}</span>
+                  <span style=${{fontSize:9,fontWeight:700,color:"#fff",background:r.color,flexShrink:0,
+                                 borderRadius:20,padding:"1px 6px",whiteSpace:"nowrap"}}>${r.lv}</span>
                 </div>
                 <div style=${{position:"relative",borderRadius:14,background:"var(--bg)",
                               border:`1px solid ${here?r.color:"var(--border)"}`,
                               aspectRatio:"1 / 1",display:"flex",alignItems:"center",
-                              justifyContent:"center",overflow:"hidden"}}>
+                              justifyContent:"center",overflow:"hidden",
+                              padding:"8px",boxSizing:"border-box"}}>
                   ${art
                     ? html`<img src=${art} alt=${r.name} loading="lazy"
-                             style=${{width:"84%",height:"84%",objectFit:"contain",display:"block"}}/>`
+                             style=${{maxWidth:"100%",maxHeight:"100%",objectFit:"contain",display:"block"}}/>`
                     : html`<span style=${{display:"flex",flexDirection:"column",alignItems:"center",gap:6}}>
                         <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="var(--sub)" stroke-width="1.8">
                           <rect x="4" y="10.5" width="16" height="10" rx="2.5"/>
@@ -9377,11 +9381,12 @@ function SettingsScreen({onToast,onLogout,onGoalSaved,profile,onProfileSaved,onC
                         <span style=${{fontSize:10.5,color:"var(--sub)",fontWeight:600}}>
                           ${myLevel>0 ? `Lv.${r.minLv} で会えます` : "読み込み中…"}</span>
                       </span>`}
-                  ${here&&html`
-                    <span style=${{position:"absolute",top:6,right:6,fontSize:9.5,fontWeight:700,
-                                   color:"#fff",background:r.color,borderRadius:20,padding:"2px 8px"}}>いまここ</span>`}
                 </div>
-                <div style=${{fontSize:10.5,color:"var(--sub)",marginTop:5}}>${r.sub}</div>
+                <div style=${{fontSize:10.5,color:"var(--sub)",marginTop:5,
+                              display:"flex",alignItems:"center",gap:5,minWidth:0}}>
+                  <span style=${{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>${r.sub}</span>
+                  ${here&&html`<span style=${{flexShrink:0,fontSize:9,fontWeight:700,color:r.color}}>● いまここ</span>`}
+                </div>
               </div>`;
           })}
         </div>
@@ -9592,7 +9597,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260805-122140";
+const APP_BUILD = "20260805-122916";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
