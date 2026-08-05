@@ -6794,8 +6794,9 @@ function ReportScreen() {
   // 取れなければ従来レポートを出す
   const [ops, setOps]=useState(null);
   const [workReportCopied, setWorkReportCopied]=useState(false);
+  const [workReportExcluded, setWorkReportExcluded]=useState(0);  // プライベートとして外した件数
   const generateWorkReport = async () => {
-    setWorkReportLoading(true); setWorkReportError(""); setWorkReportCopied(false);
+    setWorkReportLoading(true); setWorkReportError(""); setWorkReportCopied(false); setWorkReportExcluded(0);
     const todayKey = formatDateStr(new Date());
     // タスクの完了状態と見積もり時間は端末にしかないため、ここで集めて送る
     let tasks=[];
@@ -6808,16 +6809,28 @@ function ReportScreen() {
       const actions = normalizeTaskList(rawActions);
       const checked = JSON.parse(localStorage.getItem("today_actions")||"{}");
       const est = JSON.parse(localStorage.getItem("jiroku_task_estimates_"+todayKey)||"{}");
-      tasks = actions.map(t=>({
-        text: t.title,
-        done: !!(checked[t.id] || checked[t.title]),
-        min: Number(est[t.id] !== undefined ? est[t.id] : est[t.title]) || 0
-      }));
+      // ★プライベートのタスクは業務報告書に渡さない★（2026-08-05 Kai要望）
+      //   仕分けが「プライベート」「健康」のものは外す。
+      //   未設定は判断材料が無いので残す（勝手に消さない）。
+      const ctx = (()=>{ try{ return JSON.parse(localStorage.getItem("jiroku_task_context_"+todayKey)||"{}")||{}; }catch(e){ return {}; } })();
+      const PRIVATE = {PERSONAL:1, HEALTH:1};
+      tasks = actions
+        .filter(t=>!PRIVATE[String(ctx[t.id]||ctx[t.title]||"").toUpperCase()])
+        .map(t=>({
+          text: t.title,
+          done: !!(checked[t.id] || checked[t.title]),
+          min: Number(est[t.id] !== undefined ? est[t.id] : est[t.title]) || 0
+        }));
     }catch(e){}
     let intent=null;
     try{ const s=JSON.parse(localStorage.getItem("jiroku_intent")||"null"); if(s&&s.date===todayKey) intent=s; }catch(e){}
     const r = await gasPostJson("generateWorkReport", {date:todayKey, tasks:JSON.stringify(tasks), intent:intent?JSON.stringify(intent):""});
-    if(r.ok) setWorkReport(r.data.text);
+    if(r.ok){
+      setWorkReport(r.data.text);
+      // 何件をプライベートとして外したかを画面に出す（記録が消えたと誤解させない）
+      // ★onToast はこの画面に渡っていない★ 使うと画面ごと落ちる（2026-08-05に2回やった）
+      setWorkReportExcluded(Number(r.data.excluded_private||0));
+    }
     else setWorkReportError(r.error||"生成に失敗しました。時間をおいてもう一度お試しください。");
     setWorkReportLoading(false);
   };
@@ -6925,6 +6938,14 @@ function ReportScreen() {
             </div>
             ${workReportError&&html`
               <div style=${{fontSize:12,color:"var(--red,#d33)",background:"var(--bg)",borderRadius:10,padding:"10px 14px",marginBottom:8}}>${workReportError}</div>
+            `}
+            <!-- ★プライベートを外したことを伝える★（2026-08-05 Kai要望）
+                 黙って減らすと「記録が抜けている」と誤解される。 -->
+            ${workReportExcluded>0&&html`
+              <div style=${{fontSize:11.5,color:"var(--sub)",background:"var(--bg)",borderRadius:10,
+                            padding:"9px 13px",marginBottom:8,lineHeight:1.6}}>
+                プライベートの記録 <b style=${{color:"var(--text)"}}>${workReportExcluded}件</b> は業務報告書に含めていません
+                （回復の時間・仕分けが「プライベート」「健康」のタスク）</div>
             `}
             ${weeklySummary&&html`
               <div class="card" style=${{marginBottom:8}}>
@@ -10189,7 +10210,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260805-222245";
+const APP_BUILD = "20260805-222521";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 

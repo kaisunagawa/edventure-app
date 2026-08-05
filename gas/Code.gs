@@ -4701,7 +4701,33 @@ function opsLatestIndexSlow_() {
   return idx;
 }
 
-function buildReportRankingSet(emailSet, allReports, windowDays) {
+// ★Reportsは必要な列だけ読む★（2026-08-05 Kai報告「みんなの頑張りが遅い」）
+//   Reports には feedback や breakdown のJSONなど長い列が並んでいる。
+//   ランキングと最新点数に要るのは4列だけなので、そこだけ読む。
+//   実測でこの読み込みが1.3秒かかっていた（画面の中で一番重かった）。
+function reportsLite_() {
+  const sh = getSheet("Reports");
+  const lastRow = sh.getLastRow();
+  if (lastRow < 2) return [];
+  const hdr = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0];
+  const want = ["student_email", "date", "score", "score_precise"];
+  const idx = want.map(function (k) { return hdr.indexOf(k); });
+  const cols = idx.filter(function (i) { return i !== -1; });
+  const lo = Math.min.apply(null, cols), hi = Math.max.apply(null, cols);
+  const block = sh.getRange(2, lo + 1, lastRow - 1, hi - lo + 1).getValues();
+  return block.map(function (row) {
+    const o = {};
+    want.forEach(function (k, n) {
+      if (idx[n] === -1) { o[k] = ""; return; }
+      const v = row[idx[n] - lo];
+      o[k] = (k === "date" && v instanceof Date)
+        ? Utilities.formatDate(v, "Asia/Tokyo", "yyyy-MM-dd") : v;
+    });
+    return o;
+  });
+}
+
+function buildReportRankingSet(emailSet, allReports, windowDays, opsIndexIn) {
   const has = (emailSet && typeof emailSet.has === "function")
     ? function (e) { return emailSet.has(e); }
     : (function () { const s = new Set(emailSet || []); return function (e) { return s.has(e); }; })();
@@ -4721,7 +4747,8 @@ function buildReportRankingSet(emailSet, allReports, windowDays) {
   // ★確定した新レポートがある人は、その点数でランキングに載せる★（2026-08-03 Kaiの判断）
   //   画面に出ている点数と、ランキングの点数が違うのはおかしいため。
   //   まだ新レポートが無い人は、これまでどおり夜レポートの点数で比べる。
-  const opsFinal = opsLatestIndex_();
+  // 呼び出し元が既に読んでいれば、それを使う（同じ読み込みを2回しない）
+  const opsFinal = opsIndexIn || opsLatestIndex_();
   const scores = [];
   latestByEmail.forEach(function (r, email) {
     if (!(noWindow || r.date >= cutoff)) return;
@@ -5066,7 +5093,7 @@ function getCommunityFresh_(studentEmail) {
   // 直近7日以内にレポートがある人だけを対象にし、ホームの getRanking と基準を統一している
   // （止まっている人が分母に残り続けないように）。
   const commEmails = new Set(users.map(u => u.student_email));
-  const rankSet = buildReportRankingSet(commEmails, allReports, RANKING_WINDOW_DAYS);
+  const rankSet = buildReportRankingSet(commEmails, allReports, RANKING_WINDOW_DAYS, opsLatest);
   const userByEmail = new Map(users.map(u => [u.student_email, u]));
   const reportRanking = rankSet.scores.map(s => {
     const u = userByEmail.get(s.email);
@@ -5437,7 +5464,7 @@ function coachGetStudents(coachEmail) {
   const jirokuUsers = allUsers.filter(u => u.coach_email === coachEmail && u.is_active.toUpperCase() === "TRUE");
   const allLogs = sheetToObjects(getSheet("DailyLog"));
   const statuses = computeAllStatuses(allLogs);
-  const allReports = sheetToObjects(getSheet("Reports"));
+  const allReports = reportsLite_();
   const allNotes = sheetToObjects(getCoachingNotesSheet());
   const allProfiles = sheetToObjects(getStudentProfileSheet());
   const jirokuEmails = new Set(jirokuUsers.map(u => u.student_email));
@@ -8315,10 +8342,37 @@ function generateWorkReportInner(studentEmail, body) {
   const user = sheetToObjects(getSheet("Users")).find(u => u.student_email === studentEmail);
   if (!user) return { ok: false, error: "User not found" };
 
-  const logs = getFilteredRows("DailyLog", "student_email", studentEmail)
+  const allDayLogs = getFilteredRows("DailyLog", "student_email", studentEmail)
     .filter(l => l.date === date)
     .sort((a, b) => a.time_block > b.time_block ? 1 : -1);
-  if (logs.length === 0) return { ok: false, error: "この日の記録がまだありません。まず今日やったことを記録してください。" };
+  if (allDayLogs.length === 0) return { ok: false, error: "この日の記録がまだありません。まず今日やったことを記録してください。" };
+
+  // ★プライベートは業務報告書に載せない★（2026-08-05 Kai要望）
+  //   これまでは「私用と分かるものは省く」とAIに頼んでいただけで、
+  //   判断がぶれる余地があった。データで確実に落とす。
+  //   ・紐づいたタスクの仕分けが PERSONAL / HEALTH のもの
+  //   ・時間の分類が RECOVERY（回復）のもの
+  //   人間関係は仕事の打ち合わせも含むので落とさない。
+  //   仕分けが未設定のものは、判断材料が無いので残す（勝手に消さない）。
+  const PRIVATE_CONTEXTS = { PERSONAL: 1, HEALTH: 1 };
+  const ctxByTask = {};
+  try {
+    p1List("Tasks", studentEmail).forEach(function (t) {
+      if (t.task_id) ctxByTask[String(t.task_id)] = String(t.context || "").toUpperCase();
+    });
+  } catch (e) {}
+  const isPrivate = function (l) {
+    const cls = String(l.time_classification || "").toUpperCase();
+    if (cls === "RECOVERY") return true;
+    const tid = String(l.link_task_id || "").trim();
+    if (tid && PRIVATE_CONTEXTS[ctxByTask[tid]]) return true;
+    return false;
+  };
+  const logs = allDayLogs.filter(function (l) { return !isPrivate(l); });
+  const excludedCount = allDayLogs.length - logs.length;
+  if (logs.length === 0) {
+    return { ok: false, error: "この日は仕事の記録がありません（プライベートの記録は業務報告書に含めません）。" };
+  }
 
   const logLines = logs.map(l =>
     `${l.time_block}: ${l.task}${String(l.memo || "").trim() ? "（メモ: " + String(l.memo).trim() + "）" : ""}`
@@ -8364,7 +8418,8 @@ ${tasksText}
 ■ 明日の予定: 未完了タスクや記録の流れから自然に書ける範囲で。無理に埋めない
 - 文体は「です・ます」調。簡潔だが情報量を削らない。件数・時間・金額・固有名詞（会社名・人名・日付）など、メモにある具体は必ず報告書に反映する
 - 各業務は1行の言い換えで済ませず、メモに書かれた進捗・成果・決定事項が上司に伝わるように書く（メモが詳しい業務ほど報告も具体的に）
-- 記録が趣味・私用（例: ゲーム、昼食）と明確に分かるものは業務報告からは省く（勤務時間の計算にも含めない）
+- ここに渡した記録は、すでにプライベート（回復・私用・健康）を除いた仕事の記録だけです。渡された記録は全て業務として扱ってください
+- それでも記録の中身が明らかに私用（例: ゲーム、昼食、家事）と分かるものがあれば、それだけは省く（勤務時間の計算にも含めない）
 - 出力は報告書本文のみ。前置き・解説・コードブロック記号は不要`;
 
   // モデルを順に試す（1つ目が過負荷・権限・レート制限などで失敗しても、別モデルで
@@ -8390,7 +8445,9 @@ ${tasksText}
       if (result && result.stop_reason === "max_tokens") Logger.log("generateWorkReport: max_tokensで切れた可能性 " + studentEmail);
       // thinkingブロックが先頭に入るモデルもあるため、textブロックを探して取り出す
       const textBlock = (result.content || []).find(c => c && c.type === "text" && typeof c.text === "string");
-      if (textBlock) return { ok: true, data: { text: textBlock.text.trim() } };
+      // 何件をプライベートとして外したかも返す（本人が「記録が足りない」と誤解しないため）
+      if (textBlock) return { ok: true, data: { text: textBlock.text.trim(),
+                                                excluded_private: excludedCount } };
       lastErr = MODELS[mi] + " HTTP" + code + " " + bodyText.slice(0, 200);
       Logger.log("generateWorkReport: " + lastErr);
     } catch (e) {
