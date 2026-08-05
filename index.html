@@ -65,6 +65,10 @@
       --r:        14px;
       --hero1:    #0891B2;
       --hero2:    #0e7490;
+      /* ★記録画面のシアン★（2026-08-05 Kai指摘）
+         明るいときは水色だとJIROKUの色に見えない。
+         ライトはJIROKUの基本色、ダークは指定いただいた画像の色を使う。 */
+      --cyan:     #0891B2;
     }
 
     html, body {
@@ -340,6 +344,7 @@
         --red-l:    #331717;
         --hero1:    #0B4A5A;
         --hero2:    #093642;
+        --cyan:     #22D3EE;   /* ダークは画像どおりの水色 */
       }
       .nav { background: rgba(20,25,30,.96); }
       .toast { background: #E8ECEF; color: #111827; }
@@ -1352,7 +1357,7 @@ const TIME_CLASS_COLOR = {
   RECOVERY:              "#22C55E",  // 回復         緑
   RELATIONSHIP:          "#F59E0B",  // 人間関係     橙
   RECOVERY_RELATIONSHIP: "#22C55E",  // 旧分類（回復・人間関係）
-  OPERATIONS:            "#22D3EE",  // 日常業務     水色
+  OPERATIONS:            "var(--cyan)",  // 日常業務  明るいときはJIROKUの色、暗いときは水色
   UNPLANNED_LEAKAGE:     "#64748B",  // 計画外の時間 灰
 };
 const TIME_CLASS_ICON = {
@@ -5550,14 +5555,14 @@ function LogScreen({onToast, isActive}) {
       return html`
       <div style=${{margin:"0 0 14px",background:"var(--card)",borderRadius:18,border:"1px solid var(--border)",padding:"18px 16px 14px"}}>
         <div style=${{display:"flex",alignItems:"center",gap:10,marginBottom:14}}>
-          <span style=${{flexShrink:0,color:"#22D3EE",display:"flex"}}>
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+          <span style=${{flexShrink:0,color:"var(--cyan)",display:"flex"}}>
+            <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
               <circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.2 2"/></svg></span>
-          <span style=${{flex:1,minWidth:0,fontSize:17,fontWeight:800,color:"var(--text)"}}>
+          <span style=${{flex:1,minWidth:0,fontSize:15,fontWeight:800,color:"var(--text)"}}>
             ${isToday(date)?"今日の時間の内訳":date+" の時間の内訳"}</span>
           <button onClick=${()=>setBulkOpen(true)}
-            style=${{flexShrink:0,whiteSpace:"nowrap",background:"none",border:"none",color:"#22D3EE",
-                     fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit",padding:0}}>詳細を見る ›</button>
+            style=${{flexShrink:0,whiteSpace:"nowrap",background:"none",border:"none",color:"var(--cyan)",
+                     fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit",padding:0}}>詳細を見る ›</button>
         </div>
 
         ${total===0
@@ -5577,7 +5582,7 @@ function LogScreen({onToast, isActive}) {
               <div style=${{position:"absolute",inset:0,display:"flex",flexDirection:"column",
                             alignItems:"center",justifyContent:"center",pointerEvents:"none"}}>
                 <div style=${{fontSize:10,color:"var(--sub)",marginBottom:1}}>合計</div>
-                <div style=${{fontSize:17,fontWeight:800,color:"var(--text)",lineHeight:1.15,fontVariantNumeric:"tabular-nums"}}>${hm(total)}</div>
+                <div style=${{fontSize:15,fontWeight:800,color:"var(--text)",lineHeight:1.15,fontVariantNumeric:"tabular-nums"}}>${hm(total)}</div>
                 <div style=${{fontSize:10.5,color:"var(--sub)",marginTop:2}}>(${Math.round((1-restFrac)*100)}%)</div>
               </div>
             </div>
@@ -5615,15 +5620,15 @@ function LogScreen({onToast, isActive}) {
 
           <div style=${{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",
                         borderTop:"1px solid var(--border)",marginTop:10,paddingTop:11}}>
-            <span style=${{flexShrink:0,color:"#22D3EE",display:"flex"}}>
+            <span style=${{flexShrink:0,color:"var(--cyan)",display:"flex"}}>
               <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round">
                 <path d="M12 3a9 9 0 109 9h-9V3z"/><path d="M15 3.6A9 9 0 0120.4 9H15V3.6z"/></svg></span>
-            <span style=${{fontSize:12.5,color:"var(--sub)"}}>
-              分類できた時間 <b style=${{color:"#22D3EE"}}>${timeCov}%</b>
-              　・分類できた件数 <b style=${{color:"#22D3EE"}}>${cntCov}%</b></span>
+            <span style=${{fontSize:11.5,color:"var(--sub)"}}>
+              分類できた時間 <b style=${{color:"var(--cyan)"}}>${timeCov}%</b>
+              　・分類できた件数 <b style=${{color:"var(--cyan)"}}>${cntCov}%</b></span>
             ${unconfirmed>0&&html`
               <span title="実測していない記録は、時間帯の長さで数えています"
-                style=${{marginLeft:"auto",flexShrink:0,fontSize:12.5,color:"var(--sub)",display:"flex",alignItems:"center",gap:5}}>
+                style=${{marginLeft:"auto",flexShrink:0,fontSize:11.5,color:"var(--sub)",display:"flex",alignItems:"center",gap:5}}>
                 実測していない記録 ${unconfirmed}件
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01" stroke-linecap="round"/></svg>
               </span>`}
@@ -5636,11 +5641,11 @@ function LogScreen({onToast, isActive}) {
     ${logs.length>0&&html`
       <div style=${{margin:"0 0 24px",background:"var(--card)",borderRadius:18,border:"1px solid var(--border)",padding:"18px 16px 16px"}}>
         <div style=${{display:"flex",alignItems:"center",gap:10,marginBottom:14}}>
-          <span style=${{flexShrink:0,color:"#22D3EE",display:"flex"}}>
-            <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round">
+          <span style=${{flexShrink:0,color:"var(--cyan)",display:"flex"}}>
+            <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round">
               <rect x="5" y="4" width="14" height="17" rx="2.5"/><path d="M9 4V3h6v1" stroke-linecap="round"/>
               <path d="M9 10h6M9 14h4" stroke-linecap="round"/></svg></span>
-          <span style=${{flex:1,minWidth:0,fontSize:17,fontWeight:800,color:"var(--text)"}}>
+          <span style=${{flex:1,minWidth:0,fontSize:15,fontWeight:800,color:"var(--text)"}}>
             ${isToday(date)?"本日の記録":date+" の記録"}</span>
         </div>
 
@@ -5656,7 +5661,7 @@ function LogScreen({onToast, isActive}) {
           <div key=${l.log_id||i} style=${{display:"flex",gap:12}}>
             <!-- 時刻の線 -->
             <div style=${{width:14,flexShrink:0,display:"flex",flexDirection:"column",alignItems:"center",paddingTop:5}}>
-              <span style=${{width:12,height:12,borderRadius:"50%",background:"#22D3EE",flexShrink:0}}/>
+              <span style=${{width:12,height:12,borderRadius:"50%",background:"var(--cyan)",flexShrink:0}}/>
               ${!last&&html`<span style=${{flex:1,width:2,background:"var(--border)",marginTop:3}}/>`}
             </div>
             <div style=${{flex:1,minWidth:0,paddingBottom:last?2:14,
@@ -5665,10 +5670,10 @@ function LogScreen({onToast, isActive}) {
                 style=${{display:"flex",alignItems:"flex-start",gap:10,width:"100%",background:"none",border:"none",
                          padding:0,cursor:"pointer",fontFamily:"inherit",textAlign:"left"}}>
                 <span style=${{flex:1,minWidth:0}}>
-                  <span style=${{display:"block",fontSize:14,fontWeight:700,color:"#22D3EE",
+                  <span style=${{display:"block",fontSize:12.5,fontWeight:700,color:"var(--cyan)",
                                  fontVariantNumeric:"tabular-nums",marginBottom:3}}>${isTimer?"⏱ ":""}${shown}</span>
-                  <span style=${{display:"block",fontSize:15,fontWeight:700,color:"var(--text)",
-                                 lineHeight:1.45,overflowWrap:"anywhere"}}>${l.task}</span>
+                  <span style=${{display:"block",fontSize:13.5,fontWeight:700,color:"var(--text)",
+                                 lineHeight:1.5,overflowWrap:"anywhere"}}>${l.task}</span>
                 </span>
                 <span style=${{flexShrink:0,color:"var(--sub)",fontSize:16,paddingTop:18}}>›</span>
               </button>
@@ -5676,23 +5681,23 @@ function LogScreen({onToast, isActive}) {
                 <span style=${{display:"inline-flex",alignItems:"center",gap:6,marginTop:7,padding:"4px 11px",
                                borderRadius:99,background:"var(--bg)",border:"1px solid var(--border)"}}>
                   <span style=${{width:10,height:10,borderRadius:"50%",background:DOT[num]||"var(--sub)",flexShrink:0}}/>
-                  <span style=${{fontSize:12.5,color:"var(--text)"}}>${num?num+"・":""}${focusLabel||focusStr}</span>
+                  <span style=${{fontSize:11.5,color:"var(--text)"}}>${num?num+"・":""}${focusLabel||focusStr}</span>
                 </span>`}
               ${l.memo&&html`
-                <div style=${{fontSize:13,color:"var(--sub)",lineHeight:1.75,marginTop:7,overflowWrap:"anywhere"}}>${l.memo}</div>`}
+                <div style=${{fontSize:12,color:"var(--sub)",lineHeight:1.8,marginTop:7,overflowWrap:"anywhere"}}>${l.memo}</div>`}
               <div style=${{display:"flex",flexWrap:"wrap",gap:6,marginTop:8}}>
                 ${clsEditing===l.log_id
                   ? TIME_CLASS_OPTS.map(([k,lb])=>html`
                       <button key=${k} onClick=${()=>saveClass(l,k)}
                         style=${{padding:"5px 11px",borderRadius:99,fontSize:11.5,cursor:"pointer",fontFamily:"inherit",
-                                 border:`1px solid ${l.time_classification===k?(TIME_CLASS_COLOR[k]||"#22D3EE"):"var(--border)"}`,
+                                 border:`1px solid ${l.time_classification===k?(TIME_CLASS_COLOR[k]||"var(--cyan)"):"var(--border)"}`,
                                  background:"transparent",
-                                 color:l.time_classification===k?(TIME_CLASS_COLOR[k]||"#22D3EE"):"var(--sub)"}}>${lb}</button>`)
+                                 color:l.time_classification===k?(TIME_CLASS_COLOR[k]||"var(--cyan)"):"var(--sub)"}}>${lb}</button>`)
                   : html`<button onClick=${()=>setClsEditing(l.log_id)}
                       style=${{padding:"5px 12px",borderRadius:99,fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit",
-                               border:`1px solid ${l.time_classification?(TIME_CLASS_COLOR[l.time_classification]||"#22D3EE"):"var(--border)"}`,
+                               border:`1px solid ${l.time_classification?(TIME_CLASS_COLOR[l.time_classification]||"var(--cyan)"):"var(--border)"}`,
                                background:"transparent",
-                               color:l.time_classification?(TIME_CLASS_COLOR[l.time_classification]||"#22D3EE"):"var(--sub)"}}>
+                               color:l.time_classification?(TIME_CLASS_COLOR[l.time_classification]||"var(--cyan)"):"var(--sub)"}}>
                       ${l.time_classification?TIME_CLASS_LABEL[l.time_classification]:"分類を選ぶ"}</button>`}
               </div>
             </div>
@@ -5702,8 +5707,8 @@ function LogScreen({onToast, isActive}) {
         <button onClick=${()=>{ handleBlockSelect(getCurrentBlock()); window.scrollTo?.(0,0); }}
           style=${{display:"flex",alignItems:"center",justifyContent:"center",gap:9,width:"100%",marginTop:6,
                    padding:"14px",borderRadius:12,border:"1px solid #22D3EE",background:"transparent",
-                   color:"#22D3EE",fontSize:14,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
-          <span style=${{fontSize:17,lineHeight:1}}>＋</span> 記録を追加する</button>
+                   color:"var(--cyan)",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
+          <span style=${{fontSize:15,lineHeight:1}}>＋</span> 記録を追加する</button>
       </div>
     `}
   </div>`;
@@ -9130,7 +9135,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260805-085916";
+const APP_BUILD = "20260805-091527";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
