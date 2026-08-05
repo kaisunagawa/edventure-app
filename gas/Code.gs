@@ -497,9 +497,19 @@ function doGet(e) {
       case "adminCommunityTiming": {
         if (!verifyAdmin(e.parameter.coachEmail)) return jsonResponse({ ok: false, error: "not admin" });
         const t0 = Date.now();
+        // 段階ごとの内訳（どこで時間を使っているかを実測する）
+        const stage = {};
+        let tp = Date.now();
+        sheetToObjects(getSheet("Users")); stage.Users = Date.now() - tp; tp = Date.now();
+        sheetToObjects(getSheet("Reports")); stage.Reports = Date.now() - tp; tp = Date.now();
+        opsLatestIndex_(); stage.DailyOpsReport = Date.now() - tp; tp = Date.now();
+        (function(){ const dl = getSheet("DailyLog"); const lr = dl.getLastRow();
+          if (lr > 1) dl.getRange(2, 1, lr - 1, 4).getValues(); })();
+        stage.DailyLog = Date.now() - tp;
+        const tAll = Date.now();
         const r0 = getCommunity(adminEmail());
         const t1 = Date.now();
-        return jsonResponse({ ok: true, ms: t1 - t0,
+        return jsonResponse({ ok: true, ms: t1 - tAll, 内訳: stage, 合計: t1 - t0,
           counts: { list: (r0.data||[]).length, level: (r0.levelRanking||[]).length,
                     streak: (r0.streakRanking||[]).length, report: (r0.reportRanking||[]).length,
                     recent: (r0.recentLoggers||[]).length } });
@@ -4940,6 +4950,22 @@ function adminSmpWarmAll(coachEmail) {
 }
 
 function getCommunity(studentEmail) {
+  // ★開くたびに作り直さない★（2026-08-05 Kai報告「表示が遅すぎる。2秒で開きたい」）
+  //   中身は「みんなの状況」なので、数分ずれても困らない。
+  //   1人ぶん作るのに数秒かかるため、2分間だけ持ち回す。
+  //   本人の記録やシェアはこの画面から書き換えないので、古い値が悪さをしない。
+  //   （シェア投稿だけは shareAchievement 側でこのキーを消して即反映させる）
+  const _ckC = "community_v2_" + studentEmail;
+  try {
+    const _hit = CacheService.getScriptCache().get(_ckC);
+    if (_hit) { const o = JSON.parse(_hit); o.cached = true; return o; }
+  } catch (e) { /* キャッシュが読めなくても本処理へ進む */ }
+  const _r = getCommunityFresh_(studentEmail);
+  try { CacheService.getScriptCache().put(_ckC, JSON.stringify(_r), 120); } catch (e) {}
+  return _r;
+}
+
+function getCommunityFresh_(studentEmail) {
   // ラインの分離：学生（cohort付き）は学生同士、クライアントはクライアント同士だけが見える
   const allUsersC = sheetToObjects(getSheet("Users"));
   const meC = allUsersC.find(u => u.student_email === studentEmail);
@@ -5029,7 +5055,10 @@ function getCommunity(studentEmail) {
       score: smpTotalOf(u.student_email),
       reportScore: reportScoreOf(u.student_email)
     };
-  }).filter(x => x.score !== null)
+    // ★0点は載せない★（2026-08-05 Kai指摘「0点の人がいる」）
+    //   まだ何も測れていない人が0点として最下位に固定されてしまう。
+    //   総合点が出ていない人を載せない、という元の意図と揃える。
+  }).filter(x => x.score !== null && Number(x.score) > 0)
     .map(x => { delete x.email; return x; })
     .sort((a, b) => b.score - a.score);
 
@@ -5181,6 +5210,8 @@ function getAchievementsSheet() {
 function shareAchievement(studentEmail, body) {
   const message = String(body.message || "").trim().slice(0, 200);
   if (!message) return { ok: false, error: "empty message" };
+  // 投稿したのに自分の画面に出ないと壊れて見えるので、持ち回している分を捨てる
+  try { CacheService.getScriptCache().remove("community_v2_" + studentEmail); } catch (e) {}
   const user = sheetToObjects(getSheet("Users")).find(u => u.student_email === studentEmail);
   if (!user) return { ok: false, error: "user not found" };
   const sheet = getAchievementsSheet();
