@@ -5298,14 +5298,37 @@ function trimRanking(list) {
   if (meIdx === -1 || meIdx < RANKING_TOP_N) return { top, me: null, meRank: 0 };
   return { top, me: list[meIdx], meRank: meIdx+1 };
 }
+// ★前に開いたときの内容を端末に控えておく★（2026-08-05 Kai要望「2秒で開きたい」）
+//   GASは1往復するだけで1〜2秒かかり、この画面は5つのシートを読むので
+//   毎回作り直すかぎり待ち時間はゼロにできない。
+//   前回の内容をすぐ出して、裏で最新に差し替える。
+//   （中身は「みんなの状況」なので、数分前のものが一瞬見えても困らない）
+const COMMUNITY_CACHE_KEY = "jiroku_community_cache_v1";
+function loadCommunityCache() {
+  try {
+    const raw = localStorage.getItem(COMMUNITY_CACHE_KEY);
+    if (!raw) return null;
+    const o = JSON.parse(raw);
+    // 古すぎるものは出さない（1日以上前の順位を見せない）
+    if (!o || !o.at || Date.now() - o.at > 86400000) return null;
+    return o.payload || null;
+  } catch (e) { return null; }
+}
+function saveCommunityCache(payload) {
+  try { localStorage.setItem(COMMUNITY_CACHE_KEY,
+        JSON.stringify({ at: Date.now(), payload: payload })); } catch (e) {}
+}
+
 function CommunityOverlay({onClose}) {
-  const [list,setList]=useState(null);
-  const [reportRanking,setReportRanking]=useState(null);
-  const [streakRanking,setStreakRanking]=useState(null);
-  const [levelRanking,setLevelRanking]=useState(null);   // 階級ランキング
-  const [newcomers,setNewcomers]=useState(null);
-  const [recentLoggers,setRecentLoggers]=useState(null);
-  const [achievements,setAchievements]=useState(null);
+  const cached = loadCommunityCache();
+  const [list,setList]=useState(cached?cached.data:null);
+  const [reportRanking,setReportRanking]=useState(cached?cached.reportRanking:null);
+  const [streakRanking,setStreakRanking]=useState(cached?cached.streakRanking:null);
+  const [levelRanking,setLevelRanking]=useState(cached?cached.levelRanking:null);   // 階級ランキング
+  const [newcomers,setNewcomers]=useState(cached?cached.newcomers:null);
+  const [recentLoggers,setRecentLoggers]=useState(cached?cached.recentLoggers:null);
+  const [achievements,setAchievements]=useState(cached?cached.achievements:null);
+  const [refreshing,setRefreshing]=useState(true);
   const [message,setMessage]=useState("");
   const [sending,setSending]=useState(false);
 
@@ -5313,14 +5336,20 @@ function CommunityOverlay({onClose}) {
   //   2本に分けると、GASは同じ人の通信を順番に処理するので、
   //   そのぶん開くまで待たされる。シェア一覧も getCommunity に相乗りさせた。
   const load=()=>{
+    setRefreshing(true);
     gasApi("getCommunity").then(r=>{
+      setRefreshing(false);
       if(!r.ok) return;
       setList(r.data); setReportRanking(r.reportRanking||[]); setStreakRanking(r.streakRanking||[]);
       setLevelRanking(r.levelRanking||[]);
       setNewcomers(r.newcomers||[]); setRecentLoggers(r.recentLoggers||[]);
       if(r.achievements) setAchievements(r.achievements);
       else gasApi("getAchievements").then(a=>{ if(a.ok) setAchievements(a.data); });
-    });
+      saveCommunityCache({ data:r.data, reportRanking:r.reportRanking||[],
+        streakRanking:r.streakRanking||[], levelRanking:r.levelRanking||[],
+        newcomers:r.newcomers||[], recentLoggers:r.recentLoggers||[],
+        achievements:r.achievements||null });
+    }).catch(()=>setRefreshing(false));
   };
   useEffect(()=>{ load(); },[]);
 
@@ -5339,6 +5368,8 @@ function CommunityOverlay({onClose}) {
       <div style=${{position:"sticky",top:0,background:"var(--bg)",borderBottom:"1px solid var(--border)",padding:"14px 16px",display:"flex",alignItems:"center",gap:10,zIndex:1}}>
         <button onClick=${onClose} style=${{background:"none",border:"none",fontSize:20,color:"var(--text)",cursor:"pointer",padding:"0 4px"}}>‹</button>
         <div style=${{fontSize:16,fontWeight:800,color:"var(--text)"}}>みんなの頑張り</div>
+        <!-- 前回の内容を先に出しているので、裏で更新中であることを小さく伝える -->
+        ${refreshing&&list&&html`<span style=${{fontSize:10.5,color:"var(--sub)",fontWeight:600}}>更新中…</span>`}
       </div>
 
       <div style=${{padding:16}}>
@@ -10222,7 +10253,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260805-223627";
+const APP_BUILD = "20260805-223951";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
