@@ -680,16 +680,6 @@ function doGet(e) {
         const day4 = String(e.parameter.date || "").slice(0, 10) || formatDate(new Date());
         const detail = getDailyOpsReport(em4, { date: day4 });
         const dv = (detail && detail.ok && detail.data) ? detail.data.displayed_score : null;
-        // ★確定前のその日は比べない★（2026-08-05）
-        //   夜のレポート（22時）で一覧の点数を書いたあとに記録を足すと、
-        //   詳細は今の計算・一覧は22時時点の値になり、必ず食い違う。
-        //   23:59の確定処理でそろうので、確定前の当日は判定の対象外にする。
-        //   （食い違いを見逃すのではなく、まだ動いている日を比べないということ）
-        if (detail && detail.ok && detail.data && !detail.data.finalized &&
-            day4 === formatDate(new Date())) {
-          return jsonResponse({ ok: false, error: "確定前の当日は比べない",
-            date: day4, note: "夜の確定処理（23:59）の前は、詳細が最新・一覧が夜22時時点になるため" });
-        }
         const listR = getReportList(em4);
         const lrow = (listR.data || []).find(function (r) { return String(r.date).slice(0, 10) === day4; });
         const lv = lrow ? lrow.score : null;
@@ -1524,10 +1514,18 @@ function getReportList(studentEmail) {
   try {
     const u = sheetToObjects(getSheet("Users")).find(function (x) { return x.student_email === studentEmail; });
     if (hasFeature(u, OPS_FEATURE_KEY)) {
+      // ★詳細と同じ拾い方にする★（2026-08-05 Kai環境で 詳細89 / 一覧37 になった）
+      //   記録の網羅が足りない日は「全体の点数」が出ない。
+      //   詳細画面は代わりに部分点を出しているのに、一覧はそれを拾えず
+      //   旧方式の点数へ落ちていたため、同じ日で数字が食い違っていた。
+      //   詳細の displayed_score と同じ順（全体 → 部分）で拾う。
       p1List("DailyOpsReport", studentEmail).forEach(function (r) {
         const d = String(r.report_date).slice(0, 10);
-        const v = String(r.operating_score || "").trim();
-        if (d && v !== "") opsByDate[d] = Number(v);
+        if (!d) return;
+        const full = String(r.operating_score || "").trim();
+        const part = String(r.partial_score || "").trim();
+        if (full !== "") opsByDate[d] = Number(full);
+        else if (part !== "") opsByDate[d] = Number(part);
       });
       // ★今日だけは計算し直す★
       //   保存した後に記録を足すと、保存済みの点数（一覧）と、開いたときに
@@ -4671,7 +4669,8 @@ function opsLatestIndex_() {
     const last = sh.getLastRow();
     if (last < 2) return idx;
     const hdr = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0];
-    const cols = ["student_email", "report_date", "operating_score", "finalized_at"];
+    // partial_score も読む（全体の点数が出ない日は部分点を使う。詳細・一覧と同じ）
+    const cols = ["student_email", "report_date", "operating_score", "finalized_at", "partial_score"];
     const ii = cols.map(function (c) { return hdr.indexOf(c); });
     if (ii.some(function (x) { return x === -1; })) return opsLatestIndexSlow_();
     const lo = Math.min.apply(null, ii), hi = Math.max.apply(null, ii);
@@ -4682,9 +4681,11 @@ function opsLatestIndex_() {
       const o = { student_email: row[c[0]],
                   report_date: rawD instanceof Date
                     ? Utilities.formatDate(rawD, "Asia/Tokyo", "yyyy-MM-dd") : rawD,
-                  operating_score: row[c[2]], finalized_at: row[c[3]] };
+                  operating_score: row[c[2]], finalized_at: row[c[3]],
+                  partial_score: row[c[4]] };
       const em = String(o.student_email || ""), d = String(o.report_date).slice(0, 10);
-      const v = String(o.operating_score || "").trim();
+      const vFull = String(o.operating_score || "").trim();
+      const v = vFull !== "" ? vFull : String(o.partial_score || "").trim();
       // ★確定した日だけを使う★（2026-08-05）
       //   夜のレポートで締めていない日は、まだ動く可能性のある点数なので
       //   ランキングや共有欄には出さない。
@@ -4702,7 +4703,9 @@ function opsLatestIndexSlow_() {
   try {
     sheetToObjects(getP1Sheet("DailyOpsReport")).forEach(function (o) {
       const em = String(o.student_email || ""), d = String(o.report_date).slice(0, 10);
-      const v = String(o.operating_score || "").trim();
+      // 全体の点数が無い日は部分点を使う（速い方の経路と同じ）
+      const vFull = String(o.operating_score || "").trim();
+      const v = vFull !== "" ? vFull : String(o.partial_score || "").trim();
       if (!String(o.finalized_at || "").trim()) return;
       if (!em || !d || v === "") return;
       if (!idx[em] || idx[em].date < d) idx[em] = { date: d, score: Number(v) };
