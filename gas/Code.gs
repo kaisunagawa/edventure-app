@@ -4989,6 +4989,29 @@ function getCommunity(studentEmail) {
     .filter(u => u.streak > 0)
     .sort((a, b) => b.streak - a.streak);
 
+  // ★階級ランキング★（2026-08-05 Kai要望）
+  //   XPそのものではなく「いまどの階級か」で並べる。
+  //   数字だけの競争にせず、ジローくんの姿が変わる楽しさに寄せる。
+  //   Lv.1（まだ始めたばかり）は載せない。晒される場にしないため。
+  const levelRanking = users
+    .map(u => {
+      const isMe = u.student_email === studentEmail;
+      const xp = Number(u.xp || 0);
+      const lv = getXpLevel(xp);
+      const rk = getRank(lv);
+      return {
+        isMe,
+        nickname: maskName(u, isMe),
+        avatar: maskAvatar(u, isMe),
+        level: lv,
+        rankName: rk ? rk.name : "",
+        // 同じ階級の中では、次の階級までの進み具合が分かるようにXPも返す
+        xp: xp
+      };
+    })
+    .filter(u => u.level > 1)
+    .sort((a, b) => (b.level - a.level) || (b.xp - a.xp));
+
   // 最近記録した仲間（直近48時間に記録した人を全員）。ランキング（上位5人）とは別に、
   // 「記録した人は必ず載る」場を作ることで、頑張りを取りこぼさず称える
   const recentCut = formatDate(new Date(Date.now() - 1 * 86400000)); // 昨日・今日
@@ -5028,6 +5051,7 @@ function getCommunity(studentEmail) {
   let achievements = null;
   try { const a = getAchievements(studentEmail); if (a && a.ok) achievements = a.data; } catch (e) {}
   return { ok: true, data: list, reportRanking: reportRanking, streakRanking: streakRanking,
+           levelRanking: levelRanking,
            newcomers: newcomers, recentLoggers: recentLoggers, achievements: achievements };
 }
 
@@ -14122,7 +14146,7 @@ const ADMIN_SECRET_ALLOWLIST = {
   // 一斉送信（Kaiの明示的な要望により残す）
   adminBroadcastLine:1, adminBroadcastLinePending:1, adminSendStudentCampaign:1,
   // セットアップ・保守
-  adminSetupTriggers:1, adminInstallTrigger:1, adminSetupPhase1:1, adminSetupAuth:1, adminPhase4DryRun:1, adminLegacyBackfill:1, adminWritePathStats:1, adminIssueTestSession:1, adminDropTestSessions:1, adminOpsSelfTest:1, adminActualMinutesAudit:1, adminXpCorrection:1, adminStreakRecalc:1, adminGrantFeature:1, adminUserDiag:1, adminReportScoreDryRun:1, adminReportGenTest:1, adminScoreConsistency:1, adminFinalizeOps:1, adminUnfinalizeOps:1, adminSmpDump:1, adminSmpWarmAll:1, adminLevelAudit:1, adminXpRestore:1, adminCleanupPlusLogs:1, adminClassAudit:1, adminRecolorCalendar:1,
+  adminSetupTriggers:1, adminInstallTrigger:1, adminSetupPhase1:1, adminSetupAuth:1, adminPhase4DryRun:1, adminLegacyBackfill:1, adminWritePathStats:1, adminIssueTestSession:1, adminDropTestSessions:1, adminOpsSelfTest:1, adminActualMinutesAudit:1, adminXpCorrection:1, adminStreakRecalc:1, adminGrantFeature:1, adminUserDiag:1, adminReportScoreDryRun:1, adminReportGenTest:1, adminScoreConsistency:1, adminFinalizeOps:1, adminUnfinalizeOps:1, adminSmpDump:1, adminSmpWarmAll:1, adminLevelAudit:1, adminXpRestore:1, adminCleanupPlusLogs:1, adminClassAudit:1, adminRecolorCalendar:1, adminFixTokenVersion:1, adminPurgeChallenges:1, adminJiroBackfill:1,
   authSetMode:1, authSetEnforce:1, authRoleApply:1, authRoleDryRun:1, authRevokeAll:1,
   authCleanupTestData:1, adminPurgeTestUsers:1, adminMigrateTasks:1, authBreakerReset:1, rotateSessionSecret:1,
   p1Backup:1, p1BackupInfo:1, p1PurgeArchived:1, weeklyBackup:1

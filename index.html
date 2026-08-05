@@ -5271,6 +5271,7 @@ function CommunityOverlay({onClose}) {
   const [list,setList]=useState(null);
   const [reportRanking,setReportRanking]=useState(null);
   const [streakRanking,setStreakRanking]=useState(null);
+  const [levelRanking,setLevelRanking]=useState(null);   // 階級ランキング
   const [newcomers,setNewcomers]=useState(null);
   const [recentLoggers,setRecentLoggers]=useState(null);
   const [achievements,setAchievements]=useState(null);
@@ -5284,6 +5285,7 @@ function CommunityOverlay({onClose}) {
     gasApi("getCommunity").then(r=>{
       if(!r.ok) return;
       setList(r.data); setReportRanking(r.reportRanking||[]); setStreakRanking(r.streakRanking||[]);
+      setLevelRanking(r.levelRanking||[]);
       setNewcomers(r.newcomers||[]); setRecentLoggers(r.recentLoggers||[]);
       if(r.achievements) setAchievements(r.achievements);
       else gasApi("getAchievements").then(a=>{ if(a.ok) setAchievements(a.data); });
@@ -5390,6 +5392,36 @@ function CommunityOverlay({onClose}) {
             `;
           })()}
           ${reportRanking&&reportRanking.length===0&&html`<div style=${{padding:20,textAlign:"center",color:"var(--sub)",fontSize:13}}>まだデータがありません</div>`}
+        </div>
+
+        <!-- ★階級ランキング★（2026-08-05 Kai要望）
+             点数ではなく「いまどの階級か」で並べる。階級の色の丸を添えて、
+             ルーキーなのかコンシステントなのかがひと目で分かるようにする。 -->
+        <div style=${{background:"var(--card)",borderRadius:16,border:"1px solid var(--border)",overflow:"hidden",marginBottom:16}}>
+          <div style=${{padding:"14px 16px",borderBottom:"1px solid var(--border)"}}>
+            <div style=${{fontSize:12,fontWeight:700,color:"var(--text)"}}>階級ランキング</div>
+            <div style=${{fontSize:10.5,color:"var(--sub)",marginTop:2}}>記録を続けるほど上がります。Lv.1 の人は載りません</div>
+          </div>
+          ${levelRanking===null&&html`<div style=${{padding:20,textAlign:"center",color:"var(--sub)",fontSize:13}}>読み込み中...</div>`}
+          ${levelRanking&&(()=>{
+            const {top,me,meRank}=trimRanking(levelRanking);
+            const row=(u,rank,isLast)=>{
+              const rk=RANKS.find(r=>r.name===u.rankName);
+              return html`<${RankingRow} rank=${rank} avatar=${u.avatar} nickname=${u.nickname} isMe=${u.isMe}
+                scoreValue=${"Lv."+u.level} scoreUnit=""
+                sub=${html`<span style=${{display:"inline-flex",alignItems:"center",gap:4}}>
+                  <span style=${{width:6,height:6,borderRadius:"50%",flexShrink:0,
+                                 background:rk?rk.color:"var(--sub)"}}/>${u.rankName}</span>`}
+                isLast=${isLast}/>`;
+            };
+            return html`
+              ${top.map((u,i)=>html`<${React.Fragment} key=${i}>${row(u,i+1,!me&&i===top.length-1)}<//>`)}
+              ${me&&html`
+                <div style=${{textAlign:"center",fontSize:12,color:"var(--sub)",padding:"6px 0",borderBottom:"1px solid var(--border)"}}>⋮</div>
+                ${row(me,meRank,true)}`}
+            `;
+          })()}
+          ${levelRanking&&levelRanking.length===0&&html`<div style=${{padding:20,textAlign:"center",color:"var(--sub)",fontSize:13}}>まだデータがありません</div>`}
         </div>
 
         <div style=${{background:"var(--card)",borderRadius:16,border:"1px solid var(--border)",overflow:"hidden",marginBottom:16}}>
@@ -10097,7 +10129,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260805-212543";
+const APP_BUILD = "20260805-213819";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 

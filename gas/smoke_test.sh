@@ -130,6 +130,15 @@ PYX
     ng "$(sed -n '2p' /tmp/_smoke_deps.txt)"
   fi
 
+  # ★運用コマンドが ops.sh から呼べるか★
+  #   admin* は fail-closed。許可リストに載せ忘れると AUTH_REQUIRED で弾かれ、
+  #   デプロイし直しになる（2026-08-05に3つ載せ忘れた）。
+  if (cd .. && python3 .preview/check_ops_allowlist.py >/tmp/_smoke_allow.txt 2>&1); then
+    ok "運用コマンドが許可リストにある"
+  else
+    ng "$(sed -n '2p' /tmp/_smoke_allow.txt)"
+  fi
+
   # ★渡している値が、その場所にあるか★
   #   2026-08-05、App には無い game を SettingsScreen に渡してしまい、
   #   本番で "Can't find variable: game" が出てアプリ全体が開かなくなった。
