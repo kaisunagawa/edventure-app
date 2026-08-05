@@ -2262,9 +2262,19 @@ function getSelfMgmtPower(studentEmail, body) {
                hasFeature(u, SMP_FEATURE_KEY); });
       const scores = [];
       peers.forEach(function (u) {
-        const v = (u.student_email === studentEmail)
-          ? mine
-          : smpOverallCached_(u.student_email, false);   // キャッシュにあるものだけ
+        if (u.student_email === studentEmail) { scores.push(Number(mine)); return; }
+        // ★一時キャッシュだけを見ない★（2026-08-05 Kai報告「上位◯%が消えた」）
+        //   一時キャッシュは数時間で消えるうえ、デプロイでも飛ぶ。
+        //   消えると比べる相手が5人に届かず、表示ごと出なくなっていた。
+        //   Users に残してある smp_overall（消えない）へ倒す。
+        var v = smpOverallCached_(u.student_email, false);
+        if (v === null || v === undefined) {
+          const raw = u.smp_overall;
+          if (raw !== "" && raw !== null && raw !== undefined) {
+            const n = Number(raw);
+            if (!isNaN(n)) v = n;
+          }
+        }
         if (v !== null && v !== undefined) scores.push(Number(v));
       });
       if (scores.length >= 5) {
@@ -4635,12 +4645,44 @@ function latestScoreOf_(email, opsIndex, latestReportRow) {
 function opsLatestIndex_() {
   const idx = {};
   try {
-    sheetToObjects(getP1Sheet("DailyOpsReport")).forEach(function (o) {
+    // ★必要な4列だけ読む★（2026-08-05）
+    //   sheetToObjects は全列をオブジェクト化するため、行が増えるほど重い。
+    const sh = getP1Sheet("DailyOpsReport");
+    const last = sh.getLastRow();
+    if (last < 2) return idx;
+    const hdr = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0];
+    const cols = ["student_email", "report_date", "operating_score", "finalized_at"];
+    const ii = cols.map(function (c) { return hdr.indexOf(c); });
+    if (ii.some(function (x) { return x === -1; })) return opsLatestIndexSlow_();
+    const lo = Math.min.apply(null, ii), hi = Math.max.apply(null, ii);
+    const vals = sh.getRange(2, lo + 1, last - 1, hi - lo + 1).getValues();
+    const c = ii.map(function (x) { return x - lo; });
+    vals.forEach(function (row) {
+      const rawD = row[c[1]];
+      const o = { student_email: row[c[0]],
+                  report_date: rawD instanceof Date
+                    ? Utilities.formatDate(rawD, "Asia/Tokyo", "yyyy-MM-dd") : rawD,
+                  operating_score: row[c[2]], finalized_at: row[c[3]] };
       const em = String(o.student_email || ""), d = String(o.report_date).slice(0, 10);
       const v = String(o.operating_score || "").trim();
       // ★確定した日だけを使う★（2026-08-05）
       //   夜のレポートで締めていない日は、まだ動く可能性のある点数なので
       //   ランキングや共有欄には出さない。
+      if (!String(o.finalized_at || "").trim()) return;
+      if (!em || !d || v === "") return;
+      if (!idx[em] || idx[em].date < d) idx[em] = { date: d, score: Number(v) };
+    });
+  } catch (e) {}
+  return idx;
+}
+
+// 列名が想定と違うときの従来どおりの読み方（保険）
+function opsLatestIndexSlow_() {
+  const idx = {};
+  try {
+    sheetToObjects(getP1Sheet("DailyOpsReport")).forEach(function (o) {
+      const em = String(o.student_email || ""), d = String(o.report_date).slice(0, 10);
+      const v = String(o.operating_score || "").trim();
       if (!String(o.finalized_at || "").trim()) return;
       if (!em || !d || v === "") return;
       if (!idx[em] || idx[em].date < d) idx[em] = { date: d, score: Number(v) };
@@ -4920,7 +4962,28 @@ function getCommunity(studentEmail) {
   //   ステータスランキングを自己経営力ランキングに置き換えたとき、
   //   この呼び出しだけが残った。結果はどこにも使っていないのに、
   //   全員ぶんの DailyLog を日ごとに減衰計算する、この画面で一番重い処理だった。
-  const allReports = sheetToObjects(getSheet("Reports"));
+  // ★Reports は必要な3列だけ読む★（2026-08-05 Kai報告「開くのが遅すぎる」）
+  //   ここで使うのは student_email / date / score だけ。
+  //   sheetToObjects は breakdown などの長いJSON列まで毎行オブジェクト化するため、
+  //   行数が増えるほど効いてくる。
+  const allReports = (function () {
+    const sh = getSheet("Reports");
+    const last = sh.getLastRow();
+    if (last < 2) return [];
+    const hdr = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0];
+    const iE = hdr.indexOf("student_email"), iD = hdr.indexOf("date"), iS = hdr.indexOf("score");
+    if (iE === -1 || iD === -1 || iS === -1) return sheetToObjects(sh);
+    const lo = Math.min(iE, iD, iS), hi = Math.max(iE, iD, iS);
+    const vals = sh.getRange(2, lo + 1, last - 1, hi - lo + 1).getValues();
+    const cE = iE - lo, cD = iD - lo, cS = iS - lo;
+    return vals.map(function (r) {
+      const raw = r[cD];
+      return { student_email: String(r[cE] || ""),
+               date: raw instanceof Date ? Utilities.formatDate(raw, "Asia/Tokyo", "yyyy-MM-dd")
+                                         : String(raw).slice(0, 10),
+               score: r[cS] };
+    });
+  })();
   const latestReportByEmail = new Map();
   allReports.forEach(r => {
     const cur = latestReportByEmail.get(r.student_email);
