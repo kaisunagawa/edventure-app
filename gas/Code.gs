@@ -426,10 +426,12 @@ function doGet(e) {
           const dt = String(l.date instanceof Date ? formatDate(l.date) : l.date || "").slice(0, 10);
           if (!dt || dt < cutA) return;
           const em = String(l.student_email || "");
-          if (!byUser[em]) byUser[em] = { rows: 0, days: {}, memo: 0 };
+          if (!byUser[em]) byUser[em] = { rows: 0, days: {}, memo: 0, focus: 0, awarded: 0 };
           byUser[em].rows++;
           byUser[em].days[dt] = 1;
           if (String(l.memo || "").trim()) byUser[em].memo++;
+          if (String(l.focus_level || "").trim()) byUser[em].focus++;
+          if (String(l.xp_awarded || "").toUpperCase() === "TRUE") byUser[em].awarded++;
         });
         const led = {};
         try {
@@ -442,7 +444,7 @@ function doGet(e) {
           .filter(function (u) { return String(u.is_active || "").toUpperCase() === "TRUE"; })
           .map(function (u) {
             const em = u.student_email;
-            const st = byUser[em] || { rows: 0, days: {}, memo: 0 };
+            const st = byUser[em] || { rows: 0, days: {}, memo: 0, focus: 0, awarded: 0 };
             const nDays = Object.keys(st.days).length;
             const xp = Number(u.xp || 0);
             const lv = getXpLevel(xp);
@@ -451,6 +453,7 @@ function doGet(e) {
             return { email: em, nickname: u.nickname || "", streak: Number(u.streak || 0),
                      xp: xp, level: lv, rank: getRank(lv).name,
                      recorded_days: nDays, records: st.rows, memos: st.memo,
+                     with_focus: st.focus, xp_awarded_rows: st.awarded,
                      xp_expected_min: expect, xp_ledger: led[em] || 0,
                      gap: expect - xp,
                      suspicious: (nDays >= 7 && xp < expect * 0.5) };
@@ -459,6 +462,51 @@ function doGet(e) {
         return jsonResponse({ ok: true, days: dA,
           suspicious_count: rowsA.filter(function (r) { return r.suspicious; }).length,
           users: rowsA });
+      }
+      // ★減点で削られたXPを戻す★（2026-08-05 Kaiの判断）
+      //   減点に下限が無く、215件記録した人が28%、123件記録した人が2%まで
+      //   落ちていた。記録の事実から積み上げを計算し直して戻す。
+      //   台帳(XpEvents)は最近のぶんしか無いので、記録件数から再計算する。
+      //     dry=1（既定）… 戻さずに、誰がいくつになるかだけ返す
+      case "adminXpRestore": {
+        if (!verifyAdmin(e.parameter.coachEmail)) return jsonResponse({ ok: false, error: "not admin" });
+        const dryR2 = String(e.parameter.dry || "1") !== "0";
+        const logsR = sheetToObjects(getSheet("DailyLog"));
+        const agg = {};
+        logsR.forEach(function (l) {
+          if (String(l.deleted_at || "").trim()) return;
+          if (!String(l.focus_level || "").trim()) return;   // 評価が入った記録だけがXPの対象
+          const em = String(l.student_email || "");
+          if (!agg[em]) agg[em] = { rows: 0, memo: 0 };
+          agg[em].rows++;
+          if (String(l.memo || "").trim()) agg[em].memo++;
+        });
+        const sheetR = getSheet("Users");
+        const dataR = sheetR.getDataRange().getValues();
+        const hR = dataR[0];
+        const iEmR = hR.indexOf("student_email");
+        const iXpR = hR.indexOf("xp");
+        let iPkR = hR.indexOf("peak_level");
+        if (iPkR === -1) { iPkR = hR.length; sheetR.getRange(1, iPkR + 1).setValue("peak_level"); }
+        const outR = [];
+        for (let i = 1; i < dataR.length; i++) {
+          const em = String(dataR[i][iEmR] || "");
+          const a = agg[em];
+          if (!a) continue;
+          const cur = Number(dataR[i][iXpR] || 0);
+          // 記録から積み上がるXPの下限（連続ボーナスは含めない＝控えめに戻す）
+          const base = a.rows * 10 + a.memo * 5;
+          if (base <= cur) continue;     // すでに足りている人は触らない
+          const lv = getXpLevel(base);
+          outR.push({ email: em, nickname: String(dataR[i][hR.indexOf("nickname")] || ""),
+                      before: cur, after: base, level_after: lv, rank_after: getRank(lv).name,
+                      records: a.rows, memos: a.memo });
+          if (!dryR2) {
+            sheetR.getRange(i + 1, iXpR + 1).setValue(base);
+            if (lv > Number(dataR[i][iPkR] || 0)) sheetR.getRange(i + 1, iPkR + 1).setValue(lv);
+          }
+        }
+        return jsonResponse({ ok: true, dry: dryR2, changed: outR.length, users: outR });
       }
       case "adminSmpWarmAll": {
         result = adminSmpWarmAll(e.parameter.coachEmail); break;
@@ -3519,6 +3567,53 @@ function ownerCalColor_(cls) {
   }
 }
 
+// ★カレンダー書き込みを後回しにする★（2026-08-05 Kai報告）
+//   保存のたびにカレンダーAPIを叩くと1〜3秒かかり、記録ボタンの待ち時間が
+//   そのぶん延びていた。予定は少し遅れて入っても困らないので、
+//   いったん控えておき、1分おきの処理でまとめて書く。
+function queueOwnerCalendarWrite_(studentEmail, dateStr, timeBlock, task, cls) {
+  try {
+    if (!String(task || "").trim()) return;
+    const props = PropertiesService.getScriptProperties();
+    const key = "calq";
+    let q = [];
+    try { q = JSON.parse(props.getProperty(key) || "[]"); } catch (e) { q = []; }
+    // 同じ人・同じ日・同じ時間帯のものは最新だけ残す
+    q = q.filter(function (x) {
+      return !(x.e === studentEmail && x.d === dateStr && x.t === timeBlock);
+    });
+    q.push({ e: studentEmail, d: dateStr, t: timeBlock, k: String(task).slice(0, 120), c: cls || "" });
+    if (q.length > 200) q = q.slice(-200);   // 溜めすぎない
+    props.setProperty(key, JSON.stringify(q));
+  } catch (e) {
+    // 控えられなかったときは、その場で書く（記録が予定に出ないほうが困る）
+    try { writeRecordToOwnerCalendar(studentEmail, dateStr, timeBlock, task, cls); } catch (e2) {}
+  }
+}
+
+// 控えておいたカレンダー書き込みをまとめて処理する（1分おきのトリガーから呼ぶ）
+function flushOwnerCalendarQueue() {
+  const props = PropertiesService.getScriptProperties();
+  let q = [];
+  try { q = JSON.parse(props.getProperty("calq") || "[]"); } catch (e) { q = []; }
+  if (!q.length) return { ok: true, done: 0 };
+  props.setProperty("calq", "[]");   // 先に空にする（二重に書かないため）
+  const start = Date.now();
+  let done = 0;
+  const rest = [];
+  q.forEach(function (x) {
+    if (Date.now() - start > 4 * 60 * 1000) { rest.push(x); return; }
+    try { writeRecordToOwnerCalendar(x.e, x.d, x.t, x.k, x.c); done++; }
+    catch (err) { Logger.log("calq: " + err); }
+  });
+  if (rest.length) {
+    let cur = [];
+    try { cur = JSON.parse(props.getProperty("calq") || "[]"); } catch (e) { cur = []; }
+    props.setProperty("calq", JSON.stringify(rest.concat(cur).slice(-200)));
+  }
+  return { ok: true, done: done, left: rest.length };
+}
+
 function writeRecordToOwnerCalendar(studentEmail, dateStr, timeBlock, task, cls) {
   try {
     if (!timeBlock || !String(task || "").trim()) return;
@@ -3705,16 +3800,22 @@ function saveLog(studentEmail, body) {
       // xp_awardedフラグが未設定の古い記録は、既に評価が入っていれば「付与済み」とみなす
       // （デプロイ前からある記録が、編集で二重にXPをもらわないための移行措置）
       const prevAwarded = flagRaw === "TRUE" || (flagRaw === "" && !!prevFocus);
-      if (i === matchRow && String(data[i][timeIdx]) !== String(body.time_block)) {
-        sheet.getRange(i + 1, timeIdx + 1).setNumberFormat("@").setValue(String(body.time_block));
-      }
-      sheet.getRange(i+1, headers.indexOf("task")+1).setValue(body.task);
-      sheet.getRange(i+1, focusIdx+1).setValue(body.focus_level);
-      sheet.getRange(i+1, headers.indexOf("memo")+1).setValue(body.memo || "");
+      // ★1セルずつ書かない★（2026-08-05 Kai報告「記録ボタンの待ち時間が長い」）
+      //   setValue 1回ごとにシートへの往復が起きる。まとめて1回で書く。
       let grIdx = headers.indexOf("goal_related");
       if(grIdx === -1){ grIdx = headers.length; sheet.getRange(1, grIdx+1).setValue("goal_related"); }
-      sheet.getRange(i+1, grIdx+1).setValue(body.goal_related || "false");
-      writeRecordToOwnerCalendar(studentEmail, targetDate, String(body.time_block), body.task, body.time_classification);
+      if (i === matchRow && String(data[i][timeIdx]) !== String(body.time_block)) {
+        sheet.getRange(i + 1, timeIdx + 1).setNumberFormat("@");
+      }
+      const rowU = data[i].slice();
+      rowU[timeIdx] = String(body.time_block);
+      rowU[headers.indexOf("task")] = body.task;
+      rowU[focusIdx] = body.focus_level;
+      rowU[headers.indexOf("memo")] = body.memo || "";
+      if (grIdx < rowU.length) rowU[grIdx] = body.goal_related || "false";
+      sheet.getRange(i + 1, 1, 1, rowU.length).setValues([rowU]);
+      // カレンダーへの書き込みは、記録の保存を待たせない（あとでまとめて処理する）
+      queueOwnerCalendarWrite_(studentEmail, targetDate, String(body.time_block), body.task, body.time_classification);
       if (!isPast) { updateStreak(studentEmail); invalidateStatusCache(); }
 
       // 「まだXP未付与」かつ「今回きちんと評価が入っている」記録にだけ、1回だけXPを付与する。
@@ -3738,7 +3839,7 @@ function saveLog(studentEmail, body) {
   sheet.appendRow([logId, studentEmail, targetDate, "", body.task, body.focus_level, body.memo || "", now, body.goal_related || "false"]);
   sheet.getRange(newRow, 4).setNumberFormat("@").setValue(String(body.time_block));
   writeP1LogFields(sheet, newRow, studentEmail, targetDate, String(body.time_block), body);
-  writeRecordToOwnerCalendar(studentEmail, targetDate, String(body.time_block), body.task, body.time_classification);
+  queueOwnerCalendarWrite_(studentEmail, targetDate, String(body.time_block), body.task, body.time_classification);
   let awardedIdxN = headers.indexOf("xp_awarded");
   if (awardedIdxN === -1) { awardedIdxN = headers.length; sheet.getRange(1, awardedIdxN + 1).setValue("xp_awarded"); }
 
@@ -4177,6 +4278,28 @@ function recomputeStreak_(studentEmail, dryRun) {
   return { before: null, after: finalStreak, last_log_date: finalLast, dry_run: !!dryRun };
 }
 
+// ★XPの下限★（2026-08-05）
+//   到達した最高レベル（peak_level）の1つ下のレベルの入口XPを下限にする。
+//   例: Lv.26 まで行った人は Lv.25 の入口（=いまのXPの少し下）までしか落ちない。
+//   peak_level が無い古い行は、いまのXPから逆算して記録しておく。
+function xpDecayFloor_(sheet, headers, row, rowIdx, currentXP) {
+  var iPeak = headers.indexOf("peak_level");
+  if (iPeak === -1) {
+    iPeak = headers.length;
+    sheet.getRange(1, iPeak + 1).setValue("peak_level");
+  }
+  var peak = Number(row[iPeak] || 0);
+  var nowLv = getXpLevel(currentXP);
+  if (nowLv > peak) {   // 最高到達を更新していたら記録し直す
+    peak = nowLv;
+    sheet.getRange(rowIdx + 1, iPeak + 1).setValue(peak);
+  }
+  if (peak <= 1) return 0;
+  // 1つ下のレベルの入口XP（XP_THRESHOLDS は0始まりの配列）
+  var floorLv = Math.max(1, peak - 1);
+  return XP_THRESHOLDS[floorLv - 1] || 0;
+}
+
 function addXP(studentEmail, memo, todaysLogCount, logSummary, sourceId) {
   // 同じ記録で二重にXPを出さない（再送・重複送信の保険）
   if (sourceId && xpLedgerHas_(studentEmail, sourceId)) {
@@ -4212,6 +4335,12 @@ function addXP(studentEmail, memo, todaysLogCount, logSummary, sourceId) {
     const levelUp = newLevel > oldLevel;
 
     usersSheet.getRange(i+1, xpIdx+1).setValue(newXP);
+    // 到達した最高レベルを控えておく（減点の下限に使う）
+    try {
+      var iPk = headers.indexOf("peak_level");
+      if (iPk === -1) { iPk = headers.length; usersSheet.getRange(1, iPk + 1).setValue("peak_level"); }
+      if (newLevel > Number(data[i][iPk] || 0)) usersSheet.getRange(i+1, iPk+1).setValue(newLevel);
+    } catch (e) {}
     xpLedgerAdd_(studentEmail, "LOG", sourceId, gained, memo && memo.trim() ? "log_with_memo" : "log");
 
     // バッジ判定
@@ -7831,7 +7960,15 @@ function applyXPDecay(studentEmail, targetDate) {
     // 昨日も記録なしなら減少額を増やす（最大-30）
     const missedYesterday = lastLogDate !== yesterday;
     const decay = missedYesterday ? 30 : 15;
-    const newXP = Math.max(0, currentXP - decay);
+    // ★下限を設ける★（2026-08-05 Kaiの判断）
+    //   これまで減点に下限が無く、ゼロまで削れていた。
+    //   215件記録した人が28%、123件記録した人が2%まで落ち、
+    //   Lv.1のルーキーに戻っていた。積み上げが全部消えると、
+    //   離れた人が戻ってきたときに「また最初から」になる。
+    //   到達した最高レベルの1つ下のレベル（の入口XP）までしか下げない。
+    //   休んだ痛みは残しつつ、やってきた事実は残す。
+    const floorXP = xpDecayFloor_(sheet, headers, data[i], i, currentXP);
+    const newXP = Math.max(floorXP, currentXP - decay);
 
     sheet.getRange(i + 1, xpIdx + 1).setValue(newXP);
     // ストリークリセット
@@ -12128,10 +12265,17 @@ function recomputeTaskActualMinutes_(studentEmail, taskId) {
 
 function writeP1LogFields(sheet, rowNum, studentEmail, targetDate, timeBlock, body) {
   try {
-    const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+    // ★1セルずつ書かない★（2026-08-05 Kai報告「記録ボタンの待ち時間が長い」）
+    //   1回の setValue ごとにシートへの往復が発生する。ここは最大10か所あり、
+    //   さらに分類の確認で1セルずつ読み直してもいた。
+    //   行をまるごと1回だけ読み、まとめて1回だけ書く。
+    const lastCol = sheet.getLastColumn();
+    const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+    const rowVals = sheet.getRange(rowNum, 1, 1, lastCol).getValues()[0];
+    let dirty = false;
     const set = (col, val) => {
       const i = headers.indexOf(col);
-      if (i !== -1) sheet.getRange(rowNum, i + 1).setValue(val);
+      if (i !== -1) { rowVals[i] = val; dirty = true; }
     };
     // ★冪等キー★ クライアントが送ってきたIDを優先する。
     //   タイマーは開始時にIDを決めるので、再送・重複送信でも同じ行を更新する。
@@ -12153,9 +12297,10 @@ function writeP1LogFields(sheet, rowNum, studentEmail, targetDate, timeBlock, bo
     //   本人が選んだ分類は、あとからルールで上書きしない
     const iCls = headers.indexOf("time_classification");
     if (iCls !== -1) {
+      const iMth = headers.indexOf("classification_method");
       const cur = {
-        cls: String(sheet.getRange(rowNum, iCls + 1).getValue() || ""),
-        method: String(sheet.getRange(rowNum, headers.indexOf("classification_method") + 1).getValue() || "")
+        cls: String(rowVals[iCls] || ""),
+        method: String(iMth === -1 ? "" : (rowVals[iMth] || ""))
       };
       const decided = classifyLogTime_(studentEmail, targetDate, body, cur);
       if (decided) {
@@ -12166,6 +12311,8 @@ function writeP1LogFields(sheet, rowNum, studentEmail, targetDate, timeBlock, bo
         if (decided.method === "USER") set("user_corrected_at", new Date().toISOString());
       }
     }
+    // まとめて1回で書き戻す
+    if (dirty) sheet.getRange(rowNum, 1, 1, lastCol).setValues([rowVals]);
     // 紐づいたタスクの実績時間を作り直す（同じ行を更新しても二重に増えない：
     // 足し算ではなく、DailyLog を読み直して合計を出し直しているため）
     if (body.link_task_id !== undefined && String(body.link_task_id || "").trim()) {
@@ -13661,7 +13808,7 @@ const ADMIN_SECRET_ALLOWLIST = {
   // 一斉送信（Kaiの明示的な要望により残す）
   adminBroadcastLine:1, adminBroadcastLinePending:1, adminSendStudentCampaign:1,
   // セットアップ・保守
-  adminSetupTriggers:1, adminInstallTrigger:1, adminSetupPhase1:1, adminSetupAuth:1, adminPhase4DryRun:1, adminLegacyBackfill:1, adminWritePathStats:1, adminIssueTestSession:1, adminDropTestSessions:1, adminOpsSelfTest:1, adminActualMinutesAudit:1, adminXpCorrection:1, adminStreakRecalc:1, adminGrantFeature:1, adminUserDiag:1, adminReportScoreDryRun:1, adminReportGenTest:1, adminScoreConsistency:1, adminFinalizeOps:1, adminUnfinalizeOps:1, adminSmpDump:1, adminSmpWarmAll:1, adminLevelAudit:1, adminCleanupPlusLogs:1, adminClassAudit:1, adminRecolorCalendar:1,
+  adminSetupTriggers:1, adminInstallTrigger:1, adminSetupPhase1:1, adminSetupAuth:1, adminPhase4DryRun:1, adminLegacyBackfill:1, adminWritePathStats:1, adminIssueTestSession:1, adminDropTestSessions:1, adminOpsSelfTest:1, adminActualMinutesAudit:1, adminXpCorrection:1, adminStreakRecalc:1, adminGrantFeature:1, adminUserDiag:1, adminReportScoreDryRun:1, adminReportGenTest:1, adminScoreConsistency:1, adminFinalizeOps:1, adminUnfinalizeOps:1, adminSmpDump:1, adminSmpWarmAll:1, adminLevelAudit:1, adminXpRestore:1, adminCleanupPlusLogs:1, adminClassAudit:1, adminRecolorCalendar:1,
   authSetMode:1, authSetEnforce:1, authRoleApply:1, authRoleDryRun:1, authRevokeAll:1,
   authCleanupTestData:1, adminPurgeTestUsers:1, adminMigrateTasks:1, authBreakerReset:1, rotateSessionSecret:1,
   p1Backup:1, p1BackupInfo:1, p1PurgeArchived:1, weeklyBackup:1
@@ -15330,7 +15477,9 @@ function adminInstallTrigger(email, handler, replaceFlag) {
   //   稼働中に使うと夜間レポート等を巻き込む。1本だけ足したい時はこちらを使う★
   const allowed = {
     dailyOpsHealthCheck: function (b) { return b.timeBased().everyDays(1).atHour(23).nearMinute(59); },
-    weeklyBackup:        function (b) { return b.timeBased().everyWeeks(1).onWeekDay(ScriptApp.WeekDay.SUNDAY).atHour(3); }
+    weeklyBackup:        function (b) { return b.timeBased().everyWeeks(1).onWeekDay(ScriptApp.WeekDay.SUNDAY).atHour(3); },
+    // 控えておいたカレンダー書き込みを流す（記録の保存を待たせないため）
+    flushOwnerCalendarQueue: function (b) { return b.timeBased().everyMinutes(1); }
   };
   if (!allowed[name]) return { ok: false, error: "許可されていないハンドラ: " + name };
   // ★時刻を変えたいときは張り直す★（2026-08-05）
