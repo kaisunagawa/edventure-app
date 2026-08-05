@@ -10592,11 +10592,19 @@ function listGoalEntries(studentEmail, body) {
   const chk = p1RequireUser(studentEmail);
   if (!chk.ok) return chk;
   const goalId = String((body && body.quarterly_goal_id) || "").trim();
+  // ★週間目標の履歴も返す★（2026-08-05）
+  //   3か月目標だけ履歴を見られて、今週の目標は見られなかった。
+  //   間違えて足したときに、打ち消しで足すしかない状態だった。
+  const wGoalId = String((body && body.weekly_goal_id) || "").trim();
   const rows = p1List("GoalEntries", studentEmail)
     .filter(function (r) { return !String(r.deleted_at || "").trim(); })
-    .filter(function (r) { return !goalId || String(r.quarterly_goal_id) === goalId; })
+    .filter(function (r) {
+      if (wGoalId) return String(r.weekly_goal_id || "") === wGoalId;
+      if (goalId)  return String(r.quarterly_goal_id || "") === goalId;
+      return true; })
     .map(function (r) {
       return { entry_id: r.entry_id, quarterly_goal_id: r.quarterly_goal_id,
+               weekly_goal_id: r.weekly_goal_id || "",
                amount: Number(r.amount) || 0, category: String(r.category || "OTHER"),
                memo: String(r.memo || ""), entry_date: String(r.entry_date || "").slice(0, 10) }; })
     .sort(function (a, b) { return String(b.entry_date).localeCompare(String(a.entry_date)); });

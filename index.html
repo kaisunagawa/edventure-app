@@ -58,6 +58,7 @@
       --green-l:  #F0FDF4;
       --amber:    #F59E0B;
       --amber-l:  #FFFBEB;
+      --focus:    #D97706;   /* 今日のフォーカス。淡い金色だと薄いので濃いオレンジに（2026-08-05 Kai要望） */
       --red:      #EF4444;
       --red-l:    #FEF2F2;
       --nav-h:    64px;
@@ -340,6 +341,7 @@
         --green-l:  #0E2B21;
         --amber:    #FBBF24;
         --amber-l:  #2E2410;
+        --focus:    #F59E0B;
         --red:      #F87171;
         --red-l:    #331717;
         --hero1:    #0B4A5A;
@@ -1783,12 +1785,16 @@ function SprintEntrySheet({sprint, weeklies, onClose, onPick, onAddGoal, onToast
 }
 
 // ★履歴の確認・編集★ 長押しで開く
-function GoalHistorySheet({goal, onClose, onEdit, onAdd, onChanged, onToast}) {
+// weekly=true のときは「今週の目標」の履歴として開く（2026-08-05）
+function GoalHistorySheet({goal, weekly, onClose, onEdit, onAdd, onChanged, onToast}) {
   useLockBodyScroll();
   const [rows, setRows] = useState(null);
-  const unit = (goal.pace&&goal.pace.unit) || goal.unit || "";
+  const unit = weekly
+    ? (goal.unit || (goal.metric_type==="DURATION"?"分":"件"))
+    : ((goal.pace&&goal.pace.unit) || goal.unit || "");
   const CAT_LABEL = { SALES:"売上", CONTRACT:"契約", OTHER:"その他" };
-  const load = () => gasApi("listGoalEntries",{quarterly_goal_id:goal.quarterly_goal_id})
+  const load = () => gasApi("listGoalEntries",
+      weekly ? {weekly_goal_id:goal.weekly_goal_id} : {quarterly_goal_id:goal.quarterly_goal_id})
     .then(r=>setRows((r&&r.ok&&r.data)||[]));
   useEffect(()=>{ load(); },[]);
   const del = async (e2) => {
@@ -1819,7 +1825,7 @@ function GoalHistorySheet({goal, onClose, onEdit, onAdd, onChanged, onToast}) {
           <span style=${{flex:1,fontSize:17,fontWeight:800,color:"var(--text)"}}>履歴の確認・編集</span>
           <button onClick=${onClose} style=${{background:"none",border:"none",color:"var(--sub)",fontSize:22,cursor:"pointer",lineHeight:1,padding:"0 4px"}}>×</button>
         </div>
-        <div style=${{fontSize:13,color:"var(--sub)",marginBottom:14}}>${goal.title} の履歴</div>
+        <div style=${{fontSize:13,color:"var(--sub)",marginBottom:14}}>${goal.title} の履歴${weekly?"（今週）":""}</div>
         ${rows===null&&html`<div style=${{padding:20,textAlign:"center",color:"var(--sub)",fontSize:13}}>読み込み中…</div>`}
         ${rows&&rows.length===0&&html`
           <div style=${{padding:"18px 0",color:"var(--sub)",fontSize:13,lineHeight:1.8}}>
@@ -1832,7 +1838,7 @@ function GoalHistorySheet({goal, onClose, onEdit, onAdd, onChanged, onToast}) {
                 <b style=${{color:"var(--accent)",marginLeft:8}}>${e2.amount>0?"+":""}${e2.amount}${unit}</b>
               </span>
               <span style=${{display:"block",fontSize:11.5,color:"var(--sub)",marginTop:2}}>
-                ${CAT_LABEL[e2.category]||"その他"}${e2.memo?"・"+e2.memo:""}</span>
+                ${weekly ? (e2.memo||"") : ((CAT_LABEL[e2.category]||"その他")+(e2.memo?"・"+e2.memo:""))}</span>
             </span>
             <button onClick=${()=>onEdit(e2)}
               style=${{flexShrink:0,padding:"5px 11px",borderRadius:7,border:"1px solid var(--border)",background:"none",
@@ -3152,7 +3158,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
       const C_Q = "#14B8A6";    // 3か月目標   ティール
       const C_S = "#3B82F6";    // 2週間Sprint 青
       const C_W = "#4CAF50";    // 今週の目標   緑
-      const C_STAR = "#F5C542"; // 今日のフォーカス 黄
+      const C_STAR = "var(--focus)"; // 今日のフォーカス オレンジ
 
       // ★目標がまだ無い人にも入口を残す★
       if (!goals.length && !allSp.length) return html`
@@ -3553,10 +3559,15 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
               </div>
               ${wPct!==null&&InfoBox({ color:C_W, onClick:()=>setOpenRow(openRow==="week"?"":"week"),
                 icon: html`<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 20V11M12 20V4M19 20v-6"/></svg>`,
-                children: html`<span style=${{display:"flex",alignItems:"baseline",justifyContent:"space-between",gap:8}}>
-                  <span style=${{fontSize:13,fontWeight:700,color:"var(--text)"}}>今週の達成率</span>
-                  <span style=${{color:C_W,fontWeight:800,fontSize:26,lineHeight:1,fontVariantNumeric:"tabular-nums"}}>
-                    ${wPct}<span style=${{fontSize:14}}>%</span></span></span>` })}
+                children: html`<span style=${{display:"flex",alignItems:"center",gap:10}}>
+                  <span style=${{flexShrink:0,fontSize:12,fontWeight:700,color:"var(--text)"}}>今週の達成率</span>
+                  <!-- 真ん中が空いて枠だけ大きく見えていたので、バーで埋めて高さを他の枠にそろえた（2026-08-05 Kai要望） -->
+                  <span style=${{flex:1,minWidth:20,height:6,borderRadius:99,background:"var(--border)",
+                                 display:"block",overflow:"hidden"}}>
+                    <span style=${{display:"block",height:"100%",borderRadius:99,background:C_W,
+                                   width:Math.max(0,Math.min(100,wPct))+"%"}}/></span>
+                  <span style=${{flexShrink:0,color:C_W,fontWeight:800,fontSize:17,lineHeight:1,fontVariantNumeric:"tabular-nums"}}>
+                    ${wPct}<span style=${{fontSize:11}}>%</span></span></span>` })}
               ${openRow==="week"&&html`
                 <div style=${{fontSize:12,color:"var(--sub)",lineHeight:1.9,marginTop:9}}>
                   ${wg.map((w,k)=>{ const u=w.unit||(w.metric_type==="DURATION"?"分":"件");
@@ -5553,7 +5564,8 @@ function LogScreen({onToast, isActive}) {
       const restFrac = Math.max(0, 1-acc);
 
       return html`
-      <div style=${{margin:"0 0 14px",background:"var(--card)",borderRadius:18,border:"1px solid var(--border)",padding:"18px 16px 14px"}}>
+      <!-- 寸法は他のカード(.card)と同じにする。ここだけ全幅だと横がそろわない（2026-08-05 Kai指摘） -->
+      <div style=${{margin:"0 16px 8px",background:"var(--card)",borderRadius:12,border:"1px solid var(--border)",padding:16}}>
         <div style=${{display:"flex",alignItems:"center",gap:10,marginBottom:14}}>
           <span style=${{flexShrink:0,color:"var(--cyan)",display:"flex"}}>
             <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
@@ -5636,10 +5648,38 @@ function LogScreen({onToast, isActive}) {
       </div>`;
     })()}
 
+    <!-- ★まとめて分類する★
+         デザイン差し替えのときに、この入口とシートごと消してしまっていた
+         （2026-08-05に発見）。「詳細を見る」を押しても何も開かない状態だった。 -->
+    ${(()=>{
+      const un = logs.filter(l=>!String(l.time_classification||"").trim());
+      if(!un.length) return "";
+      return html`
+        <button onClick=${()=>setBulkOpen(true)}
+          style=${{display:"flex",alignItems:"center",gap:10,width:"calc(100% - 32px)",margin:"0 16px 8px",
+                   boxSizing:"border-box",
+                   padding:"12px 14px",borderRadius:12,border:"1.5px dashed var(--cyan)",
+                   background:"transparent",cursor:"pointer",fontFamily:"inherit",textAlign:"left"}}>
+          <span style=${{fontSize:16,flexShrink:0}}>🗂</span>
+          <span style=${{flex:1,minWidth:0}}>
+            <span style=${{display:"block",fontSize:12.5,fontWeight:700,color:"var(--cyan)"}}>
+              まだ分類していない記録が ${un.length}件あります</span>
+            <span style=${{display:"block",fontSize:11,color:"var(--sub)",marginTop:2}}>
+              まとめて分類すると、時間の使い方が正しく出ます</span>
+          </span>
+          <span style=${{flexShrink:0,fontSize:14,color:"var(--cyan)"}}>›</span>
+        </button>`;
+    })()}
+
+    ${bulkOpen&&html`<${BulkClassifySheet} date=${date} onClose=${()=>setBulkOpen(false)}
+      onSaved=${(id,k)=>setLogs(prev=>prev.map(x=>x.log_id===id
+        ? {...x, time_classification:k, classification_method:"USER", classification_reason_code:"USER_SELECTED"} : x))}
+      onToast=${onToast}/>`}
+
     <!-- ★本日の記録★（2026-08-05 Kai指定のデザイン）
          左に時刻の線を通し、1件ずつを時系列に見せる。 -->
     ${logs.length>0&&html`
-      <div style=${{margin:"0 0 24px",background:"var(--card)",borderRadius:18,border:"1px solid var(--border)",padding:"18px 16px 16px"}}>
+      <div style=${{margin:"0 16px 24px",background:"var(--card)",borderRadius:12,border:"1px solid var(--border)",padding:16}}>
         <div style=${{display:"flex",alignItems:"center",gap:10,marginBottom:14}}>
           <span style=${{flexShrink:0,color:"var(--cyan)",display:"flex"}}>
             <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round">
@@ -5657,6 +5697,9 @@ function LogScreen({onToast, isActive}) {
           const tb = String(l.time_block||"");
           const shown = tb.indexOf("-")!==-1 ? tb.replace("-", " - ") : tb;
           const last = i===arr.length-1;
+          // 今の分類に無い値（昔の分類など）は「未分類」として扱う。
+          // そうしないとラベルが空の丸い枠だけが出てしまう。
+          const clsLabel = TIME_CLASS_LABEL[l.time_classification] || "";
           return html`
           <div key=${l.log_id||i} style=${{display:"flex",gap:12}}>
             <!-- 時刻の線 -->
@@ -5695,10 +5738,10 @@ function LogScreen({onToast, isActive}) {
                                  color:l.time_classification===k?(TIME_CLASS_COLOR[k]||"var(--cyan)"):"var(--sub)"}}>${lb}</button>`)
                   : html`<button onClick=${()=>setClsEditing(l.log_id)}
                       style=${{padding:"5px 12px",borderRadius:99,fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit",
-                               border:`1px solid ${l.time_classification?(TIME_CLASS_COLOR[l.time_classification]||"var(--cyan)"):"var(--border)"}`,
+                               border:`1px solid ${clsLabel?(TIME_CLASS_COLOR[l.time_classification]||"var(--cyan)"):"var(--border)"}`,
                                background:"transparent",
-                               color:l.time_classification?(TIME_CLASS_COLOR[l.time_classification]||"var(--cyan)"):"var(--sub)"}}>
-                      ${l.time_classification?TIME_CLASS_LABEL[l.time_classification]:"分類を選ぶ"}</button>`}
+                               color:clsLabel?(TIME_CLASS_COLOR[l.time_classification]||"var(--cyan)"):"var(--sub)"}}>
+                      ${clsLabel||"分類を選ぶ"}</button>`}
               </div>
             </div>
           </div>`;
@@ -5706,7 +5749,7 @@ function LogScreen({onToast, isActive}) {
 
         <button onClick=${()=>{ handleBlockSelect(getCurrentBlock()); window.scrollTo?.(0,0); }}
           style=${{display:"flex",alignItems:"center",justifyContent:"center",gap:9,width:"100%",marginTop:6,
-                   padding:"14px",borderRadius:12,border:"1px solid #22D3EE",background:"transparent",
+                   padding:"14px",borderRadius:12,border:"1px solid var(--cyan)",background:"transparent",
                    color:"var(--cyan)",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
           <span style=${{fontSize:15,lineHeight:1}}>＋</span> 記録を追加する</button>
       </div>
@@ -9135,7 +9178,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260805-091527";
+const APP_BUILD = "20260805-094524";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
