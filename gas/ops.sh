@@ -26,8 +26,20 @@ TEST="AKfycbw-MhcAhOaqd_JJTlN4LltE-liM-WriznSgcDGIBR0uUMMB-rnYI74GUoXkmyNgTsx5"
 DEP="$PROD"; [ "${TARGET:-prod}" = "test" ] && DEP="$TEST"
 ADMIN="${OPS_ADMIN_EMAIL:-work.sunagawa@gmail.com}"
 
+# 鍵の取り出し方は2通り。
+#   ① 環境変数 P1_ADMIN_SECRET（従来どおり。その都度 export する）
+#   ② macOSのキーチェーン（一度入れておけば、以後は自動で取り出す）
+#      入れ方: security add-generic-password -s P1_ADMIN_SECRET -a "$USER" -w
+#      （-w のあとは何も書かずに実行すると、画面に出ない形で入力できる）
 if [ -z "${P1_ADMIN_SECRET:-}" ]; then
-  echo "P1_ADMIN_SECRET が未設定です。export してから実行してください" >&2; exit 2
+  P1_ADMIN_SECRET=$(security find-generic-password -s P1_ADMIN_SECRET -w 2>/dev/null || true)
+  export P1_ADMIN_SECRET
+fi
+if [ -z "${P1_ADMIN_SECRET:-}" ]; then
+  echo "P1_ADMIN_SECRET が見つかりません。" >&2
+  echo "  その都度渡す場合 : export P1_ADMIN_SECRET='...'" >&2
+  echo "  一度で済ませる場合: security add-generic-password -s P1_ADMIN_SECRET -a \"$USER\" -w" >&2
+  exit 2
 fi
 ACTION="${1:-}"
 if [ -z "$ACTION" ]; then
