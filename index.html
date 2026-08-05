@@ -3239,47 +3239,63 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
       </div>
       <div style=${{fontSize:13,color:"rgba(255,255,255,0.75)",marginBottom:10}}>${today} · ${greeting}</div>
 
-      <!-- 名前とXPを1行に。レベル・連続日数はその下の行にまとめる -->
-      <div style=${{display:"flex",alignItems:"center",gap:12,marginBottom:6}}>
-        <!-- ★階級のキャラクターを出す★（2026-08-05 Kai要望）
-             選んだ絵文字ではなく、いまの階級の姿を出す。上がると見た目が変わる。
-             まだレベルが分からないうち（読み込み中）は、これまでの絵文字のまま。 -->
-        ${(()=>{
-          const art = game ? RANK_ART[getRank(game.level).name] : "";
-          return html`
-            <div style=${{width:46,height:46,borderRadius:"50%",background:"rgba(255,255,255,0.2)",
-                          display:"flex",alignItems:"center",justifyContent:"center",
-                          fontSize:24,flexShrink:0,overflow:"hidden"}}>
-              ${art
-                ? html`<img src=${art} alt=${getRank(game.level).name} width="46" height="46"
-                         style=${{width:46,height:46,objectFit:"contain",display:"block"}}/>`
-                : (profile?.avatar||"🦊")}
-            </div>`;
-        })()}
-        <div style=${{flex:1,minWidth:0}}>
-          <div style=${{fontSize:26,fontWeight:800,color:"#fff",letterSpacing:"-.5px",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>${profile?.nickname||CURRENT_USER.name}</div>
-        </div>
-        ${game&&html`
-          <div style=${{flexShrink:0,textAlign:"right"}}>
-            <div style=${{fontSize:15,fontWeight:800,color:"#fff",whiteSpace:"nowrap"}}>${game.xp} XP</div>
-            ${(()=>{ const xpInLv=getXpInLevel(game.xp), xpForNxt=getXpForNextLevel(game.xp);
-              return html`<div style=${{fontSize:10.5,color:"rgba(255,255,255,0.65)",whiteSpace:"nowrap",marginTop:1}}>
-                ${xpForNxt?`次のレベルまで ${xpForNxt-xpInLv} XP`:"MAX LEVEL"}</div>`; })()}
-          </div>`}
-      </div>
-
-      ${game&&(()=>{
-        const rank=getRank(game.level);
+      <!-- ★見出しまわり★（2026-08-05 Kai指定のデザイン）
+           左に階級のキャラクターを大きく、右に名前・階級の札・XPの進み具合。
+           階級が上がってもキャラの大きさは変わらないよう、絵の側でそろえてある。 -->
+      ${(()=>{
+        const rank = game ? getRank(game.level) : null;
+        const art  = rank ? RANK_ART[rank.name] : "";
+        const lvLabel = rank
+          ? (rank.maxLv >= 999 ? `Lv.${rank.minLv}+`
+             : rank.minLv === rank.maxLv ? `Lv.${game.level}` : `Lv.${game.level}`)
+          : "";
+        const inLv  = game ? getXpInLevel(game.xp) : 0;
+        const forNxt= game ? getXpForNextLevel(game.xp) : 0;
+        const pct = forNxt ? Math.max(3, Math.min(100, Math.round(inLv / forNxt * 100))) : 100;
         return html`
-          <div style=${{display:"flex",alignItems:"center",gap:7,flexWrap:"wrap",marginLeft:58,marginBottom:16}}>
-            <!-- ★階級の色の丸★（2026-08-05 Kai要望）
-                 レベルの数字だけだと、いまどの階級にいるのかが色で分からない。
-                 ヘッダーは濃い背景なので、白い縁をつけて色を沈ませない。 -->
-            <span style=${{width:9,height:9,borderRadius:"50%",flexShrink:0,background:rank.color}}/>
-            <span style=${{fontSize:12,fontWeight:700,color:"rgba(255,255,255,0.9)"}}>Lv.${game.level} ${rank.name}</span>
-            ${game.streak>0&&html`<span style=${{fontSize:11,background:"rgba(255,255,255,0.2)",color:"#fff",padding:"2px 9px",borderRadius:20,fontWeight:600,whiteSpace:"nowrap"}}>🔥 ${game.streak}日連続</span>`}
-            ${game.streakFreeze>0&&html`<span title="連続記録フリーズ: 記録できない日があっても自動で連続記録を守ります" style=${{fontSize:11,background:"rgba(255,255,255,0.2)",color:"#fff",padding:"2px 9px",borderRadius:20,fontWeight:600,whiteSpace:"nowrap"}}>🧊 ×${game.streakFreeze}</span>`}
-          </div>`;
+        <div style=${{display:"flex",alignItems:"center",gap:11,marginBottom:14}}>
+          ${art
+            ? html`<span style=${{flexShrink:0,width:84,height:84,borderRadius:16,
+                                   background:"rgba(255,255,255,0.16)",display:"flex",
+                                   alignItems:"center",justifyContent:"center"}}>
+                     <img src=${art} alt=${rank.name} width="76" height="76"
+                       style=${{width:76,height:76,objectFit:"contain",display:"block"}}/>
+                   </span>`
+            : html`<div style=${{width:56,height:56,borderRadius:"50%",background:"rgba(255,255,255,0.2)",
+                                 display:"flex",alignItems:"center",justifyContent:"center",
+                                 fontSize:28,flexShrink:0}}>${profile?.avatar||"🦊"}</div>`}
+
+          <div style=${{flex:1,minWidth:0}}>
+            <div style=${{fontSize:26,fontWeight:800,color:"#fff",letterSpacing:"-.5px",lineHeight:1.15,
+                          overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+              ${profile?.nickname||CURRENT_USER.name}</div>
+            ${rank&&html`
+              <div style=${{display:"inline-flex",alignItems:"center",gap:5,marginTop:7,
+                            background:rank.color,borderRadius:20,padding:"4px 12px"}}>
+                <span style=${{fontSize:11,lineHeight:1}}>${rank.emoji}</span>
+                <span style=${{fontSize:12,fontWeight:800,color:"#fff",whiteSpace:"nowrap"}}>
+                  ${lvLabel} ${rank.name}</span>
+              </div>
+              <!-- 次のレベルまでの進み具合 -->
+              <div style=${{height:6,borderRadius:99,background:"rgba(255,255,255,0.25)",
+                            overflow:"hidden",marginTop:8}}>
+                <div style=${{height:"100%",width:pct+"%",borderRadius:99,background:rank.color}}/>
+              </div>`}
+            ${game&&html`
+              <!-- 2つとも1行に収める。折り返すと縦に伸びて間延びする -->
+              <div style=${{display:"flex",alignItems:"center",gap:6,flexWrap:"nowrap",marginTop:8}}>
+                ${game.streak>0&&html`<span style=${{fontSize:10.5,background:"rgba(255,255,255,0.2)",color:"#fff",padding:"3px 9px",borderRadius:20,fontWeight:700,whiteSpace:"nowrap"}}>🔥 ${game.streak}日連続</span>`}
+                ${game.streakFreeze>0&&html`<span title="連続記録フリーズ: 記録できない日があっても自動で連続記録を守ります" style=${{fontSize:10.5,background:"rgba(255,255,255,0.2)",color:"#fff",padding:"3px 9px",borderRadius:20,fontWeight:700,whiteSpace:"nowrap"}}>🧊 ×${game.streakFreeze}</span>`}
+              </div>`}
+          </div>
+
+          ${game&&html`
+            <div style=${{flexShrink:0,textAlign:"right",paddingTop:2}}>
+              <div style=${{fontSize:17,fontWeight:800,color:"#fff",whiteSpace:"nowrap"}}>${game.xp} XP</div>
+              <div style=${{fontSize:10.5,color:"rgba(255,255,255,0.65)",whiteSpace:"nowrap",marginTop:2}}>
+                ${forNxt?`次のレベルまで ${forNxt-inLv} XP`:"MAX LEVEL"}</div>
+            </div>`}
+        </div>`;
       })()}
 
       <div style=${{display:"flex",gap:8}}>
@@ -9310,37 +9326,35 @@ function SettingsScreen({onToast,onLogout,onGoalSaved,profile,onProfileSaved,onC
             ストリークリセット
           </div>
         </div>
-        <!-- ★階級の一覧★（2026-08-05 Kai指定のデザイン）
-             丸い点・名前・色つきのレベル札・キャラクター。段の間に矢印を入れて、
-             上から下へ上がっていくことが分かるようにする。
-             キャラクターの絵（RANK_ART）が入っていない階級は、絵柄の代わりに
-             その階級の記号を出す。空の枠だけが残らないようにするため。 -->
-        <div style=${{display:"flex",flexDirection:"column"}}>
-          ${RANK_RULES.map((r,ri)=>{
+        <!-- ★階級の一覧★（2026-08-05 Kai指定のデザイン・2枚目の画像に合わせる）
+             見出し（丸・名前・レベルの札）の下に、キャラクターを白いカードに入れて置く。
+             はみ出さないよう、カードの中に収める。 -->
+        <div style=${{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+          ${RANK_RULES.map(r=>{
             const here = myLevel > 0 && getRank(myLevel).name === r.name;
             const art = RANK_ART[r.name] || "";
             return html`
-            <div key=${r.name}>
-              <div style=${{display:"flex",alignItems:"center",gap:10,padding:"7px 11px",borderRadius:10,
-                            marginTop:ri?5:0,
-                            background:here?"var(--bg)":"transparent",
-                            border:`1px solid ${here?r.color:"var(--border)"}`}}>
-                <span style=${{width:8,height:8,borderRadius:"50%",background:r.color,flexShrink:0}}/>
-                <div style=${{flex:1,minWidth:0}}>
-                  <div style=${{display:"flex",alignItems:"center",gap:7,flexWrap:"wrap"}}>
-                    <span style=${{fontSize:13,fontWeight:800,color:"var(--text)"}}>${r.name}</span>
-                    <span style=${{fontSize:10,fontWeight:700,color:"#fff",background:r.color,
-                                   borderRadius:20,padding:"1px 8px",whiteSpace:"nowrap"}}>${r.lv}</span>
-                    ${here&&html`<span style=${{fontSize:10,fontWeight:700,color:r.color}}>いまここ</span>`}
-                  </div>
-                  <div style=${{fontSize:10.5,color:"var(--sub)",marginTop:1}}>${r.sub}</div>
+              <div key=${r.name}>
+                <div style=${{display:"flex",alignItems:"center",gap:6,marginBottom:6,flexWrap:"wrap"}}>
+                  <span style=${{width:8,height:8,borderRadius:"50%",background:r.color,flexShrink:0}}/>
+                  <span style=${{fontSize:12,fontWeight:800,color:"var(--text)"}}>${r.name}</span>
+                  <span style=${{fontSize:9.5,fontWeight:700,color:"#fff",background:r.color,
+                                 borderRadius:20,padding:"1px 7px",whiteSpace:"nowrap"}}>${r.lv}</span>
                 </div>
-                ${art
-                  ? html`<img src=${art} alt=${r.name} width="40" height="40" loading="lazy"
-                           style=${{width:40,height:40,objectFit:"contain",display:"block",flexShrink:0}}/>`
-                  : html`<span style=${{fontSize:20,lineHeight:1,flexShrink:0}}>${r.emoji}</span>`}
-              </div>
-            </div>`;
+                <div style=${{position:"relative",borderRadius:14,background:"var(--bg)",
+                              border:`1px solid ${here?r.color:"var(--border)"}`,
+                              aspectRatio:"1 / 1",display:"flex",alignItems:"center",
+                              justifyContent:"center",overflow:"hidden"}}>
+                  ${art
+                    ? html`<img src=${art} alt=${r.name} loading="lazy"
+                             style=${{width:"84%",height:"84%",objectFit:"contain",display:"block"}}/>`
+                    : html`<span style=${{fontSize:34,lineHeight:1}}>${r.emoji}</span>`}
+                  ${here&&html`
+                    <span style=${{position:"absolute",top:6,right:6,fontSize:9.5,fontWeight:700,
+                                   color:"#fff",background:r.color,borderRadius:20,padding:"2px 8px"}}>いまここ</span>`}
+                </div>
+                <div style=${{fontSize:10.5,color:"var(--sub)",marginTop:5}}>${r.sub}</div>
+              </div>`;
           })}
         </div>
       <//>
@@ -9550,7 +9564,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260805-114406";
+const APP_BUILD = "20260805-120240";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
