@@ -209,7 +209,7 @@ function doGet(e) {
           const live = mine.filter(function (x) {
             return !String(x.revoked_at || "").trim() &&
                    new Date(String(x.expires_at)).getTime() > now &&
-                   Number(x.token_version || 0) >= Number(u.token_version || 0); });
+                   tokenVer_(x.token_version) >= tokenVer_(u.token_version); });
           return { email: u.student_email, name: u.name, nickname: u.nickname,
                    is_active: u.is_active, cohort: u.cohort || "",
                    line_linked: !!String(u.line_user_id || "").trim(),
@@ -217,7 +217,7 @@ function doGet(e) {
                    streak: u.streak, last_log_date: String(u.last_log_date || ""),
                    sessions_total: mine.length, sessions_live: live.length,
                    last_session_at: mine.length ? String(mine[mine.length - 1].created_at || "") : "",
-                   token_version: u.token_version || 0 };
+                   token_version: u.token_version, token_version_num: tokenVer_(u.token_version) };
         }) });
       }
       // 新しい採点方式を、実データで試算する（保存はしない）
@@ -462,6 +462,36 @@ function doGet(e) {
           total_found: outJ.reduce(function (a, o) { return a + o.count; }, 0),
           detail: outJ.sort(function (a, b) { return b.count - a.count; }) });
       }
+      // ★token_version の書式崩れを直す★（2026-08-05）
+      //   セルが時刻書式になっていると 0 が Date(00:00) として読まれ、
+      //   セッションが毎回無効になって、何度ログインしても入れなくなる。
+      //   数字として読めない行を、数字の0に直す。
+      //     bash gas/ops.sh adminFixTokenVersion dry=1
+      case "adminFixTokenVersion": {
+        if (!verifyAdmin(e.parameter.coachEmail)) return jsonResponse({ ok: false, error: "not admin" });
+        const dryT = String(e.parameter.dry || "") === "1";
+        const shT = getSheet("Users");
+        const dataT = shT.getDataRange().getValues();
+        const hT = dataT[0];
+        const iEmT = hT.indexOf("student_email"), iNmT = hT.indexOf("name");
+        const iTvT = hT.indexOf("token_version");
+        if (iTvT === -1) return jsonResponse({ ok: false, error: "token_version 列がありません" });
+        const fixed = [];
+        for (let i = 1; i < dataT.length; i++) {
+          const raw = dataT[i][iTvT];
+          const isNum = (typeof raw === "number") && isFinite(raw);
+          if (isNum) continue;
+          if (raw === "" || raw === null || raw === undefined) continue;  // 空欄はそのままで問題ない
+          fixed.push({ email: String(dataT[i][iEmT] || ""), name: String(dataT[i][iNmT] || ""),
+                       before: String(raw), after: 0 });
+          if (!dryT) {
+            const cell = shT.getRange(i + 1, iTvT + 1);
+            cell.setNumberFormat("0");   // 時刻書式に戻らないようにする
+            cell.setValue(0);
+          }
+        }
+        return jsonResponse({ ok: true, dry: dryT, count: fixed.length, fixed: fixed });
+      }
       // 自己経営力の中身を読むだけのコマンド（調査用・書き込みなし）
       // ★レベルのズレを調べる（読むだけ・書き込みなし）★（2026-08-05）
       //   「35日続けているのにルーキーのまま」のような食い違いを見つける。
@@ -682,7 +712,7 @@ function doGet(e) {
         getAuthSheet("Sessions").appendRow([
           sha256Hex(token), u.user_id, u.google_sub || "", u.auth_role || u.role || "USER", u.organization_id || "",
           new Date(now.getTime() + 86400000).toISOString(), now.toISOString(), now.toISOString(), "",
-          Number(u.token_version || 0), "localtest"
+          tokenVer_(u.token_version), "localtest"
         ]);
         authAudit("TEST_SESSION", { result: "ISSUED", action: "adminIssueTestSession" });
         return jsonResponse({ ok: true, token: token });
@@ -869,14 +899,14 @@ function doGet(e) {
         // 単純に revoked_at だけで数えると実態より多く見えてしまう。
         // CP3/CP4の切り替え判断に使う数字なので、検証と同じ条件で数える。
         var _tvByUser = {};
-        allUsers.forEach(function(u){ if (u.user_id) _tvByUser[String(u.user_id)] = Number(u.token_version || 0); });
+        allUsers.forEach(function(u){ if (u.user_id) _tvByUser[String(u.user_id)] = tokenVer_(u.token_version); });
         var _now = Date.now();
         var usable = ses.filter(function(x){
           if (String(x.revoked_at || "").trim()) return false;
           if (new Date(String(x.expires_at)).getTime() <= _now) return false;
           var cur = _tvByUser[String(x.user_id)];
           if (cur === undefined) return false;
-          return Number(x.token_version || 0) === cur;
+          return tokenVer_(x.token_version) === cur;
         });
         var usableUsers = {};
         usable.forEach(function(x){ usableUsers[String(x.user_id)] = 1; });
@@ -7934,7 +7964,7 @@ function adminBroadcastLinePending(email, message, confirm) {
 
   const users = sheetToObjects(getSheet("Users"));
   const tvByUser = {};
-  users.forEach(function (u) { if (u.user_id) tvByUser[String(u.user_id)] = Number(u.token_version || 0); });
+  users.forEach(function (u) { if (u.user_id) tvByUser[String(u.user_id)] = tokenVer_(u.token_version); });
 
   const now = Date.now();
   const hasUsable = {};
@@ -7943,7 +7973,7 @@ function adminBroadcastLinePending(email, message, confirm) {
     if (new Date(String(x.expires_at)).getTime() <= now) return;
     const cur = tvByUser[String(x.user_id)];
     if (cur === undefined) return;
-    if (Number(x.token_version || 0) !== cur) return;
+    if (tokenVer_(x.token_version) !== cur) return;
     hasUsable[String(x.user_id)] = true;
   });
 
@@ -12741,6 +12771,18 @@ const AUTH_SHEETS = {
 };
 const AUTH_USER_COLUMNS = ["user_id","google_sub","token_version","role","organization_id","auth_linked_at"];
 
+// ★token_version は必ずこれを通して読む★（2026-08-05 本番で5人がログインできなくなった）
+//   シートのセルが時刻書式になっていると、0 が Date（00:00）として返ってくる。
+//   Number(Date) は NaN になり、NaN !== NaN が常に true なので
+//   「版が変わった」と判定され、何度ログインしてもセッションが無効になる。
+//   数字として読めないものは 0 として扱う。
+function tokenVer_(v) {
+  if (v === "" || v === null || v === undefined) return 0;
+  if (v instanceof Date) return 0;             // 書式が崩れた 00:00 は「未設定」
+  const n = Number(v);
+  return isFinite(n) ? n : 0;
+}
+
 const SESSION_ABSOLUTE_DAYS = 14;  // 絶対有効期限
 const SESSION_IDLE_DAYS     = 7;   // 無操作で切れるまで
 const SESSION_MAX_DEVICES   = 5;   // 1人あたりの同時端末数
@@ -13116,7 +13158,7 @@ function authRoleApply() {
     const role = (em === admin) ? "JIROKU_ADMIN" : (coachEmails[em] ? "COACH" : "USER");
     sh.getRange(i + 1, iRole + 1).setValue(role);
     // 権限が変わったので、その人の既存セッションを無効化する
-    if (iTv !== -1) sh.getRange(i + 1, iTv + 1).setValue(Number(data[i][iTv] || 0) + 1);
+    if (iTv !== -1) sh.getRange(i + 1, iTv + 1).setValue(tokenVer_(data[i][iTv]) + 1);
     applied.push({ email: em, role: role });
     authAudit("ROLE_ASSIGN", { result: "SUCCESS", targetUserId: em, action: "authRoleApply", failureReason: role });
   }
@@ -13317,7 +13359,7 @@ function authCohort(days) {
   const tvByUser = {};
   users.forEach(function (u) {
     if (u.student_email) byEmail[String(u.student_email).trim()] = u;
-    if (u.user_id) tvByUser[String(u.user_id)] = Number(u.token_version || 0);
+    if (u.user_id) tvByUser[String(u.user_id)] = tokenVer_(u.token_version);
   });
   const ses = sheetToObjects(getAuthSheet("Sessions"));
   const hasUsable = {};   // user_id -> true
@@ -13326,7 +13368,7 @@ function authCohort(days) {
     if (new Date(String(x.expires_at)).getTime() <= now) return;
     const cur = tvByUser[String(x.user_id)];
     if (cur === undefined) return;
-    if (Number(x.token_version || 0) !== cur) return;
+    if (tokenVer_(x.token_version) !== cur) return;
     hasUsable[String(x.user_id)] = true;
   });
 
@@ -13495,7 +13537,7 @@ function authRevokeAllUsers(confirm, reason) {
   // いま実際に使えるセッションを持っている人（authCohort と同一条件）
   const tvByUser = {};
   for (let i = 1; i < data.length; i++) {
-    if (data[i][iUid]) tvByUser[String(data[i][iUid])] = Number(data[i][iTv] || 0);
+    if (data[i][iUid]) tvByUser[String(data[i][iUid])] = tokenVer_(data[i][iTv]);
   }
   const now = Date.now();
   const hasUsable = {};
@@ -13505,7 +13547,7 @@ function authRevokeAllUsers(confirm, reason) {
     if (new Date(String(x.expires_at)).getTime() <= now) return;
     const cur = tvByUser[String(x.user_id)];
     if (cur === undefined) return;
-    if (Number(x.token_version || 0) !== cur) return;
+    if (tokenVer_(x.token_version) !== cur) return;
     hasUsable[String(x.user_id)] = true;
     usableSessions++;
   });
@@ -13514,7 +13556,7 @@ function authRevokeAllUsers(confirm, reason) {
   for (let i = 1; i < data.length; i++) {
     const uid = String(data[i][iUid] || "");
     if (!uid || !hasUsable[uid]) continue;
-    targets.push({ row: i + 1, uid: uid, tv: Number(data[i][iTv] || 0) });
+    targets.push({ row: i + 1, uid: uid, tv: tokenVer_(data[i][iTv]) });
   }
 
   // 消すキャッシュのキーを先に集める。
@@ -13621,7 +13663,7 @@ function authLoginAccess(body) {
 
   const userRow = sheetToObjects(getSheet("Users")).find(function (x) { return String(x.user_id) === String(u.userId); }) || {};
   const sess = issueSession({ userId: u.userId, sub: v.sub, role: userRow.role || "USER",
-                              organizationId: userRow.organization_id || "", tokenVersion: userRow.token_version || 0 }, String((body && body.device) || ""));
+                              organizationId: userRow.organization_id || "", tokenVersion: tokenVer_(userRow.token_version) }, String((body && body.device) || ""));
   authAudit("LOGIN_ACCESS", { result: "SUCCESS", actorUserId: u.userId, action: "loginAccess",
                               credentialFingerprint: fp, failureReason: u.linked ? "sub_linked" : "" });
   return { ok: true, token: sess.token, expiresAt: sess.expiresAt,
@@ -13752,7 +13794,7 @@ function verifySession(token, allowCache) {
     const user = sheetToObjects(getSheet("Users")).find(u => String(u.user_id) === String(data[i][iUid]));
     if (!user) return { ok: false, reason: "USER_NOT_FOUND" };
     if (String(user.is_active).toUpperCase() !== "TRUE") return { ok: false, reason: "USER_INACTIVE" };
-    if (Number(user.token_version || 0) !== Number(data[i][iTv] || 0)) return { ok: false, reason: "TOKEN_VERSION_CHANGED" };
+    if (tokenVer_(user.token_version) !== tokenVer_(data[i][iTv])) return { ok: false, reason: "TOKEN_VERSION_CHANGED" };
     if (String(user.google_sub || "") !== String(data[i][iSub])) return { ok: false, reason: "SUB_MISMATCH" };
 
     sh.getRange(i + 1, iSeen + 1).setValue(new Date().toISOString());
@@ -13817,7 +13859,7 @@ function authLogin(body) {
 
   const userRow = sheetToObjects(getSheet("Users")).find(x => String(x.user_id) === String(u.userId)) || {};
   const sess = issueSession({ userId: u.userId, sub: v.sub, role: userRow.role || "USER",
-                              organizationId: userRow.organization_id || "", tokenVersion: userRow.token_version || 0 }, String((body && body.device) || ""));
+                              organizationId: userRow.organization_id || "", tokenVersion: tokenVer_(userRow.token_version) }, String((body && body.device) || ""));
   if (fp) rateClear("fp_" + fp);
   rateClear("sub_" + v.sub);
   authAudit("LOGIN", { result: "SUCCESS", actorUserId: u.userId, action: "login",
