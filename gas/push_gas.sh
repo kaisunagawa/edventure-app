@@ -22,6 +22,18 @@ TEST_DEPLOYMENT_ID="AKfycbw-MhcAhOaqd_JJTlN4LltE-liM-WriznSgcDGIBR0uUMMB-rnYI74G
 
 BASE="https://script.google.com/macros/s"
 set -e
+
+# ★夜の処理が動いている時間帯はデプロイしない★（2026-08-05の事故）
+#   夜のレポートは22:00に始まり、時間切れになると1分後に自分を再実行して続きを処理する。
+#   その最中にデプロイすると動いているコードが差し替わり、生成が途中で止まる。
+#   実際、22:00〜22:30に4回デプロイして3人分で止め、点数も食い違わせた。
+#   22:00〜23:00は既定で止める。どうしても出す必要があるときだけ FORCE_NIGHT=1。
+_hour=$(date +%H)
+if [ "$_hour" = "22" ] && [ "${FORCE_NIGHT:-0}" != "1" ]; then
+  echo "✗ 22時台は夜のレポートが動いているためデプロイしません（利用者のレポートが途中で止まります）"
+  echo "   23時以降にやり直すか、どうしても今出すなら FORCE_NIGHT=1 を付けてください"
+  exit 1
+fi
 cd "$(dirname "$0")"
 export PATH="$HOME/.local/node-v22.17.0-darwin-arm64/bin:$PATH"
 

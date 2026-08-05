@@ -680,6 +680,16 @@ function doGet(e) {
         const day4 = String(e.parameter.date || "").slice(0, 10) || formatDate(new Date());
         const detail = getDailyOpsReport(em4, { date: day4 });
         const dv = (detail && detail.ok && detail.data) ? detail.data.displayed_score : null;
+        // ★確定前のその日は比べない★（2026-08-05）
+        //   夜のレポート（22時）で一覧の点数を書いたあとに記録を足すと、
+        //   詳細は今の計算・一覧は22時時点の値になり、必ず食い違う。
+        //   23:59の確定処理でそろうので、確定前の当日は判定の対象外にする。
+        //   （食い違いを見逃すのではなく、まだ動いている日を比べないということ）
+        if (detail && detail.ok && detail.data && !detail.data.finalized &&
+            day4 === formatDate(new Date())) {
+          return jsonResponse({ ok: false, error: "確定前の当日は比べない",
+            date: day4, note: "夜の確定処理（23:59）の前は、詳細が最新・一覧が夜22時時点になるため" });
+        }
         const listR = getReportList(em4);
         const lrow = (listR.data || []).find(function (r) { return String(r.date).slice(0, 10) === day4; });
         const lv = lrow ? lrow.score : null;
