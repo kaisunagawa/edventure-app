@@ -9238,7 +9238,12 @@ function GuideBookSheet({myLevel,jiro,onClose}) {
     </div>`, document.body);
 }
 
-function SettingsScreen({onToast,onLogout,onGoalSaved,profile,onProfileSaved,onCalLinked,jumpTo,onJumped,game}) {
+function SettingsScreen({onToast,onLogout,onGoalSaved,profile,onProfileSaved,onCalLinked,jumpTo,onJumped}) {
+  // ★App から game を渡さないこと★（2026-08-05 本番で画面が真っ赤になった）
+  //   game は App には無く、ホーム側の state。渡そうとして
+  //   「Can't find variable: game」でアプリ全体が落ちた。
+  //   ホームが localStorage に置いたキャッシュから読む。
+  const gameCache = (()=>{ try { return JSON.parse(localStorage.getItem("cache_gameStatus")||"null"); } catch { return null; } })();
   const [nickname,setNickname]=useState(profile?.nickname||CURRENT_USER.name);
   const [avatar,setAvatar]=useState(profile?.avatar||"🦊");
   const [showAllAvatars,setShowAllAvatars]=useState(false);
@@ -9885,7 +9890,7 @@ function SettingsScreen({onToast,onLogout,onGoalSaved,profile,onProfileSaved,onC
         </div>
       <//>
 
-      ${guideOpen && html`<${GuideBookSheet} myLevel=${myLevel} jiro=${game&&game.jiro} onClose=${()=>setGuideOpen(false)}/>`}
+      ${guideOpen && html`<${GuideBookSheet} myLevel=${myLevel} jiro=${gameCache&&gameCache.jiro} onClose=${()=>setGuideOpen(false)}/>`}
 
       <!-- 使い方 Q&A -->
       <${FAQSection}/>
@@ -10092,7 +10097,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260805-183421";
+const APP_BUILD = "20260805-200818";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
@@ -11603,7 +11608,7 @@ function App() {
           <div style=${{display:tab==="report"?"block":"none"}}><${ReportScreen}/></div>
           <div style=${{display:tab==="brain"?"block":"none"}}><${SecondBrainScreen} isActive=${tab==="brain"}/></div>
           <div style=${{display:tab==="timer"?"block":"none",height:"100%"}}><${TimerScreen} onToast=${setToast} isActive=${tab==="timer"}/></div>
-          <div style=${{display:tab==="settings"?"block":"none"}}><${SettingsScreen} onToast=${setToast} onLogout=${logout} onGoalSaved=${setGoalData} profile=${profile} onProfileSaved=${setProfile} onCalLinked=${()=>setCalLinked(true)} jumpTo=${settingsJump} onJumped=${()=>setSettingsJump("")} game=${game}/></div>
+          <div style=${{display:tab==="settings"?"block":"none"}}><${SettingsScreen} onToast=${setToast} onLogout=${logout} onGoalSaved=${setGoalData} profile=${profile} onProfileSaved=${setProfile} onCalLinked=${()=>setCalLinked(true)} jumpTo=${settingsJump} onJumped=${()=>setSettingsJump("")}/></div>
         </div>
       </div>
       <!-- 独り言（クイック記録）フローティングボタン。

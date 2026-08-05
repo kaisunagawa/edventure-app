@@ -130,6 +130,16 @@ PYX
     ng "$(sed -n '2p' /tmp/_smoke_deps.txt)"
   fi
 
+  # ★渡している値が、その場所にあるか★
+  #   2026-08-05、App には無い game を SettingsScreen に渡してしまい、
+  #   本番で "Can't find variable: game" が出てアプリ全体が開かなくなった。
+  #   構文は正しく、依存配列の検査も通ってしまう種類のバグ。
+  if (cd .. && python3 .preview/check_props.py >/tmp/_smoke_props.txt 2>&1); then
+    ok "受け渡している値が存在する"
+  else
+    ng "$(sed -n '2p' /tmp/_smoke_props.txt)"
+  fi
+
   # Googleの公式ボタンを描画する土台が揃っているか。
   # 「押しても無反応」は原因が見えず、いちばん困る壊れ方なので必ず確認する。
   check_pair() {  # $1=ファイル $2=コンテナid $3=表示名
