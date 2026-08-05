@@ -1388,6 +1388,43 @@ const RANK_ART = {
   "アルティメットレジェンド": "assets/rank/ultimate.png",
 };
 
+// ★隠しジロー図鑑★（2026-08-05 Kai要望）
+//   条件を満たすと会える。判定はサーバー（HIDDEN_JIRO と同じ並び・同じid）。
+//   ★絵が届くまで art は空にしておく★ 未発見はどのみちシルエットなので、
+//   仕組みだけ先に動かして、絵が揃った日に差し込めばそのまま公開できる。
+const HIDDEN_JIRO = [
+  { id:"night",    no:"No.101", name:"夜ふかしジロー", rarity:"Epic", art:"",
+    cond:"23:00〜5:00の記録が通算20件",  personality:"夜型・マイペース",
+    line:"「今日はまだ始まったばかり。」", note:"夜になると本領発揮する夜行性ジロー。" },
+  { id:"calm",     no:"No.102", name:"ととのえジロー", rarity:"Rare", art:"",
+    cond:"回復の記録が通算30件",          personality:"穏やか・癒し系",
+    line:"「大丈夫、ちゃんと休めてるよ。」", note:"心と体をととのえる達人ジロー。" },
+  { id:"stack",    no:"No.103", name:"積み上げジロー", rarity:"Rare", art:"",
+    cond:"将来への投資の記録が通算50件",  personality:"真面目・コツコツ型",
+    line:"「未来の自分に、今をプレゼント。」", note:"小さな努力を積み重ねる研究者タイプ。" },
+  { id:"straight", no:"No.104", name:"一直線ジロー",   rarity:"Epic", art:"",
+    cond:"目標に直結の記録が通算50件",    personality:"ストイック・一直線",
+    line:"「ブレずに、ゴールまで。」",     note:"無駄な寄り道はしないストイックジロー。" },
+  { id:"kind",     no:"No.105", name:"思いやりジロー", rarity:"Rare", art:"",
+    cond:"人間関係の記録が通算20件",      personality:"優しい・サポート好き",
+    line:"「一緒なら、もっと頑張れるよね。」", note:"人を思いやることが大好きなジロー。" },
+  { id:"support",  no:"No.106", name:"縁の下ジロー",   rarity:"Rare", art:"",
+    cond:"日常業務の記録が通算80件",      personality:"縁の下・責任感が強い",
+    line:"「ちゃんとやる、それが一番の近道。」", note:"目立たないけど欠かせない存在。" },
+  { id:"turbo",    no:"No.107", name:"爆速ジロー",     rarity:"Epic", art:"",
+    cond:"日次スコア90点以上が7日連続",   personality:"情熱的・負けず嫌い",
+    line:"「限界？そんなの、昨日の話！」", note:"勢いが止まらないスピードスター。" }
+];
+// 新しく会えたジローのお知らせ文（サーバーが jiro_gained で返してくる）
+function jiroGainedMsg(res) {
+  const g = (res && res.jiro_gained) || [];
+  if (!g.length) return "";
+  if (g.length === 1) return `🎉 ${g[0].name} に会えました！（図鑑に追加）`;
+  return `🎉 新しいジローに ${g.length} 体 会えました！（図鑑に追加）`;
+}
+const RARITY_COLOR = { Rare:"#3B82F6", Epic:"#8B5CF6", Legendary:"#D97706",
+                       Mythic:"#DB2777", Secret:"#334155", Ultimate:"#CA8A04" };
+
 // 画像は端末にキャッシュされる。差し替えても古い絵が出続けるので、
 // 版（APP_BUILD）をURLに付けて別物として取り直させる。
 // ★関数にしておくこと★ RANK_ART は APP_BUILD より前にあるので、
@@ -5762,6 +5799,7 @@ function LogScreen({onToast, isActive}) {
       return;
     }
     if(res.xp_gained){ const lv=res.level_up?`  →  Lv.${res.level} へ！`:""; onToast(`+${res.xp_gained} XP 獲得${lv}`); }
+    const jm1=jiroGainedMsg(res); if(jm1) setTimeout(()=>onToast(jm1), 1800);
     else onToast(res.updated?"記録を上書きしました"
       :(blocks.length>1 ? blocks.length+"個の時間帯に保存しました"
         : (blockMinutes(blocks[0])>60 ? blocks[0]+" を1件として保存しました" : "保存しました")));
@@ -7652,6 +7690,7 @@ function TimerScreen({onToast, isActive}) {
     if(linkTaskId) completeTaskById(linkTaskId, calTitle);
     else completeTaskIfListed(task);
     if(res.xp_gained){ const lv=res.level_up?` → Lv.${res.level}！`:""; onToast(`+${res.xp_gained} XP 獲得${lv}`); }
+    const jm2=jiroGainedMsg(res); if(jm2) setTimeout(()=>onToast(jm2), 1800);
     else onToast(res.updated?"記録を更新しました":"記録しました");
     // タイマー記録は1時間枠ではなく「実際に集中した開始〜終了時刻」でカレンダーに書き戻す
     // （同じ時間帯キーを使うので、手動記録側で作ったイベントがあれば実測時刻に更新される）
@@ -8989,7 +9028,11 @@ function AvailableTimeSection({onToast}) {
 //   中身は「それっぽい数字」ではなく、実際のサーバーの計算(addXP)に合わせている。
 //     記録1件 +10 / メモあり +5 / その日の最初の1件だけ ストリーク日数×2（30日で頭打ち）
 //   まだ上がっていない階級は姿も攻略も見せない。アルティメットレジェンドは名前も伏せる。
-function GuideBookSheet({myLevel,onClose}) {
+function GuideBookSheet({myLevel,jiro,onClose}) {
+  // サーバーから来た発見済みと進み具合（無ければ空で表示する）
+  const jFound = (jiro && jiro.found) || [];
+  const jProg = {};
+  ((jiro && jiro.progress) || []).forEach(p => { jProg[p.id] = p; });
   const H = ({t,s}) => html`
     <div style=${{marginBottom:9}}>
       <div style=${{fontSize:14,fontWeight:800,color:"var(--text)"}}>${t}</div>
@@ -9135,6 +9178,54 @@ function GuideBookSheet({myLevel,onClose}) {
               <div style=${{fontSize:11,color:"var(--sub)",lineHeight:1.65,marginTop:2}}>→ ${a}</div>
             </div>`)})}
 
+          <!-- ★隠しジロー図鑑★（2026-08-05 Kai要望）
+               条件を満たした瞬間に会える。会うまでは影と条件だけ見せる。 -->
+          ${H({t:"隠しジロー図鑑",s:`記録の内容で会える、レアなジローたち。${jFound.length} / ${HIDDEN_JIRO.length} 体`})}
+          <div style=${{display:"grid",gridTemplateColumns:"minmax(0,1fr) minmax(0,1fr)",gap:10,marginBottom:14}}>
+            ${HIDDEN_JIRO.map(j=>{
+              const have = jFound.indexOf(j.id) !== -1;
+              const pg = jProg[j.id] || {now:0,need:0};
+              const rc = RARITY_COLOR[j.rarity] || "var(--sub)";
+              return html`
+                <div key=${j.id} style=${{border:"1px solid var(--border)",borderRadius:12,
+                              background:"var(--bg)",padding:"9px 10px",boxSizing:"border-box",
+                              minWidth:0,opacity:have?1:0.92}}>
+                  <div style=${{display:"flex",alignItems:"center",gap:4,marginBottom:6,minWidth:0}}>
+                    <span style=${{flexShrink:0,fontSize:7.5,fontWeight:800,color:"var(--faint)"}}>${j.no}</span>
+                    <span style=${{flexShrink:0,fontSize:7.5,fontWeight:800,color:"#fff",background:rc,
+                                   borderRadius:20,padding:"1px 5px"}}>${j.rarity}</span>
+                  </div>
+                  <!-- 正方形にすると1枚が大きくなりすぎて、7枚が空欄の帯になる。
+                       絵は96pxで十分読める（素材は400px以上を想定）。 -->
+                  <div style=${{position:"relative",height:96,borderRadius:10,
+                                background:"var(--card)",display:"flex",alignItems:"center",
+                                justifyContent:"center",overflow:"hidden",marginBottom:6}}>
+                    ${have && j.art
+                      ? html`<img src=${j.art+"?v="+APP_BUILD} alt=${j.name} loading="lazy"
+                               style=${{maxWidth:"88%",maxHeight:"88%",objectFit:"contain",display:"block"}}/>`
+                      : html`<span style=${{fontSize:26,fontWeight:800,color:"var(--border)"}}>?</span>`}
+                  </div>
+                  <div style=${{fontSize:10,fontWeight:800,lineHeight:1.35,
+                                color:have?"var(--text)":"var(--sub)"}}>
+                    ${have ? j.name : "？？？ジロー"}</div>
+                  ${have
+                    ? html`<div style=${{fontSize:8.8,color:"var(--sub)",lineHeight:1.5,marginTop:3}}>
+                             ${j.personality}<br/>${j.line}</div>`
+                    : html`
+                      <div style=${{fontSize:8.5,color:"var(--sub)",lineHeight:1.5,marginTop:3}}>${j.cond}</div>
+                      ${pg.need ? html`
+                        <div style=${{marginTop:5}}>
+                          <div style=${{height:4,borderRadius:4,background:"var(--border)",overflow:"hidden"}}>
+                            <div style=${{height:"100%",width:Math.round(pg.now/pg.need*100)+"%",
+                                          background:rc,borderRadius:4}}/>
+                          </div>
+                          <div style=${{fontSize:8,color:"var(--faint)",marginTop:3,fontWeight:700}}>
+                            ${pg.now} / ${pg.need}</div>
+                        </div>` : ""}`}
+                </div>`;
+            })}
+          </div>
+
           <div style=${{background:"var(--accent-l)",border:"1px solid var(--accent)",borderRadius:14,
                         padding:"12px 14px",fontSize:11.5,color:"var(--accent)",fontWeight:700,
                         lineHeight:1.7,textAlign:"center",marginBottom:14}}>
@@ -9147,7 +9238,7 @@ function GuideBookSheet({myLevel,onClose}) {
     </div>`, document.body);
 }
 
-function SettingsScreen({onToast,onLogout,onGoalSaved,profile,onProfileSaved,onCalLinked,jumpTo,onJumped}) {
+function SettingsScreen({onToast,onLogout,onGoalSaved,profile,onProfileSaved,onCalLinked,jumpTo,onJumped,game}) {
   const [nickname,setNickname]=useState(profile?.nickname||CURRENT_USER.name);
   const [avatar,setAvatar]=useState(profile?.avatar||"🦊");
   const [showAllAvatars,setShowAllAvatars]=useState(false);
@@ -9794,7 +9885,7 @@ function SettingsScreen({onToast,onLogout,onGoalSaved,profile,onProfileSaved,onC
         </div>
       <//>
 
-      ${guideOpen && html`<${GuideBookSheet} myLevel=${myLevel} onClose=${()=>setGuideOpen(false)}/>`}
+      ${guideOpen && html`<${GuideBookSheet} myLevel=${myLevel} jiro=${game&&game.jiro} onClose=${()=>setGuideOpen(false)}/>`}
 
       <!-- 使い方 Q&A -->
       <${FAQSection}/>
@@ -10001,7 +10092,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260805-174848";
+const APP_BUILD = "20260805-183421";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
@@ -11512,7 +11603,7 @@ function App() {
           <div style=${{display:tab==="report"?"block":"none"}}><${ReportScreen}/></div>
           <div style=${{display:tab==="brain"?"block":"none"}}><${SecondBrainScreen} isActive=${tab==="brain"}/></div>
           <div style=${{display:tab==="timer"?"block":"none",height:"100%"}}><${TimerScreen} onToast=${setToast} isActive=${tab==="timer"}/></div>
-          <div style=${{display:tab==="settings"?"block":"none"}}><${SettingsScreen} onToast=${setToast} onLogout=${logout} onGoalSaved=${setGoalData} profile=${profile} onProfileSaved=${setProfile} onCalLinked=${()=>setCalLinked(true)} jumpTo=${settingsJump} onJumped=${()=>setSettingsJump("")}/></div>
+          <div style=${{display:tab==="settings"?"block":"none"}}><${SettingsScreen} onToast=${setToast} onLogout=${logout} onGoalSaved=${setGoalData} profile=${profile} onProfileSaved=${setProfile} onCalLinked=${()=>setCalLinked(true)} jumpTo=${settingsJump} onJumped=${()=>setSettingsJump("")} game=${game}/></div>
         </div>
       </div>
       <!-- 独り言（クイック記録）フローティングボタン。

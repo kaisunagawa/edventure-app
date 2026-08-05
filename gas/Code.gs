@@ -412,6 +412,56 @@ function doGet(e) {
                      users: Object.keys(unknown[k].users).length, sample: unknown[k].sample }; })
             .sort(function (a, b) { return b.count - a.count; }) });
       }
+      // ★隠しジローの棚卸し★（2026-08-05）
+      //   これまでの記録を数えて、Users の jiro_counts / jiro_found を作り直す。
+      //   dry=1 なら書き込まず、誰が何体になるかだけ返す。
+      //     bash gas/ops.sh adminJiroBackfill dry=1
+      case "adminJiroBackfill": {
+        if (!verifyAdmin(e.parameter.coachEmail)) return jsonResponse({ ok: false, error: "not admin" });
+        const dryJ = String(e.parameter.dry || "") === "1";
+        const logsJ = sheetToObjects(getSheet("DailyLog"));
+        const perUser = {};
+        logsJ.forEach(function (r) {
+          if (String(r.deleted_at || "").trim()) return;
+          const em = String(r.student_email || ""); if (!em) return;
+          const c = perUser[em] || (perUser[em] = {});
+          const cls = String(r.time_classification || "").trim();
+          if (cls && TIME_CLASSES[cls]) c[cls] = (c[cls] || 0) + 1;
+          if (jiroIsNight_(r.time_block)) c.night = (c.night || 0) + 1;
+        });
+        // 90点以上の連続日数（今日を末尾に数える）
+        const repSheet = getSheet("Reports");
+        const todayJ = formatDate(new Date());
+        const usersJ = sheetToObjects(getSheet("Users"));
+        const outJ = [];
+        usersJ.forEach(function (u) {
+          const em = String(u.student_email || ""); if (!em) return;
+          const c = perUser[em] || {};
+          try { c.hiscore7 = jiroHighScoreRun_(repSheet, em, todayJ); } catch (e2) { c.hiscore7 = 0; }
+          const r = jiroApply_(c, [], {}, {});
+          outJ.push({ email: em, name: String(u.nickname || u.name || ""),
+                      counts: c, found: r.found, count: r.found.length });
+        });
+        if (!dryJ) {
+          const sh = getSheet("Users");
+          const dataJ = sh.getDataRange().getValues();
+          const hdrJ = dataJ[0];
+          const iEmJ = hdrJ.indexOf("student_email");
+          let iCJ = hdrJ.indexOf("jiro_counts"), iFJ = hdrJ.indexOf("jiro_found");
+          if (iCJ === -1) { iCJ = hdrJ.length; sh.getRange(1, iCJ + 1).setValue("jiro_counts"); }
+          if (iFJ === -1) { iFJ = (iCJ === hdrJ.length ? hdrJ.length + 1 : hdrJ.length);
+                            sh.getRange(1, iFJ + 1).setValue("jiro_found"); }
+          const byEmail = {}; outJ.forEach(function (o) { byEmail[o.email] = o; });
+          for (let i = 1; i < dataJ.length; i++) {
+            const o = byEmail[String(dataJ[i][iEmJ])]; if (!o) continue;
+            sh.getRange(i + 1, iCJ + 1).setValue(JSON.stringify(o.counts));
+            sh.getRange(i + 1, iFJ + 1).setValue(o.found.join(","));
+          }
+        }
+        return jsonResponse({ ok: true, dry: dryJ, users: outJ.length,
+          total_found: outJ.reduce(function (a, o) { return a + o.count; }, 0),
+          detail: outJ.sort(function (a, b) { return b.count - a.count; }) });
+      }
       // 自己経営力の中身を読むだけのコマンド（調査用・書き込みなし）
       // ★レベルのズレを調べる（読むだけ・書き込みなし）★（2026-08-05）
       //   「35日続けているのにルーキーのまま」のような食い違いを見つける。
@@ -3184,6 +3234,36 @@ function appendReportRow(targetDate, studentEmail, report, logCount) {
     CacheService.getScriptCache().remove(ck);
   } catch (e) { /* ignore */ }
   try { postHighScoreAchievement(studentEmail, report.score); } catch (e) { /* ignore */ }
+  // ★爆速ジロー★ 90点以上が何日続いているかを数え直して置く（足し算ではない）。
+  //   レポートは作り直されることがあるので、そのつど正しい連続数にそろえる。
+  try {
+    const runs = jiroHighScoreRun_(sheet, studentEmail, String(targetDate));
+    jiroBumpUser_(studentEmail, {}, { hiscore7: runs });
+  } catch (e) { /* 図鑑が更新できなくてもレポートは成功させる */ }
+}
+
+// Reports から、その日を末尾とする「90点以上の連続日数」を数える。
+function jiroHighScoreRun_(sheet, studentEmail, endDate) {
+  const data = sheet.getDataRange().getValues();
+  const hdr = data[0];
+  const dIdx = hdr.indexOf("date"), eIdx = hdr.indexOf("student_email"), sIdx = hdr.indexOf("score");
+  if (dIdx === -1 || sIdx === -1) return 0;
+  const byDate = {};
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][eIdx]) !== studentEmail) continue;
+    const raw = data[i][dIdx];
+    const d = raw instanceof Date ? Utilities.formatDate(raw, "Asia/Tokyo", "yyyy-MM-dd") : String(raw).slice(0, 10);
+    byDate[d] = Number(data[i][sIdx] || 0);
+  }
+  let run = 0;
+  let cur = new Date(endDate + "T00:00:00+09:00");
+  for (let n = 0; n < 400; n++) {
+    const key = Utilities.formatDate(cur, "Asia/Tokyo", "yyyy-MM-dd");
+    if (byDate[key] === undefined || byDate[key] < 90) break;
+    run++;
+    cur.setDate(cur.getDate() - 1);
+  }
+  return run;
 }
 
 // student_email・dateで先に絞り込んでから必要な行だけをオブジェクト化する。
@@ -3849,11 +3929,13 @@ function saveLog(studentEmail, body) {
         const xpResult = addXP(studentEmail, body.memo, todaysLogCount, {
           totalLogs, memoCount: memoCount + ((body.memo || "").trim() ? 1 : 0)
         }, String(data[i][0]));
-        writeP1LogFields(sheet, i + 1, studentEmail, targetDate, String(body.time_block), body);
-        return { ok: true, log_id: String(data[i][0]), updated: true, ...xpResult };
+        const jd1 = writeP1LogFields(sheet, i + 1, studentEmail, targetDate, String(body.time_block), body);
+        const jr1 = jiroCollect_(studentEmail, jd1, false);
+        return { ok: true, log_id: String(data[i][0]), updated: true, ...xpResult, jiro_gained: jr1.gained };
       }
-      writeP1LogFields(sheet, i + 1, studentEmail, targetDate, String(body.time_block), body);
-      return { ok: true, log_id: String(data[i][0]), updated: true, xp_gained: 0 };
+      const jd2 = writeP1LogFields(sheet, i + 1, studentEmail, targetDate, String(body.time_block), body);
+      const jr2 = jiroCollect_(studentEmail, jd2, false);
+      return { ok: true, log_id: String(data[i][0]), updated: true, xp_gained: 0, jiro_gained: jr2.gained };
     }
   }
 
@@ -3861,7 +3943,9 @@ function saveLog(studentEmail, body) {
   const newRow = sheet.getLastRow() + 1;
   sheet.appendRow([logId, studentEmail, targetDate, "", body.task, body.focus_level, body.memo || "", now, body.goal_related || "false"]);
   sheet.getRange(newRow, 4).setNumberFormat("@").setValue(String(body.time_block));
-  writeP1LogFields(sheet, newRow, studentEmail, targetDate, String(body.time_block), body);
+  const jdNew = writeP1LogFields(sheet, newRow, studentEmail, targetDate, String(body.time_block), body);
+  // 新しい記録なので、夜ふかしの判定もここで1回だけ行う
+  if (!isPast && jiroIsNight_(body.time_block)) jdNew.night = (jdNew.night || 0) + 1;
   queueOwnerCalendarWrite_(studentEmail, targetDate, String(body.time_block), body.task, body.time_classification);
   let awardedIdxN = headers.indexOf("xp_awarded");
   if (awardedIdxN === -1) { awardedIdxN = headers.length; sheet.getRange(1, awardedIdxN + 1).setValue("xp_awarded"); }
@@ -3869,19 +3953,20 @@ function saveLog(studentEmail, body) {
   const newFocusN = String(body.focus_level || "").trim();
   // 過去日の後付け入力はストリーク・XPの対象外（後から稼げない）
   if (isPast) { sheet.getRange(newRow, awardedIdxN + 1).setValue("FALSE"); return { ok: true, log_id: logId, xp_gained: 0 }; }
+  const jrNew = jiroCollect_(studentEmail, jdNew, false);
 
   updateStreak(studentEmail);
   invalidateStatusCache();
   // 評価が入っている記録だけ、その場でXPを付与して「付与済み」の印を付ける。
   // 評価なしで保存した場合は付与せず未付与のままにし、あとで評価を足した更新時に付与する
-  if (!newFocusN) { sheet.getRange(newRow, awardedIdxN + 1).setValue("FALSE"); return { ok: true, log_id: logId, xp_gained: 0 }; }
+  if (!newFocusN) { sheet.getRange(newRow, awardedIdxN + 1).setValue("FALSE"); return { ok: true, log_id: logId, xp_gained: 0, jiro_gained: jrNew.gained }; }
   sheet.getRange(newRow, awardedIdxN + 1).setValue("TRUE");
   if (String(body.goal_related) === "true") incrementGoalBlocksAndNotify(studentEmail, 1);
   const xpResult = addXP(studentEmail, body.memo, todaysLogCount + 1, {
     totalLogs: totalLogs + 1,
     memoCount: memoCount + ((body.memo || "").trim() ? 1 : 0)
   }, logId);
-  return { ok: true, log_id: logId, ...xpResult };
+  return { ok: true, log_id: logId, ...xpResult, jiro_gained: jrNew.gained };
 }
 
 // カレンダーから、その開始時刻のJIROKU記録イベントを消す。
@@ -4426,7 +4511,18 @@ function getGameStatus(studentEmail) {
   // 週ペース設計用: 直近8週の「記録した日数（ユニーク日付）」を週(月曜始まり)ごとに返す。
   // クライアントが本人の週目標と突き合わせて「今週●/N日」「週ストリーク」を算出する
   const weekDayCounts = computeWeekLogDays(getFilteredRows("DailyLog", "student_email", studentEmail), 8);
-  return { ok: true, data: { xp, level, xpInLevel, xpForNextLevel, streak, streakFreeze, badges, goals, weekDayCounts, weekLogDays: (weekDayCounts[0] ? weekDayCounts[0].days : 0) } };
+  // ★隠しジロー図鑑★ すでに読んである行から取り出すだけ（通信は増えない）
+  const jiroCounts = jiroParseCounts_(user.jiro_counts);
+  const jiroFound = jiroParseFound_(user.jiro_found);
+  const jiro = {
+    found: jiroFound,
+    total: HIDDEN_JIRO.length,
+    progress: HIDDEN_JIRO.map(function (j) {
+      return { id: j.id, have: jiroFound.indexOf(j.id) !== -1,
+               now: Math.min(Number(jiroCounts[j.key] || 0), j.need), need: j.need };
+    })
+  };
+  return { ok: true, data: { xp, level, xpInLevel, xpForNextLevel, streak, streakFreeze, badges, goals, weekDayCounts, weekLogDays: (weekDayCounts[0] ? weekDayCounts[0].days : 0), jiro } };
 }
 
 // 日付文字列(YYYY-MM-DD)の週の月曜日を返す（JST固定・UTC基準で計算しTZに依存しない）
@@ -12014,6 +12110,104 @@ const TIME_CLASSES = { GOAL_DIRECT:1, OPERATIONS:1, ASSET_BUILD:1,
 // 「休めたか」を見る集計は、新旧どちらのキーも休息として数える
 const REST_CLASSES = { RECOVERY:1, RECOVERY_RELATIONSHIP:1 };
 
+// ══════════════════════════════════════════════════════════════════
+// ★隠しジロー★（2026-08-05 Kai要望）
+//   条件を満たした瞬間に会える、プレイスタイル別のキャラクター。
+//   ★数え直さない★ Users の1行に通算カウンターを持ち、記録の保存や
+//   分類の変更のときに±1するだけ。判定はその場でできるので、
+//   シートを数え直す通信は一度も増えない。
+//   絵が揃うまでは画面側でシルエットのままにしておく（判定だけ先に動かす）。
+// ══════════════════════════════════════════════════════════════════
+const HIDDEN_JIRO = [
+  { id:"night",    no:"No.101", name:"夜ふかしジロー", rarity:"Epic",
+    key:"night",        need:20, cond:"23:00〜5:00の記録が通算20件" },
+  { id:"calm",     no:"No.102", name:"ととのえジロー", rarity:"Rare",
+    key:"RECOVERY",     need:30, cond:"回復の記録が通算30件" },
+  { id:"stack",    no:"No.103", name:"積み上げジロー", rarity:"Rare",
+    key:"ASSET_BUILD",  need:50, cond:"将来への投資の記録が通算50件" },
+  { id:"straight", no:"No.104", name:"一直線ジロー",   rarity:"Epic",
+    key:"GOAL_DIRECT",  need:50, cond:"目標に直結の記録が通算50件" },
+  { id:"kind",     no:"No.105", name:"思いやりジロー", rarity:"Rare",
+    key:"RELATIONSHIP", need:20, cond:"人間関係の記録が通算20件" },
+  { id:"support",  no:"No.106", name:"縁の下ジロー",   rarity:"Rare",
+    key:"OPERATIONS",   need:80, cond:"日常業務の記録が通算80件" },
+  { id:"turbo",    no:"No.107", name:"爆速ジロー",     rarity:"Epic",
+    key:"hiscore7",     need:7,  cond:"日次スコア90点以上が7日連続" }
+];
+
+// 記録の時刻が「夜ふかし」に当たるか（23時〜翌5時のはじまり）
+function jiroIsNight_(timeBlock) {
+  const m = String(timeBlock || "").match(/^(\d{1,2}):/);
+  if (!m) return false;
+  const h = Number(m[1]);
+  return h >= 23 || h < 5;
+}
+
+function jiroParseCounts_(raw) {
+  let o = raw;
+  if (typeof o === "string") { if (!o.trim()) return {}; try { o = JSON.parse(o); } catch (e) { return {}; } }
+  return (o && typeof o === "object") ? o : {};
+}
+function jiroParseFound_(raw) {
+  return String(raw || "").split(",").map(function (x) { return x.trim(); }).filter(Boolean);
+}
+
+// カウンターを増減し、新しく条件を満たしたジローの一覧を返す。
+//   counts / found は呼び出し元が持っている値をそのまま渡す（読み直さない）。
+function jiroApply_(counts, found, deltas, absolutes) {
+  const c = counts || {};
+  Object.keys(deltas || {}).forEach(function (k) {
+    const v = Number(c[k] || 0) + Number(deltas[k] || 0);
+    c[k] = v > 0 ? v : 0;
+  });
+  // 連続日数のように「足すのではなく置き換える」もの
+  Object.keys(absolutes || {}).forEach(function (k) { c[k] = Number(absolutes[k] || 0); });
+  const have = {}; (found || []).forEach(function (id) { have[id] = 1; });
+  const gained = [];
+  HIDDEN_JIRO.forEach(function (j) {
+    if (have[j.id]) return;
+    if (Number(c[j.key] || 0) >= j.need) { have[j.id] = 1; gained.push(j.id); }
+  });
+  return { counts: c, found: Object.keys(have), gained: gained };
+}
+
+// 増減が空なら通信しない。空でなければ1回だけ Users を更新する。
+//   ★通信を増やさないための門番★ 分類が変わらない保存では何もしない。
+function jiroCollect_(studentEmail, deltas, force) {
+  const d = deltas || {};
+  let any = false;
+  Object.keys(d).forEach(function (k) { if (Number(d[k])) any = true; });
+  if (!any && !force) return { gained: [] };
+  const r = jiroBumpUser_(studentEmail, d);
+  return { gained: (r.gained || []).map(function (id) {
+    const j = HIDDEN_JIRO.find(function (x) { return x.id === id; });
+    return j ? { id: j.id, no: j.no, name: j.name, rarity: j.rarity } : { id: id };
+  }) };
+}
+
+// Users の1行だけを読み書きして反映する（分類の後からの変更など、
+// XPの更新と一緒に書けない場面で使う）。
+function jiroBumpUser_(studentEmail, deltas, absolutes) {
+  try {
+    const sheet = getSheet("Users");
+    const data = sheet.getDataRange().getValues();
+    const headers = data[0];
+    const iEm = headers.indexOf("student_email");
+    let iC = headers.indexOf("jiro_counts"), iF = headers.indexOf("jiro_found");
+    if (iC === -1) { iC = headers.length; sheet.getRange(1, iC + 1).setValue("jiro_counts"); }
+    if (iF === -1) { iF = (iC === headers.length ? headers.length + 1 : headers.length);
+                     sheet.getRange(1, iF + 1).setValue("jiro_found"); }
+    for (let i = 1; i < data.length; i++) {
+      if (String(data[i][iEm]) !== studentEmail) continue;
+      const r = jiroApply_(jiroParseCounts_(data[i][iC]), jiroParseFound_(data[i][iF]), deltas, absolutes);
+      sheet.getRange(i + 1, iC + 1).setValue(JSON.stringify(r.counts));
+      if (r.gained.length) sheet.getRange(i + 1, iF + 1).setValue(r.found.join(","));
+      return r;
+    }
+  } catch (e) { /* 図鑑が更新できなくても、記録そのものは成功させる */ }
+  return { counts: {}, found: [], gained: [] };
+}
+
 // ★1日の区切り（画面側の DAY_CUTOFF_HOUR と必ず同じ値にすること）★
 //   深夜0時〜この時刻までの記録は「前の日の続き」として扱う。
 //   夜通しの作業が、暦の日付をまたいだだけで2日に割れるのを防ぐ。
@@ -12243,6 +12437,7 @@ function setLogClassification(studentEmail, body) {
     if (String(data[i][iEm]) !== studentEmail) return { ok: false, error: "not found" }; // 他人の行は「無い」と返す
     const iDel = headers.indexOf("deleted_at");
     if (iDel !== -1 && String(data[i][iDel] || "").trim()) return { ok: false, error: "not found" };
+    const prevCls = String(data[i][iCls] || "");
     const set = function (col, v) { const k = headers.indexOf(col); if (k !== -1) sheet.getRange(i + 1, k + 1).setValue(v); };
     set("time_classification", want);
     set("classification_method", "USER");          // ★サーバーが決める★
@@ -12259,7 +12454,16 @@ function setLogClassification(studentEmail, body) {
       const dStr = rawD instanceof Date ? Utilities.formatDate(rawD, "Asia/Tokyo", "yyyy-MM-dd") : String(rawD).slice(0, 10);
       writeRecordToOwnerCalendar(studentEmail, dStr, String(data[i][iTb]), String(data[i][iTask]), want);
     } catch (e) { /* 色が変わらなくても分類の保存は成功させる */ }
-    return { ok: true, log_id: logId, time_classification: want, classification_method: "USER" };
+    // ★隠しジローのカウンター★ 付け替えなので、前の分類は-1・新しい分類は+1
+    let jiroGained = [];
+    if (prevCls !== want) {
+      const d = {};
+      if (prevCls) d[prevCls] = -1;
+      d[want] = 1;
+      jiroGained = jiroCollect_(studentEmail, d, false).gained;
+    }
+    return { ok: true, log_id: logId, time_classification: want, classification_method: "USER",
+             jiro_gained: jiroGained };
   }
   return { ok: false, error: "not found" };
 }
@@ -12286,7 +12490,9 @@ function recomputeTaskActualMinutes_(studentEmail, taskId) {
   return { task_id: tid, actual_minutes: sum, from_logs: use.length, confirmed_only: !!confirmed.length };
 }
 
+// 戻り値: 隠しジローのカウンターに足すべき増減（呼び出し元がまとめて反映する）
 function writeP1LogFields(sheet, rowNum, studentEmail, targetDate, timeBlock, body) {
+  const jiroDelta = {};
   try {
     // ★1セルずつ書かない★（2026-08-05 Kai報告「記録ボタンの待ち時間が長い」）
     //   1回の setValue ごとにシートへの往復が発生する。ここは最大10か所あり、
@@ -12332,6 +12538,11 @@ function writeP1LogFields(sheet, rowNum, studentEmail, targetDate, timeBlock, bo
         set("classification_version", TIME_CLASS_VERSION);
         set("classification_reason_code", decided.reason_code);
         if (decided.method === "USER") set("user_corrected_at", new Date().toISOString());
+        // ★隠しジローのカウンター★ 増えた分類を+1、前の分類を-1（付け替え）
+        if (decided.classification !== cur.cls) {
+          if (cur.cls) jiroDelta[cur.cls] = (jiroDelta[cur.cls] || 0) - 1;
+          if (decided.classification) jiroDelta[decided.classification] = (jiroDelta[decided.classification] || 0) + 1;
+        }
       }
     }
     // まとめて1回で書き戻す
@@ -12344,6 +12555,7 @@ function writeP1LogFields(sheet, rowNum, studentEmail, targetDate, timeBlock, bo
   } catch (e) {
     Logger.log("writeP1LogFields 失敗（記録本体は保存済み）: " + e);
   }
+  return jiroDelta;
 }
 
 // 週間目標の実績を集計する。weekStart は月曜(YYYY-MM-DD)。
