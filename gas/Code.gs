@@ -1548,17 +1548,19 @@ function getReportList(studentEmail) {
       p1List("DailyOpsReport", studentEmail).forEach(function (r) {
         const d = String(r.report_date).slice(0, 10);
         if (!d) return;
-        const full = String(r.operating_score || "").trim();
-        if (full !== "") { opsByDate[d] = Number(full); return; }
-        // ★部分点は列に無く、snapshot_json の中にしか入っていない★
-        //   ここを見ていなかったため、全体の点数が出ない日は
-        //   一覧だけ旧方式の点数へ落ちて、詳細と食い違っていた。
+        // ★スナップショットを先に見る★（2026-08-05 実データで確認）
+        //   締めた行の operating_score 列と、同じ行の snapshot_json の中身が
+        //   食い違っていた（列37・スナップショット89）。
+        //   詳細画面はスナップショットを読んで89を出しているので、
+        //   一覧・ランキングもそちらに合わせる（画面に出ている数字を正とする）。
         try {
           const snap = JSON.parse(r.snapshot_json || "null");
           const dsp = snap && (snap.displayed_score !== null && snap.displayed_score !== undefined
                                 ? snap.displayed_score : snap.partial_score);
-          if (dsp !== null && dsp !== undefined && dsp !== "") opsByDate[d] = Number(dsp);
+          if (dsp !== null && dsp !== undefined && dsp !== "") { opsByDate[d] = Number(dsp); return; }
         } catch (e3) {}
+        const full = String(r.operating_score || "").trim();
+        if (full !== "") opsByDate[d] = Number(full);
       });
       // ★今日だけは計算し直す★
       //   保存した後に記録を足すと、保存済みの点数（一覧）と、開いたときに
@@ -4728,16 +4730,15 @@ function opsLatestIndex_() {
                   operating_score: row[c[2]], finalized_at: row[c[3]],
                   snapshot_json: row[c[4]] };
       const em = String(o.student_email || ""), d = String(o.report_date).slice(0, 10);
-      const vFull = String(o.operating_score || "").trim();
-      let v = vFull;
-      if (v === "") {
-        try {
-          const snap = JSON.parse(o.snapshot_json || "null");
-          const dsp = snap && (snap.displayed_score !== null && snap.displayed_score !== undefined
-                                ? snap.displayed_score : snap.partial_score);
-          if (dsp !== null && dsp !== undefined) v = String(dsp);
-        } catch (e4) {}
-      }
+      // 画面に出ている数字（スナップショット）を正とする。列とズレることがある
+      let v = "";
+      try {
+        const snap = JSON.parse(o.snapshot_json || "null");
+        const dsp = snap && (snap.displayed_score !== null && snap.displayed_score !== undefined
+                              ? snap.displayed_score : snap.partial_score);
+        if (dsp !== null && dsp !== undefined) v = String(dsp);
+      } catch (e4) {}
+      if (v === "") v = String(o.operating_score || "").trim();
       // ★確定した日だけを使う★（2026-08-05）
       //   夜のレポートで締めていない日は、まだ動く可能性のある点数なので
       //   ランキングや共有欄には出さない。
@@ -4755,17 +4756,15 @@ function opsLatestIndexSlow_() {
   try {
     sheetToObjects(getP1Sheet("DailyOpsReport")).forEach(function (o) {
       const em = String(o.student_email || ""), d = String(o.report_date).slice(0, 10);
-      // 全体の点数が無い日は部分点を使う（部分点は snapshot_json の中）
-      const vFull = String(o.operating_score || "").trim();
-      let v = vFull;
-      if (v === "") {
-        try {
-          const snap = JSON.parse(o.snapshot_json || "null");
-          const dsp = snap && (snap.displayed_score !== null && snap.displayed_score !== undefined
-                                ? snap.displayed_score : snap.partial_score);
-          if (dsp !== null && dsp !== undefined) v = String(dsp);
-        } catch (e5) {}
-      }
+      // 画面に出ている数字（スナップショット）を正とする。列とズレることがある
+      let v = "";
+      try {
+        const snap = JSON.parse(o.snapshot_json || "null");
+        const dsp = snap && (snap.displayed_score !== null && snap.displayed_score !== undefined
+                              ? snap.displayed_score : snap.partial_score);
+        if (dsp !== null && dsp !== undefined) v = String(dsp);
+      } catch (e5) {}
+      if (v === "") v = String(o.operating_score || "").trim();
       if (!String(o.finalized_at || "").trim()) return;
       if (!em || !d || v === "") return;
       if (!idx[em] || idx[em].date < d) idx[em] = { date: d, score: Number(v) };
