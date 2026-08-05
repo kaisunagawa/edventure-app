@@ -110,6 +110,16 @@ PYX
     fi
   done
 
+  # ★画面とサーバーで同じでなければならない定義★
+  #   レベルのしきい値は両方に持っている。片方だけ配信すると、
+  #   サーバーは古い区切りでレベルを返し、画面は新しい区切りで階級を出す。
+  #   「コンシステントのはずがチャレンジャー」になった（2026-08-05）。
+  if (cd .. && python3 .preview/check_shared.py >/tmp/_smoke_shared.txt 2>&1); then
+    ok "画面とサーバーの定義が一致"
+  else
+    ng "$(grep '✗' /tmp/_smoke_shared.txt | head -1)"
+  fi
+
   # ★描画時に評価される依存配列の順番★
   #   useEffect の [x] は描画のたびにその場で評価されるので、xの宣言より前に
   #   書くと "Cannot access 'x' before initialization" で画面が真っ赤になる。
