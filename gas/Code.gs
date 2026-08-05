@@ -1972,6 +1972,9 @@ function smpEpoch_(studentEmail) {
   catch (e) { return "0"; }
 }
 function smpBumpEpoch_(studentEmail) {
+  // 認証前に呼ばれることもあるので、宛先が無いときは何もしない
+  // （知らない相手のぶんまで書き込みを増やさないため）
+  if (!String(studentEmail || "").trim()) return;
   try {
     const props = PropertiesService.getScriptProperties();
     const k = smpEpochKey_(studentEmail);
@@ -3169,6 +3172,9 @@ function aiCapExceeded(feature, email, limitPer6h) {
 }
 
 function quickLog(studentEmail, body) {
+  // 自己経営力は計算に時間がかかるので取っておいている。書き換えたら
+  // 古い結果に当たらないよう世代を進める（2026-08-05）。
+  smpBumpEpoch_(studentEmail);
   const text = String(body.text || "").trim();
   if (!text) return { ok: false, error: "何をしたか一言だけ教えてください" };
   const apiKey = PropertiesService.getScriptProperties().getProperty("CLAUDE_API_KEY");
@@ -3544,6 +3550,9 @@ function logicalToday_(base) {
 }
 
 function saveLog(studentEmail, body) {
+  // 自己経営力は計算に時間がかかるので取っておいている。書き換えたら
+  // 古い結果に当たらないよう世代を進める（2026-08-05）。
+  smpBumpEpoch_(studentEmail);
   const sheet = getSheet("DailyLog");
   const today = logicalToday_();
   const now = new Date().toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" });
@@ -3664,6 +3673,9 @@ function saveLog(studentEmail, body) {
 // 記録の削除。間違えて記録した時間帯を消せるようにする（編集画面で内容を空にして
 // 更新＝この時間帯の記録を消す、という操作の受け皿）。該当行を1件だけ削除する。
 function deleteLog(studentEmail, body) {
+  // 自己経営力は計算に時間がかかるので取っておいている。書き換えたら
+  // 古い結果に当たらないよう世代を進める（2026-08-05）。
+  smpBumpEpoch_(studentEmail);
   const timeBlock = String(body.time_block || "");
   if (!timeBlock) return { ok: false, error: "no time_block" };
   const sheet = getSheet("DailyLog");
@@ -3701,6 +3713,9 @@ function deleteLog(studentEmail, body) {
 // DailyLogの読み込み・書き込みをこの関数内で1回にまとめ、ストリーク・XPも
 // ブロック数ぶん繰り返さずリクエスト全体で1回だけ計算する
 function saveLogMulti(studentEmail, body) {
+  // 自己経営力は計算に時間がかかるので取っておいている。書き換えたら
+  // 古い結果に当たらないよう世代を進める（2026-08-05）。
+  smpBumpEpoch_(studentEmail);
   const blocks = String(body.time_blocks || "").split(",").map(s => s.trim()).filter(Boolean);
   if (blocks.length === 0) return { ok: false, error: "no blocks" };
 
@@ -4295,7 +4310,8 @@ function getRanking(studentEmail) {
 //   allowCompute=false のときは、キャッシュに無ければ null を返してすぐ諦める。
 function smpOverallCached_(studentEmail, allowCompute) {
   const key = "smpall_" + sha256Hex(studentEmail + "|" + SMP_VERSION + "|" + OPS_CALC_VERSION +
-                                    "|" + mondayOf(formatDate(new Date()))).slice(0, 40);
+                                    "|" + mondayOf(formatDate(new Date())) +
+                                    "|" + smpEpoch_(studentEmail)).slice(0, 40);
   try {
     const hit = CacheService.getScriptCache().get(key);
     if (hit !== null && hit !== undefined) return hit === "" ? null : Number(hit);
@@ -10705,6 +10721,9 @@ function goalEntryBumpCurrent_(studentEmail, goalId, delta) {
 }
 
 function addGoalEntry(studentEmail, body) {
+  // 自己経営力は計算に時間がかかるので取っておいている。書き換えたら
+  // 古い結果に当たらないよう世代を進める（2026-08-05）。
+  smpBumpEpoch_(studentEmail);
   const chk = p1RequireUser(studentEmail);
   if (!chk.ok) return chk;
   const goalId = String((body && body.quarterly_goal_id) || "").trim();
@@ -10771,6 +10790,9 @@ function listGoalEntries(studentEmail, body) {
 }
 
 function updateGoalEntry(studentEmail, body) {
+  // 自己経営力は計算に時間がかかるので取っておいている。書き換えたら
+  // 古い結果に当たらないよう世代を進める（2026-08-05）。
+  smpBumpEpoch_(studentEmail);
   const chk = p1RequireUser(studentEmail);
   if (!chk.ok) return chk;
   const id = String((body && body.entry_id) || "").trim();
@@ -10789,6 +10811,9 @@ function updateGoalEntry(studentEmail, body) {
 }
 
 function deleteGoalEntry(studentEmail, body) {
+  // 自己経営力は計算に時間がかかるので取っておいている。書き換えたら
+  // 古い結果に当たらないよう世代を進める（2026-08-05）。
+  smpBumpEpoch_(studentEmail);
   const chk = p1RequireUser(studentEmail);
   if (!chk.ok) return chk;
   const id = String((body && body.entry_id) || "").trim();
@@ -11352,17 +11377,25 @@ function p1PurgeArchived(studentEmail, dryRun) {
   const allWeeklies = p1List("WeeklyGoals", studentEmail);
   const logs = sheetToObjects(getSheet("DailyLog")).filter(l => l.student_email === studentEmail);
   const tasks = p1List("Tasks", studentEmail);
+  // ★「＋ 追加する」で入れた実績も参照として数える★（2026-08-05）
+  //   ここを見ていなかったため、実績が GoalEntries にしか無い目標が
+  //   「参照なし＝消してよい」と判定されていた。履歴ごと消えるところだった。
+  const entries = p1List("GoalEntries", studentEmail)
+    .filter(function (e) { return !String(e.deleted_at || "").trim(); });
 
   // 各目標が他から参照されていないか数える。1件でもあれば消さない
   const report = goals.map(g => {
     const id = String(g.quarterly_goal_id);
     const wgRefs = allWeeklies.filter(w => String(w.link_quarterly_goal_id) === id && String(w.status).toUpperCase() !== "ARCHIVED").length;
-    return { kind: "goal", id: id, title: g.title, owner: g.student_email, refs: wgRefs };
+    const entryRefs = entries.filter(e => String(e.quarterly_goal_id || "") === id).length;
+    return { kind: "goal", id: id, title: g.title, owner: g.student_email, refs: wgRefs + entryRefs };
   }).concat(weeklies.map(w => {
     const id = String(w.weekly_goal_id);
     const logRefs = logs.filter(l => String(l.primary_weekly_goal_id) === id || String(l.related_goal_ids || "").indexOf(id) !== -1).length;
     const taskRefs = tasks.filter(t => String(t.link_weekly_goal_id) === id).length;
-    return { kind: "weekly", id: id, title: w.title, owner: w.student_email, refs: logRefs + taskRefs };
+    const entryRefs = entries.filter(e => String(e.weekly_goal_id || "") === id).length;
+    return { kind: "weekly", id: id, title: w.title, owner: w.student_email,
+             refs: logRefs + taskRefs + entryRefs };
   }));
 
   if (dryRun) return { ok: true, dryRun: true, candidates: report };
@@ -11719,6 +11752,9 @@ function saveDayPlan(studentEmail, body) {
 //   ・許可された5値以外は保存しない
 //   ・他人の log_id では何も起きない
 function setLogClassification(studentEmail, body) {
+  // 自己経営力は計算に時間がかかるので取っておいている。書き換えたら
+  // 古い結果に当たらないよう世代を進める（2026-08-05）。
+  smpBumpEpoch_(studentEmail);
   const logId = String((body && body.log_id) || "").trim();
   const want = String((body && body.time_classification) || "").toUpperCase();
   if (!logId) return { ok: false, error: "no log_id" };
@@ -14459,6 +14495,9 @@ function getTasks(studentEmail, body) {
 //   各mutationは独立に判定する（1件の競合で他の正常な操作を道連れにしない）。
 //   ただし配列の順序どおりに適用する（作成→編集→完了の依存を守るため）。
 function saveTaskMutations(studentEmail, body) {
+  // 自己経営力は計算に時間がかかるので取っておいている。書き換えたら
+  // 古い結果に当たらないよう世代を進める（2026-08-05）。
+  smpBumpEpoch_(studentEmail);
   const chk = p1RequireUser(studentEmail);
   if (!chk.ok) return chk;
   let muts;
@@ -14531,6 +14570,9 @@ function saveTaskMutations(studentEmail, body) {
 }
 
 function saveTask(studentEmail, body) {
+  // 自己経営力は計算に時間がかかるので取っておいている。書き換えたら
+  // 古い結果に当たらないよう世代を進める（2026-08-05）。
+  smpBumpEpoch_(studentEmail);
   const chk = p1RequireUser(studentEmail);
   if (!chk.ok) return chk;
   const id = String((body && body.task_id) || "").trim();

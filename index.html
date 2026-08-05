@@ -4922,7 +4922,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
             style=${{width:"100%",padding:"10px",borderRadius:10,border:"1.5px dashed var(--border)",background:"none",color:"var(--accent)",fontSize:14,fontWeight:600,cursor:"pointer",marginBottom:16}}>
             ＋ タスクを追加
           </button>
-          ${editError && html`<div style=${{background:"#fef2f2",border:"1px solid #fecaca",color:"#b91c1c",
+          ${editError && html`<div style=${{background:"var(--red-l)",border:"1px solid var(--red)",color:"var(--red)",
             borderRadius:10,padding:"10px 12px",fontSize:12.5,lineHeight:1.8,marginBottom:10,whiteSpace:"pre-wrap"}}>${editError}</div>`}
           <button class="btn" onClick=${saveEdit} style=${{marginBottom:10}}>保存する</button>
           <button onClick=${()=>setEditMode(false)}
@@ -9376,7 +9376,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260805-110245";
+const APP_BUILD = "20260805-110925";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
