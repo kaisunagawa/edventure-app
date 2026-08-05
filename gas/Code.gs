@@ -2112,9 +2112,9 @@ function smpBumpEpoch_(studentEmail) {
   // （知らない相手のぶんまで書き込みを増やさないため）
   if (!String(studentEmail || "").trim()) return;
   try {
-    const props = PropertiesService.getScriptProperties();
-    const k = smpEpochKey_(studentEmail);
-    props.setProperty(k, String((Number(props.getProperty(k)) || 0) + 1));
+    // 読んで足して書き戻すと、同時に保存されたとき片方が消える。
+    // 値は「変わればよい」だけなので、時刻をそのまま入れる（読み込みも不要）。
+    PropertiesService.getScriptProperties().setProperty(smpEpochKey_(studentEmail), String(Date.now()));
   } catch (e) { Logger.log("smpBumpEpoch_: " + e); }
 }
 
@@ -3572,8 +3572,18 @@ function ownerCalColor_(cls) {
 //   そのぶん延びていた。予定は少し遅れて入っても困らないので、
 //   いったん控えておき、1分おきの処理でまとめて書く。
 function queueOwnerCalendarWrite_(studentEmail, dateStr, timeBlock, task, cls) {
+  if (!String(task || "").trim()) return;
+  // ★鍵をかけて読み書きする★
+  //   読んで→足して→書き戻す形なので、2人が同時に保存すると
+  //   片方の予定が消える。鍵が取れなければ、その場で書いて取りこぼさない。
+  const lock = LockService.getScriptLock();
+  let locked = false;
+  try { locked = lock.tryLock(5000); } catch (e) { locked = false; }
+  if (!locked) {
+    try { writeRecordToOwnerCalendar(studentEmail, dateStr, timeBlock, task, cls); } catch (e2) {}
+    return;
+  }
   try {
-    if (!String(task || "").trim()) return;
     const props = PropertiesService.getScriptProperties();
     const key = "calq";
     let q = [];
@@ -3586,18 +3596,26 @@ function queueOwnerCalendarWrite_(studentEmail, dateStr, timeBlock, task, cls) {
     if (q.length > 200) q = q.slice(-200);   // 溜めすぎない
     props.setProperty(key, JSON.stringify(q));
   } catch (e) {
-    // 控えられなかったときは、その場で書く（記録が予定に出ないほうが困る）
     try { writeRecordToOwnerCalendar(studentEmail, dateStr, timeBlock, task, cls); } catch (e2) {}
+  } finally {
+    try { lock.releaseLock(); } catch (e) {}
   }
 }
 
 // 控えておいたカレンダー書き込みをまとめて処理する（1分おきのトリガーから呼ぶ）
 function flushOwnerCalendarQueue() {
   const props = PropertiesService.getScriptProperties();
+  const lock = LockService.getScriptLock();
+  // 取り出しも鍵をかける（取り出し中に足された分を落とさない）
+  let locked = false;
+  try { locked = lock.tryLock(10000); } catch (e) { locked = false; }
+  if (!locked) return { ok: true, done: 0, note: "他の処理が使用中。次の回に回す" };
   let q = [];
-  try { q = JSON.parse(props.getProperty("calq") || "[]"); } catch (e) { q = []; }
+  try {
+    try { q = JSON.parse(props.getProperty("calq") || "[]"); } catch (e) { q = []; }
+    if (q.length) props.setProperty("calq", "[]");   // 先に空にする（二重に書かないため）
+  } finally { try { lock.releaseLock(); } catch (e) {} }
   if (!q.length) return { ok: true, done: 0 };
-  props.setProperty("calq", "[]");   // 先に空にする（二重に書かないため）
   const start = Date.now();
   let done = 0;
   const rest = [];
@@ -3607,9 +3625,13 @@ function flushOwnerCalendarQueue() {
     catch (err) { Logger.log("calq: " + err); }
   });
   if (rest.length) {
-    let cur = [];
-    try { cur = JSON.parse(props.getProperty("calq") || "[]"); } catch (e) { cur = []; }
-    props.setProperty("calq", JSON.stringify(rest.concat(cur).slice(-200)));
+    let l2 = false;
+    try { l2 = lock.tryLock(5000); } catch (e) { l2 = false; }
+    try {
+      let cur = [];
+      try { cur = JSON.parse(props.getProperty("calq") || "[]"); } catch (e) { cur = []; }
+      props.setProperty("calq", JSON.stringify(rest.concat(cur).slice(-200)));
+    } finally { if (l2) { try { lock.releaseLock(); } catch (e) {} } }
   }
   return { ok: true, done: done, left: rest.length };
 }

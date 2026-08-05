@@ -1421,7 +1421,6 @@ const CLASS_REASON_TEXT = {
 function BulkClassifySheet({date, onClose, onSaved, onToast}) {
   useLockBodyScroll();
   const [rows, setRows] = useState(null);   // null = 読み込み中
-  const [busy, setBusy] = useState("");
   const [doneCount, setDoneCount] = useState(0);
   useEffect(()=>{
     let alive = true;
@@ -1444,15 +1443,40 @@ function BulkClassifySheet({date, onClose, onSaved, onToast}) {
     return ()=>{ alive=false; };
   },[date]);
 
-  const pick = async (l, k) => {
-    if(busy) return;
-    setBusy(l.log_id);
-    const r = await gasPostJson("setLogClassification", { log_id: l.log_id, time_classification: k });
-    setBusy("");
-    if(!r || !r.ok){ onToast&&onToast("分類を保存できませんでした"); return; }
+  // ★押した瞬間に次へ進める★（2026-08-05 Kai報告「1クリックで時間を取られる」）
+  //   これまでは1件ごとにサーバーの応答を待ち、待っている間は他のボタンも
+  //   押せなかった。20件あると数分かかる。
+  //   押した時点で一覧から消し、送信は裏で行う。
+  //   失敗したものだけ戻して知らせる（黙って無かったことにしない）。
+  const failedRef = useRef([]);
+  const pendingRef = useRef(0);
+  const handledRef = useRef({});   // 二重押しよけ
+  const pick = (l, k) => {
+    if (handledRef.current[l.log_id]) return;
+    handledRef.current[l.log_id] = true;
+    setRows(prev=>prev.filter(x=>x.log_id!==l.log_id));
     setDoneCount(n=>n+1);
     onSaved&&onSaved(l.log_id, k);
-    setRows(prev=>prev.filter(x=>x.log_id!==l.log_id));
+    pendingRef.current++;
+    gasPostJson("setLogClassification", { log_id: l.log_id, time_classification: k })
+      .then(r=>{
+        if(!r || !r.ok){
+          delete handledRef.current[l.log_id];   // やり直せるようにする
+          failedRef.current.push(l);
+          setRows(prev=>[...prev, l].sort((a,b)=> a.__date===b.__date
+            ? blockSortKey(a.time_block)-blockSortKey(b.time_block)
+            : (a.__date>b.__date?-1:1)));
+          setDoneCount(n=>Math.max(0,n-1));
+        }
+      })
+      .catch(()=>{})
+      .finally(()=>{
+        pendingRef.current--;
+        if(pendingRef.current===0 && failedRef.current.length){
+          onToast&&onToast(failedRef.current.length+"件は保存できませんでした。もう一度押してください");
+          failedRef.current = [];
+        }
+      });
   };
 
   // ★画面の外（body直下）に出す★
@@ -1475,7 +1499,7 @@ function BulkClassifySheet({date, onClose, onSaved, onToast}) {
           <div style=${{padding:"28px 16px",textAlign:"center",color:"var(--sub)",fontSize:13,lineHeight:1.9}}>
             分類していない記録はありません。<br/>時間の使い方が正しく採点されます。</div>`}
         ${rows&&rows.map(l=>html`
-          <div key=${l.log_id} style=${{background:"var(--card)",border:"1px solid var(--border)",borderRadius:12,padding:"12px 14px",marginBottom:10,opacity:busy===l.log_id?0.5:1}}>
+          <div key=${l.log_id} style=${{background:"var(--card)",border:"1px solid var(--border)",borderRadius:12,padding:"12px 14px",marginBottom:10}}>
             <div style=${{display:"flex",gap:8,alignItems:"baseline",marginBottom:6}}>
               <span style=${{flexShrink:0,fontSize:11,color:"var(--sub)",fontVariantNumeric:"tabular-nums"}}>
                 ${l.__date===date?"":Number(l.__date.slice(5,7))+"/"+Number(l.__date.slice(8,10))+" "}${l.time_block}</span>
@@ -1485,7 +1509,7 @@ function BulkClassifySheet({date, onClose, onSaved, onToast}) {
                                           display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical",overflow:"hidden"}}>${l.memo}</div>`}
             <div style=${{display:"flex",flexWrap:"wrap",gap:6}}>
               ${TIME_CLASS_OPTS.map(([k,lb])=>html`
-                <button key=${k} disabled=${!!busy} onClick=${()=>pick(l,k)}
+                <button key=${k} onClick=${()=>pick(l,k)}
                   style=${{padding:"6px 11px",borderRadius:20,fontSize:11.5,cursor:"pointer",fontFamily:"inherit",
                            border:"1px solid var(--border)",background:"transparent",color:"var(--sub)"}}>${lb}</button>`)}
             </div>
@@ -2149,24 +2173,38 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
   //   はじめは時間の記録(DailyLog)を作っていたが、
   //   「アポ1件取れた」は時間の記録ではない。
   //   本日の記録に身に覚えのない行が並んでしまうので、実績は実績として別に持つ。
-  const addWeeklyOne = async (w, amount) => {
+  // ★押した瞬間に数字が動く★（2026-08-05 Kai報告「1クリックで時間を取られる」）
+  //   これまでは送信の応答を待ってから数えていた。連続で押すと1回ごとに
+  //   数秒待たされる。先に画面の数字を進め、送信は裏で行う。
+  //   失敗したら戻して知らせる（黙って進んだことにしない）。
+  const addWeeklyOne = (w, amount) => {
     const u = w.unit || (w.metric_type==="DURATION" ? "分" : "件");
     const step = (amount !== undefined && amount !== null && Number(amount))
       ? Number(amount)
       : ((w.metric_type==="DURATION") ? 30 : 1);
-    const r = await gasPostJson("addGoalEntry", {
+    const bump = (delta) => setGoalTree(prev=>{
+      if(!prev) return prev;
+      const patch = (arr)=>(arr||[]).map(x=> x.weekly_goal_id===w.weekly_goal_id
+        ? {...x, actual_value:(Number(x.actual_value)||0)+delta, has_records:true} : x);
+      return {...prev,
+        goals: (prev.goals||[]).map(g=>({...g, weeklyGoals: patch(g.weeklyGoals)})),
+        orphanWeeklyGoals: patch(prev.orphanWeeklyGoals)};
+    });
+    bump(step);
+    onToast&&onToast(w.title+" を "+(step>0?"+":"")+step+u+" 記録しました");
+    gasPostJson("addGoalEntry", {
       weekly_goal_id: w.weekly_goal_id,
       amount: step,
       category: "OTHER",
       memo: step<0 ? "戻した分" : "",
-    });
-    if(r&&r.ok){
-      onToast&&onToast(w.title+" を "+(step>0?"+":"")+step+u+" 記録しました");
+    }).then(r=>{
+      if(!(r&&r.ok)){ bump(-step); onToast&&onToast("記録できませんでした"); return; }
+      // サーバーの値で整え直す（連打しても最後に正しい数に落ち着く）
       gasApi("getGoalTree").then(x=>{ if(x&&x.ok&&x.data){ setGoalTree(x.data);
         try{ localStorage.setItem("cache_goaltree", JSON.stringify(x.data)); }catch(e){} } });
       gasApi("getSprints").then(x=>{ if(x&&x.ok){ setSprints(x);
         try{ localStorage.setItem("cache_sprints", JSON.stringify(x)); }catch(e){} } });
-    } else onToast&&onToast("記録できませんでした");
+    }).catch(()=>{ bump(-step); onToast&&onToast("記録できませんでした"); });
   };
   const [showWhy, setShowWhy] = useState(false);   // 次にやることの選定理由
   const [goalDetail, setGoalDetail] = useState(false);   // 数字の出どころ（普段は隠す）
@@ -7375,6 +7413,33 @@ function TimerScreen({onToast, isActive}) {
   // ①今日のタスクに自動でチェックを付け（today_actions）、②タイマーの選択肢から消す。
   // 集中対象が「今日のタスク」の項目に一致する時だけ実行する（フリー入力の時は何もしない）。
   // ホーム側はチェック状態を再読込して✓を反映＆共有リストを更新する。
+  // ★タスクIDが分かっているときは、それで完了にする★（2026-08-05 Kai報告）
+  //   これまでは名前の一致でしか判定できず、しかもタイマーが最後まで鳴ったときしか
+  //   呼ばれていなかった。途中で「完了して記録」しても✓が付かなかった。
+  //   タスクを選んで始めた場合は id を持っているので、それで確実に完了にする。
+  const completeTaskById = (tid, title) => {
+    const id = String(tid||"").trim();
+    if(!id) return;
+    try {
+      const checked = JSON.parse(localStorage.getItem("today_actions")||"{}");
+      if(checked[id]) return;
+      checked[id] = true;
+      localStorage.setItem("today_actions", JSON.stringify(checked));
+      gasPostJson("saveTodayActions", {checked: JSON.stringify(checked), noBridge: "1"});
+      enqueueTaskMutation("UPDATE", id, { status: "DONE" });
+      // タイマーの選択肢からも外す
+      const t = String(title||"").trim();
+      if(t){
+        const shared = JSON.parse(localStorage.getItem("jiroku_today_actions_shared")||"null");
+        if(shared && Array.isArray(shared.items)){
+          shared.items = shared.items.filter(it=> (typeof it==="string"?it:String(it.text||"")) !== t);
+          localStorage.setItem("jiroku_today_actions_shared", JSON.stringify(shared));
+        }
+      }
+      setTodayActionOptions(opts=>opts.filter(o=>String(o.id||"")!==id && o.text!==t));
+    } catch(e){}
+  };
+
   const completeTaskIfListed = (taskText) => {
     const t = String(taskText||"").trim();
     if(!t) return;
@@ -7523,6 +7588,11 @@ function TimerScreen({onToast, isActive}) {
       time_classification: logTimeClass || undefined,
     });
     if(!res.ok){ onToast("記録に失敗しました。もう一度お試しください"); setSaving(false); return; }
+    // ★記録できたら、そのタスクにチェックを付ける★（2026-08-05 Kai報告）
+    //   タイマーで測って記録まで済んだのに、今日のタスクが未完了のままだった。
+    //   IDが分かっていればIDで、無ければ名前で完了にする。
+    if(linkTaskId) completeTaskById(linkTaskId, calTitle);
+    else completeTaskIfListed(task);
     if(res.xp_gained){ const lv=res.level_up?` → Lv.${res.level}！`:""; onToast(`+${res.xp_gained} XP 獲得${lv}`); }
     else onToast(res.updated?"記録を更新しました":"記録しました");
     // タイマー記録は1時間枠ではなく「実際に集中した開始〜終了時刻」でカレンダーに書き戻す
@@ -9621,7 +9691,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260805-134044";
+const APP_BUILD = "20260805-150131";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
