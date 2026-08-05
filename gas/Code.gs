@@ -3259,8 +3259,18 @@ function finalizeDailyOpsReport(studentEmail, date) {
     return String(x.report_date).slice(0, 10) === day &&
            String(x.report_version) === OPS_REPORT_VERSION; });
   if (!row) return { ok: false };
+  // ★点数の列も、同じ計算結果で書き直す★（2026-08-05 Kai報告「詳細89・一覧37」）
+  //   これまでは finalized_at と内訳(snapshot)だけを書いていた。
+  //   点数の列は行を作った時点の古い値のまま残るため、
+  //   詳細（内訳を読む）と 一覧・ランキング・みんなの頑張り（列を読む）で
+  //   同じ日の点数が食い違っていた。確定は「その時の計算結果で固める」ことなので、
+  //   内訳と点数は必ず同じ計算から同時に書く。
   p1Upsert("DailyOpsReport", "row_id", {
     row_id: row.row_id, student_email: studentEmail,
+    operating_score: (r.data.operating_score === null || r.data.operating_score === undefined)
+                       ? "" : r.data.operating_score,
+    partial_score:   (r.data.partial_score === null || r.data.partial_score === undefined)
+                       ? "" : r.data.partial_score,
     finalized_at: new Date().toISOString(),
     snapshot_json: JSON.stringify(Object.assign({}, r.data, { narrative: undefined })).slice(0, 45000)
   });
