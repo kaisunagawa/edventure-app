@@ -130,6 +130,15 @@ PYX
     ng "$(sed -n '2p' /tmp/_smoke_deps.txt)"
   fi
 
+  # ★別の関数の中の定数を、外から参照していないか★
+  #   2026-08-05、設定画面のローカル RANK_RULES を攻略本から参照して
+  #   「攻略本を開くと落ちる」を本番で出した。構文は正しいので検出できなかった。
+  if (cd .. && python3 .preview/check_scope.py >/tmp/_smoke_scope.txt 2>&1); then
+    ok "定数が見える場所にある"
+  else
+    ng "$(sed -n '2p' /tmp/_smoke_scope.txt)"
+  fi
+
   # ★運用コマンドが ops.sh から呼べるか★
   #   admin* は fail-closed。許可リストに載せ忘れると AUTH_REQUIRED で弾かれ、
   #   デプロイし直しになる（2026-08-05に3つ載せ忘れた）。

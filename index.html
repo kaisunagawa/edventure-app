@@ -1378,6 +1378,14 @@ const RANK_PERSONA = {
 //   ファイルを assets/rank/ に置いて、ここに名前→パスを書けば表示される。
 //   まだ入っていない階級は、代わりにその階級の記号を出す（空の枠を作らない）。
 //   絵はKaiからもらった1枚の画像から切り出して、背景を透かしてある。
+// ★階級の表示用（レベルの帯を文字にしたもの）★
+//   ここは全体から見える場所に置くこと。設定画面の中に置いていたため、
+//   攻略本（別のコンポーネント）から参照できず、開いた瞬間に落ちた（2026-08-05）。
+const RANK_RULES = RANKS.map(r => ({
+  ...r,
+  lv: r.minLv === r.maxLv ? `Lv.${r.minLv}` : `Lv.${r.minLv}–${r.maxLv}`
+}));
+
 const RANK_ART = {
   "ルーキー":       "assets/rank/rookie.png",
   "チャレンジャー": "assets/rank/challenger.png",
@@ -9458,12 +9466,6 @@ function SettingsScreen({onToast,onLogout,onGoalSaved,profile,onProfileSaved,onC
     try { return Number(JSON.parse(localStorage.getItem("cache_gameStatus")||"{}").level)||0; }
     catch(e){ return 0; }
   });
-  // RANKS定数から生成
-  const RANK_RULES = RANKS.map(r => ({
-    ...r,
-    lv: r.minLv === r.maxLv ? `Lv.${r.minLv}` : `Lv.${r.minLv}–${r.maxLv}`
-  }));
-
   const SectionHeader = ({icon, title}) => html`
     <div style=${{display:"flex",alignItems:"center",gap:8,marginBottom:14}}>
       <span style=${{fontSize:15}}>${icon}</span>
@@ -10129,7 +10131,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260805-213819";
+const APP_BUILD = "20260805-215312";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
