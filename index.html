@@ -111,6 +111,21 @@
     .ph-sub { font-size: 13px; color: var(--sub); margin-top: 2px; }
     .ph-label { display: none; }
 
+    /* 階級のカードをめくる。押すと裏の性格が出る（2026-08-05 Kai要望） */
+    .flip { perspective: 800px; }
+    .flip-in { position: relative; width: 100%; height: 100%;
+               transition: transform .45s cubic-bezier(.2,.7,.3,1); transform-style: preserve-3d; }
+    .flip.on .flip-in { transform: rotateY(180deg); }
+    .flip-f, .flip-b { position: absolute; inset: 0; backface-visibility: hidden;
+                       -webkit-backface-visibility: hidden;
+                       display: flex; align-items: center; justify-content: center; }
+    .flip-b { transform: rotateY(180deg); }
+    @media (prefers-reduced-motion: reduce) { .flip-in { transition: none; } }
+
+    /* 未到達の階級にうっすら敷くシルエット。
+       明るい画面では黒、暗い画面では白にしないと見えない（2026-08-05） */
+    .rank-ghost { filter: grayscale(1) brightness(0) opacity(0.10); }
+
     /* ── Cards ── */
     .card {
       background: var(--card); border-radius: 12px;
@@ -348,6 +363,7 @@
         --hero2:    #093642;
         --cyan:     #22D3EE;   /* ダークは画像どおりの水色 */
       }
+      .rank-ghost { filter: grayscale(1) brightness(0) invert(1) opacity(0.13); }
       .nav { background: rgba(20,25,30,.96); }
       .toast { background: #E8ECEF; color: #111827; }
       .e5 { background: var(--green-l); border-color: #14532D; color: #4ADE80; }
@@ -1315,8 +1331,49 @@ const RANKS = [
   { minLv:16, maxLv:30, name:"コンシステント", sub:"継続が身についた", color:"#3B82F6", bg:"#EFF6FF", emoji:"⚡" },
   { minLv:31, maxLv:50, name:"習慣マスター",  sub:"本物の継続力", color:"#F59E0B", bg:"#FFFBEB", emoji:"⭐️" },
   { minLv:51, maxLv:75, name:"エキスパート",  sub:"圧倒的な実行力", color:"#8B5CF6", bg:"#F5F3FF", emoji:"🏆" },
-  { minLv:76, maxLv:100,name:"レジェンド",   sub:"超人的な記録力", color:"#EC4899", bg:"#FDF2F8", emoji:"👑" },
+  { minLv:76, maxLv:99, name:"レジェンド",   sub:"超人的な記録力", color:"#EC4899", bg:"#FDF2F8", emoji:"👑" },
+  // ★到達するまで名前も姿も見せない★（2026-08-05 Kai要望）
+  //   secret:true の階級は、たどり着くまで「？？？」で出す。
+  //   先に全部見えていると、最後の一段の意味が無くなる。
+  { minLv:100,maxLv:100,name:"アルティメットレジェンド", sub:"すべての習慣を極めた証",
+    color:"#C9A227", bg:"#FEFCE8", emoji:"✨", secret:true },
 ];
+// ★階級ごとのジローくん★（2026-08-05 Kai要望）
+//   カードを押すと裏返って出るプロフィール。
+//   小さな正方形に収まるよう、値は16文字くらいまでに抑えること。
+//   段が上がるほど記録との付き合い方が変わる（そして少しこじらせる）。
+const RANK_PERSONA = {
+  "ルーキー": { no:"No.001", type:"しゅうかんのタネ",
+    line: "まだ何者でもないジローくん。記録を続けることで少しずつ成長する。",
+    items: [["好き","白ごはん"],["苦手","「明日やる」"],
+            ["口ぐせ","「できるかな…？」"],["特徴","寝ると葉っぱが伸びる"]] },
+  "チャレンジャー": { no:"No.002", type:"挑戦の若葉",
+    line: "挑戦する楽しさを覚えたジローくん。失敗しても笑って立ち上がる。",
+    items: [["好き","ゆで卵"],["苦手","「無理」"],
+            ["口ぐせ","「もう1回やる！」"],["特徴","ストリークが切れそうで焦る"]] },
+  "コンシステント": { no:"No.003", type:"継続の騎士",
+    line: "記録することが生活になった。初心者ジローをよく助けている。",
+    items: [["好き","朝のコーヒー"],["苦手","通知OFF"],
+            ["口ぐせ","「昨日より少し前へ。」"],["特徴","王冠はXPでできている"]] },
+  "習慣マスター": { no:"No.004", type:"努力の守護者",
+    line: "努力を楽しめるようになったジローくん。もう三日坊主という言葉を知らない。",
+    items: [["好き","ストリーク"],["苦手","逃げること"],
+            ["口ぐせ","「あと少し。」"],["特徴","鎧は毎日の積み重ね"]] },
+  "エキスパート": { no:"No.005", type:"時間の賢者",
+    line: "時間の使い方を極めた存在。迷ったときほど冷静。",
+    items: [["好き","データ分析"],["苦手","ムダな時間"],
+            ["口ぐせ","「数字は嘘をつかない。」"],["特徴","未来を見るのが得意"]] },
+  "レジェンド": { no:"No.006", type:"継続の伝説",
+    line: "努力が才能を追い越した姿。すべてのジローくんの憧れ。",
+    items: [["好き","朝5時"],["苦手","サボる自分"],
+            ["口ぐせ","「未来は今日つくられる。」"],["特徴","羽は努力の結晶"]] },
+  "アルティメットレジェンド": { no:"No.007", type:"習慣の化身",
+    line: "毎日の積み重ねを極めた者だけが辿り着く境地。",
+    items: [["好き","誰かの挑戦"],["苦手","諦めること"],
+            ["口ぐせ","「君ならできる。」"],["特徴","誰より努力したことを語らない"]] }
+};
+
+
 // ★階級ごとのキャラクター画像★（2026-08-05 Kai要望）
 //   ファイルを assets/rank/ に置いて、ここに名前→パスを書けば表示される。
 //   まだ入っていない階級は、代わりにその階級の記号を出す（空の枠を作らない）。
@@ -1328,6 +1385,7 @@ const RANK_ART = {
   "習慣マスター":   "assets/rank/master.png",
   "エキスパート":   "assets/rank/expert.png",
   "レジェンド":     "assets/rank/legend.png",
+  "アルティメットレジェンド": "assets/rank/ultimate.png",
 };
 
 // 画像は端末にキャッシュされる。差し替えても古い絵が出続けるので、
@@ -8925,6 +8983,168 @@ function AvailableTimeSection({onToast}) {
     </div>`;
 }
 
+// ★攻略本★（2026-08-05 Kai要望・図鑑の攻略本ページのイメージを画面用に作り直す）
+//   中身は「それっぽい数字」ではなく、実際のサーバーの計算(addXP)に合わせている。
+//     記録1件 +10 / メモあり +5 / その日の最初の1件だけ ストリーク日数×2（30日で頭打ち）
+//   まだ上がっていない階級は姿も攻略も見せない。アルティメットレジェンドは名前も伏せる。
+function GuideBookSheet({myLevel,onClose}) {
+  const H = ({t,s}) => html`
+    <div style=${{marginBottom:9}}>
+      <div style=${{fontSize:14,fontWeight:800,color:"var(--text)"}}>${t}</div>
+      ${s&&html`<div style=${{fontSize:11,color:"var(--sub)",marginTop:3,lineHeight:1.6}}>${s}</div>`}
+    </div>`;
+  const Box = ({children}) => html`
+    <div style=${{background:"var(--bg)",border:"1px solid var(--border)",borderRadius:14,
+                  padding:"13px 14px",marginBottom:14}}>${children}</div>`;
+
+  // 育て方（アプリに実際にある操作だけを書く）
+  const HOWTO = [
+    ["毎日1件でいいから記録する","記録すると +10 XP。1分のことでも構いません。"],
+    ["ひとことメモを添える","結果や気づきを書くと +5 XP。あとで自分が読み返せます。"],
+    ["連続を切らさない","その日の最初の1件に、連続日数×2 XP がつきます（30日で頭打ち・最大 +60）。"],
+    ["時間を6分類に振り分ける","「まとめて分類する」で片づけると、時間配分力が測れるようになります。"],
+    ["目標とつなげる","今週の目標・今日のフォーカスに沿った記録が増えるほど、成果力が上がります。"]
+  ];
+  // つまずきと対策
+  const STUCK = [
+    ["記録を忘れる","LINE連携をして、朝と夜のリマインダーを受け取る。"],
+    ["やる気が出ない","ハードルを下げる。「1分だけ」で記録は1件になります。"],
+    ["連続が切れた","0に戻るのは連続日数だけ。XPと階級は下がりません。今日また1件。"],
+    ["分類がたまった","記録画面の「まとめて分類する」で、たまった分を一気に片づけられます。"]
+  ];
+  // 階級ごとの攻略。到達していない階級は伏せる。
+  const TIPS = {
+    "ルーキー":"まずは「開いて1件記録する」を毎日。完璧より、続けることを優先。",
+    "チャレンジャー":"いろいろな時間帯で記録してみる。小さくできた日を自分で認める。",
+    "コンシステント":"朝と夜の決まった時間に記録を置く。生活のリズムに乗せる。",
+    "習慣マスター":"休みの日も記録する。「当たり前」になると、崩れにくくなります。",
+    "エキスパート":"内訳を見て、計画外の時間を削る。時間の質を見直す時期。",
+    "レジェンド":"みんなの頑張りで仲間を応援する。教えることで自分も伸びます。",
+    "アルティメットレジェンド":"すべての習慣がつながる場所。新しい挑戦で、さらに高みへ。"
+  };
+
+  return ReactDOM.createPortal(html`
+    <div style=${{position:"fixed",inset:0,height:"100dvh",background:"rgba(0,0,0,0.5)",
+                  display:"flex",alignItems:"flex-end",zIndex:600}}
+      onClick=${e=>{if(e.target===e.currentTarget)onClose();}}>
+      <div style=${{background:"var(--card)",borderRadius:"20px 20px 0 0",width:"100%",boxSizing:"border-box",
+                    maxHeight:"90dvh",display:"flex",flexDirection:"column",overflow:"hidden"}}>
+
+        <!-- 表紙 -->
+        <div style=${{position:"relative",background:"var(--accent)",color:"#fff",
+                      padding:"18px 20px 16px",overflow:"hidden",flexShrink:0}}>
+          <svg width="120" height="120" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.2"
+            stroke-linejoin="round" style=${{position:"absolute",right:-22,top:-16,opacity:0.16}}>
+            <path d="M3 4.5h6a3 3 0 0 1 3 3v12a2.5 2.5 0 0 0-2.5-2.5H3z"/>
+            <path d="M21 4.5h-6a3 3 0 0 0-3 3v12a2.5 2.5 0 0 1 2.5-2.5H21z"/></svg>
+          <div style=${{position:"relative",fontSize:19,fontWeight:800,letterSpacing:".01em"}}>📖 ジロー図鑑 攻略本</div>
+          <div style=${{position:"relative",fontSize:11.5,opacity:0.92,marginTop:4,lineHeight:1.6}}>
+            ジローくんを育てるための完全ガイド
+          </div>
+        </div>
+
+        <div style=${{flex:1,overflowY:"auto",overscrollBehavior:"contain",WebkitOverflowScrolling:"touch",
+                      padding:"16px 18px calc(20px + env(safe-area-inset-bottom))"}}>
+
+          <!-- 成長の流れ -->
+          ${H({t:"ジローくんの成長の流れ",s:"まだ会っていないジローくんは、影だけ見えています。"})}
+          <div style=${{display:"flex",gap:10,overflowX:"auto",paddingBottom:10,marginBottom:14,
+                        WebkitOverflowScrolling:"touch"}}>
+            ${RANK_RULES.map(r=>{
+              const reached = myLevel>0 && myLevel>=r.minLv;
+              const hidden = r.secret && !reached;
+              return html`
+                <div key=${r.name} style=${{flexShrink:0,width:78,textAlign:"center"}}>
+                  <div style=${{position:"relative",width:78,height:78,borderRadius:12,
+                                background:"var(--bg)",border:"1px solid var(--border)",
+                                display:"flex",alignItems:"center",justifyContent:"center",
+                                overflow:"hidden",padding:5,boxSizing:"border-box"}}>
+                    ${reached
+                      ? html`<img src=${rankArt(r.name)} alt=${r.name} loading="lazy"
+                               style=${{maxWidth:"100%",maxHeight:"100%",objectFit:"contain",display:"block"}}/>`
+                      : html`<img class="rank-ghost" src=${rankArt(r.name)} alt="" aria-hidden="true" loading="lazy"
+                               style=${{maxWidth:"100%",maxHeight:"100%",objectFit:"contain",display:"block"}}/>`}
+                  </div>
+                  <div style=${{fontSize:9.5,fontWeight:800,marginTop:5,lineHeight:1.35,
+                                color:hidden?"var(--sub)":"var(--text)"}}>${hidden?"？？？":r.name}</div>
+                  <div style=${{display:"inline-block",marginTop:3,fontSize:8.5,fontWeight:700,color:"#fff",
+                                background:r.color,borderRadius:20,padding:"1px 6px"}}>${r.lv}</div>
+                </div>`;
+            })}
+          </div>
+
+          <!-- 育て方 -->
+          ${H({t:"基本の育て方"})}
+          ${Box({children:HOWTO.map(([t,d],i)=>html`
+            <div key=${i} style=${{display:"flex",gap:9,alignItems:"flex-start",
+                                   marginBottom:i===HOWTO.length-1?0:11}}>
+              <span style=${{flexShrink:0,width:18,height:18,borderRadius:"50%",background:"var(--accent)",
+                             color:"#fff",fontSize:10,fontWeight:800,display:"flex",
+                             alignItems:"center",justifyContent:"center",marginTop:1}}>${i+1}</span>
+              <span style=${{flex:1,minWidth:0}}>
+                <span style=${{display:"block",fontSize:12,fontWeight:800,color:"var(--text)"}}>${t}</span>
+                <span style=${{display:"block",fontSize:11,color:"var(--sub)",lineHeight:1.65,marginTop:2}}>${d}</span>
+              </span>
+            </div>`)})}
+
+          <!-- XPの仕組み -->
+          ${H({t:"XPとレベルの仕組み",s:"1件の記録でもらえるXPは、この3つの足し算です。"})}
+          ${Box({children:html`
+            <div>
+              ${[["記録を1件つける","+10"],["ひとことメモを書く","+5"],
+                 ["連続日数ボーナス（その日の1件目だけ）","+2 × 連続日数"]].map(([k,v],i)=>html`
+                <div key=${i} style=${{display:"flex",alignItems:"baseline",gap:10,
+                                       padding:"7px 0",borderBottom:"1px solid var(--border)"}}>
+                  <span style=${{flex:1,minWidth:0,fontSize:11.5,color:"var(--text)",lineHeight:1.5}}>${k}</span>
+                  <span style=${{flexShrink:0,fontSize:12,fontWeight:800,color:"var(--accent)"}}>${v}</span>
+                </div>`)}
+              <div style=${{fontSize:11,color:"var(--sub)",lineHeight:1.7,marginTop:10}}>
+                連続日数ボーナスは30日で頭打ち（最大 +60）。<br/>
+                つまり<b style=${{color:"var(--text)"}}>1日1件を切らさない</b>のが、いちばん効きます。<br/>
+                レベルは上に行くほど必要なXPが増え、Lv.100（累計 83,040 XP）が頂点です。
+              </div>
+            </div>`})}
+
+          <!-- 階級ごとの攻略ポイント -->
+          ${H({t:"階級ごとの攻略ポイント",s:"いま会えるジローくんの分だけ読めます。"})}
+          ${Box({children:RANK_RULES.map(r=>{
+            const reached = myLevel>0 && myLevel>=r.minLv;
+            const hidden = r.secret && !reached;
+            return html`
+              <div key=${r.name} style=${{display:"flex",gap:9,alignItems:"flex-start",marginBottom:11}}>
+                <span style=${{flexShrink:0,marginTop:3,width:7,height:7,borderRadius:"50%",
+                               background:reached?r.color:"var(--border)"}}/>
+                <span style=${{flex:1,minWidth:0}}>
+                  <span style=${{display:"block",fontSize:11.5,fontWeight:800,
+                                 color:reached?"var(--text)":"var(--sub)"}}>
+                    ${hidden?"？？？":r.name} <span style=${{fontWeight:700,color:"var(--faint)"}}>${r.lv}</span></span>
+                  <span style=${{display:"block",fontSize:11,lineHeight:1.65,marginTop:2,
+                                 color:reached?"var(--sub)":"var(--faint)"}}>
+                    ${reached ? TIPS[r.name] : `Lv.${r.minLv} でここが読めます`}</span>
+                </span>
+              </div>`;
+          })})}
+
+          <!-- つまずきと対策 -->
+          ${H({t:"よくあるつまずきと対策"})}
+          ${Box({children:STUCK.map(([q,a],i)=>html`
+            <div key=${i} style=${{marginBottom:i===STUCK.length-1?0:11}}>
+              <div style=${{fontSize:11.5,fontWeight:800,color:"var(--text)"}}>${q}</div>
+              <div style=${{fontSize:11,color:"var(--sub)",lineHeight:1.65,marginTop:2}}>→ ${a}</div>
+            </div>`)})}
+
+          <div style=${{background:"var(--accent-l)",border:"1px solid var(--accent)",borderRadius:14,
+                        padding:"12px 14px",fontSize:11.5,color:"var(--accent)",fontWeight:700,
+                        lineHeight:1.7,textAlign:"center",marginBottom:14}}>
+            大事なのは速さじゃない。<br/>昨日の自分を超えることだよ。
+          </div>
+
+          <button class="btn-g" onClick=${onClose}>閉じる</button>
+        </div>
+      </div>
+    </div>`, document.body);
+}
+
 function SettingsScreen({onToast,onLogout,onGoalSaved,profile,onProfileSaved,onCalLinked,jumpTo,onJumped}) {
   const [nickname,setNickname]=useState(profile?.nickname||CURRENT_USER.name);
   const [avatar,setAvatar]=useState(profile?.avatar||"🦊");
@@ -9126,6 +9346,8 @@ function SettingsScreen({onToast,onLogout,onGoalSaved,profile,onProfileSaved,onC
   // 折りたたみ式セクション。開閉状態は openSec で管理し、本体は安定した
   // モジュール外コンポーネント SettingsSec を使う（下の各セクションで直接呼ぶ）
   const [openSec,setOpenSec]=useState("");
+  const [flipped,setFlipped]=useState({});   // 階級カードをめくった状態
+  const [guideOpen,setGuideOpen]=useState(false);  // 攻略本を開いているか
   // 階級システムを開いたとき、レベルが分からなければ取りに行く。
   // ★この useEffect は openSec より後に書くこと★
   //   前に書いて "Cannot access 'openSec' before initialization" で
@@ -9442,49 +9664,135 @@ function SettingsScreen({onToast,onLogout,onGoalSaved,profile,onProfileSaved,onC
         <!-- ★階級の一覧★（2026-08-05 Kai指定のデザイン・2枚目の画像に合わせる）
              見出し（丸・名前・レベルの札）の下に、キャラクターを白いカードに入れて置く。
              はみ出さないよう、カードの中に収める。 -->
-        <div style=${{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+        <!-- minmax(0,1fr) にしないと、長い階級名が列を押し広げて
+             左右のカードの大きさがそろわない（2026-08-05） -->
+        <div style=${{display:"grid",gridTemplateColumns:"minmax(0,1fr) minmax(0,1fr)",gap:12}}>
           ${RANK_RULES.map(r=>{
             const here = myLevel > 0 && getRank(myLevel).name === r.name;
             // ★まだ上がっていない階級は、姿を見せない★（2026-08-05 Kai要望）
             //   先に全部見えていると、上がったときの楽しみが無くなる。
+            //   ただし真っ白では寂しいので、うっすらシルエットだけ敷く。
+            //   secret の階級は名前も伏せる（たどり着くまで何者か分からない）。
             const reached = myLevel > 0 && myLevel >= r.minLv;
             const art = reached ? rankArt(r.name) : "";
+            const ghost = reached ? "" : rankArt(r.name);      // 影だけ見せる用
+            const hidden = r.secret && !reached;
+            const shownName = hidden ? "？？？" : r.name;
+            const shownSub  = hidden ? "たどり着いた人だけが会えます" : r.sub;
             return html`
               <div key=${r.name}>
                 <!-- 名前とレベルは1行に収める。折り返すと下のカードに重なる -->
                 <div style=${{display:"flex",alignItems:"center",gap:5,marginBottom:6,
                               minWidth:0,overflow:"hidden"}}>
                   <span style=${{width:7,height:7,borderRadius:"50%",background:r.color,flexShrink:0}}/>
-                  <span style=${{fontSize:11.5,fontWeight:800,color:"var(--text)",
-                                 overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>${r.name}</span>
+                  <span style=${{fontSize:11.5,fontWeight:800,
+                                 color:hidden?"var(--sub)":"var(--text)",
+                                 overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>${shownName}</span>
                   <span style=${{fontSize:9,fontWeight:700,color:"#fff",background:r.color,flexShrink:0,
                                  borderRadius:20,padding:"1px 6px",whiteSpace:"nowrap"}}>${r.lv}</span>
                 </div>
-                <div style=${{position:"relative",borderRadius:14,background:"var(--bg)",
+                <button onClick=${()=>reached&&setFlipped(f=>({...f,[r.name]:!f[r.name]}))}
+                  aria-label=${reached?r.name+"の性格を見る":""}
+                  class=${"flip"+(flipped[r.name]?" on":"")}
+                  style=${{position:"relative",borderRadius:14,background:"var(--bg)",
                               border:`1px solid ${here?r.color:"var(--border)"}`,
-                              aspectRatio:"1 / 1",display:"flex",alignItems:"center",
-                              justifyContent:"center",overflow:"hidden",
-                              padding:"8px",boxSizing:"border-box"}}>
+                              aspectRatio:"1 / 1",width:"100%",display:"block",
+                              overflow:"hidden",padding:0,
+                              cursor:reached?"pointer":"default",fontFamily:"inherit",
+                              boxSizing:"border-box"}}>
+                  <span class="flip-in" style=${{display:"block"}}>
+                  <span class="flip-b" style=${{padding:"9px 10px",flexDirection:"column",
+                        alignItems:"stretch",justifyContent:"center",gap:4,
+                        textAlign:"left",overflow:"hidden"}}>
+                    <!-- ★図鑑の見出し（No.＋分類）★ Kaiの図鑑画像に合わせる -->
+                    <span style=${{display:"flex",alignItems:"baseline",gap:4,minWidth:0}}>
+                      <span style=${{flexShrink:0,fontSize:7.5,fontWeight:800,color:r.color,
+                                     letterSpacing:".04em"}}>${(RANK_PERSONA[r.name]||{}).no||""}</span>
+                      <span style=${{fontSize:9.5,fontWeight:800,color:"var(--text)",
+                                     overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}
+                        >${(RANK_PERSONA[r.name]||{}).type||""}</span>
+                    </span>
+                    <span style=${{fontSize:8.5,color:"var(--sub)",lineHeight:1.42,
+                                   borderBottom:"1px solid var(--border)",paddingBottom:4}}>
+                      ${(RANK_PERSONA[r.name]||{}).line||""}</span>
+                    ${((RANK_PERSONA[r.name]||{}).items||[]).map(([k,v],ii)=>html`
+                      <span key=${ii} style=${{display:"flex",alignItems:"flex-start",gap:3,minWidth:0}}>
+                        <!-- ラベルは折り返させない（「口ぐせ」が2行になって高さが崩れる） -->
+                        <span style=${{flexShrink:0,width:25,fontSize:8,fontWeight:800,color:r.color,
+                                       lineHeight:1.5,whiteSpace:"nowrap"}}>${k}</span>
+                        <span style=${{flex:1,minWidth:0,fontSize:8.5,color:"var(--text)",lineHeight:1.35,
+                                       overflowWrap:"anywhere",wordBreak:"break-all"}}>${v}</span>
+                      </span>`)}
+                  </span>
+                  <span class="flip-f" style=${{padding:"8px",boxSizing:"border-box"}}>
                   ${art
                     ? html`<img src=${art} alt=${r.name} loading="lazy"
                              style=${{maxWidth:"100%",maxHeight:"100%",objectFit:"contain",display:"block"}}/>`
-                    : html`<span style=${{display:"flex",flexDirection:"column",alignItems:"center",gap:6}}>
+                    : html`
+                      <!-- うっすらシルエット。姿は分からないが、何かがいることは伝わる -->
+                      <img class="rank-ghost" src=${ghost} alt="" aria-hidden="true" loading="lazy"
+                        style=${{position:"absolute",inset:8,width:"calc(100% - 16px)",height:"calc(100% - 16px)",
+                                 objectFit:"contain",pointerEvents:"none"}}/>
+                      <span style=${{position:"relative",display:"flex",flexDirection:"column",
+                                     alignItems:"center",gap:6}}>
                         <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="var(--sub)" stroke-width="1.8">
                           <rect x="4" y="10.5" width="16" height="10" rx="2.5"/>
                           <path d="M8 10.5V7.5a4 4 0 0 1 8 0v3" stroke-linecap="round"/></svg>
                         <span style=${{fontSize:10.5,color:"var(--sub)",fontWeight:600}}>
                           ${myLevel>0 ? `Lv.${r.minLv} で会えます` : "読み込み中…"}</span>
                       </span>`}
-                </div>
+                  </span>
+                  </span>
+                </button>
                 <div style=${{fontSize:10.5,color:"var(--sub)",marginTop:5,
                               display:"flex",alignItems:"center",gap:5,minWidth:0}}>
-                  <span style=${{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>${r.sub}</span>
+                  <span style=${{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>${shownSub}</span>
                   ${here&&html`<span style=${{flexShrink:0,fontSize:9,fontWeight:700,color:r.color}}>● いまここ</span>`}
                 </div>
               </div>`;
           })}
+
+          <!-- ★右下の空きに攻略のヒントを置く★（2026-08-05 Kai要望）
+               階級が7つなので2列だと1つ余る。空白のままにせず、
+               「次に何をすれば上がるのか」を置く。 -->
+          <div>
+            <!-- 階級カードと同じ丸印だと見分けがつかないので、本のしるしにする -->
+            <div style=${{display:"flex",alignItems:"center",gap:5,marginBottom:6}}>
+              <span style=${{flexShrink:0,color:"var(--accent)",display:"flex"}}>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                  stroke-width="2" stroke-linejoin="round">
+                  <path d="M3 4.5h6a3 3 0 0 1 3 3v12a2.5 2.5 0 0 0-2.5-2.5H3z"/>
+                  <path d="M21 4.5h-6a3 3 0 0 0-3 3v12a2.5 2.5 0 0 1 2.5-2.5H21z"/></svg></span>
+              <span style=${{fontSize:11.5,fontWeight:800,color:"var(--text)"}}>攻略本</span>
+            </div>
+            <button type="button" onClick=${()=>setGuideOpen(true)}
+                    style=${{position:"relative",borderRadius:14,background:"var(--accent-l)",
+                          border:"1px solid var(--accent)",width:"100%",textAlign:"left",
+                          aspectRatio:"1 / 1",padding:"9px 11px",boxSizing:"border-box",
+                          display:"flex",flexDirection:"column",justifyContent:"center",gap:6,
+                          overflow:"hidden",cursor:"pointer",fontFamily:"inherit"}}>
+              <!-- 背景にうっすら本 -->
+              <svg width="86" height="86" viewBox="0 0 24 24" fill="none" stroke="var(--accent)"
+                stroke-width="1.4" stroke-linejoin="round"
+                style=${{position:"absolute",right:-14,bottom:-12,opacity:0.10,pointerEvents:"none"}}>
+                <path d="M3 4.5h6a3 3 0 0 1 3 3v12a2.5 2.5 0 0 0-2.5-2.5H3z"/>
+                <path d="M21 4.5h-6a3 3 0 0 0-3 3v12a2.5 2.5 0 0 1 2.5-2.5H21z"/></svg>
+              <div style=${{position:"relative",fontSize:11,color:"var(--text)",lineHeight:1.6}}>
+                ・記録1件 <b>+10</b><br/>
+                ・メモを書く <b>+5</b><br/>
+                ・連続日数ボーナス
+              </div>
+              <div style=${{position:"relative",fontSize:9.8,color:"var(--sub)",lineHeight:1.55,
+                            borderTop:"1px solid var(--border)",paddingTop:6}}>
+                効くのは<b>毎日1件</b>。<br/>件数より、途切れさせないこと。
+              </div>
+            </button>
+            <div style=${{fontSize:10.5,color:"var(--accent)",marginTop:5,fontWeight:700}}>タップで開く</div>
+          </div>
         </div>
       <//>
+
+      ${guideOpen && html`<${GuideBookSheet} myLevel=${myLevel} onClose=${()=>setGuideOpen(false)}/>`}
 
       <!-- 使い方 Q&A -->
       <${FAQSection}/>
@@ -9691,7 +9999,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260805-150131";
+const APP_BUILD = "20260805-154755";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 

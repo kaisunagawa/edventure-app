@@ -46,7 +46,8 @@ const RANKS = [
   { minLv:16, maxLv:30, name:"コンシステント" },
   { minLv:31, maxLv:50, name:"習慣マスター" },
   { minLv:51, maxLv:75, name:"エキスパート" },
-  { minLv:76, maxLv:100,name:"レジェンド" }
+  { minLv:76, maxLv:99, name:"レジェンド" },
+  { minLv:100,maxLv:100,name:"アルティメットレジェンド" }
 ];
 function getRank(level) {
   for (var i = 0; i < RANKS.length; i++) {
