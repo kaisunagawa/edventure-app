@@ -4618,8 +4618,13 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
       const BADGE = {
         "強み":     {fg:"#38BDF8", bg:"rgba(56,189,248,0.14)"},
         "安定":     {fg:"#34D399", bg:"rgba(52,211,153,0.13)"},
-        "要確認":   {fg:"var(--sub)", bg:"rgba(148,163,184,0.14)"},
-        "改善優先": {fg:"#F59E0B", bg:"rgba(245,158,11,0.15)"},
+        // ★「要確認」を灰色にしない★（2026-08-05 Kai指摘）
+        //   灰色は「まだ測れていない」の色。要確認は測れたうえで低いので、
+        //   気づける色にする。強み→安定→要確認→改善優先が
+        //   青→緑→黄→赤と一段ずつ強くなるようにそろえた。
+        "要確認":   {fg:"#F59E0B", bg:"rgba(245,158,11,0.15)"},
+        "改善優先": {fg:"#EF4444", bg:"rgba(239,68,68,0.15)"},
+        // 暫定は「まだ測れていない」ので灰色のまま
         "暫定":     {fg:"var(--sub)", bg:"rgba(148,163,184,0.14)"},
       };
       const ICON = {
@@ -9289,7 +9294,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260805-104926";
+const APP_BUILD = "20260805-105335";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
