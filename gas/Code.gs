@@ -291,6 +291,39 @@ function doGet(e) {
           failureReason: days2.join(",") + " cleared=" + cleared });
         return jsonResponse({ ok: true, dates: days2, matched_rows: scanned, cleared: cleared });
       }
+      // ★記録に入っている分類の値を数えるだけのコマンド（調査用・書き込みなし）★
+      //   今の分類（TIME_CLASSES）に無い値がどれだけ残っているかを見る。
+      //   まとめて書き換えるかどうかは、この結果を見てから決める。
+      //     &days=90 で遡る日数を変えられる（既定90日）
+      case "adminClassAudit": {
+        if (!verifyAdmin(e.parameter.coachEmail)) return jsonResponse({ ok: false, error: "not admin" });
+        const dAgo = Math.max(1, Math.min(400, Number(e.parameter.days) || 90));
+        const cutA = formatDate(new Date(Date.now() - dAgo * 86400000));
+        const rowsA = sheetToObjects(getSheet("DailyLog"));
+        const known = {}, unknown = {};
+        let scannedA = 0;
+        rowsA.forEach(function (r) {
+          const dt = String(r.date instanceof Date ? formatDate(r.date) : r.date || "").slice(0, 10);
+          if (!dt || dt < cutA) return;
+          scannedA++;
+          const c = String(r.time_classification || "").trim();
+          if (!c) return;
+          if (TIME_CLASSES[c]) known[c] = (known[c] || 0) + 1;
+          else {
+            if (!unknown[c]) unknown[c] = { count: 0, users: {}, sample: [] };
+            unknown[c].count++;
+            unknown[c].users[String(r.student_email || "")] = 1;
+            if (unknown[c].sample.length < 3) {
+              unknown[c].sample.push(dt + " " + String(r.time_block || "") + " " + String(r.task || "").slice(0, 24));
+            }
+          }
+        });
+        return jsonResponse({ ok: true, days: dAgo, scanned: scannedA, known: known,
+          unknown: Object.keys(unknown).map(function (k) {
+            return { value: k, count: unknown[k].count,
+                     users: Object.keys(unknown[k].users).length, sample: unknown[k].sample }; })
+            .sort(function (a, b) { return b.count - a.count; }) });
+      }
       // 自己経営力の中身を読むだけのコマンド（調査用・書き込みなし）
       case "adminSmpDump": {
         if (!verifyAdmin(e.parameter.coachEmail)) return jsonResponse({ ok: false, error: "not admin" });
@@ -1684,8 +1717,10 @@ function computeSelfMgmtPower(studentEmail, weekStart) {
       const clsMin = {};
       let classified = 0;
       logs.forEach(function (l) {
+        // 今の分類に無い値（昔の分類など）は数えない。数えると
+        // 「分類できている」ことになり、実際より判断が甘くなる。
         const c = String(l.time_classification || "");
-        if (!c) return;
+        if (!c || !TIME_CLASSES[c]) return;
         clsMin[c] = (clsMin[c] || 0) + mins(l);
         classified += mins(l);
       });
@@ -1766,7 +1801,7 @@ function computeSelfMgmtPower(studentEmail, weekStart) {
         const m = minsOf(l); if (!(m > 0)) return;
         total += m;
         const k = String(l.time_classification || "");
-        if (!k) return;
+        if (!k || !TIME_CLASSES[k]) return;
         classified += m;
         if (REST_CLASSES[k]) rest += m;
       });
@@ -2078,8 +2113,10 @@ function computeDailyOpsFacts(studentEmail, dateStr, fixture) {
       const clsMin = {};
       let classified = 0;
       logs.forEach(function (l) {
+        // 今の分類に無い値（昔の分類など）は数えない。数えると
+        // 「分類できている」ことになり、実際より判断が甘くなる。
         const c = String(l.time_classification || "");
-        if (!c) return;
+        if (!c || !TIME_CLASSES[c]) return;
         clsMin[c] = (clsMin[c] || 0) + mins(l);
         classified += mins(l);
       });
@@ -10262,7 +10299,11 @@ function getTimeUseSummary(studentEmail) {
     const m = minsOf(l);
     total += m;
     if (Number(l.actual_minutes) > 0) measured += m;
-    const k = String(l.time_classification || "");
+    // ★今の分類に無い値は「未分類」として数える★（2026-08-05）
+    //   以前は空でなければ何でも「分類済み」に数えていたため、昔の分類が
+    //   入った記録が内訳に出ないまま、割合だけ埋まって見えていた。
+    const k0 = String(l.time_classification || "");
+    const k = TIME_CLASSES[k0] ? k0 : "";
     if (k) { classifiedCount++; classifiedMin += m; byClass[k] = (byClass[k] || 0) + m; }
     else unclassifiedMin += m;
   });
@@ -13164,7 +13205,7 @@ const ADMIN_SECRET_ALLOWLIST = {
   // 一斉送信（Kaiの明示的な要望により残す）
   adminBroadcastLine:1, adminBroadcastLinePending:1, adminSendStudentCampaign:1,
   // セットアップ・保守
-  adminSetupTriggers:1, adminInstallTrigger:1, adminSetupPhase1:1, adminSetupAuth:1, adminPhase4DryRun:1, adminLegacyBackfill:1, adminWritePathStats:1, adminIssueTestSession:1, adminDropTestSessions:1, adminOpsSelfTest:1, adminActualMinutesAudit:1, adminXpCorrection:1, adminStreakRecalc:1, adminGrantFeature:1, adminUserDiag:1, adminReportScoreDryRun:1, adminReportGenTest:1, adminScoreConsistency:1, adminFinalizeOps:1, adminUnfinalizeOps:1, adminSmpDump:1, adminCleanupPlusLogs:1,
+  adminSetupTriggers:1, adminInstallTrigger:1, adminSetupPhase1:1, adminSetupAuth:1, adminPhase4DryRun:1, adminLegacyBackfill:1, adminWritePathStats:1, adminIssueTestSession:1, adminDropTestSessions:1, adminOpsSelfTest:1, adminActualMinutesAudit:1, adminXpCorrection:1, adminStreakRecalc:1, adminGrantFeature:1, adminUserDiag:1, adminReportScoreDryRun:1, adminReportGenTest:1, adminScoreConsistency:1, adminFinalizeOps:1, adminUnfinalizeOps:1, adminSmpDump:1, adminCleanupPlusLogs:1, adminClassAudit:1,
   authSetMode:1, authSetEnforce:1, authRoleApply:1, authRoleDryRun:1, authRevokeAll:1,
   authCleanupTestData:1, adminPurgeTestUsers:1, adminMigrateTasks:1, authBreakerReset:1, rotateSessionSecret:1,
   p1Backup:1, p1BackupInfo:1, p1PurgeArchived:1, weeklyBackup:1
