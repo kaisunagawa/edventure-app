@@ -976,7 +976,8 @@ function doGet(e) {
           try { _bmsg = Utilities.newBlob(Utilities.base64DecodeWebSafe(e.parameter.messageB64)).getDataAsString("UTF-8"); }
           catch (err) { result = { ok: false, error: "messageB64 を読めませんでした" }; break; }
         }
-        result = adminBroadcastLine(e.parameter.coachEmail, _bmsg, e.parameter.confirm);
+        result = adminBroadcastLine(e.parameter.coachEmail, _bmsg, e.parameter.confirm,
+                                    e.parameter.imageUrl, e.parameter.previewUrl);
         break;
       }
       // まだセッションを取得していない人だけへ送る（切替日の予告用）
@@ -7649,18 +7650,24 @@ function adminRunNightlyCoachMessage(email) {
 // JIROKUに登録済み(is_active=TRUE)かつLINE連携済みの生徒全員にLINEでお知らせを送る。
 // confirm="yes"を渡さない限り実際には送信せず、対象人数とプレビューだけ返す
 // （一斉送信は取り消せないため、必ず事前確認できるようにしている）
-function adminBroadcastLine(email, message, confirm) {
+function adminBroadcastLine(email, message, confirm, imageUrl, previewUrl) {
   if (!verifyAdmin(email)) return { ok: false, error: "not admin" };
   if (!message) return { ok: false, error: "message is required" };
   const targets = sheetToObjects(getSheet("Users")).filter(u =>
     u.is_active.toUpperCase() === "TRUE" && u.line_user_id
   );
   if (confirm !== "yes") {
-    return { ok: true, dryRun: true, recipientCount: targets.length, preview: message };
+    return { ok: true, dryRun: true, recipientCount: targets.length, preview: message,
+             image: imageUrl || null };
   }
-  let sent = 0;
-  targets.forEach(u => { if (sendLineMessage(u.line_user_id, message)) sent++; });
-  return { ok: true, dryRun: false, recipientCount: targets.length, sentCount: sent };
+  let sent = 0, imgSent = 0;
+  targets.forEach(u => {
+    // 画像 → 本文 の順。先に絵が出たほうが読んでもらえる
+    if (imageUrl && sendLineImage(u.line_user_id, imageUrl, previewUrl)) imgSent++;
+    if (sendLineMessage(u.line_user_id, message)) sent++;
+  });
+  return { ok: true, dryRun: false, recipientCount: targets.length,
+           sentCount: sent, imageSentCount: imgSent };
 }
 
 // ★まだセッションを取得していない人だけへ送る★
@@ -10855,6 +10862,28 @@ function stripMismatchedGreeting(text, hour) {
       return ok ? m : "";
     }
   );
+}
+
+// ★画像を送る★（2026-08-05）
+//   LINEの画像は公開URL（https）でしか送れない。GitHub Pages に置いたものを指す。
+//   originalContentUrl は10MBまで、previewImageUrl は1MBまで。
+function sendLineImage(lineUserId, imageUrl, previewUrl) {
+  if (!lineUserId || !LINE_CHANNEL_TOKEN || !imageUrl) return false;
+  try {
+    const res = UrlFetchApp.fetch("https://api.line.me/v2/bot/message/push", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": "Bearer " + LINE_CHANNEL_TOKEN },
+      payload: JSON.stringify({ to: lineUserId, messages: [
+        { type: "image", originalContentUrl: imageUrl, previewImageUrl: previewUrl || imageUrl }
+      ]}),
+      muteHttpExceptions: true
+    });
+    if (res.getResponseCode() !== 200) {
+      Logger.log("LINE画像送信失敗 " + res.getResponseCode() + " " + res.getContentText());
+      return false;
+    }
+    return true;
+  } catch (e) { Logger.log("LINE画像送信例外 " + e); return false; }
 }
 
 function sendLineMessage(lineUserId, text) {
