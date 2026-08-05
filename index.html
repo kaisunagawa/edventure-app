@@ -1316,6 +1316,18 @@ const RANKS = [
   { minLv:11, maxLv:15, name:"エキスパート",  sub:"圧倒的な実行力", color:"#8B5CF6", bg:"#F5F3FF", emoji:"🏆" },
   { minLv:16, maxLv:999,name:"レジェンド",   sub:"超人的な記録力", color:"#EC4899", bg:"#FDF2F8", emoji:"👑" },
 ];
+// ★階級ごとのキャラクター画像★（2026-08-05 Kai要望）
+//   ファイルを assets/rank/ に置いて、ここに名前→パスを書けば表示される。
+//   まだ入っていない階級は、代わりにその階級の記号を出す（空の枠を作らない）。
+const RANK_ART = {
+  // "ルーキー":       "assets/rank/rookie.png",
+  // "チャレンジャー": "assets/rank/challenger.png",
+  // "コンシステント": "assets/rank/consistent.png",
+  // "習慣マスター":   "assets/rank/master.png",
+  // "エキスパート":   "assets/rank/expert.png",
+  // "レジェンド":     "assets/rank/legend.png",
+};
+
 function getRank(level) {
   return RANKS.find(r => level >= r.minLv && level <= r.maxLv) || RANKS[0];
 }
@@ -3239,6 +3251,11 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
         const rank=getRank(game.level);
         return html`
           <div style=${{display:"flex",alignItems:"center",gap:7,flexWrap:"wrap",marginLeft:58,marginBottom:16}}>
+            <!-- ★階級の色の丸★（2026-08-05 Kai要望）
+                 レベルの数字だけだと、いまどの階級にいるのかが色で分からない。
+                 ヘッダーは濃い背景なので、白い縁をつけて色を沈ませない。 -->
+            <span style=${{width:9,height:9,borderRadius:"50%",flexShrink:0,background:rank.color,
+                           boxShadow:"0 0 0 2px rgba(255,255,255,0.55)"}}/>
             <span style=${{fontSize:12,fontWeight:700,color:"rgba(255,255,255,0.9)"}}>Lv.${game.level} ${rank.name}</span>
             ${game.streak>0&&html`<span style=${{fontSize:11,background:"rgba(255,255,255,0.2)",color:"#fff",padding:"2px 9px",borderRadius:20,fontWeight:600,whiteSpace:"nowrap"}}>🔥 ${game.streak}日連続</span>`}
             ${game.streakFreeze>0&&html`<span title="連続記録フリーズ: 記録できない日があっても自動で連続記録を守ります" style=${{fontSize:11,background:"rgba(255,255,255,0.2)",color:"#fff",padding:"2px 9px",borderRadius:20,fontWeight:600,whiteSpace:"nowrap"}}>🧊 ×${game.streakFreeze}</span>`}
@@ -8964,6 +8981,10 @@ function SettingsScreen({onToast,onLogout,onGoalSaved,profile,onProfileSaved,onC
     onToast("目標を保存しました");
   };
 
+  // いまの階級に「いまここ」を出すためのレベル。
+  // 設定画面は game を持っていないので、ホームが残した内容から読む。
+  const myLevel = (()=>{ try { return Number(JSON.parse(localStorage.getItem("cache_gameStatus")||"{}").level)||0; }
+                         catch(e){ return 0; } })();
   // RANKS定数から生成
   const RANK_RULES = RANKS.map(r => ({
     ...r,
@@ -9269,17 +9290,42 @@ function SettingsScreen({onToast,onLogout,onGoalSaved,profile,onProfileSaved,onC
             ストリークリセット
           </div>
         </div>
-        <div style=${{display:"flex",flexDirection:"column",gap:6}}>
-          ${RANK_RULES.map(r=>html`
-            <div key=${r.name} style=${{display:"flex",alignItems:"center",gap:10,padding:"9px 12px",borderRadius:10,background:"var(--bg)",border:"1px solid var(--border)"}}>
-              <span style=${{width:8,height:8,borderRadius:"50%",background:r.color,flexShrink:0}}/>
-              <div style=${{flex:1}}>
-                <span style=${{fontSize:13,fontWeight:700,color:"var(--text)"}}>${r.name}</span>
-                <span style=${{fontSize:11,color:"var(--sub)",marginLeft:6}}>${r.sub}</span>
+        <!-- ★階級の一覧★（2026-08-05 Kai指定のデザイン）
+             丸い点・名前・色つきのレベル札・キャラクター。段の間に矢印を入れて、
+             上から下へ上がっていくことが分かるようにする。
+             キャラクターの絵（RANK_ART）が入っていない階級は、絵柄の代わりに
+             その階級の記号を出す。空の枠だけが残らないようにするため。 -->
+        <div style=${{display:"flex",flexDirection:"column"}}>
+          ${RANK_RULES.map((r,ri)=>{
+            const here = myLevel > 0 && getRank(myLevel).name === r.name;
+            const art = RANK_ART[r.name] || "";
+            return html`
+            <div key=${r.name}>
+              ${ri>0&&html`
+                <div style=${{textAlign:"center",color:"var(--sub)",fontSize:11,lineHeight:1,margin:"5px 0"}}>˅</div>`}
+              <div style=${{display:"flex",alignItems:"center",gap:11,padding:"11px 13px",borderRadius:12,
+                            background:"var(--bg)",
+                            border:`1px solid ${here?r.color:"var(--border)"}`}}>
+                <span style=${{width:9,height:9,borderRadius:"50%",background:r.color,flexShrink:0}}/>
+                <div style=${{flex:1,minWidth:0}}>
+                  <div style=${{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                    <span style=${{fontSize:13.5,fontWeight:800,color:"var(--text)"}}>${r.name}</span>
+                    <span style=${{fontSize:10.5,fontWeight:700,color:"#fff",background:r.color,
+                                   borderRadius:20,padding:"2px 9px",whiteSpace:"nowrap"}}>${r.lv}</span>
+                    ${here&&html`<span style=${{fontSize:10,fontWeight:700,color:r.color}}>いまここ</span>`}
+                  </div>
+                  <div style=${{fontSize:11,color:"var(--sub)",marginTop:3}}>${r.sub}</div>
+                </div>
+                <span style=${{flexShrink:0,width:44,height:44,borderRadius:12,display:"flex",
+                               alignItems:"center",justifyContent:"center",background:"var(--card)"}}>
+                  ${art
+                    ? html`<img src=${art} alt=${r.name} width="44" height="44"
+                             style=${{width:44,height:44,objectFit:"contain",display:"block"}}/>`
+                    : html`<span style=${{fontSize:22,lineHeight:1}}>${r.emoji}</span>`}
+                </span>
               </div>
-              <span style=${{fontSize:11,fontWeight:700,color:r.color,flexShrink:0}}>${r.lv}</span>
-            </div>
-          `)}
+            </div>`;
+          })}
         </div>
       <//>
 
@@ -9488,7 +9534,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260805-111931";
+const APP_BUILD = "20260805-112418";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
