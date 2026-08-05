@@ -1006,17 +1006,28 @@ async function flushCalendarQueue(){
 //   良い使い方ほど落ち着いた緑〜青、望ましくない「計画外の時間」は赤にして、
 //   1週間を俯瞰したときに色の偏りだけで傾向が読めるようにする。
 //   （GoogleカレンダーのcolorIdは1〜11の固定パレット）
+// ★カレンダーの色はアプリの色に合わせる★（2026-08-05 Kai要望）
+//   別々の色にしていたため、アプリでは青の「目標に直結」がカレンダーでは緑、
+//   といったズレが起きていた。Googleカレンダーは11色から選ぶしかないので、
+//   アプリの色にいちばん近いものを選ぶ。TIME_CLASS_COLOR と対で直すこと。
+//     目標に直結   #3B82F6 青   → Blueberry #3F51B5
+//     将来への投資 #8B5CF6 紫   → Grape     #8E24AA
+//     回復         #22C55E 緑   → Sage      #33B679
+//     人間関係     #F59E0B 橙   → Banana    #F6BF26
+//     日常業務     JIROKUの色   → Peacock   #039BE5
+//     計画外の時間 #64748B 灰   → Graphite  #616161
 const CAL_COLOR_BY_CLASS = {
-  GOAL_DIRECT:           "10", // Basil   濃い緑 ── いちばん良い使い方
-  ASSET_BUILD:           "2",  // Sage    明るい緑 ── 将来への投資
-  RECOVERY:              "7",  // Peacock 青 ── 回復（消耗ではなく充電）
-  RELATIONSHIP:          "5",  // Banana  黄 ── 人間関係（あたたかい時間）
-  RECOVERY_RELATIONSHIP: "7",  // 旧分類。書き換えない昔の記録のために残す
-  OPERATIONS:            "8",  // Graphite 灰 ── 日常業務（良くも悪くもない）
-  UNPLANNED_LEAKAGE:     "11", // Tomato  赤 ── 計画外の時間（いちばん減らしたい）
+  GOAL_DIRECT:           "9",  // Blueberry 青
+  ASSET_BUILD:           "3",  // Grape     紫
+  RECOVERY:              "2",  // Sage      緑
+  RELATIONSHIP:          "5",  // Banana    橙寄りの黄
+  RECOVERY_RELATIONSHIP: "2",  // 旧分類。書き換えない昔の記録のために残す
+  OPERATIONS:            "7",  // Peacock   水色
+  UNPLANNED_LEAKAGE:     "8",  // Graphite  灰
 };
-// 分類がまだ決まっていない記録は、これまでどおり灰色にしておく
-const JIROKU_RECORD_COLOR_ID = "8";
+// 分類がまだ決まっていない記録。灰色は「計画外の時間」に使うので、
+// 混ざらないように淡い色にしておく
+const JIROKU_RECORD_COLOR_ID = "1";   // Lavender
 const calColorFor = (cls) => CAL_COLOR_BY_CLASS[String(cls||"").toUpperCase()] || JIROKU_RECORD_COLOR_ID;
 // 通信エラーやトークンの一時的な失効で書き込みに失敗すると、以前は何の痕跡も残らず
 // 静かに諦めていたため、原因が特定できなかった。1回だけ再試行し、それでも失敗したら
@@ -9278,7 +9289,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260805-104341";
+const APP_BUILD = "20260805-104926";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 

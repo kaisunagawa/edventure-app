@@ -291,6 +291,59 @@ function doGet(e) {
           failureReason: days2.join(",") + " cleared=" + cleared });
         return jsonResponse({ ok: true, dates: days2, matched_rows: scanned, cleared: cleared });
       }
+      // ★すでに書いたカレンダーの色を、今の分類の色に塗り直す★（2026-08-05）
+      //   色の対応を変えたので、前に書いた予定は古い色のまま残る。
+      //   記録（DailyLog）の分類を正として、予定の色だけを直す。
+      //   予定の中身（題名・時刻）は触らない。
+      //     dry=1（既定）… 塗らずに、何件どう変わるかだけ返す
+      //     days=30      … 遡る日数（既定30・最大180）
+      case "adminRecolorCalendar": {
+        if (!verifyAdmin(e.parameter.coachEmail)) return jsonResponse({ ok: false, error: "not admin" });
+        const dryR = String(e.parameter.dry || "1") !== "0";
+        const daysR = Math.max(1, Math.min(180, Number(e.parameter.days) || 30));
+        const emR = String(e.parameter.email || "").trim() || adminEmail();
+        const uR = getFilteredRows("Users", "student_email", emR)[0];
+        const calIdR = (uR && uR.google_calendar_id) ? uR.google_calendar_id : null;
+        if (!calIdR) return jsonResponse({ ok: false, error: "no google_calendar_id" });
+        let calR = null;
+        try { calR = CalendarApp.getCalendarById(calIdR); } catch (err) { calR = null; }
+        if (!calR) return jsonResponse({ ok: false, error: "calendar not accessible" });
+
+        const fromR = new Date(); fromR.setDate(fromR.getDate() - daysR); fromR.setHours(0, 0, 0, 0);
+        const toR = new Date(); toR.setDate(toR.getDate() + 1); toR.setHours(0, 0, 0, 0);
+        // その期間の記録を「日付＋開始時刻」で引けるようにする
+        const byStart = {};
+        p1List("DailyLog", emR).forEach(function (r) {
+          const dt = String(r.date instanceof Date ? formatDate(r.date) : r.date || "").slice(0, 10);
+          const tb = String(r.time_block || "");
+          if (!dt || !tb) return;
+          byStart[dt + " " + tb.slice(0, 5)] = String(r.time_classification || "");
+        });
+
+        let scannedR = 0, changed = 0, unmatched = 0;
+        const plan = {};
+        let evsR = [];
+        try { evsR = calR.getEvents(fromR, toR); } catch (err) { evsR = []; }
+        evsR.forEach(function (ev) {
+          const t = String(ev.getTitle() || "").replace(/\uFE0F/g, "").trim();
+          const isJ = ev.getTag("jirokuRecord") === "1" || t.charAt(0) === "\u2714" || t.charAt(0) === "\u2705";
+          if (!isJ) return;   // JIROKU以外の予定には触らない
+          scannedR++;
+          const st = ev.getStartTime();
+          const key = Utilities.formatDate(st, "Asia/Tokyo", "yyyy-MM-dd HH:mm");
+          const cls = byStart[key];
+          if (cls === undefined) { unmatched++; return; }
+          const want = ownerCalColorId_(cls);
+          let now = "";
+          try { now = String(ev.getColor() || ""); } catch (err) {}
+          if (want === now) return;
+          plan[(cls || "(未分類)")] = (plan[(cls || "(未分類)")] || 0) + 1;
+          changed++;
+          if (!dryR) { try { ev.setColor(want); } catch (err) {} }
+        });
+        return jsonResponse({ ok: true, dry: dryR, email: emR, days: daysR,
+          scanned: scannedR, would_change: changed, unmatched: unmatched, by_class: plan });
+      }
       // ★記録に入っている分類の値を数えるだけのコマンド（調査用・書き込みなし）★
       //   今の分類（TIME_CLASSES）に無い値がどれだけ残っているかを見る。
       //   まとめて書き換えるかどうかは、この結果を見てから決める。
@@ -3336,17 +3389,33 @@ var _ownerCalCache = {}, _ownerCalIdByEmail = {};
 //   Kaiのようにサーバーから直接書き込む人は、画面側の書き込みを丸ごと止めている。
 //   そのためサーバー側にも同じ色分けを入れないと、その人だけ全部灰色のままになる。
 //   （CalendarAppのEventColorは、APIのcolorIdと同じ並び）
+// 色ID（"1".."11"）で持つ対応表。CalendarEvent.getColor() はこの形で返すので、
+// 「いまの色」と比べるにはこちらが要る。ownerCalColor_ と必ず同じ色にすること。
+var OWNER_CAL_COLOR_ID = {
+  GOAL_DIRECT:           "9",   // Blueberry 青
+  ASSET_BUILD:           "3",   // Grape     紫
+  RECOVERY:              "2",   // Sage      緑
+  RELATIONSHIP:          "5",   // Banana    橙寄りの黄
+  RECOVERY_RELATIONSHIP: "2",
+  OPERATIONS:            "7",   // Peacock   水色
+  UNPLANNED_LEAKAGE:     "8"    // Graphite  灰
+};
+function ownerCalColorId_(cls) {
+  return OWNER_CAL_COLOR_ID[String(cls || "").toUpperCase()] || "1";   // 未分類は Lavender
+}
+
 function ownerCalColor_(cls) {
   var C = CalendarApp.EventColor;
   switch (String(cls || "").toUpperCase()) {
-    case "GOAL_DIRECT":           return C.GREEN;       // 10 濃い緑 ── いちばん良い使い方
-    case "ASSET_BUILD":           return C.PALE_GREEN;  // 2  明るい緑 ── 将来への投資
-    case "RECOVERY":              return C.CYAN;        // 7  青 ── 回復
-    case "RELATIONSHIP":          return C.YELLOW;      // 5  黄 ── 人間関係
-    case "RECOVERY_RELATIONSHIP": return C.CYAN;        // 旧分類（書き換えない昔の記録）
-    case "OPERATIONS":            return C.GRAY;        // 8  灰 ── 日常業務
-    case "UNPLANNED_LEAKAGE":     return C.RED;         // 11 赤 ── 計画外の時間
-    default:                      return C.GRAY;        // 未分類はこれまでどおり灰色
+    // アプリの色に合わせる（2026-08-05 Kai要望）。index.html の CAL_COLOR_BY_CLASS と対。
+    case "GOAL_DIRECT":           return C.BLUE;        // 9 Blueberry 青 ── 目標に直結
+    case "ASSET_BUILD":           return C.MAUVE;       // 3 Grape     紫 ── 将来への投資
+    case "RECOVERY":              return C.PALE_GREEN;  // 2 Sage      緑 ── 回復
+    case "RELATIONSHIP":          return C.YELLOW;      // 5 Banana    橙寄りの黄 ── 人間関係
+    case "RECOVERY_RELATIONSHIP": return C.PALE_GREEN;  // 旧分類（書き換えない昔の記録）
+    case "OPERATIONS":            return C.CYAN;        // 7 Peacock   水色 ── 日常業務
+    case "UNPLANNED_LEAKAGE":     return C.GRAY;        // 8 Graphite  灰 ── 計画外の時間
+    default:                      return C.PALE_BLUE;   // 1 Lavender ── まだ分類していない
   }
 }
 
@@ -3448,7 +3517,10 @@ function dedupeOwnerJirokuEvents(days) {
       var key = Math.floor(ev.getStartTime().getTime() / 60000) + "|" + normTitle(ev.getTitle());
       debugList.push(Utilities.formatDate(ev.getStartTime(), "Asia/Tokyo", "MM-dd HH:mm:ss") + " key=[" + key + "] id=" + String(ev.getId()).slice(0, 12) + " " + String(ev.getTitle() || "").slice(0, 30));
       if (seen[key]) { try { ev.deleteEvent(); removed++; rem++; } catch (err) {} }
-      else { seen[key] = true; try { ev.setColor(CalendarApp.EventColor.GRAY); } catch (err) {} }
+      // ★残す予定の色は変えない★（2026-08-05）
+      //   ここで灰色に塗り直していたため、毎朝この掃除が走るたびに
+      //   分類ごとの色が消えていた。掃除は重複を消すだけにする。
+      else { seen[key] = true; }
     });
     perCal.push(cal.getName() + ":" + evs.length + "件/削除" + rem);
   });
@@ -13227,7 +13299,7 @@ const ADMIN_SECRET_ALLOWLIST = {
   // 一斉送信（Kaiの明示的な要望により残す）
   adminBroadcastLine:1, adminBroadcastLinePending:1, adminSendStudentCampaign:1,
   // セットアップ・保守
-  adminSetupTriggers:1, adminInstallTrigger:1, adminSetupPhase1:1, adminSetupAuth:1, adminPhase4DryRun:1, adminLegacyBackfill:1, adminWritePathStats:1, adminIssueTestSession:1, adminDropTestSessions:1, adminOpsSelfTest:1, adminActualMinutesAudit:1, adminXpCorrection:1, adminStreakRecalc:1, adminGrantFeature:1, adminUserDiag:1, adminReportScoreDryRun:1, adminReportGenTest:1, adminScoreConsistency:1, adminFinalizeOps:1, adminUnfinalizeOps:1, adminSmpDump:1, adminCleanupPlusLogs:1, adminClassAudit:1,
+  adminSetupTriggers:1, adminInstallTrigger:1, adminSetupPhase1:1, adminSetupAuth:1, adminPhase4DryRun:1, adminLegacyBackfill:1, adminWritePathStats:1, adminIssueTestSession:1, adminDropTestSessions:1, adminOpsSelfTest:1, adminActualMinutesAudit:1, adminXpCorrection:1, adminStreakRecalc:1, adminGrantFeature:1, adminUserDiag:1, adminReportScoreDryRun:1, adminReportGenTest:1, adminScoreConsistency:1, adminFinalizeOps:1, adminUnfinalizeOps:1, adminSmpDump:1, adminCleanupPlusLogs:1, adminClassAudit:1, adminRecolorCalendar:1,
   authSetMode:1, authSetEnforce:1, authRoleApply:1, authRoleDryRun:1, authRevokeAll:1,
   authCleanupTestData:1, adminPurgeTestUsers:1, adminMigrateTasks:1, authBreakerReset:1, rotateSessionSecret:1,
   p1Backup:1, p1BackupInfo:1, p1PurgeArchived:1, weeklyBackup:1
