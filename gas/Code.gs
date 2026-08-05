@@ -514,6 +514,32 @@ function doGet(e) {
                     streak: (r0.streakRanking||[]).length, report: (r0.reportRanking||[]).length,
                     recent: (r0.recentLoggers||[]).length } });
       }
+      // その日の点数が、どこから来ているかを実データで見る（読むだけ）
+      //   bash gas/ops.sh adminScoreTrace
+      case "adminScoreTrace": {
+        if (!verifyAdmin(e.parameter.coachEmail)) return jsonResponse({ ok: false, error: "not admin" });
+        const emT = String(e.parameter.email || "").trim() || adminEmail();
+        const dayT = String(e.parameter.date || "").slice(0, 10) || formatDate(new Date());
+        const rowT = p1List("DailyOpsReport", emT).find(function (r) {
+          return String(r.report_date).slice(0, 10) === dayT; }) || null;
+        let snapT = null;
+        try { snapT = JSON.parse((rowT && rowT.snapshot_json) || "null"); } catch (e6) {}
+        const repT = getFilteredRows("Reports", "student_email", emT).find(function (r) {
+          return String(r.date).slice(0, 10) === dayT; }) || null;
+        const detT = getDailyOpsReport(emT, { date: dayT });
+        return jsonResponse({ ok: true, date: dayT,
+          DailyOpsReportの行: rowT ? {
+            operating_score: rowT.operating_score, finalized_at: rowT.finalized_at,
+            report_version: rowT.report_version,
+            snapshot_jsonの長さ: String(rowT.snapshot_json || "").length } : null,
+          snapshotの中身: snapT ? {
+            displayed_score: snapT.displayed_score, operating_score: snapT.operating_score,
+            partial_score: snapT.partial_score, score_scope: snapT.score_scope } : null,
+          Reportsの行: repT ? { score: repT.score, score_precise: repT.score_precise } : null,
+          詳細が返す値: (detT && detT.ok && detT.data)
+            ? { displayed_score: detT.data.displayed_score, finalized: !!detT.data.finalized } : null,
+          OPS_REPORT_VERSION: OPS_REPORT_VERSION });
+      }
       // 古いchallengeを捨てる（ログインの遅さ対策）
       //   bash gas/ops.sh adminPurgeChallenges
       case "adminPurgeChallenges": {
@@ -14372,7 +14398,7 @@ const ADMIN_SECRET_ALLOWLIST = {
   // 一斉送信（Kaiの明示的な要望により残す）
   adminBroadcastLine:1, adminBroadcastLinePending:1, adminSendStudentCampaign:1,
   // セットアップ・保守
-  adminSetupTriggers:1, adminInstallTrigger:1, adminSetupPhase1:1, adminSetupAuth:1, adminPhase4DryRun:1, adminLegacyBackfill:1, adminWritePathStats:1, adminIssueTestSession:1, adminDropTestSessions:1, adminOpsSelfTest:1, adminActualMinutesAudit:1, adminXpCorrection:1, adminStreakRecalc:1, adminGrantFeature:1, adminUserDiag:1, adminReportScoreDryRun:1, adminReportGenTest:1, adminScoreConsistency:1, adminFinalizeOps:1, adminUnfinalizeOps:1, adminSmpDump:1, adminSmpWarmAll:1, adminLevelAudit:1, adminXpRestore:1, adminCleanupPlusLogs:1, adminClassAudit:1, adminRecolorCalendar:1, adminFixTokenVersion:1, adminPurgeChallenges:1, adminJiroBackfill:1, adminCommunityTiming:1,
+  adminSetupTriggers:1, adminInstallTrigger:1, adminSetupPhase1:1, adminSetupAuth:1, adminPhase4DryRun:1, adminLegacyBackfill:1, adminWritePathStats:1, adminIssueTestSession:1, adminDropTestSessions:1, adminOpsSelfTest:1, adminActualMinutesAudit:1, adminXpCorrection:1, adminStreakRecalc:1, adminGrantFeature:1, adminUserDiag:1, adminReportScoreDryRun:1, adminReportGenTest:1, adminScoreConsistency:1, adminFinalizeOps:1, adminUnfinalizeOps:1, adminSmpDump:1, adminSmpWarmAll:1, adminLevelAudit:1, adminXpRestore:1, adminCleanupPlusLogs:1, adminClassAudit:1, adminRecolorCalendar:1, adminFixTokenVersion:1, adminPurgeChallenges:1, adminJiroBackfill:1, adminCommunityTiming:1, adminScoreTrace:1,
   authSetMode:1, authSetEnforce:1, authRoleApply:1, authRoleDryRun:1, authRevokeAll:1,
   authCleanupTestData:1, adminPurgeTestUsers:1, adminMigrateTasks:1, authBreakerReset:1, rotateSessionSecret:1,
   p1Backup:1, p1BackupInfo:1, p1PurgeArchived:1, weeklyBackup:1
