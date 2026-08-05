@@ -1319,13 +1319,14 @@ const RANKS = [
 // ★階級ごとのキャラクター画像★（2026-08-05 Kai要望）
 //   ファイルを assets/rank/ に置いて、ここに名前→パスを書けば表示される。
 //   まだ入っていない階級は、代わりにその階級の記号を出す（空の枠を作らない）。
+//   絵はKaiからもらった1枚の画像から切り出して、背景を透かしてある。
 const RANK_ART = {
-  // "ルーキー":       "assets/rank/rookie.png",
-  // "チャレンジャー": "assets/rank/challenger.png",
-  // "コンシステント": "assets/rank/consistent.png",
-  // "習慣マスター":   "assets/rank/master.png",
-  // "エキスパート":   "assets/rank/expert.png",
-  // "レジェンド":     "assets/rank/legend.png",
+  "ルーキー":       "assets/rank/rookie.png",
+  "チャレンジャー": "assets/rank/challenger.png",
+  "コンシステント": "assets/rank/consistent.png",
+  "習慣マスター":   "assets/rank/master.png",
+  "エキスパート":   "assets/rank/expert.png",
+  "レジェンド":     "assets/rank/legend.png",
 };
 
 function getRank(level) {
@@ -3254,8 +3255,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
             <!-- ★階級の色の丸★（2026-08-05 Kai要望）
                  レベルの数字だけだと、いまどの階級にいるのかが色で分からない。
                  ヘッダーは濃い背景なので、白い縁をつけて色を沈ませない。 -->
-            <span style=${{width:9,height:9,borderRadius:"50%",flexShrink:0,background:rank.color,
-                           boxShadow:"0 0 0 2px rgba(255,255,255,0.55)"}}/>
+            <span style=${{width:9,height:9,borderRadius:"50%",flexShrink:0,background:rank.color}}/>
             <span style=${{fontSize:12,fontWeight:700,color:"rgba(255,255,255,0.9)"}}>Lv.${game.level} ${rank.name}</span>
             ${game.streak>0&&html`<span style=${{fontSize:11,background:"rgba(255,255,255,0.2)",color:"#fff",padding:"2px 9px",borderRadius:20,fontWeight:600,whiteSpace:"nowrap"}}>🔥 ${game.streak}日連続</span>`}
             ${game.streakFreeze>0&&html`<span title="連続記録フリーズ: 記録できない日があっても自動で連続記録を守ります" style=${{fontSize:11,background:"rgba(255,255,255,0.2)",color:"#fff",padding:"2px 9px",borderRadius:20,fontWeight:600,whiteSpace:"nowrap"}}>🧊 ×${game.streakFreeze}</span>`}
@@ -9301,28 +9301,24 @@ function SettingsScreen({onToast,onLogout,onGoalSaved,profile,onProfileSaved,onC
             const art = RANK_ART[r.name] || "";
             return html`
             <div key=${r.name}>
-              ${ri>0&&html`
-                <div style=${{textAlign:"center",color:"var(--sub)",fontSize:11,lineHeight:1,margin:"5px 0"}}>˅</div>`}
-              <div style=${{display:"flex",alignItems:"center",gap:11,padding:"11px 13px",borderRadius:12,
-                            background:"var(--bg)",
+              <div style=${{display:"flex",alignItems:"center",gap:10,padding:"7px 11px",borderRadius:10,
+                            marginTop:ri?5:0,
+                            background:here?"var(--bg)":"transparent",
                             border:`1px solid ${here?r.color:"var(--border)"}`}}>
-                <span style=${{width:9,height:9,borderRadius:"50%",background:r.color,flexShrink:0}}/>
+                <span style=${{width:8,height:8,borderRadius:"50%",background:r.color,flexShrink:0}}/>
                 <div style=${{flex:1,minWidth:0}}>
-                  <div style=${{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
-                    <span style=${{fontSize:13.5,fontWeight:800,color:"var(--text)"}}>${r.name}</span>
-                    <span style=${{fontSize:10.5,fontWeight:700,color:"#fff",background:r.color,
-                                   borderRadius:20,padding:"2px 9px",whiteSpace:"nowrap"}}>${r.lv}</span>
+                  <div style=${{display:"flex",alignItems:"center",gap:7,flexWrap:"wrap"}}>
+                    <span style=${{fontSize:13,fontWeight:800,color:"var(--text)"}}>${r.name}</span>
+                    <span style=${{fontSize:10,fontWeight:700,color:"#fff",background:r.color,
+                                   borderRadius:20,padding:"1px 8px",whiteSpace:"nowrap"}}>${r.lv}</span>
                     ${here&&html`<span style=${{fontSize:10,fontWeight:700,color:r.color}}>いまここ</span>`}
                   </div>
-                  <div style=${{fontSize:11,color:"var(--sub)",marginTop:3}}>${r.sub}</div>
+                  <div style=${{fontSize:10.5,color:"var(--sub)",marginTop:1}}>${r.sub}</div>
                 </div>
-                <span style=${{flexShrink:0,width:44,height:44,borderRadius:12,display:"flex",
-                               alignItems:"center",justifyContent:"center",background:"var(--card)"}}>
-                  ${art
-                    ? html`<img src=${art} alt=${r.name} width="44" height="44"
-                             style=${{width:44,height:44,objectFit:"contain",display:"block"}}/>`
-                    : html`<span style=${{fontSize:22,lineHeight:1}}>${r.emoji}</span>`}
-                </span>
+                ${art
+                  ? html`<img src=${art} alt=${r.name} width="40" height="40" loading="lazy"
+                           style=${{width:40,height:40,objectFit:"contain",display:"block",flexShrink:0}}/>`
+                  : html`<span style=${{fontSize:20,lineHeight:1,flexShrink:0}}>${r.emoji}</span>`}
               </div>
             </div>`;
           })}
@@ -9534,7 +9530,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260805-112418";
+const APP_BUILD = "20260805-113458";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 

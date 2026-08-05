@@ -8,7 +8,7 @@
 // ★v13★ 2026-08-05: 裏での取り直しがHTTPキャッシュから古いHTMLを受け取っていた。
 //   保存されるキャッシュも古いままになり、何度読み込み直しても新しい版に
 //   変わらなくなっていた（Kai報告）。名前を上げて、詰まったキャッシュを捨てる。
-const CACHE = "jiroku-v13-swr-fix";
+const CACHE = "jiroku-v14-rank-art";
 
 // タイマー終了などをバックグラウンドでも通知するためのFirebase Cloud Messaging。
 // 別ファイル（firebase-messaging-sw.js）として登録すると、同じスコープ('/')の
@@ -140,6 +140,25 @@ self.addEventListener('fetch', e => {
       const res = await fetch(e.request);
       if (res.ok || res.type === 'opaque') cache.put(e.request, res.clone());
       return res;
+    })());
+    return;
+  }
+
+  // 自分のところの画像(階級のキャラクターやアイコン): キャッシュ優先。
+  // 中身が変わらないファイルなので、開くたびに取り直す必要がない
+  // （階級の絵だけで300KB以上あり、設定を開くたびに落としていた）。
+  if (url.origin === self.location.origin && /\.(png|jpe?g|svg|webp|gif)$/i.test(url.pathname)) {
+    e.respondWith((async () => {
+      const cache = await caches.open(CACHE);
+      const hit = await cache.match(e.request);
+      if (hit) return hit;
+      try {
+        const res = await fetch(e.request);
+        if (res.ok) cache.put(e.request, res.clone());
+        return res;
+      } catch (err) {
+        return new Response("", { status: 504 });
+      }
     })());
     return;
   }
