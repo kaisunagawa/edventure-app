@@ -3264,8 +3264,9 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
         return html`
         <div style=${{display:"flex",alignItems:"center",gap:11,marginBottom:14}}>
           ${art
-            ? html`<img src=${art} alt=${rank.name} width="84" height="84"
-                     style=${{width:84,height:84,objectFit:"contain",display:"block",flexShrink:0}}/>`
+            ? html`<img src=${art} alt=${rank.name} width="118" height="118"
+                     style=${{width:118,height:118,objectFit:"contain",display:"block",flexShrink:0,
+                              marginTop:-14,marginBottom:-14,marginLeft:-12,marginRight:-6}}/>`
             : html`<div style=${{width:56,height:56,borderRadius:"50%",background:"rgba(255,255,255,0.2)",
                                  display:"flex",alignItems:"center",justifyContent:"center",
                                  fontSize:28,flexShrink:0}}>${profile?.avatar||"🦊"}</div>`}
@@ -9597,7 +9598,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260805-122916";
+const APP_BUILD = "20260805-124817";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 

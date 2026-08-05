@@ -1,0 +1,26 @@
+{
+ "rookie": {
+  "eye_y": 0.4005,
+  "eye_x": 0.5
+ },
+ "challenger": {
+  "eye_y": 0.4,
+  "eye_x": 0.5
+ },
+ "consistent": {
+  "eye_y": 0.4003,
+  "eye_x": 0.5
+ },
+ "master": {
+  "eye_y": 0.4,
+  "eye_x": 0.5
+ },
+ "expert": {
+  "eye_y": 0.4003,
+  "eye_x": 0.5
+ },
+ "legend": {
+  "eye_y": 0.4011,
+  "eye_x": 0.5
+ }
+}

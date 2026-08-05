@@ -8,7 +8,7 @@
 // ★v13★ 2026-08-05: 裏での取り直しがHTTPキャッシュから古いHTMLを受け取っていた。
 //   保存されるキャッシュも古いままになり、何度読み込み直しても新しい版に
 //   変わらなくなっていた（Kai報告）。名前を上げて、詰まったキャッシュを捨てる。
-const CACHE = "jiroku-v15-rank-art2";
+const CACHE = "jiroku-v16-art-prune";
 
 // タイマー終了などをバックグラウンドでも通知するためのFirebase Cloud Messaging。
 // 別ファイル（firebase-messaging-sw.js）として登録すると、同じスコープ('/')の
@@ -154,7 +154,19 @@ self.addEventListener('fetch', e => {
       if (hit) return hit;
       try {
         const res = await fetch(e.request);
-        if (res.ok) cache.put(e.request, res.clone());
+        if (res.ok) {
+          await cache.put(e.request, res.clone());
+          // ★古い版を消す★ 画像のURLには ?v=ビルド番号 が付いている。
+          //   消さないと、出すたびに前の版が残って端末の中で膨らみ続ける。
+          //   同じファイルの、版だけが違うものを片づける。
+          const keys = await cache.keys();
+          await Promise.all(keys.map(k => {
+            const u = new URL(k.url);
+            if (u.origin === url.origin && u.pathname === url.pathname && u.search !== url.search) {
+              return cache.delete(k);
+            }
+          }));
+        }
         return res;
       } catch (err) {
         return new Response("", { status: 504 });
