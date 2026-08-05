@@ -394,6 +394,9 @@ function doGet(e) {
             .sort(function (a, b) { return b.count - a.count; }) });
       }
       // 自己経営力の中身を読むだけのコマンド（調査用・書き込みなし）
+      case "adminSmpWarmAll": {
+        result = adminSmpWarmAll(e.parameter.coachEmail); break;
+      }
       case "adminSmpDump": {
         if (!verifyAdmin(e.parameter.coachEmail)) return jsonResponse({ ok: false, error: "not admin" });
         const em5 = String(e.parameter.email || "").trim() || adminEmail();
@@ -2023,6 +2026,8 @@ function getSelfMgmtPower(studentEmail, body) {
   //   画面が出たあとで個別に取りに行かせる。
   if (String((body && body.cacheOnly) || "") === "1") return null;
   const cur = computeSelfMgmtPower(studentEmail, weekStart);
+  // 「みんなの頑張り」がこの値を読むだけで済むように残しておく
+  if (!weekStart) { try { smpStoreOverall_(studentEmail, cur.overall_score); } catch (e) {} }
   let prev = null;
   if (String((body && body.withPrev) || "") === "1") {
     const d = new Date(cur.period_start + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() - 7);
@@ -4462,6 +4467,33 @@ function getRanking(studentEmail) {
 //   週次の計算は1人あたり数秒かかる。ランキングで全員ぶん毎回回すと画面が開かない。
 //   計算結果を6時間だけ取っておき、無ければ（かつ時間に余裕があれば）その場で計算する。
 //   allowCompute=false のときは、キャッシュに無ければ null を返してすぐ諦める。
+// ★総合点を Users シートに残しておく★（2026-08-05）
+//   「みんなの頑張り」で全員ぶんをその場で計算していたため、開くのに
+//   何十秒もかかっていた。しかも記録するたびキャッシュを捨てる作りにしたので、
+//   毎回計算し直しになっていた。
+//   本人の画面を開いたとき（＝必ず計算する場面）と夜の処理で、ここに書いておき、
+//   ランキングはこの値を読むだけにする。他人の順位は秒単位の鮮度が要らない。
+function smpStoreOverall_(studentEmail, score) {
+  try {
+    if (score === null || score === undefined) return;
+    const sheet = getSheet("Users");
+    const data = sheet.getDataRange().getValues();
+    const headers = data[0];
+    const iEm = headers.indexOf("student_email");
+    let iSc = headers.indexOf("smp_overall");
+    let iAt = headers.indexOf("smp_overall_at");
+    if (iSc === -1) { iSc = headers.length; sheet.getRange(1, iSc + 1).setValue("smp_overall"); }
+    if (iAt === -1) { iAt = (iSc === headers.length ? headers.length + 1 : headers.length);
+                      sheet.getRange(1, iAt + 1).setValue("smp_overall_at"); }
+    for (let i = 1; i < data.length; i++) {
+      if (String(data[i][iEm]) !== studentEmail) continue;
+      sheet.getRange(i + 1, iSc + 1).setValue(score);
+      sheet.getRange(i + 1, iAt + 1).setValue(new Date().toISOString());
+      return;
+    }
+  } catch (e) { Logger.log("smpStoreOverall_: " + e); }
+}
+
 function smpOverallCached_(studentEmail, allowCompute) {
   const key = "smpall_" + sha256Hex(studentEmail + "|" + SMP_VERSION + "|" + OPS_CALC_VERSION +
                                     "|" + mondayOf(formatDate(new Date())) +
@@ -4477,7 +4509,29 @@ function smpOverallCached_(studentEmail, allowCompute) {
     v = (r && r.overall_score !== null && r.overall_score !== undefined) ? r.overall_score : null;
   } catch (e) { v = null; }
   try { CacheService.getScriptCache().put(key, v === null ? "" : String(v), 6 * 60 * 60); } catch (e) {}
+  // 「みんなの頑張り」はこの値を読むだけなので、計算したら必ず残す
+  // （夜の温め処理はここを通る）
+  smpStoreOverall_(studentEmail, v);
   return v;
+}
+
+// ★全員ぶんの総合点をまとめて計算して残す★（運用コマンド）
+//   「みんなの頑張り」は Users の smp_overall を読むだけなので、
+//   一度も計算されていない人は載らない。移行のときに一度回す。
+//     bash gas/ops.sh adminSmpWarmAll
+function adminSmpWarmAll(coachEmail) {
+  if (!verifyAdmin(coachEmail)) return { ok: false, error: "not admin" };
+  const users = sheetToObjects(getSheet("Users")).filter(function (u) {
+    return String(u.is_active || "").toUpperCase() === "TRUE" && hasFeature(u, SMP_FEATURE_KEY);
+  });
+  const start = Date.now();
+  let done = 0, skipped = 0;
+  users.forEach(function (u) {
+    if (Date.now() - start > 4 * 60 * 1000) { skipped++; return; }   // 実行時間の上限を超えないように
+    try { smpOverallCached_(u.student_email, true); done++; } catch (e) { skipped++; }
+  });
+  return { ok: true, total: users.length, done: done, skipped: skipped,
+           note: skipped ? "時間切れの分が残っています。もう一度実行してください" : "全員ぶん終わりました" };
 }
 
 function getCommunity(studentEmail) {
@@ -4523,11 +4577,17 @@ function getCommunity(studentEmail) {
   //   1人ぶんの計算に数秒かかるため、全員ぶんをその場で回すと画面が開かない。
   //   6時間キャッシュし、1回のリクエストで新しく計算するのは時間の許す範囲だけにする。
   //   夜のレポート生成時にも温めておくので、通常は全員ぶんキャッシュに乗っている。
-  const commStart = Date.now();
+  // ★その場で計算しない★（2026-08-05）
+  //   1人ぶん数秒かかるため、全員ぶん回すと開くのに何十秒もかかっていた。
+  //   本人がアプリを開いたときと夜の処理で Users に書いてある値を読むだけにする。
+  //   まだ一度も計算されていない人は載せない（0点で最下位に固定しないため）。
   const smpTotalOf = function (email) {
     const uu = allUsersC.find(function (x) { return x.student_email === email; });
     if (!hasFeature(uu, SMP_FEATURE_KEY)) return null;
-    return smpOverallCached_(email, Date.now() - commStart < 45000);
+    const v = uu && uu.smp_overall;
+    if (v === "" || v === null || v === undefined) return null;
+    const n = Number(v);
+    return isNaN(n) ? null : n;
   };
   const list = users.map(u => {
     const isMe = u.student_email === studentEmail;
@@ -4613,7 +4673,11 @@ function getCommunity(studentEmail) {
       return { isMe, nickname: maskName(u, isMe), avatar: maskAvatar(u, isMe), joined_at: (u.joined_at instanceof Date ? formatDate(u.joined_at) : String(u.joined_at || "")) };
     });
 
-  return { ok: true, data: list, reportRanking: reportRanking, streakRanking: streakRanking, newcomers: newcomers, recentLoggers: recentLoggers };
+  // シェア一覧も一緒に返す（別々に取ると往復が2回になり、そのぶん待たされる）
+  let achievements = null;
+  try { const a = getAchievements(studentEmail); if (a && a.ok) achievements = a.data; } catch (e) {}
+  return { ok: true, data: list, reportRanking: reportRanking, streakRanking: streakRanking,
+           newcomers: newcomers, recentLoggers: recentLoggers, achievements: achievements };
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -13502,7 +13566,7 @@ const ADMIN_SECRET_ALLOWLIST = {
   // 一斉送信（Kaiの明示的な要望により残す）
   adminBroadcastLine:1, adminBroadcastLinePending:1, adminSendStudentCampaign:1,
   // セットアップ・保守
-  adminSetupTriggers:1, adminInstallTrigger:1, adminSetupPhase1:1, adminSetupAuth:1, adminPhase4DryRun:1, adminLegacyBackfill:1, adminWritePathStats:1, adminIssueTestSession:1, adminDropTestSessions:1, adminOpsSelfTest:1, adminActualMinutesAudit:1, adminXpCorrection:1, adminStreakRecalc:1, adminGrantFeature:1, adminUserDiag:1, adminReportScoreDryRun:1, adminReportGenTest:1, adminScoreConsistency:1, adminFinalizeOps:1, adminUnfinalizeOps:1, adminSmpDump:1, adminCleanupPlusLogs:1, adminClassAudit:1, adminRecolorCalendar:1,
+  adminSetupTriggers:1, adminInstallTrigger:1, adminSetupPhase1:1, adminSetupAuth:1, adminPhase4DryRun:1, adminLegacyBackfill:1, adminWritePathStats:1, adminIssueTestSession:1, adminDropTestSessions:1, adminOpsSelfTest:1, adminActualMinutesAudit:1, adminXpCorrection:1, adminStreakRecalc:1, adminGrantFeature:1, adminUserDiag:1, adminReportScoreDryRun:1, adminReportGenTest:1, adminScoreConsistency:1, adminFinalizeOps:1, adminUnfinalizeOps:1, adminSmpDump:1, adminSmpWarmAll:1, adminCleanupPlusLogs:1, adminClassAudit:1, adminRecolorCalendar:1,
   authSetMode:1, authSetEnforce:1, authRoleApply:1, authRoleDryRun:1, authRevokeAll:1,
   authCleanupTestData:1, adminPurgeTestUsers:1, adminMigrateTasks:1, authBreakerReset:1, rotateSessionSecret:1,
   p1Backup:1, p1BackupInfo:1, p1PurgeArchived:1, weeklyBackup:1

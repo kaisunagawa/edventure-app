@@ -5144,9 +5144,17 @@ function CommunityOverlay({onClose}) {
   const [message,setMessage]=useState("");
   const [sending,setSending]=useState(false);
 
+  // ★1回の通信でまとめて受け取る★（2026-08-05）
+  //   2本に分けると、GASは同じ人の通信を順番に処理するので、
+  //   そのぶん開くまで待たされる。シェア一覧も getCommunity に相乗りさせた。
   const load=()=>{
-    gasApi("getCommunity").then(r=>{ if(r.ok) { setList(r.data); setReportRanking(r.reportRanking||[]); setStreakRanking(r.streakRanking||[]); setNewcomers(r.newcomers||[]); setRecentLoggers(r.recentLoggers||[]); } });
-    gasApi("getAchievements").then(r=>{ if(r.ok) setAchievements(r.data); });
+    gasApi("getCommunity").then(r=>{
+      if(!r.ok) return;
+      setList(r.data); setReportRanking(r.reportRanking||[]); setStreakRanking(r.streakRanking||[]);
+      setNewcomers(r.newcomers||[]); setRecentLoggers(r.recentLoggers||[]);
+      if(r.achievements) setAchievements(r.achievements);
+      else gasApi("getAchievements").then(a=>{ if(a.ok) setAchievements(a.data); });
+    });
   };
   useEffect(()=>{ load(); },[]);
 
@@ -9613,7 +9621,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260805-131749";
+const APP_BUILD = "20260805-133820";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
