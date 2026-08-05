@@ -9020,13 +9020,6 @@ function SettingsScreen({onToast,onLogout,onGoalSaved,profile,onProfileSaved,onC
     try { return Number(JSON.parse(localStorage.getItem("cache_gameStatus")||"{}").level)||0; }
     catch(e){ return 0; }
   });
-  useEffect(()=>{
-    if (myLevel > 0 || openSec !== "rank") return;
-    gasApi("getGameStatus").then(r=>{
-      const lv = Number(r && r.ok && r.data && r.data.level);
-      if (lv > 0) setMyLevel(lv);
-    }).catch(()=>{});
-  },[openSec]);
   // RANKS定数から生成
   const RANK_RULES = RANKS.map(r => ({
     ...r,
@@ -9045,6 +9038,17 @@ function SettingsScreen({onToast,onLogout,onGoalSaved,profile,onProfileSaved,onC
   // 折りたたみ式セクション。開閉状態は openSec で管理し、本体は安定した
   // モジュール外コンポーネント SettingsSec を使う（下の各セクションで直接呼ぶ）
   const [openSec,setOpenSec]=useState("");
+  // 階級システムを開いたとき、レベルが分からなければ取りに行く。
+  // ★この useEffect は openSec より後に書くこと★
+  //   前に書いて "Cannot access 'openSec' before initialization" で
+  //   設定画面が真っ赤になった（2026-08-05）。
+  useEffect(()=>{
+    if (myLevel > 0 || openSec !== "rank") return;
+    gasApi("getGameStatus").then(r=>{
+      const lv = Number(r && r.ok && r.data && r.data.level);
+      if (lv > 0) setMyLevel(lv);
+    }).catch(()=>{});
+  },[openSec]);
   const [linkTick,setLinkTick]=useState(0);   // 連携完了で画面を描き直すための印
   // ホームのバナーや、LINEのメッセージのリンク（?open=linelink）から来たときは、
   // その場でLINE連携の欄を開いて、そこまでスクロールする
@@ -9579,7 +9583,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260805-121050";
+const APP_BUILD = "20260805-121615";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 

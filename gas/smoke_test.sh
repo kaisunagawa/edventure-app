@@ -110,6 +110,16 @@ PYX
     fi
   done
 
+  # ★描画時に評価される依存配列の順番★
+  #   useEffect の [x] は描画のたびにその場で評価されるので、xの宣言より前に
+  #   書くと "Cannot access 'x' before initialization" で画面が真っ赤になる。
+  #   構文としては正しいので node --check では見つからない（実際に本番で発生）。
+  if (cd .. && python3 .preview/check_deps.py >/tmp/_smoke_deps.txt 2>&1); then
+    ok "依存配列の順番"
+  else
+    ng "$(sed -n '2p' /tmp/_smoke_deps.txt)"
+  fi
+
   # Googleの公式ボタンを描画する土台が揃っているか。
   # 「押しても無反応」は原因が見えず、いちばん困る壊れ方なので必ず確認する。
   check_pair() {  # $1=ファイル $2=コンテナid $3=表示名
