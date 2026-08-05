@@ -3255,12 +3255,8 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
         return html`
         <div style=${{display:"flex",alignItems:"center",gap:11,marginBottom:14}}>
           ${art
-            ? html`<span style=${{flexShrink:0,width:84,height:84,borderRadius:16,
-                                   background:"rgba(255,255,255,0.16)",display:"flex",
-                                   alignItems:"center",justifyContent:"center"}}>
-                     <img src=${art} alt=${rank.name} width="76" height="76"
-                       style=${{width:76,height:76,objectFit:"contain",display:"block"}}/>
-                   </span>`
+            ? html`<img src=${art} alt=${rank.name} width="84" height="84"
+                     style=${{width:84,height:84,objectFit:"contain",display:"block",flexShrink:0}}/>`
             : html`<div style=${{width:56,height:56,borderRadius:"50%",background:"rgba(255,255,255,0.2)",
                                  display:"flex",alignItems:"center",justifyContent:"center",
                                  fontSize:28,flexShrink:0}}>${profile?.avatar||"🦊"}</div>`}
@@ -9017,10 +9013,20 @@ function SettingsScreen({onToast,onLogout,onGoalSaved,profile,onProfileSaved,onC
     onToast("目標を保存しました");
   };
 
-  // いまの階級に「いまここ」を出すためのレベル。
-  // 設定画面は game を持っていないので、ホームが残した内容から読む。
-  const myLevel = (()=>{ try { return Number(JSON.parse(localStorage.getItem("cache_gameStatus")||"{}").level)||0; }
-                         catch(e){ return 0; } })();
+  // ★いまのレベル★ 階級のキャラクターは、その階級に上がるまで出さない。
+  //   設定画面は game を持っていないので、まずホームが残した内容から読む。
+  //   残っていないと自分の階級まで隠れてしまうので、その時は取りに行く。
+  const [myLevel, setMyLevel] = useState(()=>{
+    try { return Number(JSON.parse(localStorage.getItem("cache_gameStatus")||"{}").level)||0; }
+    catch(e){ return 0; }
+  });
+  useEffect(()=>{
+    if (myLevel > 0 || openSec !== "rank") return;
+    gasApi("getGameStatus").then(r=>{
+      const lv = Number(r && r.ok && r.data && r.data.level);
+      if (lv > 0) setMyLevel(lv);
+    }).catch(()=>{});
+  },[openSec]);
   // RANKS定数から生成
   const RANK_RULES = RANKS.map(r => ({
     ...r,
@@ -9332,7 +9338,10 @@ function SettingsScreen({onToast,onLogout,onGoalSaved,profile,onProfileSaved,onC
         <div style=${{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
           ${RANK_RULES.map(r=>{
             const here = myLevel > 0 && getRank(myLevel).name === r.name;
-            const art = RANK_ART[r.name] || "";
+            // ★まだ上がっていない階級は、姿を見せない★（2026-08-05 Kai要望）
+            //   先に全部見えていると、上がったときの楽しみが無くなる。
+            const reached = myLevel > 0 && myLevel >= r.minLv;
+            const art = reached ? (RANK_ART[r.name] || "") : "";
             return html`
               <div key=${r.name}>
                 <div style=${{display:"flex",alignItems:"center",gap:6,marginBottom:6,flexWrap:"wrap"}}>
@@ -9348,7 +9357,13 @@ function SettingsScreen({onToast,onLogout,onGoalSaved,profile,onProfileSaved,onC
                   ${art
                     ? html`<img src=${art} alt=${r.name} loading="lazy"
                              style=${{width:"84%",height:"84%",objectFit:"contain",display:"block"}}/>`
-                    : html`<span style=${{fontSize:34,lineHeight:1}}>${r.emoji}</span>`}
+                    : html`<span style=${{display:"flex",flexDirection:"column",alignItems:"center",gap:6}}>
+                        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="var(--sub)" stroke-width="1.8">
+                          <rect x="4" y="10.5" width="16" height="10" rx="2.5"/>
+                          <path d="M8 10.5V7.5a4 4 0 0 1 8 0v3" stroke-linecap="round"/></svg>
+                        <span style=${{fontSize:10.5,color:"var(--sub)",fontWeight:600}}>
+                          ${myLevel>0 ? `Lv.${r.minLv} で会えます` : "読み込み中…"}</span>
+                      </span>`}
                   ${here&&html`
                     <span style=${{position:"absolute",top:6,right:6,fontSize:9.5,fontWeight:700,
                                    color:"#fff",background:r.color,borderRadius:20,padding:"2px 8px"}}>いまここ</span>`}
@@ -9564,7 +9579,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260805-120240";
+const APP_BUILD = "20260805-121050";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
