@@ -1805,6 +1805,100 @@ function SprintEntrySheet({sprint, weeklies, onClose, onPick, onAddGoal, onToast
     </div>`, document.body);
 }
 
+// ★記録の時間を直す★（2026-08-05 Kai要望）
+//   独り言やタイマーから自動で作られた記録は、時刻がずれていることがある。
+//   これまでは「時間を細かく」で選び直すと、中身が空の別の記録が増えるだけで
+//   元の記録が残り、二重になっていた。ここでは中身はそのままに時刻だけ動かす。
+function LogTimeSheet({log, date, onClose, onSaved, onToast}) {
+  useLockBodyScroll();
+  const sp = blockSpan(log.time_block) || { start: 0, end: 60 };
+  const toHM = (m) => String(Math.floor((m % 1440) / 60)).padStart(2, "0") + ":" + String(m % 60).padStart(2, "0");
+  const toMin = (v) => { const p = String(v || "").split(":"); return (Number(p[0]) || 0) * 60 + (Number(p[1]) || 0); };
+  const [from, setFrom] = useState(toHM(sp.start));
+  const [to, setTo] = useState(toHM(sp.end));
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState("");
+  const mins = (() => { let d = toMin(to) - toMin(from); if (d < 0) d += 1440; return d; })();
+  const hm = (m) => m >= 60 ? (Math.floor(m / 60) + "時間" + (m % 60 ? (m % 60) + "分" : "")) : (m + "分");
+  const shift = (delta) => { setFrom(toHM(((toMin(from) + delta) % 1440 + 1440) % 1440));
+                             setTo(toHM(((toMin(to) + delta) % 1440 + 1440) % 1440)); };
+  const changed = (toHM(sp.start) !== from) || (toHM(sp.end) !== to);
+  const save = async () => {
+    if (!(mins > 0)) { setErr("終わりの時刻を、始まりより後にしてください"); return; }
+    setSaving(true); setErr("");
+    const r = await gasPostJson("updateLogTime", {
+      log_id: log.log_id || "", date: date, time_block: log.time_block, new_time_block: from + "-" + to });
+    setSaving(false);
+    if (r && r.ok) { onToast && onToast("時間を直しました"); onSaved && onSaved(from + "-" + to, mins); onClose(); }
+    else setErr((r && r.error) || "直せませんでした");
+  };
+  return ReactDOM.createPortal(html`
+    <div onClick=${onClose} style=${{position:"fixed",inset:0,zIndex:450,background:"rgba(0,0,0,0.55)",
+                                     display:"flex",
+                                     alignItems:SHEET_WIDE?"stretch":"flex-end",
+                                     justifyContent:SHEET_WIDE?"flex-end":"center"}}>
+      <div onClick=${e=>e.stopPropagation()}
+        style=${SHEET_WIDE
+          ? {width:400,maxWidth:"92vw",background:"var(--card)",borderLeft:"1px solid var(--border)",
+             padding:"20px 20px 24px",height:"100%",overflowY:"auto"}
+          : {width:"100%",maxWidth:520,background:"var(--card)",borderRadius:"20px 20px 0 0",
+             border:"1px solid var(--border)",borderBottom:"none",
+             padding:"20px 20px calc(24px + var(--safe-bottom, 0px))",maxHeight:"88dvh",overflowY:"auto"}}>
+        <div style=${{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
+          <span style=${{flex:1,fontSize:17,fontWeight:800,color:"var(--text)"}}>記録の時間を直す</span>
+          <button onClick=${onClose} style=${{background:"none",border:"none",color:"var(--sub)",fontSize:22,
+            cursor:"pointer",lineHeight:1,padding:"0 4px"}}>×</button>
+        </div>
+        <div style=${{fontSize:13,color:"var(--sub)",marginBottom:16,lineHeight:1.7,overflowWrap:"anywhere"}}>
+          ${log.task||"（内容なし）"}<br/>
+          <span style=${{fontSize:11.5}}>いまは ${String(log.time_block||"").replace("-"," - ")}（${hm(sp.end-sp.start)}）です。
+          内容と分類はそのまま、時間だけ変わります。</span>
+        </div>
+
+        <div style=${{display:"flex",alignItems:"center",gap:8,marginBottom:10,flexWrap:"wrap"}}>
+          <input class="inp" type="time" step="300" value=${from} onInput=${e=>{setFrom(e.target.value); setErr("");}}
+            style=${{width:118,margin:0,textAlign:"center"}}/>
+          <span style=${{color:"var(--sub)"}}>〜</span>
+          <input class="inp" type="time" step="300" value=${to} onInput=${e=>{setTo(e.target.value); setErr("");}}
+            style=${{width:118,margin:0,textAlign:"center"}}/>
+          <span style=${{fontSize:12.5,fontWeight:700,color:mins>0?"var(--accent)":"var(--red)"}}>
+            ${mins>0?hm(mins):"時間が逆です"}</span>
+        </div>
+
+        <div style=${{fontSize:11.5,color:"var(--sub)",marginBottom:6}}>長さを変える</div>
+        <div style=${{display:"flex",gap:6,flexWrap:"wrap",marginBottom:12}}>
+          ${[15,30,45,60,90,120].map(m=>html`
+            <button key=${m} onClick=${()=>{setTo(toHM(((toMin(from)+m)%1440+1440)%1440)); setErr("");}}
+              style=${{padding:"6px 11px",borderRadius:20,fontSize:11.5,cursor:"pointer",fontFamily:"inherit",
+                       border:`1px solid ${mins===m?"var(--accent)":"var(--border)"}`,
+                       background:mins===m?"var(--accent-l)":"transparent",
+                       color:mins===m?"var(--accent)":"var(--sub)",
+                       fontWeight:mins===m?700:500}}>${hm(m)}</button>`)}
+        </div>
+
+        <div style=${{fontSize:11.5,color:"var(--sub)",marginBottom:6}}>まるごと前後にずらす</div>
+        <div style=${{display:"flex",gap:6,flexWrap:"wrap",marginBottom:16}}>
+          ${[-60,-30,-15,15,30,60].map(m=>html`
+            <button key=${m} onClick=${()=>{shift(m); setErr("");}}
+              style=${{padding:"6px 11px",borderRadius:20,fontSize:11.5,cursor:"pointer",fontFamily:"inherit",
+                       border:"1px solid var(--border)",background:"transparent",color:"var(--sub)"}}>
+              ${m>0?"+":"−"}${Math.abs(m)}分</button>`)}
+        </div>
+
+        ${err&&html`
+          <div style=${{background:"var(--red-l)",border:"1px solid var(--red)",color:"var(--red)",
+                        borderRadius:10,padding:"9px 11px",fontSize:12,lineHeight:1.7,marginBottom:12}}>${err}</div>`}
+
+        <button class="btn" onClick=${save} disabled=${saving||!changed||!(mins>0)}
+          style=${{opacity:(saving||!changed||!(mins>0))?0.5:1}}>
+          ${saving ? "直しています…" : changed ? `この時間に直す（${from} - ${to}）` : "時間を変えてください"}</button>
+        <div style=${{fontSize:11,color:"var(--sub)",lineHeight:1.7,marginTop:10}}>
+          カレンダーの予定も一緒に動きます。同じ時間に別の記録があるときは直せません。
+        </div>
+      </div>
+    </div>`, document.body);
+}
+
 // ★履歴の確認・編集★ 長押しで開く
 // weekly=true のときは「今週の目標」の履歴として開く（2026-08-05）
 function GoalHistorySheet({goal, weekly, onClose, onEdit, onAdd, onChanged, onToast}) {
@@ -5292,6 +5386,7 @@ function LogScreen({onToast, isActive}) {
 
   // ★時間を細かく決める★ 開始・終了を5分きざみで指定できるようにする
   const [bulkOpen, setBulkOpen] = useState(false);   // まとめて分類する画面
+  const [timeFixLog, setTimeFixLog] = useState(null);  // 時間を直す画面
   const [fineOpen, setFineOpen] = useState(false);
   const [fineFrom, setFineFrom] = useState(()=>{
     const d=new Date(); const m=Math.floor(d.getMinutes()/5)*5;
@@ -5833,6 +5928,16 @@ function LogScreen({onToast, isActive}) {
         </button>`;
     })()}
 
+    ${timeFixLog&&html`<${LogTimeSheet} log=${timeFixLog} date=${date}
+      onClose=${()=>setTimeFixLog(null)}
+      onSaved=${(tb,mins)=>{
+        setLogs(prev=>prev.map(x=>x.log_id===timeFixLog.log_id
+          ? {...x, time_block:tb, actual_minutes:(Number(x.actual_minutes)>0?mins:x.actual_minutes)} : x));
+        // 直した時間の記録を開いていたら、選択もそちらへ移す
+        if(block===timeFixLog.time_block) setBlock(tb);
+      }}
+      onToast=${onToast}/>`}
+
     ${bulkOpen&&html`<${BulkClassifySheet} date=${date} onClose=${()=>setBulkOpen(false)}
       onSaved=${(id,k)=>setLogs(prev=>prev.map(x=>x.log_id===id
         ? {...x, time_classification:k, classification_method:"USER", classification_reason_code:"USER_SELECTED"} : x))}
@@ -5871,16 +5976,23 @@ function LogScreen({onToast, isActive}) {
             </div>
             <div style=${{flex:1,minWidth:0,paddingBottom:last?2:14,
                           borderBottom:last?"none":"1px solid var(--border)",marginBottom:last?0:14}}>
+              <!-- ★時刻を押すと時間を直せる★（2026-08-05 Kai要望）
+                   独り言やタイマーから作られた記録は時刻がずれることがある。
+                   内容の編集（下）とは押し分けられるように、別のボタンにする。 -->
+              <button onClick=${()=>setTimeFixLog(l)}
+                style=${{display:"inline-flex",alignItems:"center",gap:5,marginBottom:3,
+                         background:"none",border:"none",padding:0,cursor:"pointer",fontFamily:"inherit"}}>
+                <span style=${{fontSize:12.5,fontWeight:700,color:"var(--cyan)",
+                               fontVariantNumeric:"tabular-nums"}}>${isTimer?"⏱ ":""}${shown}</span>
+                <span style=${{fontSize:10,color:"var(--sub)",border:"1px solid var(--border)",
+                               borderRadius:20,padding:"1px 7px",whiteSpace:"nowrap"}}>時間を直す</span>
+              </button>
               <button onClick=${()=>{handleBlockSelect(l.time_block);window.scrollTo?.(0,0);}}
                 style=${{display:"flex",alignItems:"flex-start",gap:10,width:"100%",background:"none",border:"none",
                          padding:0,cursor:"pointer",fontFamily:"inherit",textAlign:"left"}}>
-                <span style=${{flex:1,minWidth:0}}>
-                  <span style=${{display:"block",fontSize:12.5,fontWeight:700,color:"var(--cyan)",
-                                 fontVariantNumeric:"tabular-nums",marginBottom:3}}>${isTimer?"⏱ ":""}${shown}</span>
-                  <span style=${{display:"block",fontSize:13.5,fontWeight:700,color:"var(--text)",
-                                 lineHeight:1.5,overflowWrap:"anywhere"}}>${l.task}</span>
-                </span>
-                <span style=${{flexShrink:0,color:"var(--sub)",fontSize:16,paddingTop:18}}>›</span>
+                <span style=${{flex:1,minWidth:0,fontSize:13.5,fontWeight:700,color:"var(--text)",
+                               lineHeight:1.5,overflowWrap:"anywhere"}}>${l.task}</span>
+                <span style=${{flexShrink:0,color:"var(--sub)",fontSize:16}}>›</span>
               </button>
               ${focusStr&&html`
                 <span style=${{display:"inline-flex",alignItems:"center",gap:6,marginTop:7,padding:"4px 11px",
@@ -9376,7 +9488,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260805-110925";
+const APP_BUILD = "20260805-111931";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 

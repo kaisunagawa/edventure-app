@@ -839,6 +839,7 @@ function doGet(e) {
       case "getStudents":  result = getStudents(studentEmail); break;
       case "saveLog":      result = saveLog(studentEmail, e.parameter); break;
       case "deleteLog":    result = deleteLog(studentEmail, e.parameter); break;
+      case "updateLogTime": result = updateLogTime(studentEmail, e.parameter); break;
       case "setLogClassification": result = setLogClassification(studentEmail, e.parameter); break;
       case "getDayPlan":   result = getDayPlan(studentEmail, e.parameter); break;
       case "saveDayPlan":  result = saveDayPlan(studentEmail, e.parameter); break;
@@ -1024,6 +1025,7 @@ function doPost(e) {
     switch (action) {
       case "saveLog":      return jsonResponse(saveLog(studentEmail, body));
       case "deleteLog":    return jsonResponse(deleteLog(studentEmail, body));
+      case "updateLogTime": return jsonResponse(updateLogTime(studentEmail, body));
       case "setLogClassification": return jsonResponse(setLogClassification(studentEmail, body));
       case "clientError":  return jsonResponse(recordClientError(body));
       case "getDayPlan":   return jsonResponse(getDayPlan(studentEmail, body));
@@ -3668,6 +3670,139 @@ function saveLog(studentEmail, body) {
     memoCount: memoCount + ((body.memo || "").trim() ? 1 : 0)
   }, logId);
   return { ok: true, log_id: logId, ...xpResult };
+}
+
+// カレンダーから、その開始時刻のJIROKU記録イベントを消す。
+// 時刻を直したときに、元の時刻の予定が置き去りになるのを防ぐ。
+function removeOwnerCalendarEventAt_(studentEmail, dateStr, timeBlock) {
+  try {
+    var calId = _ownerCalIdByEmail[studentEmail];
+    if (calId === undefined) {
+      var user = getFilteredRows("Users", "student_email", studentEmail)[0];
+      calId = (user && user.google_calendar_id) ? user.google_calendar_id : null;
+      _ownerCalIdByEmail[studentEmail] = calId;
+    }
+    if (!calId) return;
+    var cal = _ownerCalCache[calId];
+    if (cal === undefined) { cal = CalendarApp.getCalendarById(calId) || null; _ownerCalCache[calId] = cal; }
+    if (!cal) return;
+    var pad = function (t) { t = String(t || "").slice(0, 5); return /^\d:\d\d$/.test(t) ? "0" + t : t; };
+    var sHM = pad(String(timeBlock).split("-")[0]);
+    if (!/^\d{2}:\d{2}$/.test(sHM)) return;
+    var start = new Date(dateStr + "T" + sHM + ":00+09:00");
+    if (isNaN(start.getTime())) return;
+    cal.getEvents(start, new Date(start.getTime() + 60000)).forEach(function (ev) {
+      var t = String(ev.getTitle() || "");
+      var isJ = ev.getTag("jirokuRecord") === "1" || t.indexOf("\u2714") === 0 || t.indexOf("\u2705") === 0;
+      if (isJ && Math.abs(ev.getStartTime().getTime() - start.getTime()) < 1000) {
+        try { ev.deleteEvent(); } catch (err) {}
+      }
+    });
+  } catch (e) { Logger.log("removeOwnerCalendarEventAt_: " + e); }
+}
+
+// ★記録の時刻を直す★（2026-08-05 Kai要望）
+//   独り言やタイマーから自動で作られた記録は、時刻がずれていることがある。
+//   これまでは「時間を細かく」で新しい時間を選ぶと、中身が空の別の記録が
+//   増えるだけで、元の記録は残っていた（二重になる）。
+//   ここでは中身をそのままに、時刻だけを動かす。
+//   ・本人の記録だけ。
+//   ・同じ日の他の記録と重なるときは断る（重なると集計が二重になる）。
+//   ・実測（タイマーで測ったぶん）が入っていれば、新しい長さに合わせ直す。
+//   ・カレンダーの予定も、元の時刻から新しい時刻へ動かす。
+function updateLogTime(studentEmail, body) {
+  smpBumpEpoch_(studentEmail);
+  const chk = p1RequireUser(studentEmail);
+  if (!chk.ok) return chk;
+
+  const logId = String((body && body.log_id) || "").trim();
+  const fromTb = String((body && body.time_block) || "").trim();
+  let toTb = String((body && body.new_time_block) || "").trim().replace(/\s*-\s*/, "-");
+  if (!logId && !fromTb) return { ok: false, error: "どの記録かが分かりません" };
+  if (!/^\d{1,2}:\d{2}-\d{1,2}:\d{2}$/.test(toTb)) return { ok: false, error: "時刻の形式が正しくありません" };
+  const pad2 = function (t) { const p = String(t).split(":"); return String(Number(p[0])).padStart(2, "0") + ":" + p[1]; };
+  toTb = pad2(toTb.split("-")[0]) + "-" + pad2(toTb.split("-")[1]);
+  const newMins = timeBlockMinutes(toTb);
+  if (!(newMins > 0)) return { ok: false, error: "終わりの時刻が始まりより後になるようにしてください" };
+  if (newMins > 16 * 60) return { ok: false, error: "1件の記録は16時間までにしてください" };
+
+  const today = logicalToday_();
+  let targetDate = today;
+  if (body.date && /^\d{4}-\d{2}-\d{2}$/.test(String(body.date)) && String(body.date) <= today) {
+    targetDate = String(body.date);
+  }
+
+  const sheet = getSheet("DailyLog");
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0];
+  const iEm = headers.indexOf("student_email");
+  const iDt = headers.indexOf("date");
+  const iTb = headers.indexOf("time_block");
+  const iId = headers.indexOf("log_id");
+  const iAm = headers.indexOf("actual_minutes");
+  const iTask = headers.indexOf("task");
+  const iCls = headers.indexOf("time_classification");
+
+  const rowDateOf = function (v) {
+    return v instanceof Date ? Utilities.formatDate(v, "Asia/Tokyo", "yyyy-MM-dd") : String(v).slice(0, 10);
+  };
+
+  // 対象の行を探す（log_id 優先。無ければ 日付＋時間帯）
+  let target = -1;
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][iEm]) !== studentEmail) continue;
+    if (logId && iId !== -1 && String(data[i][iId]) === logId) { target = i; break; }
+    if (!logId && rowDateOf(data[i][iDt]) === targetDate && String(data[i][iTb]) === fromTb) { target = i; break; }
+  }
+  if (target === -1) return { ok: false, error: "その記録が見つかりません" };
+
+  const curDate = rowDateOf(data[target][iDt]);
+  const curTb = String(data[target][iTb]);
+  if (curTb === toTb) return { ok: true, unchanged: true, time_block: toTb };
+
+  // 同じ日の他の記録と重ならないか見る
+  const span = function (tb) {
+    const m = String(tb).match(/^(\d{1,2}):(\d{2})(?:-(\d{1,2}):(\d{2}))?$/);
+    if (!m) return null;
+    const st = Number(m[1]) * 60 + Number(m[2]);
+    let en = (m[3] !== undefined) ? Number(m[3]) * 60 + Number(m[4]) : st + 60;
+    if (en <= st) en += 1440;
+    return { st: st, en: en };
+  };
+  const ns = span(toTb);
+  for (let i = 1; i < data.length; i++) {
+    if (i === target) continue;
+    if (String(data[i][iEm]) !== studentEmail) continue;
+    if (rowDateOf(data[i][iDt]) !== curDate) continue;
+    const os = span(String(data[i][iTb]));
+    if (!os) continue;
+    if (ns.st < os.en && os.st < ns.en) {
+      return { ok: false, error: "その時間には別の記録があります（" + String(data[i][iTb]) + "）" };
+    }
+  }
+
+  sheet.getRange(target + 1, iTb + 1).setValue(toTb);
+  // 実測が入っている記録（タイマーで測ったもの）は、新しい長さに合わせ直す
+  if (iAm !== -1 && Number(data[target][iAm]) > 0) {
+    sheet.getRange(target + 1, iAm + 1).setValue(newMins);
+  }
+
+  // カレンダーの予定も動かす（元の時刻の予定を消してから、新しい時刻に書く）
+  try {
+    removeOwnerCalendarEventAt_(studentEmail, curDate, curTb);
+    const task = iTask === -1 ? "" : String(data[target][iTask] || "");
+    if (String(task).trim()) {
+      writeRecordToOwnerCalendar(studentEmail, curDate, toTb, task,
+        iCls === -1 ? "" : String(data[target][iCls] || ""));
+    }
+  } catch (e) { Logger.log("updateLogTime calendar: " + e); }
+
+  try { invalidateStatusCache(); } catch (e) {}
+  const linkIdx = headers.indexOf("link_task_id");
+  const linkedTask = linkIdx === -1 ? "" : String(data[target][linkIdx] || "");
+  if (linkedTask) { try { recomputeTaskActualMinutes_(studentEmail, linkedTask); } catch (e) {} }
+
+  return { ok: true, date: curDate, from: curTb, time_block: toTb, minutes: newMins };
 }
 
 // 記録の削除。間違えて記録した時間帯を消せるようにする（編集画面で内容を空にして
@@ -13187,7 +13322,7 @@ const ACTION_POLICIES = {
 // いずれも scope="SELF"。セッションから確定した本人の行だけを書き換えられる。
 // クライアントが送る studentEmail は無視して、必ず本人で上書きする。
 const ACTION_POLICIES_WRITE = {
-  saveLog:{}, saveLogMulti:{}, quickLog:{}, deleteLog:{}, setLogClassification:{}, saveDayPlan:{}, saveWeeklyAvailable:{}, saveSettings:{}, saveOnboarding:{},
+  saveLog:{}, saveLogMulti:{}, quickLog:{}, deleteLog:{}, updateLogTime:{}, setLogClassification:{}, saveDayPlan:{}, saveWeeklyAvailable:{}, saveSettings:{}, saveOnboarding:{},
   saveTodayActions:{}, saveGoal:{}, saveWeeklyGoal:{}, archiveGoalItem:{}, migrateLocalTasks:{},
   addGoalEntry:{}, updateGoalEntry:{}, deleteGoalEntry:{},
   saveTask:{}, deleteTask:{}, carryOverTask:{}, saveTaskMutations:{}, saveSprint:{}, migrateTasksToSheet:{},
