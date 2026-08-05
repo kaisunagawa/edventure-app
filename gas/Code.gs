@@ -37,6 +37,24 @@ const XP_THRESHOLDS = [
   69285, 70755, 72240, 73739, 75253, 76781, 78324, 79881, 81453, 83040
 ];
 
+// ★階級★ 画面(index.html)の RANKS と必ず同じにすること。
+//   片方だけ直すと「Lv.6 なのにチャレンジャー」のような食い違いが起きる。
+//   .preview/check_shared.py が一致を見ている。
+const RANKS = [
+  { minLv:1,  maxLv:5,  name:"ルーキー" },
+  { minLv:6,  maxLv:15, name:"チャレンジャー" },
+  { minLv:16, maxLv:30, name:"コンシステント" },
+  { minLv:31, maxLv:50, name:"習慣マスター" },
+  { minLv:51, maxLv:75, name:"エキスパート" },
+  { minLv:76, maxLv:100,name:"レジェンド" }
+];
+function getRank(level) {
+  for (var i = 0; i < RANKS.length; i++) {
+    if (level >= RANKS[i].minLv && level <= RANKS[i].maxLv) return RANKS[i];
+  }
+  return RANKS[0];
+}
+
 function getXpLevel(xp) {
   let level = 1;
   for (let i = 1; i < XP_THRESHOLDS.length; i++) {
@@ -394,6 +412,54 @@ function doGet(e) {
             .sort(function (a, b) { return b.count - a.count; }) });
       }
       // 自己経営力の中身を読むだけのコマンド（調査用・書き込みなし）
+      // ★レベルのズレを調べる（読むだけ・書き込みなし）★（2026-08-05）
+      //   「35日続けているのにルーキーのまま」のような食い違いを見つける。
+      //   記録した日数に対してXPが少なすぎる人を洗い出す。
+      //     bash gas/ops.sh adminLevelAudit days=60
+      case "adminLevelAudit": {
+        if (!verifyAdmin(e.parameter.coachEmail)) return jsonResponse({ ok: false, error: "not admin" });
+        const dA = Math.max(7, Math.min(180, Number(e.parameter.days) || 60));
+        const cutA = formatDate(new Date(Date.now() - dA * 86400000));
+        const logsA = sheetToObjects(getSheet("DailyLog"));
+        const byUser = {};
+        logsA.forEach(function (l) {
+          const dt = String(l.date instanceof Date ? formatDate(l.date) : l.date || "").slice(0, 10);
+          if (!dt || dt < cutA) return;
+          const em = String(l.student_email || "");
+          if (!byUser[em]) byUser[em] = { rows: 0, days: {}, memo: 0 };
+          byUser[em].rows++;
+          byUser[em].days[dt] = 1;
+          if (String(l.memo || "").trim()) byUser[em].memo++;
+        });
+        const led = {};
+        try {
+          sheetToObjects(getSheet("XpEvents")).forEach(function (r) {
+            const em = String(r.student_email || "");
+            led[em] = (led[em] || 0) + (Number(r.amount) || 0);
+          });
+        } catch (err) {}
+        const rowsA = sheetToObjects(getSheet("Users"))
+          .filter(function (u) { return String(u.is_active || "").toUpperCase() === "TRUE"; })
+          .map(function (u) {
+            const em = u.student_email;
+            const st = byUser[em] || { rows: 0, days: {}, memo: 0 };
+            const nDays = Object.keys(st.days).length;
+            const xp = Number(u.xp || 0);
+            const lv = getXpLevel(xp);
+            // 記録1件で10XP、メモで+5XP。連続ボーナスを除いた最低ライン
+            const expect = st.rows * 10 + st.memo * 5;
+            return { email: em, nickname: u.nickname || "", streak: Number(u.streak || 0),
+                     xp: xp, level: lv, rank: getRank(lv).name,
+                     recorded_days: nDays, records: st.rows, memos: st.memo,
+                     xp_expected_min: expect, xp_ledger: led[em] || 0,
+                     gap: expect - xp,
+                     suspicious: (nDays >= 7 && xp < expect * 0.5) };
+          })
+          .sort(function (a, b) { return b.gap - a.gap; });
+        return jsonResponse({ ok: true, days: dA,
+          suspicious_count: rowsA.filter(function (r) { return r.suspicious; }).length,
+          users: rowsA });
+      }
       case "adminSmpWarmAll": {
         result = adminSmpWarmAll(e.parameter.coachEmail); break;
       }
@@ -13566,7 +13632,7 @@ const ADMIN_SECRET_ALLOWLIST = {
   // 一斉送信（Kaiの明示的な要望により残す）
   adminBroadcastLine:1, adminBroadcastLinePending:1, adminSendStudentCampaign:1,
   // セットアップ・保守
-  adminSetupTriggers:1, adminInstallTrigger:1, adminSetupPhase1:1, adminSetupAuth:1, adminPhase4DryRun:1, adminLegacyBackfill:1, adminWritePathStats:1, adminIssueTestSession:1, adminDropTestSessions:1, adminOpsSelfTest:1, adminActualMinutesAudit:1, adminXpCorrection:1, adminStreakRecalc:1, adminGrantFeature:1, adminUserDiag:1, adminReportScoreDryRun:1, adminReportGenTest:1, adminScoreConsistency:1, adminFinalizeOps:1, adminUnfinalizeOps:1, adminSmpDump:1, adminSmpWarmAll:1, adminCleanupPlusLogs:1, adminClassAudit:1, adminRecolorCalendar:1,
+  adminSetupTriggers:1, adminInstallTrigger:1, adminSetupPhase1:1, adminSetupAuth:1, adminPhase4DryRun:1, adminLegacyBackfill:1, adminWritePathStats:1, adminIssueTestSession:1, adminDropTestSessions:1, adminOpsSelfTest:1, adminActualMinutesAudit:1, adminXpCorrection:1, adminStreakRecalc:1, adminGrantFeature:1, adminUserDiag:1, adminReportScoreDryRun:1, adminReportGenTest:1, adminScoreConsistency:1, adminFinalizeOps:1, adminUnfinalizeOps:1, adminSmpDump:1, adminSmpWarmAll:1, adminLevelAudit:1, adminCleanupPlusLogs:1, adminClassAudit:1, adminRecolorCalendar:1,
   authSetMode:1, authSetEnforce:1, authRoleApply:1, authRoleDryRun:1, authRevokeAll:1,
   authCleanupTestData:1, adminPurgeTestUsers:1, adminMigrateTasks:1, authBreakerReset:1, rotateSessionSecret:1,
   p1Backup:1, p1BackupInfo:1, p1PurgeArchived:1, weeklyBackup:1
