@@ -1842,7 +1842,12 @@ function LogTimeSheet({log, date, onClose, onSaved, onToast}) {
     const r = await gasPostJson("updateLogTime", {
       log_id: log.log_id || "", date: date, time_block: log.time_block, new_time_block: from + "-" + to });
     setSaving(false);
-    if (r && r.ok) { onToast && onToast("時間を直しました"); onSaved && onSaved(from + "-" + to, mins); onClose(); }
+    if (r && r.ok) {
+      // 重なっていても通す。ただし黙って重ねると合計時間が二重になるので、そこは伝える
+      const ov = (r.overlaps || []).length;
+      onToast && onToast(ov ? ("時間を直しました（" + ov + "件と重なっています）") : "時間を直しました");
+      onSaved && onSaved(from + "-" + to, mins); onClose();
+    }
     else setErr((r && r.error) || "直せませんでした");
   };
   return ReactDOM.createPortal(html`
@@ -1906,7 +1911,8 @@ function LogTimeSheet({log, date, onClose, onSaved, onToast}) {
           style=${{opacity:(saving||!changed||!(mins>0))?0.5:1}}>
           ${saving ? "直しています…" : changed ? `この時間に直す（${from} - ${to}）` : "時間を変えてください"}</button>
         <div style=${{fontSize:11,color:"var(--sub)",lineHeight:1.7,marginTop:10}}>
-          カレンダーの予定も一緒に動きます。同じ時間に別の記録があるときは直せません。
+          カレンダーの予定も一緒に動きます。他の記録と時間が重なっても登録できます
+          （そのぶん合計時間は重ねて数えられます）。
         </div>
       </div>
     </div>`, document.body);
@@ -3235,7 +3241,21 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
 
       <!-- 名前とXPを1行に。レベル・連続日数はその下の行にまとめる -->
       <div style=${{display:"flex",alignItems:"center",gap:12,marginBottom:6}}>
-        <div style=${{width:46,height:46,borderRadius:"50%",background:"rgba(255,255,255,0.2)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:24,flexShrink:0}}>${profile?.avatar||"🦊"}</div>
+        <!-- ★階級のキャラクターを出す★（2026-08-05 Kai要望）
+             選んだ絵文字ではなく、いまの階級の姿を出す。上がると見た目が変わる。
+             まだレベルが分からないうち（読み込み中）は、これまでの絵文字のまま。 -->
+        ${(()=>{
+          const art = game ? RANK_ART[getRank(game.level).name] : "";
+          return html`
+            <div style=${{width:46,height:46,borderRadius:"50%",background:"rgba(255,255,255,0.2)",
+                          display:"flex",alignItems:"center",justifyContent:"center",
+                          fontSize:24,flexShrink:0,overflow:"hidden"}}>
+              ${art
+                ? html`<img src=${art} alt=${getRank(game.level).name} width="46" height="46"
+                         style=${{width:46,height:46,objectFit:"contain",display:"block"}}/>`
+                : (profile?.avatar||"🦊")}
+            </div>`;
+        })()}
         <div style=${{flex:1,minWidth:0}}>
           <div style=${{fontSize:26,fontWeight:800,color:"#fff",letterSpacing:"-.5px",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>${profile?.nickname||CURRENT_USER.name}</div>
         </div>
@@ -9530,7 +9550,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260805-113458";
+const APP_BUILD = "20260805-114406";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 

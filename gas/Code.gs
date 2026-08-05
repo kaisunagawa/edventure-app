@@ -3760,7 +3760,10 @@ function updateLogTime(studentEmail, body) {
   const curTb = String(data[target][iTb]);
   if (curTb === toTb) return { ok: true, unchanged: true, time_block: toTb };
 
-  // 同じ日の他の記録と重ならないか見る
+  // ★重なりは断らない★（2026-08-05 Kaiの判断）
+  //   もとは重なると集計が二重になるため断っていたが、
+  //   実際には重ねて記録したい場面があるとのことなので通す。
+  //   代わりに、重なっている相手を返して画面で知らせる。
   const span = function (tb) {
     const m = String(tb).match(/^(\d{1,2}):(\d{2})(?:-(\d{1,2}):(\d{2}))?$/);
     if (!m) return null;
@@ -3770,15 +3773,14 @@ function updateLogTime(studentEmail, body) {
     return { st: st, en: en };
   };
   const ns = span(toTb);
+  const overlaps = [];
   for (let i = 1; i < data.length; i++) {
     if (i === target) continue;
     if (String(data[i][iEm]) !== studentEmail) continue;
     if (rowDateOf(data[i][iDt]) !== curDate) continue;
     const os = span(String(data[i][iTb]));
     if (!os) continue;
-    if (ns.st < os.en && os.st < ns.en) {
-      return { ok: false, error: "その時間には別の記録があります（" + String(data[i][iTb]) + "）" };
-    }
+    if (ns.st < os.en && os.st < ns.en) overlaps.push(String(data[i][iTb]));
   }
 
   sheet.getRange(target + 1, iTb + 1).setValue(toTb);
@@ -3802,7 +3804,8 @@ function updateLogTime(studentEmail, body) {
   const linkedTask = linkIdx === -1 ? "" : String(data[target][linkIdx] || "");
   if (linkedTask) { try { recomputeTaskActualMinutes_(studentEmail, linkedTask); } catch (e) {} }
 
-  return { ok: true, date: curDate, from: curTb, time_block: toTb, minutes: newMins };
+  return { ok: true, date: curDate, from: curTb, time_block: toTb, minutes: newMins,
+           overlaps: overlaps };
 }
 
 // 記録の削除。間違えて記録した時間帯を消せるようにする（編集画面で内容を空にして
