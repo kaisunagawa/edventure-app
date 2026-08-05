@@ -8460,6 +8460,7 @@ function AvailableTimeSection({onToast}) {
   const todayKey2 = formatDateStr(new Date());
   const [wk, setWk] = useState(null);          // 曜日ごとの既定（分）
   const [day, setDay] = useState(null);        // 今日の設定
+  const [saved, setSaved] = useState(null);    // 最後に保存できた内容（変更の有無を見るため）
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
   // 読み込みに失敗したときに「読み込み中…」のまま固まると、
@@ -8469,11 +8470,13 @@ function AvailableTimeSection({onToast}) {
     let r = null;
     try { r = await authedPost("getDayPlan", { date: todayKey2 }); } catch(e) { r = null; }
     if (r && r.ok && r.data) {
-      setWk(r.data.weekly_available_minutes || {});
-      setDay({ day_type: r.data.day_type || "NORMAL", available_minutes: r.data.available_minutes,
-               resolved: r.data.resolved });
+      const w0 = r.data.weekly_available_minutes || {};
+      const d0 = { day_type: r.data.day_type || "NORMAL", available_minutes: r.data.available_minutes,
+                   resolved: r.data.resolved };
+      setWk(w0); setDay(d0); setSaved(JSON.stringify([w0, d0.day_type, d0.available_minutes]));
     } else {
-      setWk({}); setDay({ day_type:"NORMAL", available_minutes:null });
+      const w0 = {}, d0 = { day_type:"NORMAL", available_minutes:null };
+      setWk(w0); setDay(d0); setSaved(JSON.stringify([w0, d0.day_type, d0.available_minutes]));
       if (!r || !r.ok) setFailed(true);
     }
   };
@@ -8483,27 +8486,31 @@ function AvailableTimeSection({onToast}) {
 
   const hh = (m) => m === null || m === undefined || m === "" ? "未設定"
                     : (Math.floor(m/60) + "時間" + (m%60 ? (m%60)+"分" : ""));
-  const saveWeek = async (next) => {
-    setWk(next); setBusy(true);
-    const r = await authedPost("saveWeeklyAvailable", { weekly_available_minutes: JSON.stringify(next) });
+
+  // ★1タップごとに保存しない★（2026-08-05 Kai要望）
+  //   保存のたびにサーバーへ往復して2秒ほど固まり、選ぶだけで時間がかかっていた。
+  //   選ぶのは画面の中だけで済ませ、最後に「保存する」でまとめて送る。
+  const dirty = saved !== JSON.stringify([wk, day.day_type, day.available_minutes]);
+  const saveAll = async () => {
+    setBusy(true);
+    const r1 = await authedPost("saveWeeklyAvailable", { weekly_available_minutes: JSON.stringify(wk) });
+    const r2 = await authedPost("saveDayPlan", { date: todayKey2, day_type: day.day_type,
+      available_minutes: day.available_minutes === null ? "" : day.available_minutes });
     setBusy(false);
-    if (!r || !r.ok) onToast && onToast("保存できませんでした");
-  };
-  const saveDay = async (patch) => {
-    const next = { ...day, ...patch };
-    setDay(next); setBusy(true);
-    const r = await authedPost("saveDayPlan", { date: todayKey2, day_type: next.day_type,
-      available_minutes: next.available_minutes === null ? "" : next.available_minutes });
-    setBusy(false);
-    if (r && r.ok && r.data) setDay({ ...next, resolved: r.data.resolved });
-    else onToast && onToast("保存できませんでした");
+    if ((r1 && r1.ok) && (r2 && r2.ok)) {
+      if (r2.data) setDay({ ...day, resolved: r2.data.resolved });
+      setSaved(JSON.stringify([wk, day.day_type, day.available_minutes]));
+      // 自己経営力は計算し直しになるので、端末に残した古い結果は捨てる
+      try { localStorage.removeItem("cache_smp"); } catch(e){}
+      onToast && onToast("保存しました");
+    } else onToast && onToast("保存できませんでした");
   };
 
   return html`
     ${failed&&html`
       <div style=${{fontSize:11.5,color:"var(--sub)",lineHeight:1.7,marginBottom:10,
                     padding:"9px 11px",borderRadius:9,border:"1px solid var(--border)"}}>
-        いまの設定を読み込めませんでした。押して設定すると保存はできます。
+        いまの設定を読み込めませんでした。選んで保存することはできます。
         <button onClick=${load} style=${{marginLeft:8,padding:"3px 9px",borderRadius:7,
           border:"1px solid var(--accent)",background:"none",color:"var(--accent)",
           fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>読み込み直す</button>
@@ -8521,7 +8528,7 @@ function AvailableTimeSection({onToast}) {
         <div style=${{display:"flex",gap:5,flexWrap:"wrap",flex:1}}>
           ${[0,120,240,360,480,600].map(m=>{
             const on = cur === m;
-            return html`<button key=${m} disabled=${busy} onClick=${()=>{ const nx={...wk}; if(on) delete nx[k]; else nx[k]=m; saveWeek(nx); }}
+            return html`<button key=${m} onClick=${()=>{ const nx={...wk}; if(on) delete nx[k]; else nx[k]=m; setWk(nx); }}
               style=${{padding:"5px 9px",borderRadius:20,fontSize:11,cursor:"pointer",fontFamily:"inherit",
                        border:`1px solid ${on?"var(--accent)":"var(--border)"}`,
                        background:on?"var(--accent-l)":"transparent",color:on?"var(--accent)":"var(--sub)",
@@ -8538,24 +8545,35 @@ function AvailableTimeSection({onToast}) {
     <div style=${{display:"flex",gap:6,marginBottom:10}}>
       ${[["NORMAL","ふつうの日"],["REST","休む日"],["ADJUSTED","調整した日"]].map(([v,lb])=>{
         const on = (day && day.day_type) === v;
-        return html`<button key=${v} disabled=${busy} onClick=${()=>saveDay({day_type:v})}
+        return html`<button key=${v} onClick=${()=>setDay({...day, day_type:v})}
           style=${{flex:1,padding:"9px 4px",borderRadius:10,fontSize:12,cursor:"pointer",fontFamily:"inherit",
                    border:`1.5px solid ${on?"var(--accent)":"var(--border)"}`,
                    background:on?"var(--accent-l)":"transparent",color:on?"var(--accent)":"var(--sub)",
                    fontWeight:on?700:500}}>${lb}</button>`;
       })}
     </div>
-    <div style=${{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
+    <div style=${{display:"flex",alignItems:"center",gap:8,marginBottom:14}}>
       <input class="inp" type="number" inputmode="numeric" placeholder="例：300"
         value=${day && day.available_minutes !== null && day.available_minutes !== undefined ? day.available_minutes : ""}
         onInput=${e=>{ const v=e.target.value; setDay({...day, available_minutes: v===""?null:Number(v)}); }}
-        onBlur=${()=>saveDay({})} style=${{width:110,margin:0,textAlign:"center"}}/>
+        style=${{width:110,margin:0,textAlign:"center"}}/>
       <span style=${{fontSize:12.5,color:"var(--sub)"}}>分（今日だけ変えたいとき）</span>
     </div>
+
+    <!-- ★まとめて保存する★ 選ぶたびに待たせない -->
+    <button onClick=${saveAll} disabled=${busy||!dirty}
+      style=${{width:"100%",padding:"12px",borderRadius:11,border:"none",fontFamily:"inherit",
+               fontSize:13,fontWeight:700,marginBottom:12,
+               cursor:(busy||!dirty)?"default":"pointer",
+               background:(busy||!dirty)?"var(--bg)":"var(--accent)",
+               color:(busy||!dirty)?"var(--sub)":"#fff"}}>
+      ${busy ? "保存中…" : dirty ? "保存する" : "保存済み"}</button>
+
     <div style=${{fontSize:11.5,color:"var(--sub)",lineHeight:1.8}}>
       いま使う値：<b style=${{color:"var(--text)"}}>${day && day.resolved ? hh(day.resolved.minutes) : "未設定"}</b>
       ${day && day.resolved && day.resolved.source==="WEEKDAY_DEFAULT" ? "（曜日の目安から）" : ""}
       ${day && day.resolved && day.resolved.source==="DAY_PLAN" ? "（今日の設定）" : ""}
+      ${dirty ? html`<br/><span style=${{color:"var(--amber,#BA7517)"}}>まだ保存していない変更があります</span>` : ""}
       <br/>変更した記録は残ります（あとから休む日に変えて評価を避けられないようにするため）。
     </div>`;
 }
@@ -9260,7 +9278,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260805-103317";
+const APP_BUILD = "20260805-104341";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 

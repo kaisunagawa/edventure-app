@@ -1903,6 +1903,25 @@ function computeSelfMgmtPower(studentEmail, weekStart) {
            provisional_count: scored.filter(function (m) { return m.provisional; }).length };
 }
 
+// ★自己経営力のキャッシュを捨てるための世代番号★（2026-08-05）
+//   使える時間を変えても「1日に使える時間を設定すると見られます」のままだった。
+//   10分キャッシュが残るため。キャッシュキーの中身を1つ変えれば、
+//   古いキーには二度と当たらなくなる。個別にキーを消して回るより確実。
+function smpEpochKey_(studentEmail) {
+  return "smp_epoch_" + sha256Hex(String(studentEmail)).slice(0, 24);
+}
+function smpEpoch_(studentEmail) {
+  try { return String(PropertiesService.getScriptProperties().getProperty(smpEpochKey_(studentEmail)) || "0"); }
+  catch (e) { return "0"; }
+}
+function smpBumpEpoch_(studentEmail) {
+  try {
+    const props = PropertiesService.getScriptProperties();
+    const k = smpEpochKey_(studentEmail);
+    props.setProperty(k, String((Number(props.getProperty(k)) || 0) + 1));
+  } catch (e) { Logger.log("smpBumpEpoch_: " + e); }
+}
+
 function getSelfMgmtPower(studentEmail, body) {
   const chk = p1RequireUser(studentEmail);
   if (!chk.ok) return chk;
@@ -1914,7 +1933,8 @@ function getSelfMgmtPower(studentEmail, body) {
   //   画面が「ステータス」のまま切り替わらないことがある（Kaiの端末で発生）。
   const ckey = "smp_" + sha256Hex(studentEmail + "|" + (weekStart || "cur") + "|" +
                                   String((body && body.withPrev) || "") + "|" + SMP_VERSION +
-                                  "|" + OPS_CALC_VERSION + "|" + formatDate(new Date())).slice(0, 40);
+                                  "|" + OPS_CALC_VERSION + "|" + formatDate(new Date()) +
+                                  "|" + smpEpoch_(studentEmail)).slice(0, 40);
   if (String((body && body.refresh) || "") !== "1") {
     try { const hit = CacheService.getScriptCache().get(ckey);
       if (hit) return JSON.parse(hit); } catch (e) {}
@@ -11488,6 +11508,7 @@ function saveWeeklyAvailable(studentEmail, body) {
   for (let i = 1; i < data.length; i++) {
     if (String(data[i][iEm]) !== studentEmail) continue;
     sheet.getRange(i + 1, iW + 1).setValue(JSON.stringify(parsed));
+    smpBumpEpoch_(studentEmail);   // 自己経営力の計算結果を取り直させる
     return { ok: true, weekly_available_minutes: parsed };
   }
   return { ok: false, error: "no user" };
@@ -11609,6 +11630,7 @@ function saveDayPlan(studentEmail, body) {
     changed_by: studentEmail, changed_at: now.toISOString(),
     change_timing: timing, mutation_id: p1Text_((body && body.mutation_id) || "", 60)
   });
+  smpBumpEpoch_(studentEmail);   // 自己経営力の計算結果を取り直させる
   return { ok: true, data: { date: date, day_type: newType,
                              available_minutes: newMin === "" ? null : newMin,
                              change_timing: timing,
