@@ -492,6 +492,12 @@ function doGet(e) {
         }
         return jsonResponse({ ok: true, dry: dryT, count: fixed.length, fixed: fixed });
       }
+      // 古いchallengeを捨てる（ログインの遅さ対策）
+      //   bash gas/ops.sh adminPurgeChallenges
+      case "adminPurgeChallenges": {
+        if (!verifyAdmin(e.parameter.coachEmail)) return jsonResponse({ ok: false, error: "not admin" });
+        return jsonResponse(authPurgeOldChallenges());
+      }
       // 自己経営力の中身を読むだけのコマンド（調査用・書き込みなし）
       // ★レベルのズレを調べる（読むだけ・書き込みなし）★（2026-08-05）
       //   「35日続けているのにルーキーのまま」のような食い違いを見つける。
@@ -13262,6 +13268,37 @@ function authChallenge() {
   return { ok: true, challenge_id: challengeId, state: state, nonce: nonce, expires_in: 300 };
 }
 
+// ★古いchallengeを捨てる★（2026-08-05）
+//   AuthChallenges はログインのたびに1行ずつ増え、これまで一度も消していなかった。
+//   13,000行を超えており、consumeChallenge が毎回この全部を読むため、
+//   ログインが日に日に遅くなっていた。authChallenge は誰でも叩ける入口なので、
+//   放っておくと際限なく増える。
+//   行は必ず時系列で追記されるので、古い側をまとめて1回で消す。
+function authPurgeOldChallenges() {
+  const KEEP_DAYS = 7;
+  const KEEP_MIN_ROWS = 500;          // 直近はどんなに古くても残す（調査用）
+  const sh = getAuthSheet("AuthChallenges");
+  const last = sh.getLastRow();
+  if (last <= KEEP_MIN_ROWS + 1) return { ok: true, deleted: 0, note: "まだ少ないので何もしない" };
+  const h = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0];
+  const iCreated = h.indexOf("created_at");
+  if (iCreated === -1) return { ok: false, error: "created_at 列がありません" };
+  const cutoff = Date.now() - KEEP_DAYS * 86400000;
+  const col = sh.getRange(2, iCreated + 1, last - 1, 1).getValues();
+  // 何行目までが「古い」か（時系列に追記されている前提。念のため単調性は仮定せず全走査）
+  let lastOld = 0;
+  for (let i = 0; i < col.length; i++) {
+    const t = new Date(String(col[i][0])).getTime();
+    if (isFinite(t) && t < cutoff) lastOld = i + 1; else break;
+  }
+  // 直近 KEEP_MIN_ROWS 行は必ず残す
+  const maxDeletable = (last - 1) - KEEP_MIN_ROWS;
+  const n = Math.min(lastOld, maxDeletable);
+  if (n <= 0) return { ok: true, deleted: 0 };
+  sh.deleteRows(2, n);                // まとめて1回で消す
+  return { ok: true, deleted: n, remaining: sh.getLastRow() - 1 };
+}
+
 // challenge を1回だけ消費する。成功・失敗にかかわらず再利用させない
 function consumeChallenge(challengeId, state) {
   const sh = getAuthSheet("AuthChallenges");
@@ -15756,7 +15793,9 @@ function adminInstallTrigger(email, handler, replaceFlag) {
     dailyOpsHealthCheck: function (b) { return b.timeBased().everyDays(1).atHour(23).nearMinute(59); },
     weeklyBackup:        function (b) { return b.timeBased().everyWeeks(1).onWeekDay(ScriptApp.WeekDay.SUNDAY).atHour(3); },
     // 控えておいたカレンダー書き込みを流す（記録の保存を待たせないため）
-    flushOwnerCalendarQueue: function (b) { return b.timeBased().everyMinutes(1); }
+    flushOwnerCalendarQueue: function (b) { return b.timeBased().everyMinutes(1); },
+    // 古いchallengeの掃除（ログインが遅くなるのを防ぐ）
+    authPurgeOldChallenges: function (b) { return b.timeBased().everyDays(1).atHour(4); }
   };
   if (!allowed[name]) return { ok: false, error: "許可されていないハンドラ: " + name };
   // ★時刻を変えたいときは張り直す★（2026-08-05）
