@@ -1486,13 +1486,13 @@ function JiroFoundModal() {
                         border:`1px solid color-mix(in srgb, ${c} 40%, transparent)`,
                         borderRadius:20,padding:"5px 12px",marginBottom:14,lineHeight:1.5}}>
             ${j.cond} を達成</div>`}
-        <div style=${{position:"relative",width:150,height:150,margin:"0 auto 14px",borderRadius:"50%",
-                      overflow:"hidden",border:`3px solid ${c}`,
-                      boxShadow:`0 8px 26px color-mix(in srgb, ${c} 45%, transparent)`}}>
+        <!-- 背景は抜いてあるので、枠に入れず絵をそのまま大きく置く（2026-08-06） -->
+        <div style=${{position:"relative",width:172,height:172,margin:"0 auto 10px"}}>
           ${j.art
             ? html`<img src=${j.art+"?v="+APP_BUILD} alt=${g.name}
                      style=${{position:"absolute",inset:0,width:"100%",height:"100%",
-                              objectFit:"cover",display:"block"}}/>`
+                              objectFit:"contain",display:"block",
+                              filter:`drop-shadow(0 8px 18px color-mix(in srgb, ${c} 40%, transparent))`}}/>`
             : html`<div style=${{position:"absolute",inset:0,display:"flex",alignItems:"center",
                                  justifyContent:"center",fontSize:44,color:"var(--border)"}}>?</div>`}
         </div>
@@ -3495,19 +3495,11 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
         return html`
         <div style=${{display:"flex",alignItems:"center",gap:11,marginBottom:14}}>
           ${art
-            ? (useFeat
-              /* 隠しジローは正方形の絵なので、丸く切って枠に収める。
-                 階級のキャラは背景が抜いてあるのでそのまま置く（2026-08-06） */
-              ? html`<span style=${{position:"relative",flexShrink:0,width:96,height:96,
-                                    borderRadius:"50%",overflow:"hidden",display:"block",
-                                    border:"2px solid rgba(255,255,255,0.55)",
-                                    boxShadow:"0 4px 14px rgba(0,0,0,0.25)",marginRight:4}}>
-                  <img src=${art} alt=${featJ.name} width="96" height="96"
-                    style=${{width:"100%",height:"100%",objectFit:"cover",display:"block"}}/>
-                </span>`
-              : html`<img src=${art} alt=${rank?rank.name:""} width="118" height="118"
+            /* 隠しジローも背景を抜いてあるので、階級のキャラと同じ置き方にする
+               （2026-08-06 Kai指摘。丸枠にすると階級のときと形が変わって落ち着かない） */
+            ? html`<img src=${art} alt=${useFeat?featJ.name:(rank?rank.name:"")} width="118" height="118"
                      style=${{width:118,height:118,objectFit:"contain",display:"block",flexShrink:0,
-                              marginTop:-14,marginBottom:-14,marginLeft:-12,marginRight:-6}}/>`)
+                              marginTop:-14,marginBottom:-14,marginLeft:-12,marginRight:-6}}/>`
             : html`<div style=${{width:56,height:56,borderRadius:"50%",background:"rgba(255,255,255,0.2)",
                                  display:"flex",alignItems:"center",justifyContent:"center",
                                  fontSize:28,flexShrink:0}}>${profile?.avatar||"🦊"}</div>`}
@@ -10342,7 +10334,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260806-120741";
+const APP_BUILD = "20260806-123802";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
