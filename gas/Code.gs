@@ -540,6 +540,52 @@ function doGet(e) {
             ? { displayed_score: detT.data.displayed_score, finalized: !!detT.data.finalized } : null,
           OPS_REPORT_VERSION: OPS_REPORT_VERSION });
       }
+      // ★確定済みの日で、内訳と点数の列が食い違っている行を洗い出す★（2026-08-05）
+      //   確定処理が点数の列を書いていなかった時期の行が対象。
+      //   dry=1 なら読むだけ。dry=0 で、内訳の値に合わせて列を直す。
+      //     bash gas/ops.sh adminOpsScoreAudit dry=1
+      case "adminOpsScoreAudit": {
+        if (!verifyAdmin(e.parameter.coachEmail)) return jsonResponse({ ok: false, error: "not admin" });
+        const dryO = String(e.parameter.dry || "1") === "1";
+        const shO = getP1Sheet("DailyOpsReport");
+        const dataO = shO.getDataRange().getValues();
+        const hO = dataO[0];
+        const iEmO = hO.indexOf("student_email"), iDtO = hO.indexOf("report_date");
+        const iFinO = hO.indexOf("finalized_at"), iSnapO = hO.indexOf("snapshot_json");
+        const iOpO = hO.indexOf("operating_score"), iPtO = hO.indexOf("partial_score");
+        if ([iEmO, iDtO, iFinO, iSnapO, iOpO, iPtO].some(function (x) { return x === -1; })) {
+          return jsonResponse({ ok: false, error: "column missing" });
+        }
+        const badO = [];
+        for (let i = 1; i < dataO.length; i++) {
+          if (!String(dataO[i][iFinO] || "").trim()) continue;      // 確定済みだけ
+          let snap = null;
+          try { snap = JSON.parse(dataO[i][iSnapO] || "null"); } catch (e2) {}
+          if (!snap) continue;
+          const shown = snap.displayed_score;
+          if (shown === null || shown === undefined) continue;
+          const colOp = String(dataO[i][iOpO] || "").trim();
+          const colPt = String(dataO[i][iPtO] || "").trim();
+          const colShown = colOp !== "" ? Number(colOp) : (colPt !== "" ? Number(colPt) : null);
+          if (colShown === Number(shown)) continue;                 // 一致していれば何もしない
+          const rawD = dataO[i][iDtO];
+          badO.push({ row: i + 1,
+            email: String(dataO[i][iEmO] || ""),
+            date: rawD instanceof Date ? Utilities.formatDate(rawD, "Asia/Tokyo", "yyyy-MM-dd")
+                                       : String(rawD).slice(0, 10),
+            snapshot: Number(shown), column: colShown });
+          if (!dryO) {
+            const op = (snap.operating_score === null || snap.operating_score === undefined)
+                         ? "" : snap.operating_score;
+            const pt = (snap.partial_score === null || snap.partial_score === undefined)
+                         ? "" : snap.partial_score;
+            shO.getRange(i + 1, iOpO + 1).setValue(op);
+            shO.getRange(i + 1, iPtO + 1).setValue(pt);
+          }
+        }
+        return jsonResponse({ ok: true, dry: dryO, count: badO.length,
+          detail: badO.slice(0, 100) });
+      }
       // 古いchallengeを捨てる（ログインの遅さ対策）
       //   bash gas/ops.sh adminPurgeChallenges
       case "adminPurgeChallenges": {
@@ -14407,7 +14453,7 @@ const ADMIN_SECRET_ALLOWLIST = {
   // 一斉送信（Kaiの明示的な要望により残す）
   adminBroadcastLine:1, adminBroadcastLinePending:1, adminSendStudentCampaign:1,
   // セットアップ・保守
-  adminSetupTriggers:1, adminInstallTrigger:1, adminSetupPhase1:1, adminSetupAuth:1, adminPhase4DryRun:1, adminLegacyBackfill:1, adminWritePathStats:1, adminIssueTestSession:1, adminDropTestSessions:1, adminOpsSelfTest:1, adminActualMinutesAudit:1, adminXpCorrection:1, adminStreakRecalc:1, adminGrantFeature:1, adminUserDiag:1, adminReportScoreDryRun:1, adminReportGenTest:1, adminScoreConsistency:1, adminFinalizeOps:1, adminUnfinalizeOps:1, adminSmpDump:1, adminSmpWarmAll:1, adminLevelAudit:1, adminXpRestore:1, adminCleanupPlusLogs:1, adminClassAudit:1, adminRecolorCalendar:1, adminFixTokenVersion:1, adminPurgeChallenges:1, adminJiroBackfill:1, adminCommunityTiming:1, adminScoreTrace:1,
+  adminSetupTriggers:1, adminInstallTrigger:1, adminSetupPhase1:1, adminSetupAuth:1, adminPhase4DryRun:1, adminLegacyBackfill:1, adminWritePathStats:1, adminIssueTestSession:1, adminDropTestSessions:1, adminOpsSelfTest:1, adminActualMinutesAudit:1, adminXpCorrection:1, adminStreakRecalc:1, adminGrantFeature:1, adminUserDiag:1, adminReportScoreDryRun:1, adminReportGenTest:1, adminScoreConsistency:1, adminFinalizeOps:1, adminUnfinalizeOps:1, adminSmpDump:1, adminSmpWarmAll:1, adminLevelAudit:1, adminXpRestore:1, adminCleanupPlusLogs:1, adminClassAudit:1, adminRecolorCalendar:1, adminFixTokenVersion:1, adminPurgeChallenges:1, adminJiroBackfill:1, adminCommunityTiming:1, adminOpsScoreAudit:1, adminScoreTrace:1,
   authSetMode:1, authSetEnforce:1, authRoleApply:1, authRoleDryRun:1, authRevokeAll:1,
   authCleanupTestData:1, adminPurgeTestUsers:1, adminMigrateTasks:1, authBreakerReset:1, rotateSessionSecret:1,
   p1Backup:1, p1BackupInfo:1, p1PurgeArchived:1, weeklyBackup:1
