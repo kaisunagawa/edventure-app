@@ -1790,7 +1790,10 @@ function getReportList(studentEmail) {
       //   詳細画面は代わりに部分点を出しているのに、一覧はそれを拾えず
       //   旧方式の点数へ落ちていたため、同じ日で数字が食い違っていた。
       //   詳細の displayed_score と同じ順（全体 → 部分）で拾う。
-      p1List("DailyOpsReport", studentEmail).forEach(function (r) {
+      // ★同じ一覧を2度読まない★（2026-08-06）
+      //   下の「今日は締めたか」の判定でも同じものを読んでいた。
+      const opsRows = p1List("DailyOpsReport", studentEmail);
+      opsRows.forEach(function (r) {
         const d = String(r.report_date).slice(0, 10);
         if (!d) return;
         // ★スナップショットを先に見る★（2026-08-05 実データで確認）
@@ -1812,7 +1815,7 @@ function getReportList(studentEmail) {
       //   計算し直す点数（詳細）がずれる。実際に一覧64・詳細73になった。
       //   過去の日は変わらないので、今日の分だけその場で出し直す。
       const today = formatDate(new Date());
-      const finalizedToday = p1List("DailyOpsReport", studentEmail).some(function (r) {
+      const finalizedToday = opsRows.some(function (r) {
         return String(r.report_date).slice(0, 10) === today && String(r.finalized_at || "").trim(); });
       try {
         if (finalizedToday) throw new Error("finalized");   // 締めた日は触らない
