@@ -1424,25 +1424,25 @@ const RANK_ART = {
 //   ★絵が届くまで art は空にしておく★ 未発見はどのみちシルエットなので、
 //   仕組みだけ先に動かして、絵が揃った日に差し込めばそのまま公開できる。
 const HIDDEN_JIRO = [
-  { id:"night",    no:"No.101", name:"夜ふかしジロー", rarity:"Epic", art:"",
+  { id:"night",    no:"No.101", name:"夜ふかしジロー", rarity:"Epic", art:"assets/jiro/night.png",
     cond:"23:00〜5:00の記録が通算10件",  personality:"夜型・マイペース",
     line:"「今日はまだ始まったばかり。」", note:"夜になると本領発揮する夜行性ジロー。" },
-  { id:"calm",     no:"No.102", name:"ととのえジロー", rarity:"Rare", art:"",
+  { id:"calm",     no:"No.102", name:"ととのえジロー", rarity:"Rare", art:"assets/jiro/calm.png",
     cond:"回復の記録が通算5件",          personality:"穏やか・癒し系",
     line:"「大丈夫、ちゃんと休めてるよ。」", note:"心と体をととのえる達人ジロー。" },
-  { id:"stack",    no:"No.103", name:"積み上げジロー", rarity:"Rare", art:"",
+  { id:"stack",    no:"No.103", name:"積み上げジロー", rarity:"Rare", art:"assets/jiro/stack.png",
     cond:"将来への投資の記録が通算10件",  personality:"真面目・コツコツ型",
     line:"「未来の自分に、今をプレゼント。」", note:"小さな努力を積み重ねる研究者タイプ。" },
-  { id:"straight", no:"No.104", name:"一直線ジロー",   rarity:"Epic", art:"",
+  { id:"straight", no:"No.104", name:"一直線ジロー",   rarity:"Epic", art:"assets/jiro/straight.png",
     cond:"目標に直結の記録が通算10件",    personality:"ストイック・一直線",
     line:"「ブレずに、ゴールまで。」",     note:"無駄な寄り道はしないストイックジロー。" },
-  { id:"kind",     no:"No.105", name:"思いやりジロー", rarity:"Rare", art:"",
+  { id:"kind",     no:"No.105", name:"思いやりジロー", rarity:"Rare", art:"assets/jiro/kind.png",
     cond:"人間関係の記録が通算3件",      personality:"優しい・サポート好き",
     line:"「一緒なら、もっと頑張れるよね。」", note:"人を思いやることが大好きなジロー。" },
-  { id:"support",  no:"No.106", name:"縁の下ジロー",   rarity:"Rare", art:"",
+  { id:"support",  no:"No.106", name:"縁の下ジロー",   rarity:"Rare", art:"assets/jiro/support.png",
     cond:"日常業務の記録が通算15件",      personality:"縁の下・責任感が強い",
     line:"「ちゃんとやる、それが一番の近道。」", note:"目立たないけど欠かせない存在。" },
-  { id:"turbo",    no:"No.107", name:"爆速ジロー",     rarity:"Epic", art:"",
+  { id:"turbo",    no:"No.107", name:"爆速ジロー",     rarity:"Epic", art:"assets/jiro/turbo.png",
     cond:"日次スコア90点以上が3日連続",   personality:"情熱的・負けず嫌い",
     line:"「限界？そんなの、昨日の話！」", note:"勢いが止まらないスピードスター。" }
 ];
@@ -3435,9 +3435,19 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
         return html`
         <div style=${{display:"flex",alignItems:"center",gap:11,marginBottom:14}}>
           ${art
-            ? html`<img src=${art} alt=${useFeat?featJ.name:(rank?rank.name:"")} width="118" height="118"
+            ? (useFeat
+              /* 隠しジローは正方形の絵なので、丸く切って枠に収める。
+                 階級のキャラは背景が抜いてあるのでそのまま置く（2026-08-06） */
+              ? html`<span style=${{position:"relative",flexShrink:0,width:96,height:96,
+                                    borderRadius:"50%",overflow:"hidden",display:"block",
+                                    border:"2px solid rgba(255,255,255,0.55)",
+                                    boxShadow:"0 4px 14px rgba(0,0,0,0.25)",marginRight:4}}>
+                  <img src=${art} alt=${featJ.name} width="96" height="96"
+                    style=${{width:"100%",height:"100%",objectFit:"cover",display:"block"}}/>
+                </span>`
+              : html`<img src=${art} alt=${rank?rank.name:""} width="118" height="118"
                      style=${{width:118,height:118,objectFit:"contain",display:"block",flexShrink:0,
-                              marginTop:-14,marginBottom:-14,marginLeft:-12,marginRight:-6}}/>`
+                              marginTop:-14,marginBottom:-14,marginLeft:-12,marginRight:-6}}/>`)
             : html`<div style=${{width:56,height:56,borderRadius:"50%",background:"rgba(255,255,255,0.2)",
                                  display:"flex",alignItems:"center",justifyContent:"center",
                                  fontSize:28,flexShrink:0}}>${profile?.avatar||"🦊"}</div>`}
@@ -10272,7 +10282,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260806-111848";
+const APP_BUILD = "20260806-115526";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
