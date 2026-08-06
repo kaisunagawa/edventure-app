@@ -421,13 +421,33 @@ function doGet(e) {
         const dryJ = String(e.parameter.dry || "") === "1";
         const logsJ = sheetToObjects(getSheet("DailyLog"));
         const perUser = {};
+        const dayJ = {};
         logsJ.forEach(function (r) {
           if (String(r.deleted_at || "").trim()) return;
           const em = String(r.student_email || ""); if (!em) return;
           const c = perUser[em] || (perUser[em] = {});
           const cls = String(r.time_classification || "").trim();
           if (cls && TIME_CLASSES[cls]) c[cls] = (c[cls] || 0) + 1;
-          if (jiroIsNight_(r.time_block)) c.night = (c.night || 0) + 1;
+          c.records = (c.records || 0) + 1;
+          if (jiroIsNight_(r.time_block))   c.night   = (c.night || 0) + 1;
+          if (jiroIsMorning_(r.time_block)) c.morning = (c.morning || 0) + 1;
+          if (String(r.memo || "").trim())  c.memo    = (c.memo || 0) + 1;
+          const raw = r.date;
+          const d = raw instanceof Date ? Utilities.formatDate(raw, "Asia/Tokyo", "yyyy-MM-dd")
+                                        : String(raw || "").slice(0, 10);
+          if (d) { const k = em + "|" + d; dayJ[k] = (dayJ[k] || 0) + 1; }
+        });
+        // 日にまたがる材料
+        Object.keys(dayJ).forEach(function (k) {
+          const sep = k.lastIndexOf("|");
+          const em = k.slice(0, sep), d = k.slice(sep + 1);
+          const c = perUser[em] || (perUser[em] = {});
+          c.days = (c.days || 0) + 1;
+          if (dayJ[k] >= 5) c.denseDays = (c.denseDays || 0) + 1;
+          try {
+            const w = new Date(d + "T00:00:00+09:00").getDay();
+            if (w === 0 || w === 6) c.weekendDays = (c.weekendDays || 0) + 1;
+          } catch (eW) {}
         });
         // 90点以上の連続日数（今日を末尾に数える）
         const repSheet = getSheet("Reports");
@@ -438,6 +458,8 @@ function doGet(e) {
           const em = String(u.student_email || ""); if (!em) return;
           const c = perUser[em] || {};
           try { c.hiscore7 = jiroHighScoreRun_(repSheet, em, todayJ); } catch (e2) { c.hiscore7 = 0; }
+          try { c.perfect100 = jiroPerfectCount_(repSheet, em); } catch (e7) {}
+          c.streak = Number(u.streak || 0);
           const r = jiroApply_(c, [], {}, {});
           outJ.push({ email: em, name: String(u.nickname || u.name || ""),
                       counts: c, found: r.found, count: r.found.length });
@@ -3535,6 +3557,9 @@ function appendReportRow(targetDate, studentEmail, report, logCount) {
     //   夜のレポートのときにまとめて数え直す。
     const abs = { hiscore7: runs };
     try { abs.perfect100 = jiroPerfectCount_(sheet, studentEmail); } catch (e2) {}
+    // 日にまたがる材料（記録した日数・土日・1日5件以上）は、その場では数えられないので
+    // 夜にまとめて数え直す（2026-08-06）
+    try { Object.assign(abs, jiroDayCounts_(studentEmail)); } catch (e6) {}
     try {
       const u = getFilteredRows("Users", "student_email", studentEmail)[0];
       abs.streak = Number((u && u.streak) || 0);
@@ -3547,6 +3572,31 @@ function appendReportRow(targetDate, studentEmail, report, logCount) {
     } catch (e3) {}
     jiroBumpUser_(studentEmail, {}, abs);
   } catch (e) { /* 図鑑が更新できなくてもレポートは成功させる */ }
+}
+
+// その人の「記録した日数・土日に記録した日数・1日5件以上の日数」を数える。
+//   1日の中の話ではないので保存のたびには数えられない。夜にまとめて出す。
+function jiroDayCounts_(studentEmail) {
+  const rows = getFilteredRows("DailyLog", "student_email", studentEmail);
+  const byDay = {};
+  rows.forEach(function (r) {
+    if (String(r.deleted_at || "").trim()) return;
+    const raw = r.date;
+    const d = raw instanceof Date ? Utilities.formatDate(raw, "Asia/Tokyo", "yyyy-MM-dd")
+                                  : String(raw || "").slice(0, 10);
+    if (!d) return;
+    (byDay[d] = byDay[d] || { n: 0 }).n++;
+  });
+  let days = 0, weekendDays = 0, denseDays = 0;
+  Object.keys(byDay).forEach(function (d) {
+    days++;
+    if (byDay[d].n >= 5) denseDays++;
+    try {
+      const w = new Date(d + "T00:00:00+09:00").getDay();
+      if (w === 0 || w === 6) weekendDays++;
+    } catch (e) {}
+  });
+  return { days: days, weekendDays: weekendDays, denseDays: denseDays };
 }
 
 // Reports から「100点だった日」が通算で何回あるかを数える。
@@ -4265,8 +4315,13 @@ function saveLog(studentEmail, body) {
   sheet.appendRow([logId, studentEmail, targetDate, "", body.task, body.focus_level, body.memo || "", now, body.goal_related || "false"]);
   sheet.getRange(newRow, 4).setNumberFormat("@").setValue(String(body.time_block));
   const jdNew = writeP1LogFields(sheet, newRow, studentEmail, targetDate, String(body.time_block), body);
-  // 新しい記録なので、夜ふかしの判定もここで1回だけ行う
-  if (!isPast && jiroIsNight_(body.time_block)) jdNew.night = (jdNew.night || 0) + 1;
+  // 新しい記録なので、時間帯などの判定もここで1回だけ行う
+  if (!isPast) {
+    jdNew.records = (jdNew.records || 0) + 1;
+    if (jiroIsNight_(body.time_block))    jdNew.night   = (jdNew.night || 0) + 1;
+    if (jiroIsMorning_(body.time_block))  jdNew.morning = (jdNew.morning || 0) + 1;
+    if (String(body.memo || "").trim())   jdNew.memo    = (jdNew.memo || 0) + 1;
+  }
   queueOwnerCalendarWrite_(studentEmail, targetDate, String(body.time_block), body.task, body.time_classification);
   let awardedIdxN = headers.indexOf("xp_awarded");
   if (awardedIdxN === -1) { awardedIdxN = headers.length; sheet.getRange(1, awardedIdxN + 1).setValue("xp_awarded"); }
@@ -12673,6 +12728,42 @@ const HIDDEN_JIRO = [
     key:"OPERATIONS",   need:15, cond:"日常業務の記録が通算15件" },
   { id:"turbo",    no:"No.107", name:"爆速ジロー",     rarity:"Epic",
     key:"hiscore7",     need:3,  cond:"日次スコア90点以上が3日連続" },
+  { id:"athlete", no:"No.201", name:"アスリートジロー", rarity:"Epic",
+    key:"records", need:50, cond:"記録が通算50件" },
+  { id:"musician", no:"No.202", name:"ミュージシャンジロー", rarity:"Rare",
+    key:"memo", need:30, cond:"メモを書いた記録が通算30件" },
+  { id:"programmer", no:"No.203", name:"プログラマジロー", rarity:"Epic",
+    key:"night", need:5, cond:"23:00〜5:00の記録が通算5件" },
+  { id:"scientist", no:"No.204", name:"サイエンティストジロー", rarity:"Epic",
+    key:"denseDays", need:5, cond:"1日に5件以上記録した日が5日" },
+  { id:"cafe", no:"No.205", name:"カフェジロー", rarity:"Rare",
+    key:"records", need:10, cond:"記録が通算10件" },
+  { id:"traveler", no:"No.206", name:"旅するジロー", rarity:"Rare",
+    key:"weekendDays", need:3, cond:"土日に記録した日が3日" },
+  { id:"reader", no:"No.207", name:"読書ジロー", rarity:"Epic",
+    key:"memo", need:100, cond:"メモを書いた記録が通算100件" },
+  { id:"yoga", no:"No.208", name:"ヨガジロー", rarity:"Rare",
+    key:"morning", need:10, cond:"5:00〜9:00の記録が通算10件" },
+  { id:"gardener", no:"No.209", name:"ガーデナージロー", rarity:"Rare",
+    key:"days", need:10, cond:"記録した日が通算10日" },
+  { id:"painter", no:"No.210", name:"ペインタージロー", rarity:"Epic",
+    key:"denseDays", need:10, cond:"1日に5件以上記録した日が10日" },
+  { id:"photo", no:"No.211", name:"写真家ジロー", rarity:"Epic",
+    key:"records", need:100, cond:"記録が通算100件" },
+  { id:"camp", no:"No.212", name:"キャンプジロー", rarity:"Rare",
+    key:"weekendDays", need:5, cond:"土日に記録した日が5日" },
+  { id:"study2", no:"No.213", name:"勉強ジロー", rarity:"Epic",
+    key:"days", need:20, cond:"記録した日が通算20日" },
+  { id:"coach", no:"No.214", name:"コーチジロー", rarity:"Rare",
+    key:"streak", need:3, cond:"3日連続で記録" },
+  { id:"healer", no:"No.215", name:"ヒーラージロー", rarity:"Rare",
+    key:"morning", need:30, cond:"5:00〜9:00の記録が通算30件" },
+  { id:"mechanic", no:"No.216", name:"メカニックジロー", rarity:"Rare",
+    key:"cls_OPERATIONS", need:5, cond:"日常業務の記録が通算5件" },
+  { id:"finance", no:"No.217", name:"ファイナンスジロー", rarity:"Legendary",
+    key:"records", need:200, cond:"記録が通算200件" },
+  { id:"nightguard", no:"No.218", name:"ナイトガードジロー", rarity:"Legendary",
+    key:"night", need:15, cond:"23:00〜5:00の記録が通算15件" },
   // ── 積み重ねの証。記録の中身ではなく「続けた結果」で会える ──
   { id:"perfect",  no:"No.201", name:"パーフェクトジロー", rarity:"Legendary",
     key:"perfect100",   need:20, cond:"日次スコア100点を通算20回" },
@@ -12688,6 +12779,14 @@ function jiroIsNight_(timeBlock) {
   if (!m) return false;
   const h = Number(m[1]);
   return h >= 23 || h < 5;
+}
+
+// 記録の時刻が「早朝」に当たるか（5時〜9時のはじまり）
+function jiroIsMorning_(timeBlock) {
+  const m = String(timeBlock || "").match(/^(\d{1,2}):/);
+  if (!m) return false;
+  const h = Number(m[1]);
+  return h >= 5 && h < 9;
 }
 
 function jiroParseCounts_(raw) {
