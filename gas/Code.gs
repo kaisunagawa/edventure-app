@@ -709,10 +709,18 @@ function doGet(e) {
           perS[em].streak = Number(u.streak || 0);
           try { perS[em].perfect100 = jiroPerfectCount_(repS, em); } catch (eP) {}
         });
-        const keys = ["records","days","cls_GOAL_DIRECT","cls_ASSET_BUILD","cls_RECOVERY",
+        // 言葉で拾った場合、どれだけ当たるかも数える
+        sheetToObjects(getSheet("DailyLog")).forEach(function (r) {
+          if (String(r.deleted_at || "").trim()) return;
+          const em = String(r.student_email || ""); if (!em) return;
+          const hits = jiroWordsHit_(String(r.task || "") + " " + String(r.memo || ""));
+          hits.forEach(function (k) { bump(em, "w_" + k); });
+        });
+        const keys = Object.keys(JIRO_WORDS).map(function (k) { return "w_" + k; })
+          .concat(["records","days","cls_GOAL_DIRECT","cls_ASSET_BUILD","cls_RECOVERY",
                       "cls_RELATIONSHIP","cls_OPERATIONS","cls_UNPLANNED_LEAKAGE",
                       "night","morning","memo","timer","long60",
-                      "denseDays","varietyDays","weekendDays","streak","perfect100"];
+                      "denseDays","varietyDays","weekendDays","streak","perfect100"]);
         const out = {};
         keys.forEach(function (k) {
           const vals = Object.keys(perS).map(function (em) { return Number(perS[em][k] || 0); })
@@ -12710,6 +12718,49 @@ const REST_CLASSES = { RECOVERY:1, RECOVERY_RELATIONSHIP:1 };
 //   シートを数え直す通信は一度も増えない。
 //   絵が揃うまでは画面側でシルエットのままにしておく（判定だけ先に動かす）。
 // ══════════════════════════════════════════════════════════════════
+// ★記録の中身から、その人がやったことを見つける★（2026-08-06 Kai案）
+//   「ジムに行った記録が3回でアスリート」のように、何をしたから会えたのかを
+//   はっきりさせる。タスク名とメモの文章を見て数える。
+//   ★ゆるく拾う★ 書き方は人それぞれなので、言い換えを多めに入れる。
+//   取りこぼしはあってもいいが、まったく関係ない記録で会えるのは避ける。
+const JIRO_WORDS = {
+  cafe:       ["カフェ","喫茶","スタバ","スターバックス","ドトール","コメダ","タリーズ","珈琲","コーヒー","ラテ"],
+  camp:       ["キャンプ","テント","焚き火","たき火","バーベキュー","BBQ","アウトドア","山ごもり"],
+  traveler:   ["旅行","旅先","観光","出張","温泉","ドライブ","帰省","空港","新幹線","ホテル","遠征"],
+  athlete:    ["ジム","筋トレ","ランニング","ラン活","走っ","走る","トレーニング","運動","サッカー","野球","テニス","バスケ","水泳","泳い","スポーツ","ワークアウト"],
+  musician:   ["音楽","ギター","ピアノ","楽器","ライブ","カラオケ","作曲","ドラム","ベース","バンド"],
+  programmer: ["コード","プログラ","開発","実装","デバッグ","エラー","リファクタ","GitHub","アプリを作","システム"],
+  scientist:  ["分析","research","研究","実験","検証","データを","調査","仮説"],
+  reader:     ["読書","本を読","読んだ","書籍","Kindle","積読","漫画を読"],
+  yoga:       ["ヨガ","ストレッチ","瞑想","マインドフル","呼吸法","整体","柔軟"],
+  gardener:   ["庭","植物","水やり","家庭菜園","ガーデニング","花を","苗","観葉"],
+  painter:    ["イラスト","デザイン","絵を","描い","ペイント","アート","スケッチ","ロゴ"],
+  photo:      ["写真","撮影","カメラ","撮っ","フォト","動画を撮"],
+  study2:     ["勉強","学習","資格","試験","講義","授業","復習","予習","テスト勉強","参考書"],
+  coach:      ["コーチング","面談","1on1","1対1","メンタリング","相談に","指導","フィードバック"],
+  healer:     ["昼寝","仮眠","休息","リラックス","マッサージ","癒","ゆっくり休","サウナ"],
+  mechanic:   ["修理","直した","メンテ","整備","組み立て","セットアップ","不具合"],
+  finance:    ["経費","会計","請求","確定申告","家計","投資","資産","見積","入金","支払"],
+  cook:       ["料理","自炊","ごはんを作","夕飯を作","お弁当","作り置き","キッチン"],
+  tidy:       ["片付け","整理","掃除","断捨離","収納","模様替え"],
+  adventure:  ["登山","ハイキング","散策","冒険","street","街歩き","探検"],
+  boss:       ["経営","打ち合わせ","商談","提案","営業","会議","プレゼン","面接"]
+};
+
+// その記録が、どのキャラの言葉に当たるかを返す（複数可）
+function jiroWordsHit_(text) {
+  const t = String(text || "");
+  if (!t) return [];
+  const hit = [];
+  Object.keys(JIRO_WORDS).forEach(function (k) {
+    const ws = JIRO_WORDS[k];
+    for (let i = 0; i < ws.length; i++) {
+      if (t.indexOf(ws[i]) !== -1) { hit.push(k); return; }
+    }
+  });
+  return hit;
+}
+
 // 会えた子をホームに出しておく日数（2026-08-06 Kai要望）
 const JIRO_FEATURE_DAYS = 3;
 
