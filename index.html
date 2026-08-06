@@ -1542,8 +1542,52 @@ const HIDDEN_JIRO = [
 //   その場で伝える。サーバーが jiro_gained で返してくる。
 function announceJiroFound(res) {
   const g = (res && res.jiro_gained) || [];
-  if (!g.length) return;
-  try { window.dispatchEvent(new CustomEvent("jiroku:jirofound", { detail: g })); } catch (e) {}
+  if (g.length) {
+    try { window.dispatchEvent(new CustomEvent("jiroku:jirofound", { detail: g })); } catch (e) {}
+    return;
+  }
+  // ★あと1回で会える子を、その場でそっと知らせる★（2026-08-06 Kai要望）
+  //   会えたときだけでなく「もう少しで会える」が分かると、次の記録の理由になる。
+  //   会えたカードが出るときは、そちらが主役なので出さない。
+  const s = (res && res.jiro_soon) || [];
+  if (!s.length) return;
+  try { window.dispatchEvent(new CustomEvent("jiroku:jirosoon", { detail: s })); } catch (e) {}
+}
+
+// あと1回の知らせ。下から出て数秒で消える（記録の邪魔をしない）
+function JiroSoonToast() {
+  const [list, setList] = useState([]);
+  useEffect(() => {
+    let timer = null;
+    const on = (e) => {
+      setList(e.detail || []);
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => setList([]), 6000);
+    };
+    window.addEventListener("jiroku:jirosoon", on);
+    return () => { window.removeEventListener("jiroku:jirosoon", on); if (timer) clearTimeout(timer); };
+  }, []);
+  if (!list.length) return null;
+  const j = HIDDEN_JIRO.find(x => x.id === list[0].id) || {};
+  const more = list.length - 1;
+  return ReactDOM.createPortal(html`
+    <div style=${{position:"fixed",left:12,right:12,bottom:"calc(70px + env(safe-area-inset-bottom))",
+                  zIndex:880,display:"flex",justifyContent:"center",pointerEvents:"none"}}>
+      <div style=${{display:"flex",alignItems:"center",gap:10,maxWidth:360,width:"100%",
+                    background:"var(--card)",border:"1px solid var(--border)",borderRadius:14,
+                    padding:"9px 13px",boxSizing:"border-box",
+                    boxShadow:"0 10px 30px rgba(0,0,0,0.18)"}}>
+        <span style=${{flexShrink:0,fontSize:20,lineHeight:1}}>🌱</span>
+        <span style=${{flex:1,minWidth:0}}>
+          <span style=${{display:"block",fontSize:12,fontWeight:800,color:"var(--text)",
+                         overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+            あと1回で ${list[0].name} に会えます</span>
+          <span style=${{display:"block",fontSize:10.5,color:"var(--sub)",marginTop:1,
+                         overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+            ${list[0].cond}${more>0?`　ほか${more}体`:""}</span>
+        </span>
+      </div>
+    </div>`, document.body);
 }
 
 // ★まだ見せていない子を見つけて出す★（2026-08-06 Kai指摘「出現のカードが出てこない」）
@@ -5654,6 +5698,7 @@ function CommunityOverlay({onClose}) {
   const [reportRanking,setReportRanking]=useState(cached?cached.reportRanking:null);
   const [streakRanking,setStreakRanking]=useState(cached?cached.streakRanking:null);
   const [levelRanking,setLevelRanking]=useState(cached?cached.levelRanking:null);   // 階級ランキング
+  const [zukanRanking,setZukanRanking]=useState(cached?cached.zukanRanking:null);   // 図鑑ランキング
   const [newcomers,setNewcomers]=useState(cached?cached.newcomers:null);
   const [recentLoggers,setRecentLoggers]=useState(cached?cached.recentLoggers:null);
   const [achievements,setAchievements]=useState(cached?cached.achievements:null);
@@ -5671,11 +5716,12 @@ function CommunityOverlay({onClose}) {
       if(!r.ok) return;
       setList(r.data); setReportRanking(r.reportRanking||[]); setStreakRanking(r.streakRanking||[]);
       setLevelRanking(r.levelRanking||[]);
+      setZukanRanking(r.zukanRanking||[]);
       setNewcomers(r.newcomers||[]); setRecentLoggers(r.recentLoggers||[]);
       if(r.achievements) setAchievements(r.achievements);
       else gasApi("getAchievements").then(a=>{ if(a.ok) setAchievements(a.data); });
       saveCommunityCache({ data:r.data, reportRanking:r.reportRanking||[],
-        streakRanking:r.streakRanking||[], levelRanking:r.levelRanking||[],
+        streakRanking:r.streakRanking||[], levelRanking:r.levelRanking||[], zukanRanking:r.zukanRanking||[],
         newcomers:r.newcomers||[], recentLoggers:r.recentLoggers||[],
         achievements:r.achievements||null });
     }).catch(()=>setRefreshing(false));
@@ -5813,6 +5859,30 @@ function CommunityOverlay({onClose}) {
             `;
           })()}
           ${levelRanking&&levelRanking.length===0&&html`<div style=${{padding:20,textAlign:"center",color:"var(--sub)",fontSize:13}}>まだデータがありません</div>`}
+        </div>
+
+        <!-- ★図鑑ランキング★（2026-08-06 Kai要望）
+             何体のジローに会えたか。記録の「中身の幅」がそのまま出るので、
+             XPや連続日数では拾えない頑張りを見せられる。 -->
+        <div style=${{background:"var(--card)",borderRadius:16,border:"1px solid var(--border)",overflow:"hidden",marginBottom:16}}>
+          <div style=${{padding:"14px 16px",borderBottom:"1px solid var(--border)"}}>
+            <div style=${{fontSize:12,fontWeight:700,color:"var(--text)"}}>図鑑ランキング</div>
+            <div style=${{fontSize:10.5,color:"var(--sub)",marginTop:2}}>何体のジローに会えたか。いろんなことを記録するほど増えます</div>
+          </div>
+          ${zukanRanking===null&&html`<div style=${{padding:20,textAlign:"center",color:"var(--sub)",fontSize:13}}>読み込み中...</div>`}
+          ${zukanRanking&&(()=>{
+            const {top,me,meRank}=trimRanking(zukanRanking);
+            const row=(u,rank,isLast)=>html`<${RankingRow} rank=${rank} avatar=${u.avatar}
+              nickname=${u.nickname} isMe=${u.isMe}
+              scoreValue=${u.count} scoreUnit=${"/ "+u.total+" 体"} isLast=${isLast}/>`;
+            return html`
+              ${top.map((u,i)=>html`<${React.Fragment} key=${i}>${row(u,i+1,!me&&i===top.length-1)}<//>`)}
+              ${me&&html`
+                <div style=${{textAlign:"center",fontSize:12,color:"var(--sub)",padding:"6px 0",borderBottom:"1px solid var(--border)"}}>⋮</div>
+                ${row(me,meRank,true)}`}
+            `;
+          })()}
+          ${zukanRanking&&zukanRanking.length===0&&html`<div style=${{padding:20,textAlign:"center",color:"var(--sub)",fontSize:13}}>まだ誰も会えていません</div>`}
         </div>
 
         <div style=${{background:"var(--card)",borderRadius:16,border:"1px solid var(--border)",overflow:"hidden",marginBottom:16}}>
@@ -9630,6 +9700,16 @@ function JiroZukanSheet({jiro, onClose, picked, onPick}) {
   ((jiro && jiro.progress) || []).forEach(p => { jProg[p.id] = p; });
   // ★カードを押すと詳しく見られる★（2026-08-06 Kai要望）
   const [openId, setOpenId] = useState("");
+  // ★絞り込み★（2026-08-06 Kai要望）37体になって、探すのに縦スクロールが長い
+  const [filt, setFilt] = useState("ALL");
+  const jFoundAt = (jiro && jiro.foundAt) || {};
+  const keep = (j) => {
+    if (filt === "ALL") return true;
+    const got = jFound.indexOf(j.id) !== -1;
+    if (filt === "GOT") return got;
+    if (filt === "YET") return !got;
+    return j.rarity === filt;
+  };
   const H = ({t,s}) => html`
     <div style=${{marginBottom:9}}>
       <div style=${{fontSize:14,fontWeight:800,color:"var(--text)"}}>${t}</div>
@@ -9654,8 +9734,20 @@ function JiroZukanSheet({jiro, onClose, picked, onPick}) {
                条件を満たした瞬間に会える。会うまでは影と条件だけ見せる。 -->
           ${H({t:`${jFound.length} / ${HIDDEN_JIRO.length} 体`,
                s:((jiro&&jiro.pending>0) ? `あと${jiro.pending}体が、これから会いに来ます。カードを押すと詳しく見られます` : "カードを押すと詳しく見られます。会えた子はホーム画面に出せます")})}
+          <!-- 絞り込み。37体を上から探すのは大変なので、条件で減らせるようにする -->
+          <div style=${{display:"flex",gap:6,flexWrap:"wrap",marginBottom:12}}>
+            ${[["ALL","すべて"],["YET","まだの子"],["GOT","会えた子"],
+               ["Common","コモン"],["Rare","レア"],["Epic","エピック"],
+               ["Legendary","レジェンダリー"]].map(([k,label])=>html`
+              <button key=${k} onClick=${()=>setFilt(k)}
+                style=${{fontSize:10.5,fontWeight:800,fontFamily:"inherit",cursor:"pointer",
+                         borderRadius:20,padding:"5px 10px",whiteSpace:"nowrap",
+                         border:`1px solid ${filt===k?"var(--accent)":"var(--border)"}`,
+                         background:filt===k?"var(--accent)":"var(--card)",
+                         color:filt===k?"#fff":"var(--sub)"}}>${label}</button>`)}
+          </div>
           <div style=${{display:"grid",gridTemplateColumns:"minmax(0,1fr) minmax(0,1fr)",gap:10,marginBottom:14}}>
-            ${HIDDEN_JIRO.map(j=>{
+            ${HIDDEN_JIRO.filter(keep).map(j=>{
               const have = jFound.indexOf(j.id) !== -1;
               const pg = jiroProgOf(jProg[j.id], have);
               // ★条件を満たしていれば絵を出す★（2026-08-06 Kai要望）
@@ -9711,7 +9803,9 @@ function JiroZukanSheet({jiro, onClose, picked, onPick}) {
                 </button>`;
             })}
           </div>
-
+          ${HIDDEN_JIRO.filter(keep).length===0&&html`
+            <div style=${{padding:"18px 0 24px",textAlign:"center",fontSize:12,color:"var(--sub)"}}>
+              この条件の子はいません</div>`}
 
           <button class="btn-g" onClick=${onClose}>閉じる</button>
         </div>
@@ -9768,7 +9862,9 @@ function JiroZukanSheet({jiro, onClose, picked, onPick}) {
                     <div style=${{height:"100%",width:pg.pct+"%",background:rc,borderRadius:5}}/>
                   </div>
                   <div style=${{fontSize:10,color:done?rc:"var(--sub)",marginTop:4,fontWeight:700}}>
-                    ${have ? "✓ 会えました"
+                    ${have ? (jFoundAt[j.id]
+                                ? `✓ ${String(jFoundAt[j.id]).slice(0,10)} に会えました`
+                                : "✓ 会えました")
                            : done ? "✓ 条件クリア・順番待ち（もうすぐ会えます）"
                                   : `あと ${Math.max(0,pg.need-pg.now)}（${pg.now} / ${pg.need}）`}</div>
                 </div>`}
@@ -10820,7 +10916,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260806-155543";
+const APP_BUILD = "20260806-160240";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
@@ -12365,6 +12461,7 @@ function App() {
       ${toast&&html`<${Toast} msg=${toast} onDone=${()=>setToast(null)}/>`}
       <!-- 新しいジローに会えたら真ん中に出す（どの画面から記録しても出る） -->
       <${JiroFoundModal}/>
+      <${JiroSoonToast}/>
     </div>
   `;
 }
