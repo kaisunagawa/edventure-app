@@ -633,6 +633,75 @@ function doGet(e) {
         return jsonResponse({ ok: true, total: tsL.length, limit: 20,
                               remaining: 20 - tsL.length, duplicated: dup, triggers: listL });
       }
+      // ★隠しジローの条件を決めるための実測★（2026-08-06・読むだけ）
+      //   「これまで記録している人にちゃんと付く」ようにしたいので、
+      //   候補の材料を全部数えて分布を見てから、しきい値を決める。
+      //     bash gas/ops.sh adminJiroSignals
+      case "adminJiroSignals": {
+        if (!verifyAdmin(e.parameter.coachEmail)) return jsonResponse({ ok: false, error: "not admin" });
+        const perS = {};
+        const dayMap = {};
+        const bump = function (em, k, v) {
+          const o = perS[em] || (perS[em] = {});
+          o[k] = (o[k] || 0) + (v === undefined ? 1 : v);
+        };
+        sheetToObjects(getSheet("DailyLog")).forEach(function (r) {
+          if (String(r.deleted_at || "").trim()) return;
+          const em = String(r.student_email || ""); if (!em) return;
+          const dt = String(r.date instanceof Date ? formatDate(r.date) : (r.date || "")).slice(0, 10);
+          bump(em, "records");
+          const cls = String(r.time_classification || "").trim();
+          if (cls) bump(em, "cls_" + cls);
+          const hm = String(r.time_block || "").match(/^(\d{1,2}):/);
+          if (hm) {
+            const h = Number(hm[1]);
+            if (h >= 23 || h < 5) bump(em, "night");
+            if (h >= 5 && h < 9) bump(em, "morning");
+          }
+          if (String(r.memo || "").trim()) bump(em, "memo");
+          if (String(r.duration_confirmed || "").toUpperCase() === "TRUE") bump(em, "timer");
+          if (Number(r.actual_minutes || 0) >= 60) bump(em, "long60");
+          if (dt) {
+            const key = em + "|" + dt;
+            const d = dayMap[key] || (dayMap[key] = { n: 0, cls: {} });
+            d.n++; if (cls) d.cls[cls] = 1;
+            try {
+              const w = new Date(dt + "T00:00:00+09:00").getDay();
+              if (w === 0 || w === 6) d.weekend = 1;
+            } catch (eW) {}
+          }
+        });
+        Object.keys(dayMap).forEach(function (key) {
+          const em = key.split("|")[0], d = dayMap[key];
+          bump(em, "days");
+          if (d.n >= 5) bump(em, "denseDays");
+          if (Object.keys(d.cls).length >= 4) bump(em, "varietyDays");
+          if (d.weekend) bump(em, "weekendDays");
+        });
+        // 連続日数と100点の回数
+        const usersS = sheetToObjects(getSheet("Users"));
+        const repS = getSheet("Reports");
+        usersS.forEach(function (u) {
+          const em = String(u.student_email || ""); if (!em) return;
+          if (!perS[em]) perS[em] = {};
+          perS[em].streak = Number(u.streak || 0);
+          try { perS[em].perfect100 = jiroPerfectCount_(repS, em); } catch (eP) {}
+        });
+        const keys = ["records","days","cls_GOAL_DIRECT","cls_ASSET_BUILD","cls_RECOVERY",
+                      "cls_RELATIONSHIP","cls_OPERATIONS","cls_UNPLANNED_LEAKAGE",
+                      "night","morning","memo","timer","long60",
+                      "denseDays","varietyDays","weekendDays","streak","perfect100"];
+        const out = {};
+        keys.forEach(function (k) {
+          const vals = Object.keys(perS).map(function (em) { return Number(perS[em][k] || 0); })
+                        .sort(function (a, b) { return b - a; });
+          const at = function (n) { return vals.filter(function (v) { return v >= n; }).length; };
+          out[k] = { 上位5人: vals.slice(0, 5),
+                     人数_1以上: at(1), 人数_5以上: at(5), 人数_10以上: at(10),
+                     人数_20以上: at(20), 人数_50以上: at(50) };
+        });
+        return jsonResponse({ ok: true, 対象人数: Object.keys(perS).length, 材料: out });
+      }
       // 古いchallengeを捨てる（ログインの遅さ対策）
       //   bash gas/ops.sh adminPurgeChallenges
       case "adminPurgeChallenges": {
@@ -14593,7 +14662,7 @@ const ADMIN_SECRET_ALLOWLIST = {
   // 一斉送信（Kaiの明示的な要望により残す）
   adminBroadcastLine:1, adminBroadcastLinePending:1, adminSendStudentCampaign:1,
   // セットアップ・保守
-  adminSetupTriggers:1, adminInstallTrigger:1, adminSetupPhase1:1, adminSetupAuth:1, adminPhase4DryRun:1, adminLegacyBackfill:1, adminWritePathStats:1, adminIssueTestSession:1, adminDropTestSessions:1, adminOpsSelfTest:1, adminActualMinutesAudit:1, adminXpCorrection:1, adminStreakRecalc:1, adminGrantFeature:1, adminUserDiag:1, adminReportScoreDryRun:1, adminReportGenTest:1, adminScoreConsistency:1, adminFinalizeOps:1, adminUnfinalizeOps:1, adminSmpDump:1, adminSmpWarmAll:1, adminLevelAudit:1, adminXpRestore:1, adminCleanupPlusLogs:1, adminClassAudit:1, adminRecolorCalendar:1, adminFixTokenVersion:1, adminPurgeChallenges:1, adminJiroBackfill:1, adminCommunityTiming:1, adminOpsScoreAudit:1, adminListTriggers:1, adminHomeTiming:1, adminScoreTrace:1,
+  adminSetupTriggers:1, adminInstallTrigger:1, adminSetupPhase1:1, adminSetupAuth:1, adminPhase4DryRun:1, adminLegacyBackfill:1, adminWritePathStats:1, adminIssueTestSession:1, adminDropTestSessions:1, adminOpsSelfTest:1, adminActualMinutesAudit:1, adminXpCorrection:1, adminStreakRecalc:1, adminGrantFeature:1, adminUserDiag:1, adminReportScoreDryRun:1, adminReportGenTest:1, adminScoreConsistency:1, adminFinalizeOps:1, adminUnfinalizeOps:1, adminSmpDump:1, adminSmpWarmAll:1, adminLevelAudit:1, adminXpRestore:1, adminCleanupPlusLogs:1, adminClassAudit:1, adminRecolorCalendar:1, adminFixTokenVersion:1, adminPurgeChallenges:1, adminJiroBackfill:1, adminCommunityTiming:1, adminOpsScoreAudit:1, adminListTriggers:1, adminHomeTiming:1, adminScoreTrace:1, adminJiroSignals:1,
   authSetMode:1, authSetEnforce:1, authRoleApply:1, authRoleDryRun:1, authRevokeAll:1,
   authCleanupTestData:1, adminPurgeTestUsers:1, adminMigrateTasks:1, authBreakerReset:1, rotateSessionSecret:1,
   p1Backup:1, p1BackupInfo:1, p1PurgeArchived:1, weeklyBackup:1
