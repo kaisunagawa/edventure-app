@@ -572,6 +572,28 @@ function doGet(e) {
                   "2回目はキャッシュか": !!(r2 && r2.cached),
                   "初回はキャッシュか": !!(r1 && r1.cached) } });
       }
+      // ★画面ごとの読み込みを測る★（読むだけ・2026-08-06）
+      //   ホーム以外（レポート・記録・目標）も同じやり方で切り分けるため。
+      //     bash gas/ops.sh adminScreenTiming
+      case "adminScreenTiming": {
+        if (!verifyAdmin(e.parameter.coachEmail)) return jsonResponse({ ok: false, error: "not admin" });
+        const emS = String(e.parameter.email || "").trim() || adminEmail();
+        const outS = {};
+        const runS = function (name, fn) {
+          const t = Date.now();
+          try { fn(); } catch (e2) { outS[name + "(失敗)"] = String(e2).slice(0, 50); }
+          outS[name] = Date.now() - t;
+        };
+        runS("getReportHome",  function () { getReportHome(emS); });
+        runS("getReportList",  function () { getReportList(emS); });
+        runS("getGoalTree",    function () { getGoalTree(emS); });
+        runS("getSprints",     function () { getSprints(emS, {}); });
+        runS("getLogs",        function () { getLogs(emS, {}); });
+        runS("getTasks",       function () { getTasks(emS, { includeDone: "1" }); });
+        runS("getAchievements",function () { getAchievements(emS); });
+        runS("getCalendar",    function () { getCalendar(emS, {}); });
+        return jsonResponse({ ok: true, ms: outS });
+      }
       // みんなの頑張りが何秒かかっているかを測る（読むだけ・書き込みなし）
       //   bash gas/ops.sh adminCommunityTiming
       case "adminCommunityTiming": {
@@ -14939,7 +14961,7 @@ const ADMIN_SECRET_ALLOWLIST = {
   // 一斉送信（Kaiの明示的な要望により残す）
   adminBroadcastLine:1, adminBroadcastLinePending:1, adminSendStudentCampaign:1,
   // セットアップ・保守
-  adminSetupTriggers:1, adminInstallTrigger:1, adminSetupPhase1:1, adminSetupAuth:1, adminPhase4DryRun:1, adminLegacyBackfill:1, adminWritePathStats:1, adminIssueTestSession:1, adminDropTestSessions:1, adminOpsSelfTest:1, adminActualMinutesAudit:1, adminXpCorrection:1, adminStreakRecalc:1, adminGrantFeature:1, adminUserDiag:1, adminReportScoreDryRun:1, adminReportGenTest:1, adminScoreConsistency:1, adminFinalizeOps:1, adminUnfinalizeOps:1, adminSmpDump:1, adminSmpWarmAll:1, adminLevelAudit:1, adminXpRestore:1, adminCleanupPlusLogs:1, adminClassAudit:1, adminRecolorCalendar:1, adminFixTokenVersion:1, adminPurgeChallenges:1, adminJiroBackfill:1, adminCommunityTiming:1, adminOpsScoreAudit:1, adminListTriggers:1, adminHomeTiming:1, adminScoreTrace:1, adminJiroSignals:1,
+  adminSetupTriggers:1, adminInstallTrigger:1, adminSetupPhase1:1, adminSetupAuth:1, adminPhase4DryRun:1, adminLegacyBackfill:1, adminWritePathStats:1, adminIssueTestSession:1, adminDropTestSessions:1, adminOpsSelfTest:1, adminActualMinutesAudit:1, adminXpCorrection:1, adminStreakRecalc:1, adminGrantFeature:1, adminUserDiag:1, adminReportScoreDryRun:1, adminReportGenTest:1, adminScoreConsistency:1, adminFinalizeOps:1, adminUnfinalizeOps:1, adminSmpDump:1, adminSmpWarmAll:1, adminLevelAudit:1, adminXpRestore:1, adminCleanupPlusLogs:1, adminClassAudit:1, adminRecolorCalendar:1, adminFixTokenVersion:1, adminPurgeChallenges:1, adminJiroBackfill:1, adminCommunityTiming:1, adminOpsScoreAudit:1, adminListTriggers:1, adminHomeTiming:1, adminScreenTiming:1, adminScoreTrace:1, adminJiroSignals:1,
   authSetMode:1, authSetEnforce:1, authRoleApply:1, authRoleDryRun:1, authRevokeAll:1,
   authCleanupTestData:1, adminPurgeTestUsers:1, adminMigrateTasks:1, authBreakerReset:1, rotateSessionSecret:1,
   p1Backup:1, p1BackupInfo:1, p1PurgeArchived:1, weeklyBackup:1
