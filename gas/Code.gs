@@ -432,6 +432,8 @@ function doGet(e) {
           if (jiroIsNight_(r.time_block))   c.night   = (c.night || 0) + 1;
           if (jiroIsMorning_(r.time_block)) c.morning = (c.morning || 0) + 1;
           if (String(r.memo || "").trim())  c.memo    = (c.memo || 0) + 1;
+          jiroWordsHit_(String(r.task || "") + " " + String(r.memo || ""))
+            .forEach(function (k) { c["w_" + k] = (c["w_" + k] || 0) + 1; });
           const raw = r.date;
           const d = raw instanceof Date ? Utilities.formatDate(raw, "Asia/Tokyo", "yyyy-MM-dd")
                                         : String(raw || "").slice(0, 10);
@@ -4329,6 +4331,10 @@ function saveLog(studentEmail, body) {
     if (jiroIsNight_(body.time_block))    jdNew.night   = (jdNew.night || 0) + 1;
     if (jiroIsMorning_(body.time_block))  jdNew.morning = (jdNew.morning || 0) + 1;
     if (String(body.memo || "").trim())   jdNew.memo    = (jdNew.memo || 0) + 1;
+    // ★記録の中身から「何をしたか」を拾う★（2026-08-06 Kai案）
+    //   カフェに行った記録が3回でカフェジロー、のように結びつける。
+    jiroWordsHit_(String(body.task || "") + " " + String(body.memo || ""))
+      .forEach(function (k) { jdNew["w_" + k] = (jdNew["w_" + k] || 0) + 1; });
   }
   queueOwnerCalendarWrite_(studentEmail, targetDate, String(body.time_block), body.task, body.time_classification);
   let awardedIdxN = headers.indexOf("xp_awarded");
@@ -12765,64 +12771,72 @@ function jiroWordsHit_(text) {
 const JIRO_FEATURE_DAYS = 3;
 
 const HIDDEN_JIRO = [
-  { id:"night",    no:"No.101", name:"夜ふかしジロー", rarity:"Epic",
-    key:"night",        need:10, cond:"23:00〜5:00の記録が通算10件" },
-  { id:"calm",     no:"No.102", name:"ととのえジロー", rarity:"Rare",
-    key:"RECOVERY",     need:5,  cond:"回復の記録が通算5件" },
-  { id:"stack",    no:"No.103", name:"積み上げジロー", rarity:"Rare",
-    key:"ASSET_BUILD",  need:10, cond:"将来への投資の記録が通算10件" },
-  { id:"straight", no:"No.104", name:"一直線ジロー",   rarity:"Epic",
-    key:"GOAL_DIRECT",  need:10, cond:"目標に直結の記録が通算10件" },
-  { id:"kind",     no:"No.105", name:"思いやりジロー", rarity:"Rare",
-    key:"RELATIONSHIP", need:3,  cond:"人間関係の記録が通算3件" },
-  { id:"support",  no:"No.106", name:"縁の下ジロー",   rarity:"Rare",
-    key:"OPERATIONS",   need:15, cond:"日常業務の記録が通算15件" },
-  { id:"turbo",    no:"No.107", name:"爆速ジロー",     rarity:"Epic",
-    key:"hiscore7",     need:3,  cond:"日次スコア90点以上が3日連続" },
-  { id:"athlete", no:"No.201", name:"アスリートジロー", rarity:"Epic",
-    key:"records", need:50, cond:"記録が通算50件" },
-  { id:"musician", no:"No.202", name:"ミュージシャンジロー", rarity:"Rare",
-    key:"memo", need:30, cond:"メモを書いた記録が通算30件" },
-  { id:"programmer", no:"No.203", name:"プログラマジロー", rarity:"Epic",
-    key:"night", need:5, cond:"23:00〜5:00の記録が通算5件" },
-  { id:"scientist", no:"No.204", name:"サイエンティストジロー", rarity:"Epic",
-    key:"denseDays", need:5, cond:"1日に5件以上記録した日が5日" },
-  { id:"cafe", no:"No.205", name:"カフェジロー", rarity:"Rare",
-    key:"records", need:10, cond:"記録が通算10件" },
+  { id:"cafe", no:"No.101", name:"カフェジロー", rarity:"Common",
+    key:"w_cafe", need:3, cond:"カフェの記録が3回" },
+  { id:"study2", no:"No.102", name:"勉強ジロー", rarity:"Common",
+    key:"w_study2", need:3, cond:"勉強の記録が3回" },
+  { id:"tidy", no:"No.103", name:"整理整頓ジロー", rarity:"Common",
+    key:"w_tidy", need:3, cond:"片付け・掃除の記録が3回" },
+  { id:"boss", no:"No.104", name:"社長ジロー", rarity:"Common",
+    key:"w_boss", need:5, cond:"打ち合わせ・商談の記録が5回" },
+  { id:"photo", no:"No.105", name:"写真家ジロー", rarity:"Common",
+    key:"w_photo", need:3, cond:"写真・撮影の記録が3回" },
+  { id:"cook", no:"No.106", name:"料理ジロー", rarity:"Common",
+    key:"w_cook", need:3, cond:"料理・自炊の記録が3回" },
+  { id:"athlete", no:"No.201", name:"アスリートジロー", rarity:"Rare",
+    key:"w_athlete", need:3, cond:"運動・ジムの記録が3回" },
+  { id:"coach", no:"No.202", name:"コーチジロー", rarity:"Rare",
+    key:"w_coach", need:3, cond:"面談・コーチングの記録が3回" },
+  { id:"healer", no:"No.203", name:"ヒーラージロー", rarity:"Rare",
+    key:"w_healer", need:3, cond:"休息・リラックスの記録が3回" },
+  { id:"painter", no:"No.204", name:"ペインタージロー", rarity:"Rare",
+    key:"w_painter", need:3, cond:"絵・デザインの記録が3回" },
+  { id:"musician", no:"No.205", name:"ミュージシャンジロー", rarity:"Rare",
+    key:"w_musician", need:3, cond:"音楽の記録が3回" },
   { id:"traveler", no:"No.206", name:"旅するジロー", rarity:"Rare",
-    key:"weekendDays", need:3, cond:"土日に記録した日が3日" },
-  { id:"reader", no:"No.207", name:"読書ジロー", rarity:"Epic",
-    key:"memo", need:100, cond:"メモを書いた記録が通算100件" },
-  { id:"yoga", no:"No.208", name:"ヨガジロー", rarity:"Rare",
-    key:"morning", need:10, cond:"5:00〜9:00の記録が通算10件" },
-  { id:"gardener", no:"No.209", name:"ガーデナージロー", rarity:"Rare",
-    key:"days", need:10, cond:"記録した日が通算10日" },
-  { id:"painter", no:"No.210", name:"ペインタージロー", rarity:"Epic",
-    key:"denseDays", need:10, cond:"1日に5件以上記録した日が10日" },
-  { id:"photo", no:"No.211", name:"写真家ジロー", rarity:"Epic",
-    key:"records", need:100, cond:"記録が通算100件" },
-  { id:"camp", no:"No.212", name:"キャンプジロー", rarity:"Rare",
-    key:"weekendDays", need:5, cond:"土日に記録した日が5日" },
-  { id:"study2", no:"No.213", name:"勉強ジロー", rarity:"Epic",
-    key:"days", need:20, cond:"記録した日が通算20日" },
-  { id:"coach", no:"No.214", name:"コーチジロー", rarity:"Rare",
-    key:"streak", need:3, cond:"3日連続で記録" },
-  { id:"healer", no:"No.215", name:"ヒーラージロー", rarity:"Rare",
-    key:"morning", need:30, cond:"5:00〜9:00の記録が通算30件" },
-  { id:"mechanic", no:"No.216", name:"メカニックジロー", rarity:"Rare",
-    key:"cls_OPERATIONS", need:5, cond:"日常業務の記録が通算5件" },
-  { id:"finance", no:"No.217", name:"ファイナンスジロー", rarity:"Legendary",
-    key:"records", need:200, cond:"記録が通算200件" },
-  { id:"nightguard", no:"No.218", name:"ナイトガードジロー", rarity:"Legendary",
-    key:"night", need:15, cond:"23:00〜5:00の記録が通算15件" },
-  // ── 積み重ねの証。記録の中身ではなく「続けた結果」で会える ──
-  { id:"perfect",  no:"No.201", name:"パーフェクトジロー", rarity:"Legendary",
-    key:"perfect100",   need:20, cond:"日次スコア100点を通算20回" },
-  { id:"streak",   no:"No.202", name:"ストリークジロー",   rarity:"Legendary",
-    key:"streak",       need:30, cond:"30日連続で記録" },
-  { id:"origin",   no:"No.999", name:"？？？ジロー",       rarity:"Ultimate",
-    key:"origin",       need:1,  cond:"365日続ける・100点を100回・ほかのジロー全員と出会う" }
+    key:"w_traveler", need:2, cond:"旅行・出張の記録が2回" },
+  { id:"calm", no:"No.207", name:"ととのえジロー", rarity:"Rare",
+    key:"RECOVERY", need:5, cond:"回復の記録が通算5件" },
+  { id:"support", no:"No.208", name:"縁の下ジロー", rarity:"Rare",
+    key:"OPERATIONS", need:15, cond:"日常業務の記録が通算15件" },
+  { id:"programmer", no:"No.301", name:"プログラマジロー", rarity:"Epic",
+    key:"w_programmer", need:3, cond:"開発・コードの記録が3回" },
+  { id:"scientist", no:"No.302", name:"サイエンティストジロー", rarity:"Epic",
+    key:"w_scientist", need:2, cond:"分析・研究の記録が2回" },
+  { id:"mechanic", no:"No.303", name:"メカニックジロー", rarity:"Epic",
+    key:"w_mechanic", need:2, cond:"修理・整備の記録が2回" },
+  { id:"reader", no:"No.304", name:"読書ジロー", rarity:"Epic",
+    key:"w_reader", need:1, cond:"読書の記録が1回" },
+  { id:"yoga", no:"No.305", name:"ヨガジロー", rarity:"Epic",
+    key:"w_yoga", need:2, cond:"ヨガ・瞑想の記録が2回" },
+  { id:"night", no:"No.306", name:"夜ふかしジロー", rarity:"Epic",
+    key:"night", need:10, cond:"23:00〜5:00の記録が通算10件" },
+  { id:"stack", no:"No.307", name:"積み上げジロー", rarity:"Epic",
+    key:"ASSET_BUILD", need:10, cond:"将来への投資の記録が通算10件" },
+  { id:"straight", no:"No.308", name:"一直線ジロー", rarity:"Epic",
+    key:"GOAL_DIRECT", need:10, cond:"目標に直結の記録が通算10件" },
+  { id:"kind", no:"No.309", name:"思いやりジロー", rarity:"Epic",
+    key:"RELATIONSHIP", need:3, cond:"人間関係の記録が通算3件" },
+  { id:"camp", no:"No.401", name:"キャンプジロー", rarity:"Legendary",
+    key:"w_camp", need:2, cond:"キャンプ・焚き火の記録が2回" },
+  { id:"gardener", no:"No.402", name:"ガーデナージロー", rarity:"Legendary",
+    key:"w_gardener", need:2, cond:"庭・植物の記録が2回" },
+  { id:"adventure", no:"No.403", name:"冒険ジロー", rarity:"Legendary",
+    key:"w_adventure", need:2, cond:"登山・街歩きの記録が2回" },
+  { id:"finance", no:"No.404", name:"ファイナンスジロー", rarity:"Legendary",
+    key:"w_finance", need:3, cond:"お金まわりの記録が3回" },
+  { id:"nightguard", no:"No.405", name:"ナイトガードジロー", rarity:"Legendary",
+    key:"night", need:25, cond:"23:00〜5:00の記録が通算25件" },
+  { id:"turbo", no:"No.406", name:"爆速ジロー", rarity:"Legendary",
+    key:"hiscore7", need:3, cond:"日次スコア90点以上が3日連続" },
+  { id:"perfect", no:"No.407", name:"パーフェクトジロー", rarity:"Legendary",
+    key:"perfect100", need:20, cond:"日次スコア100点を通算20回" },
+  { id:"streak", no:"No.408", name:"ストリークジロー", rarity:"Legendary",
+    key:"streak", need:30, cond:"30日連続で記録" },
+  { id:"origin", no:"No.999", name:"？？？ジロー", rarity:"Ultimate",
+    key:"origin", need:1, cond:"365日続ける・100点を100回・ほかの子と全員出会う" },
 ];
+
 
 // 記録の時刻が「夜ふかし」に当たるか（23時〜翌5時のはじまり）
 function jiroIsNight_(timeBlock) {

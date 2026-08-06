@@ -1424,93 +1424,104 @@ const RANK_ART = {
 //   ★絵が届くまで art は空にしておく★ 未発見はどのみちシルエットなので、
 //   仕組みだけ先に動かして、絵が揃った日に差し込めばそのまま公開できる。
 const HIDDEN_JIRO = [
-  { id:"night",    no:"No.101", name:"夜ふかしジロー", rarity:"Epic", art:"assets/jiro/night.png",
-    cond:"23:00〜5:00の記録が通算10件",  personality:"夜型・マイペース",
-    line:"「今日はまだ始まったばかり。」", note:"夜になると本領発揮する夜行性ジロー。" },
-  { id:"calm",     no:"No.102", name:"ととのえジロー", rarity:"Rare", art:"assets/jiro/calm.png",
-    cond:"回復の記録が通算5件",          personality:"穏やか・癒し系",
-    line:"「大丈夫、ちゃんと休めてるよ。」", note:"心と体をととのえる達人ジロー。" },
-  { id:"stack",    no:"No.103", name:"積み上げジロー", rarity:"Rare", art:"assets/jiro/stack.png",
-    cond:"将来への投資の記録が通算10件",  personality:"真面目・コツコツ型",
-    line:"「未来の自分に、今をプレゼント。」", note:"小さな努力を積み重ねる研究者タイプ。" },
-  { id:"straight", no:"No.104", name:"一直線ジロー",   rarity:"Epic", art:"assets/jiro/straight.png",
-    cond:"目標に直結の記録が通算10件",    personality:"ストイック・一直線",
-    line:"「ブレずに、ゴールまで。」",     note:"無駄な寄り道はしないストイックジロー。" },
-  { id:"kind",     no:"No.105", name:"思いやりジロー", rarity:"Rare", art:"assets/jiro/kind.png",
-    cond:"人間関係の記録が通算3件",      personality:"優しい・サポート好き",
-    line:"「一緒なら、もっと頑張れるよね。」", note:"人を思いやることが大好きなジロー。" },
-  { id:"support",  no:"No.106", name:"縁の下ジロー",   rarity:"Rare", art:"assets/jiro/support.png",
-    cond:"日常業務の記録が通算15件",      personality:"縁の下・責任感が強い",
-    line:"「ちゃんとやる、それが一番の近道。」", note:"目立たないけど欠かせない存在。" },
-  { id:"turbo",    no:"No.107", name:"爆速ジロー",     rarity:"Epic", art:"assets/jiro/turbo.png",
-    cond:"日次スコア90点以上が3日連続",   personality:"情熱的・負けず嫌い",
-    line:"「限界？そんなの、昨日の話！」", note:"勢いが止まらないスピードスター。" },
-  { id:"athlete", no:"No.201", name:"アスリートジロー", rarity:"Epic", art:"assets/jiro/athlete.png",
-    cond:"記録が通算50件", personality:"全力・負けず嫌い",
-    line:"「目標に向かって全力で走る！」", note:"" },
-  { id:"musician", no:"No.202", name:"ミュージシャンジロー", rarity:"Rare", art:"assets/jiro/musician.png",
-    cond:"メモを書いた記録が通算30件", personality:"陽気・表現派",
-    line:"「音楽でみんなを笑顔にする！」", note:"" },
-  { id:"programmer", no:"No.203", name:"プログラマジロー", rarity:"Epic", art:"assets/jiro/programmer.png",
-    cond:"23:00〜5:00の記録が通算5件", personality:"論理的・集中型",
-    line:"「コードで未来をつくる！」", note:"" },
-  { id:"scientist", no:"No.204", name:"サイエンティストジロー", rarity:"Epic", art:"assets/jiro/scientist.png",
-    cond:"1日に5件以上記録した日が5日", personality:"探究心・分析好き",
-    line:"「すべてを探究し、解き明かす！」", note:"" },
-  { id:"cafe", no:"No.205", name:"カフェジロー", rarity:"Rare", art:"assets/jiro/cafe.png",
-    cond:"記録が通算10件", personality:"のんびり・もてなし上手",
-    line:"「ひと息ついて、また一歩ずつ。」", note:"" },
-  { id:"traveler", no:"No.206", name:"旅するジロー", rarity:"Rare", art:"assets/jiro/traveler.png",
-    cond:"土日に記録した日が3日", personality:"好奇心旺盛・自由人",
-    line:"「新しい景色に出会う旅へ！」", note:"" },
-  { id:"reader", no:"No.207", name:"読書ジロー", rarity:"Epic", art:"assets/jiro/reader.png",
-    cond:"メモを書いた記録が通算100件", personality:"物静か・想像力豊か",
-    line:"「本の中に、無限の世界がある。」", note:"" },
-  { id:"yoga", no:"No.208", name:"ヨガジロー", rarity:"Rare", art:"assets/jiro/yoga.png",
-    cond:"5:00〜9:00の記録が通算10件", personality:"穏やか・自分に正直",
-    line:"「心と体を整えて、毎日を豊かに。」", note:"" },
-  { id:"gardener", no:"No.209", name:"ガーデナージロー", rarity:"Rare", art:"assets/jiro/gardener.png",
-    cond:"記録した日が通算10日", personality:"気長・世話好き",
-    line:"「小さな積み重ねが、花を咲かせる。」", note:"" },
-  { id:"painter", no:"No.210", name:"ペインタージロー", rarity:"Epic", art:"assets/jiro/painter.png",
-    cond:"1日に5件以上記録した日が10日", personality:"感性派・こだわり強め",
-    line:"「色で想いをカタチにする！」", note:"" },
-  { id:"photo", no:"No.211", name:"写真家ジロー", rarity:"Epic", art:"assets/jiro/photo.png",
-    cond:"記録が通算100件", personality:"観察好き・記録魔",
-    line:"「一瞬を切り取り、思い出にする。」", note:"" },
-  { id:"camp", no:"No.212", name:"キャンプジロー", rarity:"Rare", art:"assets/jiro/camp.png",
-    cond:"土日に記録した日が5日", personality:"マイペース・自然派",
-    line:"「自然の中で、自分をリセット！」", note:"" },
-  { id:"study2", no:"No.213", name:"勉強ジロー", rarity:"Epic", art:"assets/jiro/study2.png",
-    cond:"記録した日が通算20日", personality:"真面目・努力家",
-    line:"「コツコツ努力が、未来を変える！」", note:"" },
-  { id:"coach", no:"No.214", name:"コーチジロー", rarity:"Rare", art:"assets/jiro/coach.png",
-    cond:"3日連続で記録", personality:"面倒見がいい・前向き",
-    line:"「君ならできる！一緒にいこう！」", note:"" },
-  { id:"healer", no:"No.215", name:"ヒーラージロー", rarity:"Rare", art:"assets/jiro/healer.png",
-    cond:"5:00〜9:00の記録が通算30件", personality:"やさしい・寄り添い型",
-    line:"「癒しの力で、みんなを助ける！」", note:"" },
-  { id:"mechanic", no:"No.216", name:"メカニックジロー", rarity:"Rare", art:"assets/jiro/mechanic.png",
-    cond:"日常業務の記録が通算5件", personality:"職人気質・面倒見がいい",
-    line:"「直すことは、支えること！」", note:"" },
-  { id:"finance", no:"No.217", name:"ファイナンスジロー", rarity:"Legendary", art:"assets/jiro/finance.png",
-    cond:"記録が通算200件", personality:"堅実・数字に強い",
-    line:"「お金の流れを味方につける！」", note:"" },
-  { id:"nightguard", no:"No.218", name:"ナイトガードジロー", rarity:"Legendary", art:"assets/jiro/nightguard.png",
-    cond:"23:00〜5:00の記録が通算15件", personality:"責任感が強い・守り型",
-    line:"「みんなの挑戦を、全力で守る！」", note:"" },
-  // ── 積み重ねの証（記録の中身ではなく、続けた結果で会える） ──
-  { id:"perfect",  no:"No.201", name:"パーフェクトジロー", rarity:"Legendary", art:"assets/jiro/perfect.png",
-    cond:"日次スコア100点を通算20回",     personality:"完璧主義・プライド高め",
-    line:"「妥協はしない。」",             note:"完璧を追い求めるストイックなジロー。" },
-  { id:"streak",   no:"No.202", name:"ストリークジロー",   rarity:"Legendary", art:"assets/jiro/streak.png",
-    cond:"30日連続で記録",                 personality:"継続の鬼・忍耐強い",
-    line:"「今日も、いつもどおり。」",     note:"「続けること」に人生をかけている。" },
-  { id:"origin",   no:"No.999", name:"？？？ジロー",       rarity:"Ultimate",  art:"assets/jiro/origin.png",
-    cond:"365日続ける・100点を100回・ほかのジロー全員と出会う",
-    personality:"神聖・すべての始まり",
-    line:"「君は、ここまで来た。」",       note:"すべてのジローたちの始祖。", secret:true }
+  { id:"cafe", no:"No.101", name:"カフェジロー", rarity:"Common", common:true,
+    art:"assets/jiro/cafe.png", cond:"カフェの記録が3回",
+    personality:"のんびり・もてなし上手", line:"「ひと息ついて、また一歩ずつ。」" },
+  { id:"study2", no:"No.102", name:"勉強ジロー", rarity:"Common", common:true,
+    art:"assets/jiro/study2.png", cond:"勉強の記録が3回",
+    personality:"真面目・努力家", line:"「コツコツ努力が、未来を変える！」" },
+  { id:"tidy", no:"No.103", name:"整理整頓ジロー", rarity:"Common", common:true,
+    art:"assets/jiro/tidy.png", cond:"片付け・掃除の記録が3回",
+    personality:"几帳面・スッキリ好き", line:"「キレイな環境がパワーの源！」" },
+  { id:"boss", no:"No.104", name:"社長ジロー", rarity:"Common", common:true,
+    art:"assets/jiro/boss.png", cond:"打ち合わせ・商談の記録が5回",
+    personality:"リーダー・決断力がある", line:"「みんなを引っ張るカリスマ経営者！」" },
+  { id:"photo", no:"No.105", name:"写真家ジロー", rarity:"Common", common:true,
+    art:"assets/jiro/photo.png", cond:"写真・撮影の記録が3回",
+    personality:"観察好き・記録魔", line:"「一瞬を切り取り、思い出にする。」" },
+  { id:"cook", no:"No.106", name:"料理ジロー", rarity:"Common", common:true,
+    art:"assets/jiro/cook.png", cond:"料理・自炊の記録が3回",
+    personality:"家庭的・面倒見がいい", line:"「料理でみんなを元気にする！」" },
+  { id:"athlete", no:"No.201", name:"アスリートジロー", rarity:"Rare",
+    art:"assets/jiro/athlete.png", cond:"運動・ジムの記録が3回",
+    personality:"全力・負けず嫌い", line:"「目標に向かって全力で走る！」" },
+  { id:"coach", no:"No.202", name:"コーチジロー", rarity:"Rare",
+    art:"assets/jiro/coach.png", cond:"面談・コーチングの記録が3回",
+    personality:"面倒見がいい・前向き", line:"「君ならできる！一緒にいこう！」" },
+  { id:"healer", no:"No.203", name:"ヒーラージロー", rarity:"Rare",
+    art:"assets/jiro/healer.png", cond:"休息・リラックスの記録が3回",
+    personality:"やさしい・寄り添い型", line:"「癒しの力で、みんなを助ける！」" },
+  { id:"painter", no:"No.204", name:"ペインタージロー", rarity:"Rare",
+    art:"assets/jiro/painter.png", cond:"絵・デザインの記録が3回",
+    personality:"感性派・こだわり強め", line:"「色で想いをカタチにする！」" },
+  { id:"musician", no:"No.205", name:"ミュージシャンジロー", rarity:"Rare",
+    art:"assets/jiro/musician.png", cond:"音楽の記録が3回",
+    personality:"陽気・表現派", line:"「音楽でみんなを笑顔にする！」" },
+  { id:"traveler", no:"No.206", name:"旅するジロー", rarity:"Rare",
+    art:"assets/jiro/traveler.png", cond:"旅行・出張の記録が2回",
+    personality:"好奇心旺盛・自由人", line:"「新しい景色に出会う旅へ！」" },
+  { id:"calm", no:"No.207", name:"ととのえジロー", rarity:"Rare",
+    art:"assets/jiro/calm.png", cond:"回復の記録が通算5件",
+    personality:"穏やか・癒し系", line:"「大丈夫、ちゃんと休めてるよ。」" },
+  { id:"support", no:"No.208", name:"縁の下ジロー", rarity:"Rare",
+    art:"assets/jiro/support.png", cond:"日常業務の記録が通算15件",
+    personality:"縁の下・責任感が強い", line:"「ちゃんとやる、それが一番の近道。」" },
+  { id:"programmer", no:"No.301", name:"プログラマジロー", rarity:"Epic",
+    art:"assets/jiro/programmer.png", cond:"開発・コードの記録が3回",
+    personality:"論理的・集中型", line:"「コードで未来をつくる！」" },
+  { id:"scientist", no:"No.302", name:"サイエンティストジロー", rarity:"Epic",
+    art:"assets/jiro/scientist.png", cond:"分析・研究の記録が2回",
+    personality:"探究心・分析好き", line:"「すべてを探究し、解き明かす！」" },
+  { id:"mechanic", no:"No.303", name:"メカニックジロー", rarity:"Epic",
+    art:"assets/jiro/mechanic.png", cond:"修理・整備の記録が2回",
+    personality:"職人気質・面倒見がいい", line:"「直すことは、支えること！」" },
+  { id:"reader", no:"No.304", name:"読書ジロー", rarity:"Epic",
+    art:"assets/jiro/reader.png", cond:"読書の記録が1回",
+    personality:"物静か・想像力豊か", line:"「本の中に、無限の世界がある。」" },
+  { id:"yoga", no:"No.305", name:"ヨガジロー", rarity:"Epic",
+    art:"assets/jiro/yoga.png", cond:"ヨガ・瞑想の記録が2回",
+    personality:"穏やか・自分に正直", line:"「心と体を整えて、毎日を豊かに。」" },
+  { id:"night", no:"No.306", name:"夜ふかしジロー", rarity:"Epic",
+    art:"assets/jiro/night.png", cond:"23:00〜5:00の記録が通算10件",
+    personality:"夜型・マイペース", line:"「今日はまだ始まったばかり。」" },
+  { id:"stack", no:"No.307", name:"積み上げジロー", rarity:"Epic",
+    art:"assets/jiro/stack.png", cond:"将来への投資の記録が通算10件",
+    personality:"真面目・コツコツ型", line:"「未来の自分に、今をプレゼント。」" },
+  { id:"straight", no:"No.308", name:"一直線ジロー", rarity:"Epic",
+    art:"assets/jiro/straight.png", cond:"目標に直結の記録が通算10件",
+    personality:"ストイック・一直線", line:"「ブレずに、ゴールまで。」" },
+  { id:"kind", no:"No.309", name:"思いやりジロー", rarity:"Epic",
+    art:"assets/jiro/kind.png", cond:"人間関係の記録が通算3件",
+    personality:"優しい・サポート好き", line:"「一緒なら、もっと頑張れるよね。」" },
+  { id:"camp", no:"No.401", name:"キャンプジロー", rarity:"Legendary",
+    art:"assets/jiro/camp.png", cond:"キャンプ・焚き火の記録が2回",
+    personality:"マイペース・自然派", line:"「自然の中で、自分をリセット！」" },
+  { id:"gardener", no:"No.402", name:"ガーデナージロー", rarity:"Legendary",
+    art:"assets/jiro/gardener.png", cond:"庭・植物の記録が2回",
+    personality:"気長・世話好き", line:"「小さな積み重ねが、花を咲かせる。」" },
+  { id:"adventure", no:"No.403", name:"冒険ジロー", rarity:"Legendary",
+    art:"assets/jiro/adventure.png", cond:"登山・街歩きの記録が2回",
+    personality:"好奇心旺盛・自由人", line:"「新しい景色と体験が大好き！」" },
+  { id:"finance", no:"No.404", name:"ファイナンスジロー", rarity:"Legendary",
+    art:"assets/jiro/finance.png", cond:"お金まわりの記録が3回",
+    personality:"堅実・数字に強い", line:"「お金の流れを味方につける！」" },
+  { id:"nightguard", no:"No.405", name:"ナイトガードジロー", rarity:"Legendary",
+    art:"assets/jiro/nightguard.png", cond:"23:00〜5:00の記録が通算25件",
+    personality:"責任感が強い・守り型", line:"「みんなの挑戦を、全力で守る！」" },
+  { id:"turbo", no:"No.406", name:"爆速ジロー", rarity:"Legendary",
+    art:"assets/jiro/turbo.png", cond:"日次スコア90点以上が3日連続",
+    personality:"情熱的・負けず嫌い", line:"「限界？そんなの、昨日の話！」" },
+  { id:"perfect", no:"No.407", name:"パーフェクトジロー", rarity:"Legendary",
+    art:"assets/jiro/perfect.png", cond:"日次スコア100点を通算20回",
+    personality:"完璧主義・プライド高め", line:"「妥協はしない。」" },
+  { id:"streak", no:"No.408", name:"ストリークジロー", rarity:"Legendary",
+    art:"assets/jiro/streak.png", cond:"30日連続で記録",
+    personality:"継続の鬼・忍耐強い", line:"「今日も、いつもどおり。」" },
+  { id:"origin", no:"No.999", name:"？？？ジロー", rarity:"Ultimate", secret:true,
+    art:"assets/jiro/origin.png", cond:"365日続ける・100点を100回・ほかの子と全員出会う",
+    personality:"神聖・すべての始まり", line:"「君は、ここまで来た。」" },
 ];
+
 // ★新しく会えたら、真ん中に出して知らせる★（2026-08-06 Kai要望）
 //   小さなお知らせだと見逃す。何が起きたのか・これからどうなるのかを
 //   その場で伝える。サーバーが jiro_gained で返してくる。
@@ -1578,7 +1589,7 @@ function JiroFoundModal() {
       </div>
     </div>`, document.body);
 }
-const RARITY_COLOR = { Rare:"#3B82F6", Epic:"#8B5CF6", Legendary:"#D97706",
+const RARITY_COLOR = { Common:"#0E9F6E", Rare:"#3B82F6", Epic:"#8B5CF6", Legendary:"#D97706",
                        Mythic:"#DB2777", Secret:"#334155", Ultimate:"#CA8A04" };
 
 // 画像は端末にキャッシュされる。差し替えても古い絵が出続けるので、
@@ -9530,6 +9541,10 @@ function GuideBookSheet({myLevel,jiro,onClose}) {
           <div style=${{display:"grid",gridTemplateColumns:"minmax(0,1fr) minmax(0,1fr)",gap:10,marginBottom:14}}>
             ${HIDDEN_JIRO.map(j=>{
               const have = jFound.indexOf(j.id) !== -1;
+              // ★コモンは最初から見せる★（2026-08-06 Kai要望）
+              //   何が待っているのか分からないと集める気にならない。
+              //   まず会える子を見せて、レア以上は影のままにしておく。
+              const shown = have || !!j.common;
               const pg = jProg[j.id] || {now:0,need:0};
               const rc = RARITY_COLOR[j.rarity] || "var(--sub)";
               return html`
@@ -9546,14 +9561,15 @@ function GuideBookSheet({myLevel,jiro,onClose}) {
                   <div style=${{position:"relative",height:96,borderRadius:10,
                                 background:"var(--card)",display:"flex",alignItems:"center",
                                 justifyContent:"center",overflow:"hidden",marginBottom:6}}>
-                    ${have && j.art
+                    ${shown && j.art
                       ? html`<img src=${j.art+"?v="+APP_BUILD} alt=${j.name} loading="lazy"
-                               style=${{maxWidth:"88%",maxHeight:"88%",objectFit:"contain",display:"block"}}/>`
+                               style=${{maxWidth:"88%",maxHeight:"88%",objectFit:"contain",display:"block",
+                                        opacity:have?1:0.55}}/>`
                       : html`<span style=${{fontSize:26,fontWeight:800,color:"var(--border)"}}>?</span>`}
                   </div>
                   <div style=${{fontSize:10,fontWeight:800,lineHeight:1.35,
                                 color:have?"var(--text)":"var(--sub)"}}>
-                    ${have ? j.name : "？？？ジロー"}</div>
+                    ${shown ? j.name : "？？？ジロー"}</div>
                   ${have
                     ? html`<div style=${{fontSize:8.8,color:"var(--sub)",lineHeight:1.5,marginTop:3}}>
                              ${j.personality}<br/>${j.line}</div>`
@@ -10439,7 +10455,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260806-125428";
+const APP_BUILD = "20260806-130337";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
