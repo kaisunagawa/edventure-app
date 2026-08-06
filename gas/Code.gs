@@ -4676,8 +4676,24 @@ function getGameStatus(studentEmail) {
   // ★隠しジロー図鑑★ すでに読んである行から取り出すだけ（通信は増えない）
   const jiroCounts = jiroParseCounts_(user.jiro_counts);
   const jiroFound = jiroParseFound_(user.jiro_found);
+  // いまホームに出す子（期限内のときだけ）
+  let jiroFeatured = null;
+  try {
+    const raw = String(user.jiro_featured || "");
+    const sep = raw.indexOf("|");
+    if (sep > 0) {
+      const fid = raw.slice(0, sep), until = raw.slice(sep + 1);
+      const left = new Date(until).getTime() - Date.now();
+      if (left > 0) {
+        const jj = HIDDEN_JIRO.find(function (x) { return x.id === fid; });
+        if (jj) jiroFeatured = { id: jj.id, name: jj.name,
+                                 daysLeft: Math.max(1, Math.ceil(left / 86400000)) };
+      }
+    }
+  } catch (eF2) {}
   const jiro = {
     found: jiroFound,
+    featured: jiroFeatured,
     total: HIDDEN_JIRO.length,
     progress: HIDDEN_JIRO.map(function (j) {
       return { id: j.id, have: jiroFound.indexOf(j.id) !== -1,
@@ -12480,6 +12496,9 @@ const REST_CLASSES = { RECOVERY:1, RECOVERY_RELATIONSHIP:1 };
 //   シートを数え直す通信は一度も増えない。
 //   絵が揃うまでは画面側でシルエットのままにしておく（判定だけ先に動かす）。
 // ══════════════════════════════════════════════════════════════════
+// 会えた子をホームに出しておく日数（2026-08-06 Kai要望）
+const JIRO_FEATURE_DAYS = 3;
+
 const HIDDEN_JIRO = [
   { id:"night",    no:"No.101", name:"夜ふかしジロー", rarity:"Epic",
     key:"night",        need:10, cond:"23:00〜5:00の記録が通算10件" },
@@ -12563,7 +12582,18 @@ function jiroBumpUser_(studentEmail, deltas, absolutes) {
       if (String(data[i][iEm]) !== studentEmail) continue;
       const r = jiroApply_(jiroParseCounts_(data[i][iC]), jiroParseFound_(data[i][iF]), deltas, absolutes);
       sheet.getRange(i + 1, iC + 1).setValue(JSON.stringify(r.counts));
-      if (r.gained.length) sheet.getRange(i + 1, iF + 1).setValue(r.found.join(","));
+      if (r.gained.length) {
+        sheet.getRange(i + 1, iF + 1).setValue(r.found.join(","));
+        // ★会えた子を、しばらくホームに出す★（2026-08-06 Kai要望）
+        //   会った実感が無いと、図鑑を開かない人には何も起きていないのと同じ。
+        //   3日だけホームのジローくんと入れ替える。期限が来たら階級の姿へ戻る。
+        try {
+          let iFeat = headers.indexOf("jiro_featured");
+          if (iFeat === -1) { iFeat = headers.length; sheet.getRange(1, iFeat + 1).setValue("jiro_featured"); }
+          const until = new Date(Date.now() + JIRO_FEATURE_DAYS * 86400000).toISOString();
+          sheet.getRange(i + 1, iFeat + 1).setValue(r.gained[r.gained.length - 1] + "|" + until);
+        } catch (eF) {}
+      }
       return r;
     }
   } catch (e) { /* 図鑑が更新できなくても、記録そのものは成功させる */ }
@@ -13611,18 +13641,29 @@ function authPurgeOldChallenges() {
   if (iCreated === -1) return { ok: false, error: "created_at 列がありません" };
   const cutoff = Date.now() - KEEP_DAYS * 86400000;
   const col = sh.getRange(2, iCreated + 1, last - 1, 1).getValues();
-  // 何行目までが「古い」か（時系列に追記されている前提。念のため単調性は仮定せず全走査）
-  let lastOld = 0;
+  // 何行目までが「古い」か。追記順なので前から見て、古い間だけ進む。
+  // ★1件でも読めない値があると止まっていた★（2026-08-05 実行して0件だった）
+  //   空欄や書式違いが混ざるだけで先へ進めなくなるので、
+  //   読めない値は「古い」とみなして先へ進む（先頭側は必ず古いため）。
+  let lastOld = 0, unreadable = 0;
+  const readAt = function (v) {
+    if (v instanceof Date) return v.getTime();
+    const t = new Date(String(v)).getTime();
+    return isFinite(t) ? t : null;
+  };
   for (let i = 0; i < col.length; i++) {
-    const t = new Date(String(col[i][0])).getTime();
-    if (isFinite(t) && t < cutoff) lastOld = i + 1; else break;
+    const t = readAt(col[i][0]);
+    if (t === null) { unreadable++; lastOld = i + 1; continue; }
+    if (t < cutoff) { lastOld = i + 1; continue; }
+    break;
   }
   // 直近 KEEP_MIN_ROWS 行は必ず残す
   const maxDeletable = (last - 1) - KEEP_MIN_ROWS;
   const n = Math.min(lastOld, maxDeletable);
-  if (n <= 0) return { ok: true, deleted: 0 };
+  if (n <= 0) return { ok: true, deleted: 0, rows: last - 1, lastOld: lastOld,
+                       unreadable: unreadable, firstAt: String(col[0][0]).slice(0, 30) };
   sh.deleteRows(2, n);                // まとめて1回で消す
-  return { ok: true, deleted: n, remaining: sh.getLastRow() - 1 };
+  return { ok: true, deleted: n, remaining: sh.getLastRow() - 1, unreadable: unreadable };
 }
 
 // challenge を1回だけ消費する。成功・失敗にかかわらず再利用させない

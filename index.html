@@ -3418,7 +3418,14 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
            階級が上がってもキャラの大きさは変わらないよう、絵の側でそろえてある。 -->
       ${(()=>{
         const rank = game ? getRank(game.level) : null;
-        const art  = rank ? rankArt(rank.name) : "";
+        // ★会えた子は、しばらくここに出す★（2026-08-06 Kai要望）
+        //   図鑑を開かない人にも「会えた」ことが伝わるように、
+        //   3日だけホームのジローくんと入れ替える。絵が無い子は入れ替えない。
+        const feat = game && game.jiro && game.jiro.featured;
+        const featJ = feat ? HIDDEN_JIRO.find(x=>x.id===feat.id) : null;
+        const useFeat = !!(featJ && featJ.art);
+        const art  = useFeat ? (featJ.art + "?v=" + APP_BUILD)
+                             : (rank ? rankArt(rank.name) : "");
         const lvLabel = rank
           ? `Lv.${game.level}`
           : "";
