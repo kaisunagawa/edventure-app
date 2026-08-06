@@ -3637,13 +3637,19 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
                     style=${{width:118,height:118,objectFit:"contain",display:"block",
                              marginTop:-14,marginBottom:-14,marginLeft:-12,marginRight:-6}}/>
                   <!-- 押せることが分かるよう、絵の左下に小さく出す。
-                       右に置くと名前の列と重なる（2026-08-06 描画で確認） -->
-                  <span style=${{position:"absolute",left:0,bottom:-2,
+                       右に置くと名前の列と重なる（2026-08-06 描画で確認）
+                       ★何の数字か分かるように「いま何番目か」を出す★
+                       （2026-08-06 Kai指摘「4って何？キャッシュ？」） -->
+                  ${(()=>{
+                    const order = ["rank"].concat(owned.map(x=>x.id));
+                    const at = order.indexOf(showRank ? "rank" : featJ.id) + 1;
+                    return html`<span style=${{position:"absolute",left:0,bottom:-2,
                                  background:"rgba(255,255,255,0.92)",color:"#0E7490",
-                                 borderRadius:20,padding:"2px 7px",fontSize:9.5,fontWeight:800,
+                                 borderRadius:20,padding:"2px 8px",fontSize:9.5,fontWeight:800,
                                  boxShadow:"0 2px 6px rgba(0,0,0,0.2)",whiteSpace:"nowrap",
-                                 pointerEvents:"none"}}>
-                    ⇄ ${owned.length + 1}</span>
+                                 pointerEvents:"none",fontVariantNumeric:"tabular-nums"}}>
+                      ⇄ ${at} / ${order.length}</span>`;
+                  })()}
                 </button>`
               : html`<img src=${art} alt=${rank?rank.name:""} width="118" height="118"
                      style=${{width:118,height:118,objectFit:"contain",display:"block",flexShrink:0,
@@ -10555,7 +10561,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260806-132830";
+const APP_BUILD = "20260806-133114";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
