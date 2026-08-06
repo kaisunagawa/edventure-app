@@ -1912,7 +1912,18 @@ function getHomeData(studentEmail) {
       schedule:     safe(function () { return getSchedule(studentEmail); }),
       logs:         safe(function () { return getLogs(studentEmail, {}); }),
       ranking:      safe(function () { return getRanking(studentEmail); }),
-      status:       safe(function () { return getStatusSummary(studentEmail); }),
+      // ★自己経営力を使っている人には計算しない★（2026-08-06 Kai報告「読み込みが遅い」）
+      //   旧ステータスは、画面では「自己経営力がまだ無い人」にしか出していない
+      //   （smpOff かつ smp.data なし のときだけ描画）。それなのに全員ぶん計算していた。
+      //   中身は computeAllStatuses＝全員のDailyLogを日ごとに減衰計算する処理で、
+      //   起動でいちばん重い。表示しない人には返さない。
+      status:       (function () {
+        try {
+          var _u = getFilteredRows("Users", "student_email", studentEmail)[0];
+          if (hasFeature(_u, SMP_FEATURE_KEY)) return null;   // 出さない人には計算もしない
+        } catch (e) { /* 判定できなければ従来どおり返す */ }
+        return safe(function () { return getStatusSummary(studentEmail); });
+      })(),
       weekly:       safe(function () { return getWeeklySummary(studentEmail); }),
       intent:       safe(function () { return getIntent(studentEmail); }),
       todayActions: safe(function () { return getTodayActions(studentEmail); })
@@ -4989,6 +5000,29 @@ function latestScoreOf_(email, opsIndex, latestReportRow) {
                                 date: String(latestReportRow.date).slice(0, 10), source: "legacy" };
   return o ? { score: o.score, date: o.date, source: "daily_v2" } : null;
 }
+// ★Reportsは必要な3列だけ読む★（2026-08-06 Kai報告「読み込みが遅い」）
+//   ランキング系で欲しいのは student_email / date / score だけ。
+//   sheetToObjects は breakdown などの長いJSON列まで毎行オブジェクト化するため、
+//   行が増えるほど効いてくる。ここを通すと、その無駄が無くなる。
+function reportsLite_() {
+  const sh = getSheet("Reports");
+  const last = sh.getLastRow();
+  if (last < 2) return [];
+  const hdr = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0];
+  const iE = hdr.indexOf("student_email"), iD = hdr.indexOf("date"), iS = hdr.indexOf("score");
+  if (iE === -1 || iD === -1 || iS === -1) return sheetToObjects(sh);   // 列名が違えば従来どおり
+  const lo = Math.min(iE, iD, iS), hi = Math.max(iE, iD, iS);
+  const vals = sh.getRange(2, lo + 1, last - 1, hi - lo + 1).getValues();
+  const cE = iE - lo, cD = iD - lo, cS = iS - lo;
+  return vals.map(function (r) {
+    const raw = r[cD];
+    return { student_email: String(r[cE] || ""),
+             date: raw instanceof Date ? Utilities.formatDate(raw, "Asia/Tokyo", "yyyy-MM-dd")
+                                       : String(raw).slice(0, 10),
+             score: r[cS] };
+  });
+}
+
 // 全員分の「最新の新レポート点数」を1回で読む
 function opsLatestIndex_() {
   const idx = {};
@@ -5179,7 +5213,7 @@ function getRanking(studentEmail) {
       String(u.cohort || "").trim() === myCohort
     );
     const active = new Set(users.map(u => u.student_email));
-    const allReports = sheetToObjects(getSheet("Reports")).filter(r => active.has(r.student_email));
+    const allReports = reportsLite_().filter(r => active.has(r.student_email));
 
     // 直近7日以内にレポートが出ている人だけを対象にする（＝いま続いている人同士で競う）。
     // 一度書いたきり止まっている人がいつまでも分母に残らないようにするための期間しばり。
@@ -5378,24 +5412,8 @@ function getCommunityFresh_(studentEmail) {
   //   ここで使うのは student_email / date / score だけ。
   //   sheetToObjects は breakdown などの長いJSON列まで毎行オブジェクト化するため、
   //   行数が増えるほど効いてくる。
-  const allReports = (function () {
-    const sh = getSheet("Reports");
-    const last = sh.getLastRow();
-    if (last < 2) return [];
-    const hdr = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0];
-    const iE = hdr.indexOf("student_email"), iD = hdr.indexOf("date"), iS = hdr.indexOf("score");
-    if (iE === -1 || iD === -1 || iS === -1) return sheetToObjects(sh);
-    const lo = Math.min(iE, iD, iS), hi = Math.max(iE, iD, iS);
-    const vals = sh.getRange(2, lo + 1, last - 1, hi - lo + 1).getValues();
-    const cE = iE - lo, cD = iD - lo, cS = iS - lo;
-    return vals.map(function (r) {
-      const raw = r[cD];
-      return { student_email: String(r[cE] || ""),
-               date: raw instanceof Date ? Utilities.formatDate(raw, "Asia/Tokyo", "yyyy-MM-dd")
-                                         : String(raw).slice(0, 10),
-               score: r[cS] };
-    });
-  })();
+  // 必要な3列だけ読む（reportsLite_ に共通化。2026-08-06）
+  const allReports = reportsLite_();
   const latestReportByEmail = new Map();
   allReports.forEach(r => {
     const cur = latestReportByEmail.get(r.student_email);
