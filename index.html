@@ -1582,12 +1582,18 @@ function JiroFoundModal() {
         <div style=${{fontSize:13,color:"var(--sub)",marginBottom:14}}>新しいジローに会えました</div>
         <!-- ★なぜ会えたのかを出す★（2026-08-06 Kai要望）
              条件が分からないと「たまたま出た」で終わる。自分の行動の結果だと伝える。 -->
+        <!-- 2026-08-06 Kai指摘「出現条件が明確に表記されてない」
+             「◯◯を達成」だけだと何の話か分からない。見出しを付けて条件だと言い切る。 -->
         ${j.cond&&html`
-          <div style=${{display:"inline-block",fontSize:11.5,fontWeight:700,color:c,
-                        background:`color-mix(in srgb, ${c} 14%, transparent)`,
-                        border:`1px solid color-mix(in srgb, ${c} 40%, transparent)`,
-                        borderRadius:20,padding:"5px 12px",marginBottom:14,lineHeight:1.5}}>
-            ${j.cond} を達成</div>`}
+          <div style=${{background:`color-mix(in srgb, ${c} 12%, transparent)`,
+                        border:`1px solid color-mix(in srgb, ${c} 38%, transparent)`,
+                        borderRadius:12,padding:"9px 12px",marginBottom:14}}>
+            <div style=${{fontSize:9.5,fontWeight:800,color:c,letterSpacing:".08em",marginBottom:3}}>
+              出現条件</div>
+            <div style=${{fontSize:12.5,fontWeight:800,color:"var(--text)",lineHeight:1.5}}>
+              ${j.cond}</div>
+            <div style=${{fontSize:10.5,fontWeight:800,color:c,marginTop:3}}>✓ 達成しました</div>
+          </div>`}
         <!-- 背景は抜いてあるので、枠に入れず絵をそのまま大きく置く（2026-08-06） -->
         <div style=${{position:"relative",width:172,height:172,margin:"0 auto 10px"}}>
           ${j.art
@@ -3636,20 +3642,6 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
                   <img src=${art} alt=${showRank?(rank?rank.name:""):featJ.name} width="118" height="118"
                     style=${{width:118,height:118,objectFit:"contain",display:"block",
                              marginTop:-14,marginBottom:-14,marginLeft:-12,marginRight:-6}}/>
-                  <!-- 押せることが分かるよう、絵の左下に小さく出す。
-                       右に置くと名前の列と重なる（2026-08-06 描画で確認）
-                       ★何の数字か分かるように「いま何番目か」を出す★
-                       （2026-08-06 Kai指摘「4って何？キャッシュ？」） -->
-                  ${(()=>{
-                    const order = ["rank"].concat(owned.map(x=>x.id));
-                    const at = order.indexOf(showRank ? "rank" : featJ.id) + 1;
-                    return html`<span style=${{position:"absolute",left:0,bottom:-2,
-                                 background:"rgba(255,255,255,0.92)",color:"#0E7490",
-                                 borderRadius:20,padding:"2px 8px",fontSize:9.5,fontWeight:800,
-                                 boxShadow:"0 2px 6px rgba(0,0,0,0.2)",whiteSpace:"nowrap",
-                                 pointerEvents:"none",fontVariantNumeric:"tabular-nums"}}>
-                      ⇄ ${at} / ${order.length}</span>`;
-                  })()}
                 </button>`
               : html`<img src=${art} alt=${rank?rank.name:""} width="118" height="118"
                      style=${{width:118,height:118,objectFit:"contain",display:"block",flexShrink:0,
@@ -3674,29 +3666,6 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
                             overflow:"hidden",marginTop:7}}>
                 <div style=${{height:"100%",width:pct+"%",borderRadius:99,background:rank.color}}/>
               </div>`}
-            <!-- ★なぜ姿が変わったのかを伝える★（2026-08-06）
-                 説明が無いと「勝手に変わった」と思われる。残り日数も出す。 -->
-            <!-- ★ジロー図鑑への入口★（2026-08-06 Kai要望）
-                 設定の奥にあると誰も辿り着けないので、ホームから1タップで開く -->
-            ${(game&&game.jiro)&&html`
-              <button onClick=${()=>setZukanOpen(true)}
-                style=${{display:"inline-flex",alignItems:"center",gap:4,marginTop:6,marginRight:6,
-                         background:"rgba(255,255,255,0.22)",border:"none",borderRadius:20,
-                         padding:"3px 10px",color:"#fff",fontSize:10.5,fontWeight:800,
-                         cursor:"pointer",fontFamily:"inherit"}}>
-                ジロー図鑑
-                <span style=${{fontSize:9.5,opacity:0.85,fontWeight:700}}>
-                  ${(game.jiro.found||[]).length} / ${HIDDEN_JIRO.length}</span>
-              </button>`}
-            ${(!showRank&&featJ)&&html`
-              <div style=${{display:"inline-flex",alignItems:"center",gap:5,marginTop:6,
-                            background:"rgba(255,255,255,0.22)",borderRadius:20,padding:"3px 10px"}}>
-                <span style=${{fontSize:10.5,fontWeight:800,color:"#fff",whiteSpace:"nowrap"}}>
-                  ${featJ.name}と一緒</span>
-                ${(feat&&feat.id===featJ.id)&&html`
-                  <span style=${{fontSize:9.5,color:"rgba(255,255,255,0.8)",whiteSpace:"nowrap"}}>
-                    あと${feat.daysLeft}日</span>`}
-              </div>`}
             ${game&&html`
               <!-- 2つとも1行に収める。折り返すと縦に伸びて間延びする -->
               <div style=${{display:"flex",alignItems:"center",gap:6,flexWrap:"nowrap",marginTop:8}}>
@@ -3711,7 +3680,26 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
               <div style=${{fontSize:10.5,color:"rgba(255,255,255,0.65)",whiteSpace:"nowrap",marginTop:2}}>
                 ${forNxt?`次のレベルまで ${forNxt-inLv} XP`:"MAX LEVEL"}</div>
             </div>`}
-        </div>`;
+        </div>
+
+        <!-- ★ジローのことは1行にまとめる★（2026-08-06 Kai指摘「段落が増えすぎ」）
+             名前の列にチップを足すと5段になって窮屈だった。
+             見出しの下に細い1行を置き、左に今の子、右に図鑑への入口。 -->
+        ${(game&&game.jiro)&&html`
+          <button onClick=${()=>setZukanOpen(true)}
+            style=${{display:"flex",alignItems:"center",gap:8,width:"100%",marginBottom:14,
+                     background:"rgba(255,255,255,0.16)",border:"none",borderRadius:12,
+                     padding:"8px 12px",cursor:"pointer",fontFamily:"inherit",textAlign:"left"}}>
+            <span style=${{flex:1,minWidth:0,fontSize:11,fontWeight:700,color:"#fff",
+                           overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+              ${(!showRank&&featJ)
+                ? `${featJ.name}と一緒${(feat&&feat.id===featJ.id)?`（あと${feat.daysLeft}日）`:""}`
+                : "ジロー図鑑"}</span>
+            <span style=${{flexShrink:0,fontSize:10.5,fontWeight:800,color:"rgba(255,255,255,0.9)",
+                           fontVariantNumeric:"tabular-nums",whiteSpace:"nowrap"}}>
+              図鑑 ${(game.jiro.found||[]).length} / ${HIDDEN_JIRO.length} ›</span>
+          </button>`}
+        `;
       })()}
 
       <div style=${{display:"flex",gap:8}}>
@@ -10561,7 +10549,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260806-133114";
+const APP_BUILD = "20260806-133950";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 

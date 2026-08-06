@@ -11600,12 +11600,26 @@ ${outputSpec}`;
 // ★ロードマップのまとめ取得★（2026-08-05 起動高速化）
 //   GASは同じ人からの同時リクエストを順番に処理するので、
 //   呼び出しの本数がそのまま待ち時間になる。2本を1本にする。
+// ★同じシートを2度読まない★（2026-08-06 Kai報告「読み込みが遅い」）
+//   1回のリクエストの間だけ、読んだシートを覚えておく。
+//   getRoadmap は getSprints と getGoalTree を呼ぶが、その両方が WeeklyGoals を読む。
+//   GASはシート1枚読むだけで0.5〜1秒かかるので、そのまま倍かかっていた。
+//   すでに有効なとき（getHomeData 経由など）は何もせず、状態も壊さない。
+function withSheetCache_(fn) {
+  const already = _sheetReadCacheOn;
+  if (!already) { _sheetReadCacheOn = true; _sheetReadCache = {}; }
+  try { return fn(); }
+  finally { if (!already) { _sheetReadCacheOn = false; _sheetReadCache = {}; } }
+}
+
 function getRoadmap(studentEmail) {
-  const out = { ok: true };
-  try { out.sprints = getSprints(studentEmail, {}); } catch (e) { out.sprints = null; }
-  try { const g = getGoalTree(studentEmail); out.goalTree = (g && g.ok) ? g.data : null; }
-  catch (e) { out.goalTree = null; }
-  return out;
+  return withSheetCache_(function () {
+    const out = { ok: true };
+    try { out.sprints = getSprints(studentEmail, {}); } catch (e) { out.sprints = null; }
+    try { const g = getGoalTree(studentEmail); out.goalTree = (g && g.ok) ? g.data : null; }
+    catch (e) { out.goalTree = null; }
+    return out;
+  });
 }
 
 function getReportHome(studentEmail) {
