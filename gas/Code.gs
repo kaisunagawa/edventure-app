@@ -784,6 +784,69 @@ function doGet(e) {
       //   「これまで記録している人にちゃんと付く」ようにしたいので、
       //   候補の材料を全部数えて分布を見てから、しきい値を決める。
       //     bash gas/ops.sh adminJiroSignals
+      // その日の記録が「何時に書き込まれたか」を人ごとに見る（読むだけ）。
+      // 夜のレポート（22:00開始）より後に記録した人は、その晩の生成対象に入らない。
+      // 「記録したのにレポートが来ない」の切り分けに使う。
+      case "adminLogTimes": {
+        if (!verifyAdmin(e.parameter.coachEmail)) return jsonResponse({ ok: false, error: "not admin" });
+        const dayLT = String(e.parameter.date || "").slice(0, 10) || formatDate(new Date());
+        const uMapLT = {};
+        sheetToObjects(getSheet("Users")).forEach(function (u) {
+          uMapLT[u.student_email] = String(u.name || u.nickname || u.student_email); });
+        const accLT = {};
+        sheetToObjects(getSheet("DailyLog")).forEach(function (r) {
+          if (String(r.deleted_at || "").trim()) return;
+          const d = r.date instanceof Date ? Utilities.formatDate(r.date, "Asia/Tokyo", "yyyy-MM-dd") : String(r.date || "").slice(0, 10);
+          if (d !== dayLT) return;
+          const em = String(r.student_email || ""); if (!em) return;
+          const ts = r.timestamp instanceof Date
+            ? Utilities.formatDate(r.timestamp, "Asia/Tokyo", "yyyy-MM-dd HH:mm:ss")
+            : String(r.timestamp || "");
+          const o = accLT[em] || (accLT[em] = { name: uMapLT[em] || em, n: 0, first: "", last: "" });
+          o.n++;
+          if (ts) {
+            if (!o.first || ts < o.first) o.first = ts;
+            if (!o.last || ts > o.last) o.last = ts;
+          }
+        });
+        const rowsLT = Object.keys(accLT).map(function (k) {
+          return { email: k, name: accLT[k].name, records: accLT[k].n,
+                   first_write: accLT[k].first, last_write: accLT[k].last }; });
+        rowsLT.sort(function (a, b) { return String(a.last_write) > String(b.last_write) ? 1 : -1; });
+        return jsonResponse({ ok: true, date: dayLT, users: rowsLT.length, rows: rowsLT });
+      }
+      // レポート生成が失敗した記録を読む（読むだけ）。clear=1 で消せる。
+      case "adminReportGenFailures": {
+        if (!verifyAdmin(e.parameter.coachEmail)) return jsonResponse({ ok: false, error: "not admin" });
+        const propsRF = PropertiesService.getScriptProperties();
+        if (String(e.parameter.clear || "") === "1") {
+          propsRF.deleteProperty(REPORT_GEN_FAIL_KEY);
+          return jsonResponse({ ok: true, cleared: true });
+        }
+        let listRF = [];
+        try { listRF = JSON.parse(propsRF.getProperty(REPORT_GEN_FAIL_KEY) || "[]"); } catch (eRF) {}
+        return jsonResponse({ ok: true, count: listRF.length, rows: listRF });
+      }
+      // 隠しジローを誰がいつ見つけたか（読むだけ）。date= を付けるとその日の分だけ。
+      case "adminJiroFound": {
+        if (!verifyAdmin(e.parameter.coachEmail)) return jsonResponse({ ok: false, error: "not admin" });
+        const dayJF = String(e.parameter.date || "").slice(0, 10);
+        const rowsJF = [];
+        sheetToObjects(getSheet("Users")).forEach(function (u) {
+          const ids = jiroParseFound_(u.jiro_found);
+          if (!ids.length) return;
+          const atJF = {};
+          String(u.jiro_found_at || "").split(",").forEach(function (p) {
+            const s = String(p).split(":");
+            if (s[0] && s[1]) atJF[s[0].trim()] = s[1].trim(); });
+          const list = ids.map(function (id) {
+            const def = HIDDEN_JIRO.find(function (h) { return h.id === id; });
+            return { id: id, name: def ? def.name : id, at: atJF[id] || "" }; })
+            .filter(function (x) { return !dayJF || x.at === dayJF; });
+          if (list.length) rowsJF.push({ name: String(u.name || u.nickname || u.student_email), found: list });
+        });
+        return jsonResponse({ ok: true, date: dayJF || "(all)", users: rowsJF.length, rows: rowsJF });
+      }
       case "adminJiroSignals": {
         if (!verifyAdmin(e.parameter.coachEmail)) return jsonResponse({ ok: false, error: "not admin" });
         const perS = {};
@@ -1889,7 +1952,7 @@ function getReportList(studentEmail) {
   //   まだ無い日だけ、従来の夜のレポートの点数を出す。
   const opsByDate = {};
   try {
-    const u = sheetToObjects(getSheet("Users")).find(function (x) { return x.student_email === studentEmail; });
+    const u = userRow_(studentEmail);
     if (hasFeature(u, OPS_FEATURE_KEY)) {
       // ★詳細と同じ拾い方にする★（2026-08-05 Kai環境で 詳細89 / 一覧37 になった）
       //   記録の網羅が足りない日は「全体の点数」が出ない。
@@ -1898,7 +1961,7 @@ function getReportList(studentEmail) {
       //   詳細の displayed_score と同じ順（全体 → 部分）で拾う。
       // ★同じ一覧を2度読まない★（2026-08-06）
       //   下の「今日は締めたか」の判定でも同じものを読んでいた。
-      const opsRows = p1List("DailyOpsReport", studentEmail);
+      const opsRows = p1ListMine_("DailyOpsReport", studentEmail);
       opsRows.forEach(function (r) {
         const d = String(r.report_date).slice(0, 10);
         if (!d) return;
@@ -2222,11 +2285,11 @@ function computeSelfMgmtPowerFromDaily_(studentEmail, monday, sunday, today) {
   // まとめて1回読む
   const allLogs = sheetToObjects(getSheet("DailyLog")).filter(function (l) {
     return String(l.student_email) === studentEmail && inWeek(dayOf(l.date)) && !String(l.deleted_at || "").trim(); });
-  const allTasks = p1List("Tasks", studentEmail).filter(function (t) {
+  const allTasks = p1ListMine_("Tasks", studentEmail).filter(function (t) {
     return !String(t.deleted_at || "").trim() && inWeek(p1DateOut_(t.date)); });
   const allJournal = sheetToObjects(getJournalSheet()).filter(function (r) {
     return String(r.student_email) === studentEmail && inWeek(dayOf(r.date)); });
-  const wgs = p1List("WeeklyGoals", studentEmail).filter(function (w) { return p1Status_(w.status, "ACTIVE") === "ACTIVE"; });
+  const wgs = p1ListMine_("WeeklyGoals", studentEmail).filter(function (w) { return p1Status_(w.status, "ACTIVE") === "ACTIVE"; });
   // 使える時間も1回だけ読む（日ごとにシートを読むと重くなる）
   const planRows = p1List("DayPlan", studentEmail);
   const userRow = sheetToObjects(getSheet("Users")).find(function (u) { return u.student_email === studentEmail; });
@@ -2316,14 +2379,14 @@ function computeSelfMgmtPower(studentEmail, weekStart) {
   const today = formatDate(new Date());
   const inWeek = function (d) { const x = String(d || "").slice(0, 10); return x >= monday && x <= sunday; };
 
-  const tasks = p1List("Tasks", studentEmail).filter(function (t) { return !String(t.deleted_at || "").trim(); });
+  const tasks = p1ListMine_("Tasks", studentEmail).filter(function (t) { return !String(t.deleted_at || "").trim(); });
   const weekTasks = tasks.filter(function (t) { return inWeek(p1DateOut_(t.date)); });
   const logs = sheetToObjects(getSheet("DailyLog")).filter(function (l) {
     // 論理削除された記録は数えない
     return String(l.student_email) === studentEmail && inWeek(l.date) &&
            !String(l.deleted_at || "").trim(); });
-  const goals = p1List("Goals", studentEmail).filter(function (g) { return p1Status_(g.status, "ACTIVE") !== "ARCHIVED"; });
-  const wgs = p1List("WeeklyGoals", studentEmail).filter(function (w) { return p1Status_(w.status, "ACTIVE") === "ACTIVE"; });
+  const goals = p1ListMine_("Goals", studentEmail).filter(function (g) { return p1Status_(g.status, "ACTIVE") !== "ARCHIVED"; });
+  const wgs = p1ListMine_("WeeklyGoals", studentEmail).filter(function (w) { return p1Status_(w.status, "ACTIVE") === "ACTIVE"; });
 
   const out = {};
   // 表示文だけで状態を判断させない。機械で読める理由コードを必ず添える
@@ -2810,12 +2873,12 @@ function computeDailyOpsFacts(studentEmail, dateStr, fixture) {
     // 論理削除された記録は数えない（消したのに評価へ残るのを防ぐ）
     return String(l.student_email) === studentEmail && String(l.date).slice(0, 10) === date &&
            !String(l.deleted_at || "").trim(); });
-  const tasks = fx ? (fx.tasks || []) : p1List("Tasks", studentEmail).filter(function (t) {
+  const tasks = fx ? (fx.tasks || []) : p1ListMine_("Tasks", studentEmail).filter(function (t) {
     return !String(t.deleted_at || "").trim() && p1DateOut_(t.date) === date; });
   const journal = fx ? (fx.journal || {}) : (sheetToObjects(getJournalSheet()).find(function (r) {
     const rd = r.date instanceof Date ? Utilities.formatDate(r.date, "Asia/Tokyo", "yyyy-MM-dd") : String(r.date).slice(0, 10);
     return String(r.student_email) === studentEmail && rd === date; }) || {});
-  const wgs = fx ? (fx.weekly_goals || []) : p1List("WeeklyGoals", studentEmail).filter(function (w) { return p1Status_(w.status, "ACTIVE") === "ACTIVE"; });
+  const wgs = fx ? (fx.weekly_goals || []) : p1ListMine_("WeeklyGoals", studentEmail).filter(function (w) { return p1Status_(w.status, "ACTIVE") === "ACTIVE"; });
 
   // state 既定は insufficient_data（測る手段が無い＝分母に残して充足度を下げる）。
   // not_evaluable は「そもそも今日は評価する機会が無い」＝分母から外す。
@@ -3167,7 +3230,7 @@ function getDailyOpsReport(studentEmail, body) {
   // ★確定した日は、そのときの内容をそのまま返す★（2026-08-03 Kaiの判断）
   //   あとからタスクの日付を明日へ動かしただけで、昨日の点数が動くのはおかしい。
   //   夜のトリガーで締めたら、その日の評価はもう変えない。
-  const frozen = p1List("DailyOpsReport", studentEmail).find(function (r) {
+  const frozen = p1ListMine_("DailyOpsReport", studentEmail).find(function (r) {
     return String(r.report_date).slice(0, 10) === date &&
            String(r.report_version) === OPS_REPORT_VERSION &&
            String(r.finalized_at || "").trim(); });
@@ -3435,7 +3498,7 @@ function opsBuildPrompt(cur, factList) {
 function opsNarrative(studentEmail, cur, forceRefresh) {
   const factList = opsFactList(cur);
   const hash = opsInputHash(cur, factList);
-  const rows = p1List("DailyOpsReport", studentEmail).filter(function (r) {
+  const rows = p1ListMine_("DailyOpsReport", studentEmail).filter(function (r) {
     return String(r.report_date).slice(0, 10) === cur.report_date &&
            String(r.report_version) === cur.report_version; });
   const row = rows[0] || null;
@@ -3677,7 +3740,7 @@ function finalizeDailyOpsReport(studentEmail, date) {
   const r = getDailyOpsReport(studentEmail, { date: day });
   if (!r || !r.ok || !r.data) return { ok: false };
   if (r.data.finalized) return { ok: true, already: true, score: r.data.displayed_score };
-  const row = p1List("DailyOpsReport", studentEmail).find(function (x) {
+  const row = p1ListMine_("DailyOpsReport", studentEmail).find(function (x) {
     return String(x.report_date).slice(0, 10) === day &&
            String(x.report_version) === OPS_REPORT_VERSION; });
   if (!row) return { ok: false };
@@ -5513,7 +5576,7 @@ function getRanking(studentEmail) {
     if (hasFeature(meU, OPS_FEATURE_KEY)) {
       // 今日の分があれば今日、なければ直近の新レポート（他の画面と同じルール）
       const today0 = formatDate(new Date());
-      const mine = p1List("DailyOpsReport", studentEmail);
+      const mine = p1ListMine_("DailyOpsReport", studentEmail);
       const todayRow = mine.find(function (r) { return String(r.report_date).slice(0, 10) === today0; });
       if (todayRow && String(todayRow.finalized_at || "").trim() &&
           String(todayRow.operating_score || "").trim() !== "") {
@@ -8966,6 +9029,23 @@ function applyXPDecay(studentEmail, targetDate) {
 // 直近のレポート生成失敗の理由。adminRunNightlyReportが診断結果に含めるための変数
 let REPORT_GEN_LAST_ERROR = "";
 
+// レポート生成の失敗を残しておく。Loggerだけだと翌日には追えず、
+// 「誰のレポートがなぜ来なかったか」が分からなくなるため（2026-08-07）。
+// 直近30件だけ持つ。adminReportGenFailures で読める。
+const REPORT_GEN_FAIL_KEY = "REPORT_GEN_FAILURES";
+function reportGenNoteFailure_(studentEmail, reason) {
+  try {
+    const props = PropertiesService.getScriptProperties();
+    const list = JSON.parse(props.getProperty(REPORT_GEN_FAIL_KEY) || "[]");
+    list.push({
+      at: Utilities.formatDate(new Date(), "Asia/Tokyo", "yyyy-MM-dd HH:mm:ss"),
+      email: String(studentEmail || ""),
+      reason: String(reason || "").slice(0, 200)
+    });
+    props.setProperty(REPORT_GEN_FAIL_KEY, JSON.stringify(list.slice(-30)));
+  } catch (e) { Logger.log("reportGenNoteFailure_: " + e); }
+}
+
 // 会社員向け「業務報告書」生成。1日の記録（時間帯・タスク・メモ）と
 // 今日のフォーカス・タスク（見積もり時間とチェック状態）から、上司に
 // そのまま提出できる報告文を作る。就業終わりに「レポートを生成する」ボタンから呼ばれる。
@@ -9005,7 +9085,7 @@ function generateWorkReportInner(studentEmail, body) {
   const PRIVATE_CONTEXTS = { PERSONAL: 1, HEALTH: 1 };
   const ctxByTask = {};
   try {
-    p1List("Tasks", studentEmail).forEach(function (t) {
+    p1ListMine_("Tasks", studentEmail).forEach(function (t) {
       if (t.task_id) ctxByTask[String(t.task_id)] = String(t.context || "").toUpperCase();
     });
   } catch (e) {}
@@ -9129,7 +9209,7 @@ function computeReportBreakdown_(studentEmail, logs, user, dateStr) {
   // 今日のタスクと、今日のフォーカス（アプリの中心にある行動を採点に入れる）
   let tasks = [], journal = {};
   try {
-    tasks = p1List("Tasks", studentEmail).filter(function (t) {
+    tasks = p1ListMine_("Tasks", studentEmail).filter(function (t) {
       return !String(t.deleted_at || "").trim() && p1DateOut_(t.date) === date; });
   } catch (e) {}
   try {
@@ -9140,7 +9220,7 @@ function computeReportBreakdown_(studentEmail, logs, user, dateStr) {
   // 週間目標への前進（今週ぶんの達成率。無ければ null）
   let weekProgress = null;
   try {
-    const wgs = p1List("WeeklyGoals", studentEmail).filter(function (w) {
+    const wgs = p1ListMine_("WeeklyGoals", studentEmail).filter(function (w) {
       return p1Status_(w.status, "ACTIVE") === "ACTIVE"; });
     const ok = wgs.filter(function (w) {
       const t = Number(w.std_line) > 0 ? Number(w.std_line) : Number(w.target_total);
@@ -9317,28 +9397,46 @@ breakdown_reasonsは各項目の点数についてのひとことコメントで
 - 実在が確認できない前提を作らない。特に「チャットワークで報告する」「◯◯さんに連絡・報告する」「上司/コーチに共有する」など“第三者への報告・連絡”は、本人のログや目標に明確にそうした相手が出てこない限り絶対に書かない（報告相手を勝手に想定しない）。
 - 「上で決めたアクション」のように他の項目を指す書き方はしない（1個なので不要）。`;
 
-  const res = UrlFetchApp.fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
-    // breakdown_reasons追加でレポートJSONが長くなり、記録が多い日は1024トークンでは
-    // 出力が途中で切れてJSONパースに失敗していた（ai-failedの原因）ため、余裕を持たせる
-    payload: JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: 4000, messages: [{ role: "user", content: prompt }] }),
-    muteHttpExceptions: true
-  });
-
-  const rawText = res.getContentText();
-  Logger.log("Claude生レスポンス: " + rawText.substring(0, 800));
-  const result = JSON.parse(rawText); logAiUsage(result, "夜のレポート");
-  if (!result.content || !result.content[0]) {
-    Logger.log("Claude エラー: " + rawText);
-    REPORT_GEN_LAST_ERROR = "APIエラー: " + rawText.substring(0, 300);
+  // ★一時的な失敗で必ずやり直す★
+  //   22時に全員分を続けて投げるので、混雑・タイムアウトを1回引くだけで
+  //   その人のその晩のレポートが丸ごと飛んでいた（2026-08-06に2人欠落）。
+  //   失敗はLoggerにしか残らず翌日には追えないので、間を空けて3回まで試す。
+  let rawText = "", result = null;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    let code = 0;
+    try {
+      const res = UrlFetchApp.fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
+        // breakdown_reasons追加でレポートJSONが長くなり、記録が多い日は1024トークンでは
+        // 出力が途中で切れてJSONパースに失敗していた（ai-failedの原因）ため、余裕を持たせる
+        payload: JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: 4000, messages: [{ role: "user", content: prompt }] }),
+        muteHttpExceptions: true
+      });
+      code = res.getResponseCode();
+      rawText = res.getContentText();
+      result = JSON.parse(rawText);
+    } catch (eFetch) {
+      // 通信そのものが落ちた（タイムアウト等）。rawTextは空のまま
+      rawText = String(eFetch); result = null;
+      Logger.log("Claude 通信失敗(" + attempt + "回目): " + rawText.substring(0, 200));
+    }
+    if (result && result.content && result.content[0]) break;
+    REPORT_GEN_LAST_ERROR = "APIエラー(HTTP " + code + "): " + rawText.substring(0, 300);
+    Logger.log("Claude エラー(" + attempt + "回目) " + studentEmail + ": " + rawText.substring(0, 300));
+    result = null;
+    if (attempt < 3) Utilities.sleep(attempt * 4000); // 4秒 → 8秒
+  }
+  if (result) logAiUsage(result, "夜のレポート");
+  if (!result) {
+    reportGenNoteFailure_(studentEmail, REPORT_GEN_LAST_ERROR);
     return null;
   }
   try {
     const text = result.content[0].text.trim();
     Logger.log("Claudeテキスト: " + text.substring(0, 500));
     const parsed = parseAiJson(text);
-    if (!parsed) { Logger.log("JSONパース失敗"); REPORT_GEN_LAST_ERROR = "JSONパース失敗: " + text.substring(0, 200); return null; }
+    if (!parsed) { Logger.log("JSONパース失敗"); REPORT_GEN_LAST_ERROR = "JSONパース失敗: " + text.substring(0, 200); reportGenNoteFailure_(studentEmail, REPORT_GEN_LAST_ERROR); return null; }
     // ★文章の中の「◯◯点」を消す★
     //   点数はこちらで計算するので、AIが書いた数字は必ず食い違う。
     //   実際にLINEへ「今日58点」と出て、画面の71点と矛盾していた（2026-08-03）。
@@ -9374,7 +9472,7 @@ breakdown_reasonsは各項目の点数についてのひとことコメントで
       parsed.action = String(parsed.action).split("\n").map(s => s.trim()).filter(Boolean)[0] || "";
     }
     return parsed;
-  } catch (e) { Logger.log("JSONパースエラー: " + e.toString()); REPORT_GEN_LAST_ERROR = "JSONパースエラー: " + e.toString(); return null; }
+  } catch (e) { Logger.log("JSONパースエラー: " + e.toString()); REPORT_GEN_LAST_ERROR = "JSONパースエラー: " + e.toString(); reportGenNoteFailure_(studentEmail, REPORT_GEN_LAST_ERROR); return null; }
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -12289,7 +12387,7 @@ function listGoalEntries(studentEmail, body) {
   //   3か月目標だけ履歴を見られて、今週の目標は見られなかった。
   //   間違えて足したときに、打ち消しで足すしかない状態だった。
   const wGoalId = String((body && body.weekly_goal_id) || "").trim();
-  const rows = p1List("GoalEntries", studentEmail)
+  const rows = p1ListMine_("GoalEntries", studentEmail)
     .filter(function (r) { return !String(r.deleted_at || "").trim(); })
     .filter(function (r) {
       if (wGoalId) return String(r.weekly_goal_id || "") === wGoalId;
@@ -12548,6 +12646,47 @@ function p1List(sheetName, studentEmail) {
   const rows = sheetToObjects(getP1Sheet(sheetName));
   return studentEmail ? rows.filter(r => r.student_email === studentEmail) : rows;
 }
+// ★1人分しか使わないなら、その人の行だけをオブジェクトにする★（2026-08-07 実測）
+//   sheetToObjects は全員ぶんの行を、長いJSON列まで含めて毎回オブジェクト化する。
+//   DailyOpsReport は snapshot_json が重く、40人ぶんを変換すると効いてくる。
+//   先に student_email 列だけを見て絞り、残った行だけ組み立てる。
+//   読取キャッシュが効いている間は、そちらを使う（二度読みしない）。
+function p1ListMine_(sheetName, studentEmail) {
+  if (!studentEmail) return p1List(sheetName, null);
+  const sheet = getP1Sheet(sheetName);
+  if (_sheetReadCacheOn) {
+    return sheetToObjects(sheet).filter(function (r) { return r.student_email === studentEmail; });
+  }
+  const data = sheet.getDataRange().getValues();
+  if (data.length < 2) return [];
+  const headers = data[0];
+  const iEm = headers.indexOf("student_email");
+  if (iEm === -1) return sheetToObjects(sheet).filter(function (r) { return r.student_email === studentEmail; });
+  const out = [];
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][iEm]) !== studentEmail) continue;
+    out.push(rowToObject(data[i], headers));
+  }
+  return out;
+}
+// ★Users から1人だけ取り出す★（2026-08-07 実測）
+//   sheetToObjects(Users).find(...) が87か所ある。Users は列が多く、
+//   1人ぶんしか要らない場面で全員ぶんを組み立てるのは無駄。
+function userRow_(studentEmail) {
+  const sheet = getSheet("Users");
+  if (_sheetReadCacheOn) {
+    return sheetToObjects(sheet).find(function (x) { return x.student_email === studentEmail; }) || null;
+  }
+  const data = sheet.getDataRange().getValues();
+  if (data.length < 2) return null;
+  const headers = data[0];
+  const iEm = headers.indexOf("student_email");
+  if (iEm === -1) return null;
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][iEm]) === studentEmail) return rowToObject(data[i], headers);
+  }
+  return null;
+}
 // idColumn の値が一致する行を更新、無ければ追加する（行番号は外部キーにしない）
 function p1Upsert(sheetName, idColumn, record) {
   const lock = LockService.getScriptLock();
@@ -12644,7 +12783,7 @@ function getGoalTreeInner_(studentEmail) {
   try { agg = aggregateWeeklyActual(studentEmail, weekStart); } catch (e) { agg = {}; }
 
   const today = formatDate(new Date());
-  const goals = p1List("Goals", studentEmail)
+  const goals = p1ListMine_("Goals", studentEmail)
     .filter(g => p1Status_(g.status, "ACTIVE") !== "ARCHIVED")
     .sort((a, b) => (Number(a.priority) || 99) - (Number(b.priority) || 99))
     .map(g => {
@@ -12652,7 +12791,7 @@ function getGoalTreeInner_(studentEmail) {
       const pace = computePace(g.start_date, g.end_date, g.current_value, g.target_value, g.unit, today);
       return Object.assign({}, g, { pace: pace, paceLabel: PACE_STATUS_LABEL[pace.status] || "不明" });
     });
-  const weeklies = p1List("WeeklyGoals", studentEmail)
+  const weeklies = p1ListMine_("WeeklyGoals", studentEmail)
     .filter(w => p1Status_(w.status, "ACTIVE") !== "ARCHIVED");
 
   // 週間目標を3か月目標の下にぶら下げる。どの目標にも紐づかないものは orphans に入れ、
@@ -12746,7 +12885,7 @@ function saveGoal(studentEmail, body) {
   const title = p1Text_(body.title, 120).trim();
   if (!title) return { ok: false, error: "目標のタイトルを入力してください" };
   // 1人あたりの上限。3か月で追える数には限りがあるし、行の量産も防げる
-  if (!id && p1List("Goals", studentEmail).filter(g => p1Status_(g.status, "ACTIVE") === "ACTIVE").length >= 10) {
+  if (!id && p1ListMine_("Goals", studentEmail).filter(g => p1Status_(g.status, "ACTIVE") === "ACTIVE").length >= 10) {
     return { ok: false, error: "3か月目標は10件までです。使わないものを完了/保留にしてください" };
   }
 
@@ -12796,7 +12935,7 @@ function saveWeeklyGoal(studentEmail, body) {
     if (!sp) return { ok: false, error: "紐づけ先のスプリントが見つかりません" };
     if (!link) link = String(sp.link_quarterly_goal_id || "");
   }
-  if (!id && p1List("WeeklyGoals", studentEmail).filter(w => p1Status_(w.status, "ACTIVE") === "ACTIVE").length >= 30) {
+  if (!id && p1ListMine_("WeeklyGoals", studentEmail).filter(w => p1Status_(w.status, "ACTIVE") === "ACTIVE").length >= 30) {
     return { ok: false, error: "週間目標は30件までです" };
   }
 
@@ -12846,7 +12985,7 @@ function archiveGoalItem(studentEmail, body) {
     p1Upsert("Goals", "quarterly_goal_id", { quarterly_goal_id: row.quarterly_goal_id, status: status });
     // ぶら下がっている週間目標も一緒に片付ける（親だけ消えて子が残らないように）
     if (status === "ARCHIVED") {
-      p1List("WeeklyGoals", studentEmail)
+      p1ListMine_("WeeklyGoals", studentEmail)
         .filter(w => String(w.link_quarterly_goal_id) === String(row.quarterly_goal_id))
         .forEach(w => p1Upsert("WeeklyGoals", "weekly_goal_id", { weekly_goal_id: w.weekly_goal_id, status: "ARCHIVED" }));
     }
@@ -12884,7 +13023,7 @@ function effectiveGoals(studentEmail, user) {
   ].filter(g => g.goal);
   if (!hasFeature(user, P1_FEATURE_KEY)) return legacy;
   try {
-    const rows = p1List("Goals", studentEmail)
+    const rows = p1ListMine_("Goals", studentEmail)
       .filter(g => String(g.status || "ACTIVE").toUpperCase() === "ACTIVE")
       .sort((a, b) => (Number(a.priority) || 99) - (Number(b.priority) || 99));
     if (!rows.length) return legacy;
@@ -12904,15 +13043,15 @@ function effectiveGoalsText(studentEmail, user) {
 // 参照件数を確認する。dryRun=true なら数えるだけで消さない。
 // 消せるのは「自分が持ち主」かつ「ARCHIVED」の行だけ。ACTIVE は絶対に消さない。
 function p1PurgeArchived(studentEmail, dryRun) {
-  const goals = p1List("Goals", studentEmail).filter(g => String(g.status).toUpperCase() === "ARCHIVED");
-  const weeklies = p1List("WeeklyGoals", studentEmail).filter(w => String(w.status).toUpperCase() === "ARCHIVED");
-  const allWeeklies = p1List("WeeklyGoals", studentEmail);
+  const goals = p1ListMine_("Goals", studentEmail).filter(g => String(g.status).toUpperCase() === "ARCHIVED");
+  const weeklies = p1ListMine_("WeeklyGoals", studentEmail).filter(w => String(w.status).toUpperCase() === "ARCHIVED");
+  const allWeeklies = p1ListMine_("WeeklyGoals", studentEmail);
   const logs = sheetToObjects(getSheet("DailyLog")).filter(l => l.student_email === studentEmail);
-  const tasks = p1List("Tasks", studentEmail);
+  const tasks = p1ListMine_("Tasks", studentEmail);
   // ★「＋ 追加する」で入れた実績も参照として数える★（2026-08-05）
   //   ここを見ていなかったため、実績が GoalEntries にしか無い目標が
   //   「参照なし＝消してよい」と判定されていた。履歴ごと消えるところだった。
-  const entries = p1List("GoalEntries", studentEmail)
+  const entries = p1ListMine_("GoalEntries", studentEmail)
     .filter(function (e) { return !String(e.deleted_at || "").trim(); });
 
   // 各目標が他から参照されていないか数える。1件でもあれば消さない
@@ -13565,7 +13704,7 @@ function saveDayPlan(studentEmail, body) {
   if (date > today) timing = "BEFORE_DAY";
   else if (date < today) {
     timing = "AFTER_DAY";
-    const evaluated = p1List("DailyOpsReport", studentEmail).some(function (r) {
+    const evaluated = p1ListMine_("DailyOpsReport", studentEmail).some(function (r) {
       return String(r.report_date).slice(0, 10) === date; });
     if (evaluated) timing = "AFTER_EVALUATION";
   }
@@ -13749,7 +13888,7 @@ function aggregateWeeklyActual(studentEmail, weekStart) {
   end.setUTCDate(end.getUTCDate() + 6);
   const sunday = end.toISOString().substring(0, 10);
 
-  const weeklies = p1List("WeeklyGoals", studentEmail)
+  const weeklies = p1ListMine_("WeeklyGoals", studentEmail)
     .filter(w => String(w.status || "ACTIVE").toUpperCase() !== "ARCHIVED");
   if (!weeklies.length) return {};
 
@@ -13766,7 +13905,7 @@ function aggregateWeeklyActual(studentEmail, weekStart) {
   // 「＋」で足した実績（時間の記録ではないもの）。この週のぶんだけ拾う
   const entryByGoal = {};
   try {
-    p1List("GoalEntries", studentEmail).forEach(function (e) {
+    p1ListMine_("GoalEntries", studentEmail).forEach(function (e) {
       if (String(e.deleted_at || "").trim()) return;
       const wid = String(e.weekly_goal_id || "");
       if (!wid) return;
@@ -15287,7 +15426,7 @@ const ADMIN_SECRET_ALLOWLIST = {
   // 一斉送信（Kaiの明示的な要望により残す）
   adminBroadcastLine:1, adminBroadcastLinePending:1, adminSendStudentCampaign:1,
   // セットアップ・保守
-  adminSetupTriggers:1, adminInstallTrigger:1, adminSetupPhase1:1, adminSetupAuth:1, adminPhase4DryRun:1, adminLegacyBackfill:1, adminWritePathStats:1, adminIssueTestSession:1, adminDropTestSessions:1, adminOpsSelfTest:1, adminActualMinutesAudit:1, adminXpCorrection:1, adminStreakRecalc:1, adminGrantFeature:1, adminUserDiag:1, adminReportScoreDryRun:1, adminReportGenTest:1, adminScoreConsistency:1, adminFinalizeOps:1, adminUnfinalizeOps:1, adminSmpDump:1, adminSmpWarmAll:1, adminLevelAudit:1, adminXpRestore:1, adminCleanupPlusLogs:1, adminClassAudit:1, adminRecolorCalendar:1, adminFixTokenVersion:1, adminPurgeChallenges:1, adminJiroBackfill:1, adminJiroReset:1, adminScoreDist:1, adminCommunityTiming:1, adminOpsScoreAudit:1, adminListTriggers:1, adminHomeTiming:1, adminScreenTiming:1, adminQuickLogTimings:1, adminScoreTrace:1, adminJiroSignals:1,
+  adminSetupTriggers:1, adminInstallTrigger:1, adminSetupPhase1:1, adminSetupAuth:1, adminPhase4DryRun:1, adminLegacyBackfill:1, adminWritePathStats:1, adminIssueTestSession:1, adminDropTestSessions:1, adminOpsSelfTest:1, adminActualMinutesAudit:1, adminXpCorrection:1, adminStreakRecalc:1, adminGrantFeature:1, adminUserDiag:1, adminReportScoreDryRun:1, adminReportGenTest:1, adminScoreConsistency:1, adminFinalizeOps:1, adminUnfinalizeOps:1, adminSmpDump:1, adminSmpWarmAll:1, adminLevelAudit:1, adminXpRestore:1, adminCleanupPlusLogs:1, adminClassAudit:1, adminRecolorCalendar:1, adminFixTokenVersion:1, adminPurgeChallenges:1, adminJiroBackfill:1, adminJiroReset:1, adminScoreDist:1, adminCommunityTiming:1, adminOpsScoreAudit:1, adminListTriggers:1, adminHomeTiming:1, adminScreenTiming:1, adminQuickLogTimings:1, adminScoreTrace:1, adminJiroSignals:1, adminLogTimes:1, adminJiroFound:1, adminReportGenFailures:1,
   authSetMode:1, authSetEnforce:1, authRoleApply:1, authRoleDryRun:1, authRevokeAll:1,
   authCleanupTestData:1, adminPurgeTestUsers:1, adminMigrateTasks:1, authBreakerReset:1, rotateSessionSecret:1,
   p1Backup:1, p1BackupInfo:1, p1PurgeArchived:1, weeklyBackup:1
@@ -15949,7 +16088,7 @@ function getSprintsInner_(studentEmail, body) {
   const chk = p1RequireUser(studentEmail);
   if (!chk.ok) return chk;
   const today = formatDate(new Date());
-  const rows = p1List("Sprints", studentEmail)
+  const rows = p1ListMine_("Sprints", studentEmail)
     .filter(function (x) { return p1Status_(x.status, "ACTIVE") !== "ARCHIVED"; })
     .map(function (x) {
       const sd = String(x.start_date || "").slice(0, 10);
@@ -15981,7 +16120,7 @@ function getSprintsInner_(studentEmail, body) {
     .sort(function (a, b) { return String(b.start_date).localeCompare(String(a.start_date)); });
 
   // 進捗は、いま進んでいるSprintだけ出す（終わったものまで毎回集計すると重い）
-  const weeklies = p1List("WeeklyGoals", studentEmail);
+  const weeklies = p1ListMine_("WeeklyGoals", studentEmail);
   rows.forEach(function (r) {
     if (!r.isCurrent) { r.progress = null; return; }
     try { r.progress = sprintProgress_(studentEmail, r, weeklies); }
@@ -16285,7 +16424,7 @@ function migrateTasksToSheet(studentEmail, body) {
     });
     if (!jr || !String(jr.actions || "").trim()) {
       return { ok: true, dryRun: true, date: date, source: "Journal.actions",
-               counts: { before: p1List("Tasks", studentEmail).length, incoming: 0,
+               counts: { before: p1ListMine_("Tasks", studentEmail).length, incoming: 0,
                          willCreate: 0, alreadySame: 0, conflict: 0, skipped: 0 },
                note: "この日の Journal.actions が空です。移行するものがありません" };
     }
@@ -16306,7 +16445,7 @@ function migrateTasksToSheet(studentEmail, body) {
   }
   const confirm = String((body && body.confirm) || "") === "yes";
 
-  const existing = p1List("Tasks", studentEmail);
+  const existing = p1ListMine_("Tasks", studentEmail);
   const byId = {};
   existing.forEach(function (t) { byId[String(t.task_id)] = t; });
 
@@ -16367,7 +16506,7 @@ function migrateTasksToSheet(studentEmail, body) {
     created++;
   });
 
-  const after = p1List("Tasks", studentEmail).length;
+  const after = p1ListMine_("Tasks", studentEmail).length;
   authAudit("TASK_MIGRATE", { result: "SUCCESS", action: "migrateTasksToSheet",
             failureReason: "before=" + counts.before + " created=" + created +
                            " conflict=" + counts.conflict + " after=" + after });
@@ -16387,7 +16526,7 @@ function getTasks(studentEmail, body) {
   const now = Date.now();
   const includeDone = String((body && body.includeDone) || "") === "1";
 
-  let rows = p1List("Tasks", studentEmail).filter(function (t) {
+  let rows = p1ListMine_("Tasks", studentEmail).filter(function (t) {
     if (String(t.deleted_at || "").trim()) return false;
     if (!includeDone && normalizeTaskStatus(t.status) === "DONE") return false;
     return true;
@@ -16787,7 +16926,7 @@ function migrateLocalTasks(studentEmail, body) {
     return { ok: true, skipped: true, reason: "already_migrated", migrated_at: String(user.task_migrated_at) };
   }
 
-  const existing = p1List("Tasks", studentEmail);
+  const existing = p1ListMine_("Tasks", studentEmail);
   const byId = {};
   const byDateTitle = {};
   existing.forEach(t => {
