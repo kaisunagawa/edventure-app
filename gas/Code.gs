@@ -4967,8 +4967,12 @@ function saveLogMulti(studentEmail, body) {
     sheet.getRange(startRow, idx.time + 1, newRows.length, 1).setNumberFormat("@");
   }
 
-  // 各ブロックをKaiのカレンダーへ直接書き込む（端末・トークンに依存しない確実な反映）
-  blocks.forEach(function (b) { writeRecordToOwnerCalendar(studentEmail, targetDate, b, body.task, body.time_classification); });
+  // ★カレンダーは控えておいて、あとでまとめて書く★（2026-08-07 実測）
+  //   1件ずつの保存はすでにキューを通していたのに、この「まとめて記録」の
+  //   経路だけ直接書き込みが残っていた。ブロック数ぶんカレンダーAPIを
+  //   叩くので、2ブロックで15.8秒、1ブロックでも5〜7秒かかっていた。
+  //   （1分おきの flushOwnerCalendarQueue が拾って書く）
+  blocks.forEach(function (b) { queueOwnerCalendarWrite_(studentEmail, targetDate, b, body.task, body.time_classification); });
 
   if (isPast) return { ok: true, xp_gained: 0, updated: updatedAny, count: blocks.length };
 
