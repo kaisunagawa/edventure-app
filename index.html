@@ -1446,12 +1446,64 @@ const HIDDEN_JIRO = [
     cond:"日次スコア90点以上が3日連続",   personality:"情熱的・負けず嫌い",
     line:"「限界？そんなの、昨日の話！」", note:"勢いが止まらないスピードスター。" }
 ];
-// 新しく会えたジローのお知らせ文（サーバーが jiro_gained で返してくる）
-function jiroGainedMsg(res) {
+// ★新しく会えたら、真ん中に出して知らせる★（2026-08-06 Kai要望）
+//   小さなお知らせだと見逃す。何が起きたのか・これからどうなるのかを
+//   その場で伝える。サーバーが jiro_gained で返してくる。
+function announceJiroFound(res) {
   const g = (res && res.jiro_gained) || [];
-  if (!g.length) return "";
-  if (g.length === 1) return `🎉 ${g[0].name} に会えました！（図鑑に追加）`;
-  return `🎉 新しいジローに ${g.length} 体 会えました！（図鑑に追加）`;
+  if (!g.length) return;
+  try { window.dispatchEvent(new CustomEvent("jiroku:jirofound", { detail: g })); } catch (e) {}
+}
+
+// 会えたことを真ん中に出す。閉じるまで消えない（見逃さないように）
+function JiroFoundModal() {
+  const [queue, setQueue] = useState([]);
+  useEffect(() => {
+    const on = (e) => setQueue(q => q.concat(e.detail || []));
+    window.addEventListener("jiroku:jirofound", on);
+    return () => window.removeEventListener("jiroku:jirofound", on);
+  }, []);
+  if (!queue.length) return null;
+  const g = queue[0];
+  const j = HIDDEN_JIRO.find(x => x.id === g.id) || {};
+  const c = RARITY_COLOR[g.rarity] || "var(--accent)";
+  const rest = queue.length - 1;
+  return ReactDOM.createPortal(html`
+    <div style=${{position:"fixed",inset:0,height:"100dvh",background:"rgba(0,0,0,0.62)",zIndex:900,
+                  display:"flex",alignItems:"center",justifyContent:"center",padding:20}}
+      onClick=${e=>{ if(e.target===e.currentTarget) setQueue(q=>q.slice(1)); }}>
+      <div style=${{background:"var(--card)",borderRadius:20,padding:"24px 22px 20px",width:"100%",
+                    maxWidth:320,boxSizing:"border-box",textAlign:"center",
+                    boxShadow:"0 18px 50px rgba(0,0,0,0.35)"}}>
+        <div style=${{fontSize:11.5,fontWeight:800,color:c,letterSpacing:".06em",marginBottom:3}}>
+          ${g.no||""} ${g.rarity||""}</div>
+        <div style=${{fontSize:13,color:"var(--sub)",marginBottom:14}}>新しいジローに会えました</div>
+        <div style=${{position:"relative",width:150,height:150,margin:"0 auto 14px",borderRadius:"50%",
+                      overflow:"hidden",border:`3px solid ${c}`,
+                      boxShadow:`0 8px 26px color-mix(in srgb, ${c} 45%, transparent)`}}>
+          ${j.art
+            ? html`<img src=${j.art+"?v="+APP_BUILD} alt=${g.name}
+                     style=${{position:"absolute",inset:0,width:"100%",height:"100%",
+                              objectFit:"cover",display:"block"}}/>`
+            : html`<div style=${{position:"absolute",inset:0,display:"flex",alignItems:"center",
+                                 justifyContent:"center",fontSize:44,color:"var(--border)"}}>?</div>`}
+        </div>
+        <div style=${{fontSize:20,fontWeight:800,color:"var(--text)",lineHeight:1.35}}>${g.name}</div>
+        ${j.personality&&html`
+          <div style=${{fontSize:12,color:"var(--sub)",marginTop:4}}>${j.personality}</div>`}
+        ${j.line&&html`
+          <div style=${{fontSize:12.5,color:"var(--text)",marginTop:8,lineHeight:1.7}}>${j.line}</div>`}
+        <div style=${{background:"var(--bg)",borderRadius:12,padding:"11px 13px",margin:"16px 0 4px",
+                      fontSize:12,color:"var(--sub)",lineHeight:1.8,textAlign:"left"}}>
+          これから<b style=${{color:"var(--text)"}}>3日間</b>、ホーム画面にこの子が出ます。<br/>
+          そのあとは階級のジローくんに戻りますが、<b style=${{color:"var(--text)"}}>図鑑にはずっと残ります</b>。
+        </div>
+        ${rest>0&&html`
+          <div style=${{fontSize:11.5,color:c,fontWeight:700,marginTop:8}}>ほかにも ${rest} 体 会えています</div>`}
+        <button class="btn" style=${{marginTop:14}} onClick=${()=>setQueue(q=>q.slice(1))}>
+          ${rest>0?"次のジローを見る":"やった！"}</button>
+      </div>
+    </div>`, document.body);
 }
 const RARITY_COLOR = { Rare:"#3B82F6", Epic:"#8B5CF6", Legendary:"#D97706",
                        Mythic:"#DB2777", Secret:"#334155", Ultimate:"#CA8A04" };
@@ -5920,7 +5972,7 @@ function LogScreen({onToast, isActive}) {
       return;
     }
     if(res.xp_gained){ const lv=res.level_up?`  →  Lv.${res.level} へ！`:""; onToast(`+${res.xp_gained} XP 獲得${lv}`); }
-    const jm1=jiroGainedMsg(res); if(jm1) setTimeout(()=>onToast(jm1), 1800);
+    setTimeout(()=>announceJiroFound(res), 1200);
     else onToast(res.updated?"記録を上書きしました"
       :(blocks.length>1 ? blocks.length+"個の時間帯に保存しました"
         : (blockMinutes(blocks[0])>60 ? blocks[0]+" を1件として保存しました" : "保存しました")));
@@ -7877,7 +7929,7 @@ function TimerScreen({onToast, isActive}) {
     if(linkTaskId) completeTaskById(linkTaskId, calTitle);
     else completeTaskIfListed(task);
     if(res.xp_gained){ const lv=res.level_up?` → Lv.${res.level}！`:""; onToast(`+${res.xp_gained} XP 獲得${lv}`); }
-    const jm2=jiroGainedMsg(res); if(jm2) setTimeout(()=>onToast(jm2), 1800);
+    setTimeout(()=>announceJiroFound(res), 1200);
     else onToast(res.updated?"記録を更新しました":"記録しました");
     // タイマー記録は1時間枠ではなく「実際に集中した開始〜終了時刻」でカレンダーに書き戻す
     // （同じ時間帯キーを使うので、手動記録側で作ったイベントがあれば実測時刻に更新される）
@@ -10282,7 +10334,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260806-115526";
+const APP_BUILD = "20260806-115705";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
