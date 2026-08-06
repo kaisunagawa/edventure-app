@@ -1425,25 +1425,25 @@ const RANK_ART = {
 //   仕組みだけ先に動かして、絵が揃った日に差し込めばそのまま公開できる。
 const HIDDEN_JIRO = [
   { id:"night",    no:"No.101", name:"夜ふかしジロー", rarity:"Epic", art:"",
-    cond:"23:00〜5:00の記録が通算20件",  personality:"夜型・マイペース",
+    cond:"23:00〜5:00の記録が通算10件",  personality:"夜型・マイペース",
     line:"「今日はまだ始まったばかり。」", note:"夜になると本領発揮する夜行性ジロー。" },
   { id:"calm",     no:"No.102", name:"ととのえジロー", rarity:"Rare", art:"",
-    cond:"回復の記録が通算30件",          personality:"穏やか・癒し系",
+    cond:"回復の記録が通算5件",          personality:"穏やか・癒し系",
     line:"「大丈夫、ちゃんと休めてるよ。」", note:"心と体をととのえる達人ジロー。" },
   { id:"stack",    no:"No.103", name:"積み上げジロー", rarity:"Rare", art:"",
-    cond:"将来への投資の記録が通算50件",  personality:"真面目・コツコツ型",
+    cond:"将来への投資の記録が通算10件",  personality:"真面目・コツコツ型",
     line:"「未来の自分に、今をプレゼント。」", note:"小さな努力を積み重ねる研究者タイプ。" },
   { id:"straight", no:"No.104", name:"一直線ジロー",   rarity:"Epic", art:"",
-    cond:"目標に直結の記録が通算50件",    personality:"ストイック・一直線",
+    cond:"目標に直結の記録が通算10件",    personality:"ストイック・一直線",
     line:"「ブレずに、ゴールまで。」",     note:"無駄な寄り道はしないストイックジロー。" },
   { id:"kind",     no:"No.105", name:"思いやりジロー", rarity:"Rare", art:"",
-    cond:"人間関係の記録が通算20件",      personality:"優しい・サポート好き",
+    cond:"人間関係の記録が通算3件",      personality:"優しい・サポート好き",
     line:"「一緒なら、もっと頑張れるよね。」", note:"人を思いやることが大好きなジロー。" },
   { id:"support",  no:"No.106", name:"縁の下ジロー",   rarity:"Rare", art:"",
-    cond:"日常業務の記録が通算80件",      personality:"縁の下・責任感が強い",
+    cond:"日常業務の記録が通算15件",      personality:"縁の下・責任感が強い",
     line:"「ちゃんとやる、それが一番の近道。」", note:"目立たないけど欠かせない存在。" },
   { id:"turbo",    no:"No.107", name:"爆速ジロー",     rarity:"Epic", art:"",
-    cond:"日次スコア90点以上が7日連続",   personality:"情熱的・負けず嫌い",
+    cond:"日次スコア90点以上が3日連続",   personality:"情熱的・負けず嫌い",
     line:"「限界？そんなの、昨日の話！」", note:"勢いが止まらないスピードスター。" }
 ];
 // 新しく会えたジローのお知らせ文（サーバーが jiro_gained で返してくる）
@@ -10255,7 +10255,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260805-235302";
+const APP_BUILD = "20260806-110822";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 

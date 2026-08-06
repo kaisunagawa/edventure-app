@@ -12487,19 +12487,19 @@ const REST_CLASSES = { RECOVERY:1, RECOVERY_RELATIONSHIP:1 };
 // ══════════════════════════════════════════════════════════════════
 const HIDDEN_JIRO = [
   { id:"night",    no:"No.101", name:"夜ふかしジロー", rarity:"Epic",
-    key:"night",        need:20, cond:"23:00〜5:00の記録が通算20件" },
+    key:"night",        need:10, cond:"23:00〜5:00の記録が通算10件" },
   { id:"calm",     no:"No.102", name:"ととのえジロー", rarity:"Rare",
-    key:"RECOVERY",     need:30, cond:"回復の記録が通算30件" },
+    key:"RECOVERY",     need:5,  cond:"回復の記録が通算5件" },
   { id:"stack",    no:"No.103", name:"積み上げジロー", rarity:"Rare",
-    key:"ASSET_BUILD",  need:50, cond:"将来への投資の記録が通算50件" },
+    key:"ASSET_BUILD",  need:10, cond:"将来への投資の記録が通算10件" },
   { id:"straight", no:"No.104", name:"一直線ジロー",   rarity:"Epic",
-    key:"GOAL_DIRECT",  need:50, cond:"目標に直結の記録が通算50件" },
+    key:"GOAL_DIRECT",  need:10, cond:"目標に直結の記録が通算10件" },
   { id:"kind",     no:"No.105", name:"思いやりジロー", rarity:"Rare",
-    key:"RELATIONSHIP", need:20, cond:"人間関係の記録が通算20件" },
+    key:"RELATIONSHIP", need:3,  cond:"人間関係の記録が通算3件" },
   { id:"support",  no:"No.106", name:"縁の下ジロー",   rarity:"Rare",
-    key:"OPERATIONS",   need:80, cond:"日常業務の記録が通算80件" },
+    key:"OPERATIONS",   need:15, cond:"日常業務の記録が通算15件" },
   { id:"turbo",    no:"No.107", name:"爆速ジロー",     rarity:"Epic",
-    key:"hiscore7",     need:7,  cond:"日次スコア90点以上が7日連続" }
+    key:"hiscore7",     need:3,  cond:"日次スコア90点以上が3日連続" }
 ];
 
 // 記録の時刻が「夜ふかし」に当たるか（23時〜翌5時のはじまり）
