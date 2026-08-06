@@ -5972,10 +5972,10 @@ function LogScreen({onToast, isActive}) {
       return;
     }
     if(res.xp_gained){ const lv=res.level_up?`  →  Lv.${res.level} へ！`:""; onToast(`+${res.xp_gained} XP 獲得${lv}`); }
-    setTimeout(()=>announceJiroFound(res), 1200);
     else onToast(res.updated?"記録を上書きしました"
       :(blocks.length>1 ? blocks.length+"個の時間帯に保存しました"
         : (blockMinutes(blocks[0])>60 ? blocks[0]+" を1件として保存しました" : "保存しました")));
+    setTimeout(()=>announceJiroFound(res), 1200);
     // Googleカレンダーへ書き戻し（連携済みのときだけ・待たずに裏で実行）。
     // 元の予定とタイトルが完全一致するブロックだけ、新規作成せずその予定に
     // ✅を追加する（内容が違う場合は別イベントとして作成し、予定の文言を守る）
@@ -7929,8 +7929,8 @@ function TimerScreen({onToast, isActive}) {
     if(linkTaskId) completeTaskById(linkTaskId, calTitle);
     else completeTaskIfListed(task);
     if(res.xp_gained){ const lv=res.level_up?` → Lv.${res.level}！`:""; onToast(`+${res.xp_gained} XP 獲得${lv}`); }
-    setTimeout(()=>announceJiroFound(res), 1200);
     else onToast(res.updated?"記録を更新しました":"記録しました");
+    setTimeout(()=>announceJiroFound(res), 1200);
     // タイマー記録は1時間枠ではなく「実際に集中した開始〜終了時刻」でカレンダーに書き戻す
     // （同じ時間帯キーを使うので、手動記録側で作ったイベントがあれば実測時刻に更新される）
     upsertCalendarEvent(formatDateStr(st), timeBlock, st.toISOString(), endDt.toISOString(), calTitle, null, false, logTimeClass);
@@ -10334,7 +10334,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260806-115911";
+const APP_BUILD = "20260806-120110";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
