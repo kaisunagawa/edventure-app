@@ -3867,6 +3867,19 @@ function aiCapExceeded(feature, email, limitPer6h) {
   } catch (e) { return false; }
 }
 
+// ★測った秒数を残す★（2026-08-06）
+//   返り値に入れるだけでは端末に届くだけで、こちらから読めない。
+//   直近5回ぶんの秒数だけを残す。記録の本文は一切残さない。
+function quickLogNoteTiming_(ms) {
+  try {
+    const props = PropertiesService.getScriptProperties();
+    const prev = JSON.parse(props.getProperty("QUICKLOG_TIMINGS") || "[]");
+    prev.push({ at: new Date().toISOString().slice(11, 19), ms: ms });
+    props.setProperty("QUICKLOG_TIMINGS", JSON.stringify(prev.slice(-5)));
+  } catch (e) { /* 測れなくても記録は成功させる */ }
+  return ms;
+}
+
 function quickLog(studentEmail, body) {
   const _t0 = Date.now();
   // 自己経営力は計算に時間がかかるので取っておいている。書き換えたら
@@ -4100,10 +4113,10 @@ ${text}
     savedAll: saved,
     fallback: usedFallback,   // AI解析に失敗し、全文をそのまま1件保存した場合true
     xp_gained: totalXp, level_up: leveled, level: lastLevel,
-    ms: { 下ごしらえ: (typeof _tPrep !== "undefined" ? _tPrep - _t0 : null),
+    ms: quickLogNoteTiming_({ 下ごしらえ: (typeof _tPrep !== "undefined" ? _tPrep - _t0 : null),
           AI解析: (typeof _tAi0 !== "undefined" ? _tSave0 - _tAi0 : null),
           保存: Date.now() - _tSave0,
-          合計: Date.now() - _t0, 件数: saved.length }
+          合計: Date.now() - _t0, 件数: saved.length })
   };
 }
 
@@ -12898,7 +12911,12 @@ const JIRO_WORDS = {
   cook:       ["料理","自炊","ごはんを作","夕飯を作","お弁当","作り置き","キッチン"],
   tidy:       ["片付け","整理","掃除","断捨離","収納","模様替え"],
   adventure:  ["登山","ハイキング","散策","冒険","street","街歩き","探検"],
-  boss:       ["経営","打ち合わせ","商談","提案","営業","会議","プレゼン","面接"]
+  boss:       ["経営","打ち合わせ","商談","提案","営業","会議","プレゼン","面接"],
+  muscle:     ["筋トレ","ジム","ウエイト","ベンチプレス","スクワット","デッドリフト","懸垂","腹筋","プロテイン","増量"],
+  party:      ["飲み会","友達","友人","仲間","集まり","懇親","打ち上げ","歓迎会","パーティー","女子会","ランチ会","food会"],
+  horse:      ["乗馬","馬に","馬場","ホースライディング","厩舎","乗馬クラブ"],
+  dog:        ["犬","わんこ","ワンちゃん","散歩","ドッグラン","柴犬","愛犬","トリミング"],
+  cat:        ["猫","ねこ","ネコ","にゃん","キャット","愛猫","保護猫"]
 };
 
 // その記録が、どのキャラの言葉に当たるかを返す（複数可）
@@ -12949,6 +12967,10 @@ const HIDDEN_JIRO = [
     key:"OPERATIONS", need:15, cond:"日常業務の記録が通算15件" },
   { id:"stack", no:"No.113", name:"積み上げジロー", rarity:"Common", common:true,
     key:"ASSET_BUILD", need:10, cond:"将来への投資の記録が通算10件" },
+  { id:"dog", no:"No.114", name:"犬ジロー", rarity:"Common",
+    key:"w_dog", need:3, cond:"犬・お散歩の記録が3回" },
+  { id:"cat", no:"No.115", name:"猫ジロー", rarity:"Common",
+    key:"w_cat", need:3, cond:"猫との時間の記録が3回" },
   { id:"painter", no:"No.201", name:"ペインタージロー", rarity:"Rare",
     key:"w_painter", need:3, cond:"絵・デザインの記録が3回" },
   { id:"musician", no:"No.202", name:"ミュージシャンジロー", rarity:"Rare",
@@ -12967,6 +12989,10 @@ const HIDDEN_JIRO = [
     key:"RELATIONSHIP", need:3, cond:"人間関係の記録が通算3件" },
   { id:"finance", no:"No.209", name:"ファイナンスジロー", rarity:"Rare",
     key:"w_finance", need:3, cond:"お金まわりの記録が3回" },
+  { id:"party", no:"No.210", name:"戯れジロー", rarity:"Rare",
+    key:"w_party", need:3, cond:"友だち・仲間と過ごした記録が3回" },
+  { id:"horse", no:"No.211", name:"馬ジロー", rarity:"Rare",
+    key:"w_horse", need:3, cond:"乗馬の記録が3回" },
   { id:"scientist", no:"No.301", name:"サイエンティストジロー", rarity:"Epic",
     key:"w_scientist", need:2, cond:"分析・研究の記録が2回" },
   { id:"mechanic", no:"No.302", name:"メカニックジロー", rarity:"Epic",
@@ -12979,6 +13005,8 @@ const HIDDEN_JIRO = [
     key:"w_adventure", need:2, cond:"登山・街歩きの記録が2回" },
   { id:"nightguard", no:"No.306", name:"ナイトガードジロー", rarity:"Epic",
     key:"night", need:25, cond:"23:00〜5:00の記録が通算25件" },
+  { id:"muscle", no:"No.307", name:"ムキムキジロー", rarity:"Epic",
+    key:"w_muscle", need:10, cond:"筋トレ・ジムの記録が10回" },
   { id:"turbo", no:"No.401", name:"爆速ジロー", rarity:"Legendary",
     key:"hiscore7", need:3, cond:"日次スコア90点以上が3日連続" },
   { id:"perfect", no:"No.402", name:"パーフェクトジロー", rarity:"Legendary",
