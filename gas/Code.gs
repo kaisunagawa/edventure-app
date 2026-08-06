@@ -1211,7 +1211,13 @@ function doGet(e) {
       case "adminTagCohortByJoinDate": result = adminTagCohortByJoinDate(e.parameter.coachEmail, e.parameter.date, e.parameter.cohort); break;
       case "adminListRecentRegistrations": result = adminListRecentRegistrations(e.parameter.coachEmail, e.parameter.days); break;
       case "adminBackfillReports": result = adminBackfillReports(e.parameter.coachEmail, e.parameter.days, e.parameter.limit, e.parameter.dryRun); break;
-      case "adminOpsHealthCheck": result = verifyAdmin(e.parameter.coachEmail) ? (dailyOpsHealthCheck(e.parameter.dryRun === "1") || {ok:true}) : {ok:false,error:"not admin"}; break;
+      // ★既定は送らない★（2026-08-06 Kai報告「運営レポートが3回届いた」）
+      //   これはLINEへ運営レポートを送る処理。状況確認のつもりで素で叩くと、
+      //   叩いた回数だけKaiのLINEに届く（実際に1晩で3回送ってしまった）。
+      //   送りたいときだけ send=1 を明示する。
+      case "adminOpsHealthCheck": result = verifyAdmin(e.parameter.coachEmail)
+        ? (dailyOpsHealthCheck(e.parameter.send !== "1") || {ok:true})
+        : {ok:false,error:"not admin"}; break;
       case "adminInstallTrigger": result = adminInstallTrigger(e.parameter.coachEmail, e.parameter.handler, e.parameter.replace); break;
       case "adminSendStudentCampaign": result = adminSendStudentCampaign(e.parameter.coachEmail, e.parameter); break;
       case "adminSystemHealth": result = verifyAdmin(e.parameter.coachEmail) ? systemHealthCheck(e.parameter.deep === "1") : {ok:false,error:"not admin"}; break;
