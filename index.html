@@ -9570,20 +9570,29 @@ function GuideBookSheet({myLevel,jiro,onClose}) {
                   <div style=${{fontSize:10,fontWeight:800,lineHeight:1.35,
                                 color:have?"var(--text)":"var(--sub)"}}>
                     ${shown ? j.name : "？？？ジロー"}</div>
+                  <!-- ★出現条件はどのカードにも必ず出す★（2026-08-06 Kai要望）
+                       会えたあとも「どうやって会えたか」が分かるように残す。 -->
+                  <div style=${{display:"flex",alignItems:"flex-start",gap:4,marginTop:4}}>
+                    <span style=${{flexShrink:0,fontSize:7.5,fontWeight:800,color:rc,
+                                   background:`color-mix(in srgb, ${rc} 15%, transparent)`,
+                                   borderRadius:4,padding:"1px 4px",lineHeight:1.5,whiteSpace:"nowrap"}}>条件</span>
+                    <span style=${{flex:1,minWidth:0,fontSize:8.5,color:"var(--sub)",lineHeight:1.5}}>
+                      ${j.cond}</span>
+                  </div>
                   ${have
-                    ? html`<div style=${{fontSize:8.8,color:"var(--sub)",lineHeight:1.5,marginTop:3}}>
-                             ${j.personality}<br/>${j.line}</div>`
-                    : html`
-                      <div style=${{fontSize:8.5,color:"var(--sub)",lineHeight:1.5,marginTop:3}}>${j.cond}</div>
-                      ${pg.need ? html`
+                    ? html`
+                      <div style=${{fontSize:8.5,fontWeight:800,color:rc,marginTop:4}}>✓ 達成ずみ</div>
+                      <div style=${{fontSize:8.8,color:"var(--sub)",lineHeight:1.5,marginTop:2}}>
+                        ${j.personality}<br/>${j.line}</div>`
+                    : (pg.need ? html`
                         <div style=${{marginTop:5}}>
                           <div style=${{height:4,borderRadius:4,background:"var(--border)",overflow:"hidden"}}>
-                            <div style=${{height:"100%",width:Math.round(pg.now/pg.need*100)+"%",
+                            <div style=${{height:"100%",width:Math.round(Math.min(1,pg.now/pg.need)*100)+"%",
                                           background:rc,borderRadius:4}}/>
                           </div>
                           <div style=${{fontSize:8,color:"var(--faint)",marginTop:3,fontWeight:700}}>
-                            ${pg.now} / ${pg.need}</div>
-                        </div>` : ""}`}
+                            あと ${Math.max(0,pg.need-pg.now)}（${pg.now} / ${pg.need}）</div>
+                        </div>` : "")}
                 </div>`;
             })}
           </div>
@@ -10455,7 +10464,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260806-130337";
+const APP_BUILD = "20260806-130715";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
