@@ -1644,6 +1644,45 @@ const RARITY_COLOR = { Common:"#0E9F6E", Rare:"#3B82F6", Epic:"#8B5CF6", Legenda
 // 版（APP_BUILD）をURLに付けて別物として取り直させる。
 // ★関数にしておくこと★ RANK_ART は APP_BUILD より前にあるので、
 //   定数の中で APP_BUILD を参照すると「初期化前に参照した」で落ちる。
+// ★絵の下端の位置★（2026-08-06 Kai指摘「名前が絵にかぶる」）
+//   絵は1枚ずつ余白の量がちがう。下いっぱいまで描かれている子だけ、
+//   名前の位置をその分だけ下げる。かぶっていない子は動かさない。
+//   値は各PNGの「不透明な部分の下端 ÷ 画像の高さ」。0.86以下は既定でよいので載せない。
+//   測り直すとき：assets の PNG のアルファ下端を測って書き換える。
+const ART_BOTTOM = {
+  "assets/jiro/photo.png":0.953,
+  "assets/jiro/athlete.png":0.951,
+  "assets/jiro/calm.png":0.951,
+  "assets/jiro/coach.png":0.951,
+  "assets/jiro/healer.png":0.951,
+  "assets/jiro/horse.png":0.951,
+  "assets/jiro/programmer.png":0.951,
+  "assets/jiro/traveler.png":0.951,
+  "assets/jiro/kind.png":0.948,
+  "assets/jiro/musician.png":0.948,
+  "assets/jiro/scientist.png":0.938,
+  "assets/rank/challenger.png":0.938,
+  "assets/rank/rookie.png":0.938,
+  "assets/rank/consistent.png":0.932,
+  "assets/jiro/nightguard.png":0.930,
+  "assets/jiro/yoga.png":0.930,
+  "assets/rank/expert.png":0.917,
+  "assets/rank/master.png":0.917,
+  "assets/jiro/painter.png":0.906,
+  "assets/jiro/mechanic.png":0.901,
+  "assets/rank/legend.png":0.885,
+  "assets/jiro/muscle.png":0.883,
+  "assets/jiro/finance.png":0.880,
+  "assets/jiro/tidy.png":0.878,
+  "assets/rank/ultimate.png":0.878,
+  "assets/jiro/cook.png":0.875,
+  "assets/jiro/reader.png":0.875,
+  "assets/jiro/cafe.png":0.870,
+  "assets/jiro/study2.png":0.870,
+  "assets/jiro/adventure.png":0.862,
+  "assets/jiro/boss.png":0.862,
+};
+
 function rankArt(name) {
   const p = RANK_ART[name];
   return p ? (p + "?v=" + APP_BUILD) : "";
@@ -3643,8 +3682,13 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
         const featJ = picked
           || ((!pickedJiro && feat) ? (owned.find(x => x.id === feat.id) || null) : null);
         const showRank = !featJ;
-        const art  = (!showRank && featJ) ? (featJ.art + "?v=" + APP_BUILD)
-                             : (rank ? rankArt(rank.name) : "");
+        const artPath = (!showRank && featJ) ? featJ.art : (rank ? (RANK_ART[rank.name] || "") : "");
+        const art  = artPath ? (artPath + "?v=" + APP_BUILD) : "";
+        // 名前を出す高さ。下いっぱいまで描かれている子だけ、その分だけ下げる。
+        //   絵は118pxの枠に上下-14pxで置いてあるので、絵の下端は 118*比率-14。
+        //   枠の下(90px)を越えたぶんだけ名前を逃がす。かぶっていない子は11pxのまま。
+        const artBottomPx = 118 * (ART_BOTTOM[artPath] || 0.85) - 14;
+        const nameBottom = -Math.min(23, Math.max(11, artBottomPx - 90 + 14));
         // タップで次の子へ（階級 → 会えた子 → …と回る）
         const cycle = () => {
           if (!owned.length) return;
@@ -3659,7 +3703,8 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
         const forNxt= game ? getXpForNextLevel(game.xp) : 0;
         const pct = forNxt ? Math.max(3, Math.min(100, Math.round(inLv / forNxt * 100))) : 100;
         return html`
-        <div style=${{display:"flex",alignItems:"center",gap:11,marginBottom:14}}>
+        <!-- 名前を下げたぶん、下に少しだけ余白を足す（かぶり回避・2026-08-06） -->
+        <div style=${{display:"flex",alignItems:"center",gap:11,marginBottom:18}}>
           ${art
             /* 隠しジローも背景を抜いてあるので、階級のキャラと同じ置き方にする
                （2026-08-06 Kai指摘。丸枠にすると階級のときと形が変わって落ち着かない）
@@ -3675,7 +3720,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
                        独立した帯にすると1段まるごと増える。絵の余白に重ねれば高さは増えない。 -->
                   <!-- 階級のときも名前を出す。押すと切り替わることが分かるように、
                        いま誰が出ているかを必ず1行で示す（2026-08-06 Kai指摘） -->
-                  <span style=${{position:"absolute",left:0,right:0,bottom:-11,
+                  <span style=${{position:"absolute",left:0,right:0,bottom:nameBottom,
                                  fontSize:9,fontWeight:700,lineHeight:1.2,textAlign:"center",
                                  color:"rgba(255,255,255,0.82)",overflow:"hidden",
                                  textOverflow:"ellipsis",whiteSpace:"nowrap",display:"block"}}>
@@ -10691,7 +10736,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260806-151806";
+const APP_BUILD = "20260806-152847";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
