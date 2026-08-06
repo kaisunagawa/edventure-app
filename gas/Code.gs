@@ -1819,8 +1819,17 @@ function getReportList(studentEmail) {
 // 渡されなかった場合のみ、5分間のCacheServiceキャッシュを使う（ステータスは
 // 日単位で減衰するスコアなので、数分の遅延は実害がない）
 // ログ保存直後にステータスキャッシュを無効化する（次回計算時に最新のDailyLogで再計算される）
-function invalidateStatusCache() {
+function invalidateStatusCache(studentEmail) {
   try { CacheService.getScriptCache().remove("all_statuses_v1"); } catch (e) { /* ignore */ }
+  // ★起動データの持ち回しも一緒に捨てる★（2026-08-06）
+  //   記録や分類を変えたのに、古いホームが最大90秒出続けるのを防ぐ。
+  //   呼び出し元がメールを渡していれば、その人ぶんだけ捨てる。
+  if (studentEmail) { try { CacheService.getScriptCache().remove(homeCacheKey_(studentEmail)); } catch (e) {} }
+}
+
+// 起動データ（getHomeData）を短時間だけ持ち回すための鍵
+function homeCacheKey_(studentEmail) {
+  return "home_v1_" + sha256Hex(String(studentEmail)).slice(0, 32);
 }
 
 function computeAllStatuses(preloadedLogObjects) {
@@ -1917,6 +1926,16 @@ function computeAllStatuses(preloadedLogObjects) {
 // 1本3〜4秒×待ち行列＝体感がとても遅かった。1本にまとめ、さらに実行内の
 // シート読取キャッシュで同じシートの読み直しを省くことで大幅に短縮する
 function getHomeData(studentEmail) {
+  // ★90秒だけ持ち回す★（2026-08-06 Kai報告「読み込みが遅い」）
+  //   実測で13秒かかっていた。内訳は1か所ではなく、13個の集計が
+  //   それぞれ別のシートを読むため（GASはシート1枚読むだけで0.5〜1秒かかる）。
+  //   記録・分類・タスクを変えたときは invalidateStatusCache でその場で捨てるので、
+  //   古いホームが残ることはない。何もしていない間の開き直しだけが速くなる。
+  const _ck = homeCacheKey_(studentEmail);
+  try {
+    const _hit = CacheService.getScriptCache().get(_ck);
+    if (_hit) { const o = JSON.parse(_hit); o.cached = true; return o; }
+  } catch (e) { /* 壊れていれば作り直す */ }
   _sheetReadCacheOn = true; _sheetReadCache = {};
   try {
     const safe = function (fn) { try { const r = fn(); return (r && r.ok) ? r.data : null; } catch (err) { Logger.log("getHomeData part: " + err); return null; } };
@@ -1960,7 +1979,13 @@ function getHomeData(studentEmail) {
       const tk = getTasks(studentEmail, { includeDone: "1" });
       if (tk && tk.ok && Array.isArray(tk.data)) data.tasks = tk.data;
     } catch (err) { Logger.log("getHomeData tasks: " + err); }
-    return { ok: true, data: data };
+    const _out = { ok: true, data: data };
+    // 100KBを超えるとCacheServiceは保存できない。入らなければ持ち回さないだけ。
+    try {
+      const _j = JSON.stringify(_out);
+      if (_j.length < 95000) CacheService.getScriptCache().put(_ck, _j, 90);
+    } catch (e) { /* 入らなくても本体は返す */ }
+    return _out;
   } finally { _sheetReadCacheOn = false; _sheetReadCache = {}; }
 }
 
@@ -4328,7 +4353,7 @@ function saveLog(studentEmail, body) {
       sheet.getRange(i + 1, 1, 1, rowU.length).setValues([rowU]);
       // カレンダーへの書き込みは、記録の保存を待たせない（あとでまとめて処理する）
       queueOwnerCalendarWrite_(studentEmail, targetDate, String(body.time_block), body.task, body.time_classification);
-      if (!isPast) { updateStreak(studentEmail); invalidateStatusCache(); }
+      if (!isPast) { updateStreak(studentEmail); invalidateStatusCache(studentEmail); }
 
       // 「まだXP未付与」かつ「今回きちんと評価が入っている」記録にだけ、1回だけXPを付与する。
       // 評価なしで保存→あとで評価を足した修正でも確実に付き、付与済みの記録は何度更新しても増えない
@@ -4374,7 +4399,7 @@ function saveLog(studentEmail, body) {
   const jrNew = jiroCollect_(studentEmail, jdNew, false);
 
   updateStreak(studentEmail);
-  invalidateStatusCache();
+  invalidateStatusCache(studentEmail);
   // 評価が入っている記録だけ、その場でXPを付与して「付与済み」の印を付ける。
   // 評価なしで保存した場合は付与せず未付与のままにし、あとで評価を足した更新時に付与する
   if (!newFocusN) { sheet.getRange(newRow, awardedIdxN + 1).setValue("FALSE"); return { ok: true, log_id: logId, xp_gained: 0, jiro_gained: jrNew.gained }; }
@@ -4514,7 +4539,7 @@ function updateLogTime(studentEmail, body) {
     }
   } catch (e) { Logger.log("updateLogTime calendar: " + e); }
 
-  try { invalidateStatusCache(); } catch (e) {}
+  try { invalidateStatusCache(studentEmail); } catch (e) {}
   const linkIdx = headers.indexOf("link_task_id");
   const linkedTask = linkIdx === -1 ? "" : String(data[target][linkIdx] || "");
   if (linkedTask) { try { recomputeTaskActualMinutes_(studentEmail, linkedTask); } catch (e) {} }
@@ -4555,7 +4580,7 @@ function deleteLog(studentEmail, body) {
       if (linkedTask) { try { recomputeTaskActualMinutes_(studentEmail, linkedTask); } catch (e) {} }
       try { xpRev = xpReverseForSource_(studentEmail, logId, "LOG_DELETED"); } catch (e) {}
       try { st = recomputeStreak_(studentEmail); } catch (e) {}
-      try { invalidateStatusCache(); } catch (e) { /* ignore */ }
+      try { invalidateStatusCache(studentEmail); } catch (e) { /* ignore */ }
       return { ok: true, deleted: true, xp_reversed: xpRev.amount, streak: st ? st.after : null };
     }
   }
@@ -4679,7 +4704,7 @@ function saveLogMulti(studentEmail, body) {
   if (isPast) return { ok: true, xp_gained: 0, updated: updatedAny, count: blocks.length };
 
   updateStreak(studentEmail); // ブロック数ぶんではなく1回だけ
-  invalidateStatusCache();
+  invalidateStatusCache(studentEmail);
   // 今回どの記録も新たにXP対象にならなかった（評価済みの再編集だけ等）場合はXPを与えない
   if (awardedBlockCount === 0) return { ok: true, xp_gained: 0, updated: updatedAny, count: blocks.length };
   // 一括保存は「このリクエスト」を1つの出どころとして台帳に残す
