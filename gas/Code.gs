@@ -4061,7 +4061,7 @@ ${text}
       focus_level: FOCUS_LABELS[fnum],
       memo: String(r.memo || "").slice(0, 3000),
       goal_related: r.goal_related === true ? "true" : "false"
-    });
+    }, { deferAggregates: true });   // 連続日数とキャッシュ破棄はループの後で1回だけ
     if (sr.ok) {
       saved.push({ time_block: tb, date: recDate, task: r.task, focus_level: fnum, goal_related: r.goal_related === true });
       if (sr.xp_gained) totalXp += sr.xp_gained;
@@ -4069,6 +4069,16 @@ ${text}
     }
   });
 
+  // ★まとめて1回だけ★ 件数ぶん繰り返していたのをここへ寄せる。
+  //   1件も保存できなかったときは、状態を触る必要がない。
+  if (saved.length > 0) {
+    // ★元の挙動を守る★ saveLog は「過去日の記録」では連続日数を更新しない。
+    //   深夜に前日の話をした場合、保存先が昨日になることがあるので、
+    //   今日の記録が1件でもあるときだけ連続日数を計算し直す。
+    const savedToday = saved.some(function (x) { return x.date === today; });
+    if (savedToday) { try { updateStreak(studentEmail); } catch (e) {} }
+    try { invalidateStatusCache(studentEmail); } catch (e) {}
+  }
   if (saved.length === 0) return { ok: false, error: "記録の保存に失敗しました。もう一度お試しください" };
   // 複数件の時は先頭を代表として返しつつ、件数も返す（フロントのトースト用）
   // ★どこで待たされているかを数字で残す★（2026-08-06）
@@ -4318,7 +4328,14 @@ function logicalToday_(base) {
   return formatDate(h < DAY_CUTOFF_HOUR_GAS ? new Date(d.getTime() - 24 * 60 * 60 * 1000) : d);
 }
 
-function saveLog(studentEmail, body) {
+// opts.deferAggregates=true のときは、連続日数の計算とキャッシュ破棄を行わない。
+// ★まとめ保存のためだけの逃げ道★（2026-08-06 Kai報告「記録するまでが遅い」）
+//   独り言で1日分をまとめて話すと saveLog が件数ぶん走る。
+//   連続日数もキャッシュ破棄も「最後に1回」で足りる処理なのに、毎回やっていた。
+//   呼び出し側（quickLog）が、ループのあとに1回だけ自分で行う。
+//   既定は false なので、他の呼び出し元の動きは一切変わらない。
+function saveLog(studentEmail, body, opts) {
+  const _defer = !!(opts && opts.deferAggregates);
   // 自己経営力は計算に時間がかかるので取っておいている。書き換えたら
   // 古い結果に当たらないよう世代を進める（2026-08-05）。
   smpBumpEpoch_(studentEmail);
@@ -4400,7 +4417,7 @@ function saveLog(studentEmail, body) {
       sheet.getRange(i + 1, 1, 1, rowU.length).setValues([rowU]);
       // カレンダーへの書き込みは、記録の保存を待たせない（あとでまとめて処理する）
       queueOwnerCalendarWrite_(studentEmail, targetDate, String(body.time_block), body.task, body.time_classification);
-      if (!isPast) { updateStreak(studentEmail); invalidateStatusCache(studentEmail); }
+      if (!isPast && !_defer) { updateStreak(studentEmail); invalidateStatusCache(studentEmail); }
 
       // 「まだXP未付与」かつ「今回きちんと評価が入っている」記録にだけ、1回だけXPを付与する。
       // 評価なしで保存→あとで評価を足した修正でも確実に付き、付与済みの記録は何度更新しても増えない
@@ -4445,8 +4462,7 @@ function saveLog(studentEmail, body) {
   if (isPast) { sheet.getRange(newRow, awardedIdxN + 1).setValue("FALSE"); return { ok: true, log_id: logId, xp_gained: 0 }; }
   const jrNew = jiroCollect_(studentEmail, jdNew, false);
 
-  updateStreak(studentEmail);
-  invalidateStatusCache(studentEmail);
+  if (!_defer) { updateStreak(studentEmail); invalidateStatusCache(studentEmail); }
   // 評価が入っている記録だけ、その場でXPを付与して「付与済み」の印を付ける。
   // 評価なしで保存した場合は付与せず未付与のままにし、あとで評価を足した更新時に付与する
   if (!newFocusN) { sheet.getRange(newRow, awardedIdxN + 1).setValue("FALSE"); return { ok: true, log_id: logId, xp_gained: 0, jiro_gained: jrNew.gained }; }
