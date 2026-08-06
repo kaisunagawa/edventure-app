@@ -1507,6 +1507,7 @@ function doGet(e) {
     try {
       if (ACTION_POLICIES_WRITE[action] && studentEmail) {
         CacheService.getScriptCache().remove(homeCacheKey_(studentEmail));
+        CacheService.getScriptCache().remove(reportCacheKey_(studentEmail));
         CacheService.getScriptCache().remove("community_v2_" + studentEmail);
       }
     } catch (eCache) { /* 捨てられなくても応答は返す */ }
@@ -1597,6 +1598,7 @@ function doPost(e) {
     try {
       if (ACTION_POLICIES_WRITE[action] && studentEmail) {
         CacheService.getScriptCache().remove(homeCacheKey_(studentEmail));
+        CacheService.getScriptCache().remove(reportCacheKey_(studentEmail));
         CacheService.getScriptCache().remove("community_v2_" + studentEmail);
       }
     } catch (eC) { /* 捨てられなくても処理は続ける */ }
@@ -1921,12 +1923,19 @@ function invalidateStatusCache(studentEmail) {
   // ★起動データの持ち回しも一緒に捨てる★（2026-08-06）
   //   記録や分類を変えたのに、古いホームが最大90秒出続けるのを防ぐ。
   //   呼び出し元がメールを渡していれば、その人ぶんだけ捨てる。
-  if (studentEmail) { try { CacheService.getScriptCache().remove(homeCacheKey_(studentEmail)); } catch (e) {} }
+  if (studentEmail) {
+    try { CacheService.getScriptCache().remove(homeCacheKey_(studentEmail)); } catch (e) {}
+    try { CacheService.getScriptCache().remove(reportCacheKey_(studentEmail)); } catch (e) {}
+  }
 }
 
 // 起動データ（getHomeData）を短時間だけ持ち回すための鍵
 function homeCacheKey_(studentEmail) {
   return "home_v1_" + sha256Hex(String(studentEmail)).slice(0, 32);
+}
+// レポート画面（getReportHome）用。理由は同じ。
+function reportCacheKey_(studentEmail) {
+  return "rpt_v1_" + sha256Hex(String(studentEmail)).slice(0, 32);
 }
 
 function computeAllStatuses(preloadedLogObjects) {
@@ -5113,8 +5122,16 @@ function getGameStatus(studentEmail) {
     }
   } catch (eF2) {}
   const jiroPending = jiroParsePending_(user.jiro_pending);
+  // 会った日（"id:YYYY-MM-DD,..." → {id:日付}）
+  const jiroFoundAt = {};
+  String(user.jiro_found_at || "").split(",").forEach(function (p) {
+    const s = p.split(":");
+    if (s[0] && s[1]) jiroFoundAt[s[0].trim()] = s[1].trim();
+  });
   const jiro = {
     found: jiroFound,
+    foundAt: jiroFoundAt,
+    soon: jiroSoon_(jiroCounts, jiroFound),
     pending: jiroPending.length,   // 待機中の体数（何体がこれから来るか）
     featured: jiroFeatured,
     total: HIDDEN_JIRO.length,
@@ -5707,6 +5724,19 @@ function getCommunityFresh_(studentEmail) {
     .filter(u => u.level > 1)
     .sort((a, b) => (b.level - a.level) || (b.xp - a.xp));
 
+  // ★図鑑ランキング★（2026-08-06 Kai要望）
+  //   何体のジローに会えたか。記録の「中身の幅」がそのまま出るので、
+  //   XPや連続日数とは別の頑張りを拾える。0体の人は載せない。
+  const zukanRanking = users
+    .map(u => {
+      const isMe = u.student_email === studentEmail;
+      const got = jiroParseFound_(u.jiro_found).length;
+      return { isMe, nickname: maskName(u, isMe), avatar: maskAvatar(u, isMe),
+               count: got, total: HIDDEN_JIRO.length };
+    })
+    .filter(u => u.count > 0)
+    .sort((a, b) => b.count - a.count);
+
   // 最近記録した仲間（直近48時間に記録した人を全員）。ランキング（上位5人）とは別に、
   // 「記録した人は必ず載る」場を作ることで、頑張りを取りこぼさず称える
   const recentCut = formatDate(new Date(Date.now() - 1 * 86400000)); // 昨日・今日
@@ -5767,7 +5797,7 @@ function getCommunityFresh_(studentEmail) {
   let achievements = null;
   try { const a = getAchievements(studentEmail); if (a && a.ok) achievements = a.data; } catch (e) {}
   return { ok: true, data: list, reportRanking: reportRanking, streakRanking: streakRanking,
-           levelRanking: levelRanking,
+           levelRanking: levelRanking, zukanRanking: zukanRanking,
            newcomers: newcomers, recentLoggers: recentLoggers, achievements: achievements };
 }
 
@@ -11733,6 +11763,24 @@ function getRoadmap(studentEmail) {
 }
 
 function getReportHome(studentEmail) {
+  // ★90秒だけ持ち回す★（2026-08-06 Kai報告「レポートが遅い」）
+  //   実測4.9秒。中で4つの集計が5枚のシートを読むため、
+  //   個別に削っても大きくは減らない。ホームと同じやり方で結果ごと持ち回す。
+  //   書き込みがあれば doGet/doPost の入口で捨てるので、古い内容は残らない。
+  const _ck = reportCacheKey_(studentEmail);
+  try {
+    const _hit = CacheService.getScriptCache().get(_ck);
+    if (_hit) { const o = JSON.parse(_hit); o.cached = true; return o; }
+  } catch (e) {}
+  // 1回の呼び出しの間は同じシートを読み直さない
+  const _out = withSheetCache_(function () { return getReportHomeInner_(studentEmail); });
+  try {
+    const _j = JSON.stringify(_out);
+    if (_j.length < 95000) CacheService.getScriptCache().put(_ck, _j, 90);
+  } catch (e) {}
+  return _out;
+}
+function getReportHomeInner_(studentEmail) {
   const out = { ok: true };
   // 1つ落ちても画面全体を落とさない（レポートは出るのに月次で失敗、等を避ける）
   try { out.list = (getReportList(studentEmail) || {}).data || []; } catch (e) { out.list = []; }
@@ -13150,16 +13198,27 @@ function jiroApply_(counts, found, deltas, absolutes) {
 
 // 増減が空なら通信しない。空でなければ1回だけ Users を更新する。
 //   ★通信を増やさないための門番★ 分類が変わらない保存では何もしない。
+// ★あと1回で会える子★（2026-08-06 Kai要望）
+//   数え直したあとの回数を見て、「あと1回」の子だけを返す。
+//   記録した直後にそっと知らせると、次の記録の理由になる。
+function jiroSoon_(counts, found) {
+  const c = counts || {}, f = found || [];
+  return HIDDEN_JIRO.filter(function (j) {
+    if (!j.need || f.indexOf(j.id) !== -1) return false;
+    return (j.need - (Number(c[j.key]) || 0)) === 1;
+  }).map(function (j) { return { id: j.id, name: j.name, cond: j.cond }; });
+}
+
 function jiroCollect_(studentEmail, deltas, force) {
   const d = deltas || {};
   let any = false;
   Object.keys(d).forEach(function (k) { if (Number(d[k])) any = true; });
-  if (!any && !force) return { gained: [] };
+  if (!any && !force) return { gained: [], soon: [] };
   const r = jiroBumpUser_(studentEmail, d);
   return { gained: (r.gained || []).map(function (id) {
     const j = HIDDEN_JIRO.find(function (x) { return x.id === id; });
     return j ? { id: j.id, no: j.no, name: j.name, rarity: j.rarity } : { id: id };
-  }) };
+  }), soon: jiroSoon_(r.counts, r.found) };
 }
 
 // 待機列から今日のぶんを出す。出した子を返す（ポップアップに使う）。
@@ -13184,6 +13243,7 @@ function jiroReleasePending_(studentEmail) {
       out.forEach(function (id) { if (found.indexOf(id) === -1) found.push(id); });
       sheet.getRange(i + 1, iF + 1).setValue(found.join(","));
       sheet.getRange(i + 1, iP + 1).setValue(rest.join(","));
+      jiroStampFoundAt_(sheet, headers, i, out);
       // 出した子をホームに出す（いちばん最後の子）
       try {
         let iFeat = headers.indexOf("jiro_featured");
@@ -13199,6 +13259,26 @@ function jiroReleasePending_(studentEmail) {
 
 // Users の1行だけを読み書きして反映する（分類の後からの変更など、
 // XPの更新と一緒に書けない場面で使う）。
+// ★会った日を残す★（2026-08-06 Kai要望）
+//   "id:YYYY-MM-DD,id:YYYY-MM-DD" の形で1列に持つ。すでにある子は上書きしない
+//   （はじめて会った日を残したいので）。
+function jiroStampFoundAt_(sheet, headers, rowIdx, ids) {
+  try {
+    let iA = headers.indexOf("jiro_found_at");
+    if (iA === -1) { iA = headers.length; sheet.getRange(1, iA + 1).setValue("jiro_found_at"); }
+    const cur = String(sheet.getRange(rowIdx + 1, iA + 1).getValue() || "");
+    const map = {};
+    cur.split(",").forEach(function (p) {
+      const s = p.split(":");
+      if (s[0] && s[1]) map[s[0].trim()] = s[1].trim();
+    });
+    const today = Utilities.formatDate(new Date(), "Asia/Tokyo", "yyyy-MM-dd");
+    (ids || []).forEach(function (id) { if (!map[id]) map[id] = today; });
+    sheet.getRange(rowIdx + 1, iA + 1).setValue(
+      Object.keys(map).map(function (k) { return k + ":" + map[k]; }).join(","));
+  } catch (e) { /* 日付が残らなくても、会えたこと自体は成立させる */ }
+}
+
 function jiroBumpUser_(studentEmail, deltas, absolutes) {
   try {
     const sheet = getSheet("Users");
@@ -13215,6 +13295,7 @@ function jiroBumpUser_(studentEmail, deltas, absolutes) {
       sheet.getRange(i + 1, iC + 1).setValue(JSON.stringify(r.counts));
       if (r.gained.length) {
         sheet.getRange(i + 1, iF + 1).setValue(r.found.join(","));
+        jiroStampFoundAt_(sheet, headers, i, r.gained);
         // ★会えた子を、しばらくホームに出す★（2026-08-06 Kai要望）
         //   会った実感が無いと、図鑑を開かない人には何も起きていないのと同じ。
         //   3日だけホームのジローくんと入れ替える。期限が来たら階級の姿へ戻る。
