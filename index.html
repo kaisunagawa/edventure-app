@@ -3435,7 +3435,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
         return html`
         <div style=${{display:"flex",alignItems:"center",gap:11,marginBottom:14}}>
           ${art
-            ? html`<img src=${art} alt=${rank.name} width="118" height="118"
+            ? html`<img src=${art} alt=${useFeat?featJ.name:(rank?rank.name:"")} width="118" height="118"
                      style=${{width:118,height:118,objectFit:"contain",display:"block",flexShrink:0,
                               marginTop:-14,marginBottom:-14,marginLeft:-12,marginRight:-6}}/>`
             : html`<div style=${{width:56,height:56,borderRadius:"50%",background:"rgba(255,255,255,0.2)",
@@ -3457,6 +3457,16 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
               <div style=${{height:5,borderRadius:99,background:"rgba(255,255,255,0.25)",
                             overflow:"hidden",marginTop:7}}>
                 <div style=${{height:"100%",width:pct+"%",borderRadius:99,background:rank.color}}/>
+              </div>`}
+            <!-- ★なぜ姿が変わったのかを伝える★（2026-08-06）
+                 説明が無いと「勝手に変わった」と思われる。残り日数も出す。 -->
+            ${useFeat&&html`
+              <div style=${{display:"inline-flex",alignItems:"center",gap:5,marginTop:6,
+                            background:"rgba(255,255,255,0.22)",borderRadius:20,padding:"3px 10px"}}>
+                <span style=${{fontSize:10.5,fontWeight:800,color:"#fff",whiteSpace:"nowrap"}}>
+                  ${featJ.name}と一緒</span>
+                <span style=${{fontSize:9.5,color:"rgba(255,255,255,0.8)",whiteSpace:"nowrap"}}>
+                  あと${feat.daysLeft}日</span>
               </div>`}
             ${game&&html`
               <!-- 2つとも1行に収める。折り返すと縦に伸びて間延びする -->
@@ -10262,7 +10272,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260806-110822";
+const APP_BUILD = "20260806-111848";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
