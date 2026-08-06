@@ -578,6 +578,28 @@ function doGet(e) {
         return jsonResponse({ ok: true, dry: dryO, count: badO.length,
           detail: badO.slice(0, 100) });
       }
+      // ★トリガーの一覧を見る★（読むだけ・2026-08-06）
+      //   上限は20個。埋まると夜のレポートの「続きから再開する」トリガーが
+      //   作れなくなり、後半の人のレポートが無言で欠落する。
+      //   使っていないもの・重複しているものを見つけるために使う。
+      //     bash gas/ops.sh adminListTriggers
+      case "adminListTriggers": {
+        if (!verifyAdmin(e.parameter.coachEmail)) return jsonResponse({ ok: false, error: "not admin" });
+        const tsL = ScriptApp.getProjectTriggers();
+        const byHandler = {};
+        const listL = tsL.map(function (t) {
+          const h = t.getHandlerFunction();
+          byHandler[h] = (byHandler[h] || 0) + 1;
+          let when = "";
+          try { when = String(t.getEventType()); } catch (e2) {}
+          return { handler: h, type: when, id: String(t.getUniqueId()).slice(0, 10) };
+        });
+        // 同じ処理が二重に張られているものを目立たせる
+        const dup = Object.keys(byHandler).filter(function (k) { return byHandler[k] > 1; })
+                      .map(function (k) { return { handler: k, count: byHandler[k] }; });
+        return jsonResponse({ ok: true, total: tsL.length, limit: 20,
+                              remaining: 20 - tsL.length, duplicated: dup, triggers: listL });
+      }
       // 古いchallengeを捨てる（ログインの遅さ対策）
       //   bash gas/ops.sh adminPurgeChallenges
       case "adminPurgeChallenges": {
@@ -14496,7 +14518,7 @@ const ADMIN_SECRET_ALLOWLIST = {
   // 一斉送信（Kaiの明示的な要望により残す）
   adminBroadcastLine:1, adminBroadcastLinePending:1, adminSendStudentCampaign:1,
   // セットアップ・保守
-  adminSetupTriggers:1, adminInstallTrigger:1, adminSetupPhase1:1, adminSetupAuth:1, adminPhase4DryRun:1, adminLegacyBackfill:1, adminWritePathStats:1, adminIssueTestSession:1, adminDropTestSessions:1, adminOpsSelfTest:1, adminActualMinutesAudit:1, adminXpCorrection:1, adminStreakRecalc:1, adminGrantFeature:1, adminUserDiag:1, adminReportScoreDryRun:1, adminReportGenTest:1, adminScoreConsistency:1, adminFinalizeOps:1, adminUnfinalizeOps:1, adminSmpDump:1, adminSmpWarmAll:1, adminLevelAudit:1, adminXpRestore:1, adminCleanupPlusLogs:1, adminClassAudit:1, adminRecolorCalendar:1, adminFixTokenVersion:1, adminPurgeChallenges:1, adminJiroBackfill:1, adminCommunityTiming:1, adminOpsScoreAudit:1, adminScoreTrace:1,
+  adminSetupTriggers:1, adminInstallTrigger:1, adminSetupPhase1:1, adminSetupAuth:1, adminPhase4DryRun:1, adminLegacyBackfill:1, adminWritePathStats:1, adminIssueTestSession:1, adminDropTestSessions:1, adminOpsSelfTest:1, adminActualMinutesAudit:1, adminXpCorrection:1, adminStreakRecalc:1, adminGrantFeature:1, adminUserDiag:1, adminReportScoreDryRun:1, adminReportGenTest:1, adminScoreConsistency:1, adminFinalizeOps:1, adminUnfinalizeOps:1, adminSmpDump:1, adminSmpWarmAll:1, adminLevelAudit:1, adminXpRestore:1, adminCleanupPlusLogs:1, adminClassAudit:1, adminRecolorCalendar:1, adminFixTokenVersion:1, adminPurgeChallenges:1, adminJiroBackfill:1, adminCommunityTiming:1, adminOpsScoreAudit:1, adminListTriggers:1, adminScoreTrace:1,
   authSetMode:1, authSetEnforce:1, authRoleApply:1, authRoleDryRun:1, authRevokeAll:1,
   authCleanupTestData:1, adminPurgeTestUsers:1, adminMigrateTasks:1, authBreakerReset:1, rotateSessionSecret:1,
   p1Backup:1, p1BackupInfo:1, p1PurgeArchived:1, weeklyBackup:1
