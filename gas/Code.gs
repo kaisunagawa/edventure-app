@@ -1468,6 +1468,17 @@ function doGet(e) {
       case "snsDeletePost":   result = snsDeletePost(studentEmail, e.parameter); break;
       default: result = { ok: false, error: "Unknown action: " + action };
     }
+    // ★書き込みのあとは、必ず起動データの持ち回しを捨てる★（2026-08-06）
+    //   90秒キャッシュを入れたとき、記録の保存側にしか破棄を入れていなかった。
+    //   目標・タスク・今日のフォーカス・分類などを保存しても古いホームが返り、
+    //   「反映されるまで時間がかかる」状態になっていた（Kai報告）。
+    //   個別に足すと必ず漏れるので、書き込み系を通ったらここで一律に捨てる。
+    try {
+      if (ACTION_POLICIES_WRITE[action] && studentEmail) {
+        CacheService.getScriptCache().remove(homeCacheKey_(studentEmail));
+        CacheService.getScriptCache().remove("community_v2_" + studentEmail);
+      }
+    } catch (eCache) { /* 捨てられなくても応答は返す */ }
     return jsonResponse(result, callback);
   } catch (err) {
     return jsonResponse({ ok: false, error: err.toString() }, callback);
@@ -1545,6 +1556,19 @@ function doPost(e) {
     if (!_azp.ok) return jsonResponse(_azp);
     // ★doGetと同じ。本人で上書きする★
     if (_azp.forceSelfEmail) { studentEmail = _azp.forceSelfEmail; body.studentEmail = _azp.forceSelfEmail; }
+    // ★書き込みの前に、起動データの持ち回しを捨てる★（2026-08-06 Kai報告「反映が遅い」）
+    //   90秒キャッシュを入れたとき、記録の保存側にしか破棄を入れていなかった。
+    //   目標・タスク・今日のフォーカス・分類などを保存しても最大90秒は
+    //   古いホームが返っていた。個別に足すと必ず漏れるので、
+    //   書き込み系のアクションはここで一律に捨てる。
+    //   ★書き込みの「前」に捨てる★ 各分岐が直接returnするので後ろに1か所を作れない。
+    //   書き終えたあとの読み直しは新しい値になる。
+    try {
+      if (ACTION_POLICIES_WRITE[action] && studentEmail) {
+        CacheService.getScriptCache().remove(homeCacheKey_(studentEmail));
+        CacheService.getScriptCache().remove("community_v2_" + studentEmail);
+      }
+    } catch (eC) { /* 捨てられなくても処理は続ける */ }
     switch (action) {
       case "saveLog":      return jsonResponse(saveLog(studentEmail, body));
       case "deleteLog":    return jsonResponse(deleteLog(studentEmail, body));
