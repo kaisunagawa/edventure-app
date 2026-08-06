@@ -2382,6 +2382,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
   const [game, setGame] = useState(null);
   // ★ホームに出す子を自分で選べる★（2026-08-06 Kai要望）
   //   会えた子が複数いるとき、タップで切り替える。選択は端末に覚えておく。
+  const [zukanOpen, setZukanOpen] = useState(false);   // ジロー図鑑
   const [pickedJiro, setPickedJiro] = useState(()=>{
     try { return localStorage.getItem("jiroku_picked_jiro") || ""; } catch(e) { return ""; }
   });
@@ -3640,6 +3641,18 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
               </div>`}
             <!-- ★なぜ姿が変わったのかを伝える★（2026-08-06）
                  説明が無いと「勝手に変わった」と思われる。残り日数も出す。 -->
+            <!-- ★ジロー図鑑への入口★（2026-08-06 Kai要望）
+                 設定の奥にあると誰も辿り着けないので、ホームから1タップで開く -->
+            ${(game&&game.jiro)&&html`
+              <button onClick=${()=>setZukanOpen(true)}
+                style=${{display:"inline-flex",alignItems:"center",gap:4,marginTop:6,marginRight:6,
+                         background:"rgba(255,255,255,0.22)",border:"none",borderRadius:20,
+                         padding:"3px 10px",color:"#fff",fontSize:10.5,fontWeight:800,
+                         cursor:"pointer",fontFamily:"inherit"}}>
+                ジロー図鑑
+                <span style=${{fontSize:9.5,opacity:0.85,fontWeight:700}}>
+                  ${(game.jiro.found||[]).length} / ${HIDDEN_JIRO.length}</span>
+              </button>`}
             ${(!showRank&&featJ)&&html`
               <div style=${{display:"inline-flex",alignItems:"center",gap:5,marginTop:6,
                             background:"rgba(255,255,255,0.22)",borderRadius:20,padding:"3px 10px"}}>
@@ -3694,6 +3707,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
     </div>
 
     ${showCommunity&&html`<${CommunityOverlay} onClose=${()=>setShowCommunity(false)}/>`}
+    ${zukanOpen&&html`<${JiroZukanSheet} jiro=${game&&game.jiro} onClose=${()=>setZukanOpen(false)}/>`}
 
     <!-- ★目標ロードマップ★（2026-08-05 Kai指定のデザインで作り直し）
          色・比率・文字の大きさ・アイコンまで指定どおりに合わせている。
@@ -9384,6 +9398,103 @@ function AvailableTimeSection({onToast}) {
     </div>`;
 }
 
+// ★ジロー図鑑★（2026-08-06 Kai要望で攻略本から独立させた）
+//   攻略本の奥（設定→階級システム→攻略本→スクロール）にあって誰も辿り着けない。
+//   ホームのジローくんからも、設定からも1タップで開けるようにする。
+function JiroZukanSheet({jiro, onClose}) {
+  const jFound = (jiro && jiro.found) || [];
+  const jProg = {};
+  ((jiro && jiro.progress) || []).forEach(p => { jProg[p.id] = p; });
+  const H = ({t,s}) => html`
+    <div style=${{marginBottom:9}}>
+      <div style=${{fontSize:14,fontWeight:800,color:"var(--text)"}}>${t}</div>
+      ${s&&html`<div style=${{fontSize:11,color:"var(--sub)",marginTop:3,lineHeight:1.6}}>${s}</div>`}
+    </div>`;
+  return ReactDOM.createPortal(html`
+    <div style=${{position:"fixed",inset:0,height:"100dvh",background:"rgba(0,0,0,0.5)",
+                  display:"flex",alignItems:"flex-end",zIndex:620}}
+      onClick=${e=>{if(e.target===e.currentTarget)onClose();}}>
+      <div style=${{background:"var(--card)",borderRadius:"20px 20px 0 0",width:"100%",boxSizing:"border-box",
+                    maxHeight:"92dvh",display:"flex",flexDirection:"column",overflow:"hidden"}}>
+        <div style=${{position:"relative",background:"var(--accent)",color:"#fff",
+                      padding:"18px 20px 16px",overflow:"hidden",flexShrink:0}}>
+          <div style=${{position:"relative",fontSize:19,fontWeight:800}}>ジロー図鑑</div>
+          <div style=${{position:"relative",fontSize:11.5,opacity:0.92,marginTop:4,lineHeight:1.6}}>
+            記録した内容におうじて、いろんなジローに会えます
+          </div>
+        </div>
+        <div style=${{flex:1,overflowY:"auto",overscrollBehavior:"contain",WebkitOverflowScrolling:"touch",
+                      padding:"16px 18px calc(20px + env(safe-area-inset-bottom))"}}>
+          <!-- ★隠しジロー図鑑★（2026-08-05 Kai要望）
+               条件を満たした瞬間に会える。会うまでは影と条件だけ見せる。 -->
+          ${H({t:`${jFound.length} / ${HIDDEN_JIRO.length} 体`,
+               s:((jiro&&jiro.pending>0) ? `あと${jiro.pending}体が、これから会いに来ます` : "コモンは最初から見えています。レア以上は会うまで影のままです")})}
+          <div style=${{display:"grid",gridTemplateColumns:"minmax(0,1fr) minmax(0,1fr)",gap:10,marginBottom:14}}>
+            ${HIDDEN_JIRO.map(j=>{
+              const have = jFound.indexOf(j.id) !== -1;
+              // ★コモンは最初から見せる★（2026-08-06 Kai要望）
+              //   何が待っているのか分からないと集める気にならない。
+              //   まず会える子を見せて、レア以上は影のままにしておく。
+              const shown = have || !!j.common;
+              const pg = jProg[j.id] || {now:0,need:0};
+              const rc = RARITY_COLOR[j.rarity] || "var(--sub)";
+              return html`
+                <div key=${j.id} style=${{border:"1px solid var(--border)",borderRadius:12,
+                              background:"var(--bg)",padding:"9px 10px",boxSizing:"border-box",
+                              minWidth:0,opacity:have?1:0.92}}>
+                  <div style=${{display:"flex",alignItems:"center",gap:4,marginBottom:6,minWidth:0}}>
+                    <span style=${{flexShrink:0,fontSize:7.5,fontWeight:800,color:"var(--faint)"}}>${j.no}</span>
+                    <span style=${{flexShrink:0,fontSize:7.5,fontWeight:800,color:"#fff",background:rc,
+                                   borderRadius:20,padding:"1px 5px"}}>${j.rarity}</span>
+                  </div>
+                  <!-- 正方形にすると1枚が大きくなりすぎて、7枚が空欄の帯になる。
+                       絵は96pxで十分読める（素材は400px以上を想定）。 -->
+                  <div style=${{position:"relative",height:96,borderRadius:10,
+                                background:"var(--card)",display:"flex",alignItems:"center",
+                                justifyContent:"center",overflow:"hidden",marginBottom:6}}>
+                    ${shown && j.art
+                      ? html`<img src=${j.art+"?v="+APP_BUILD} alt=${j.name} loading="lazy"
+                               style=${{maxWidth:"88%",maxHeight:"88%",objectFit:"contain",display:"block",
+                                        opacity:have?1:0.55}}/>`
+                      : html`<span style=${{fontSize:26,fontWeight:800,color:"var(--border)"}}>?</span>`}
+                  </div>
+                  <div style=${{fontSize:10,fontWeight:800,lineHeight:1.35,
+                                color:have?"var(--text)":"var(--sub)"}}>
+                    ${shown ? j.name : "？？？ジロー"}</div>
+                  <!-- ★出現条件はどのカードにも必ず出す★（2026-08-06 Kai要望）
+                       会えたあとも「どうやって会えたか」が分かるように残す。 -->
+                  <div style=${{display:"flex",alignItems:"flex-start",gap:4,marginTop:4}}>
+                    <span style=${{flexShrink:0,fontSize:7.5,fontWeight:800,color:rc,
+                                   background:`color-mix(in srgb, ${rc} 15%, transparent)`,
+                                   borderRadius:4,padding:"1px 4px",lineHeight:1.5,whiteSpace:"nowrap"}}>条件</span>
+                    <span style=${{flex:1,minWidth:0,fontSize:8.5,color:"var(--sub)",lineHeight:1.5}}>
+                      ${j.cond}</span>
+                  </div>
+                  ${have
+                    ? html`
+                      <div style=${{fontSize:8.5,fontWeight:800,color:rc,marginTop:4}}>✓ 達成ずみ</div>
+                      <div style=${{fontSize:8.8,color:"var(--sub)",lineHeight:1.5,marginTop:2}}>
+                        ${j.personality}<br/>${j.line}</div>`
+                    : (pg.need ? html`
+                        <div style=${{marginTop:5}}>
+                          <div style=${{height:4,borderRadius:4,background:"var(--border)",overflow:"hidden"}}>
+                            <div style=${{height:"100%",width:Math.round(Math.min(1,pg.now/pg.need)*100)+"%",
+                                          background:rc,borderRadius:4}}/>
+                          </div>
+                          <div style=${{fontSize:8,color:"var(--faint)",marginTop:3,fontWeight:700}}>
+                            あと ${Math.max(0,pg.need-pg.now)}（${pg.now} / ${pg.need}）</div>
+                        </div>` : "")}
+                </div>`;
+            })}
+          </div>
+
+
+          <button class="btn-g" onClick=${onClose}>閉じる</button>
+        </div>
+      </div>
+    </div>`, document.body);
+}
+
 // ★攻略本★（2026-08-05 Kai要望・図鑑の攻略本ページのイメージを画面用に作り直す）
 //   中身は「それっぽい数字」ではなく、実際のサーバーの計算(addXP)に合わせている。
 //     記録1件 +10 / メモあり +5 / その日の最初の1件だけ ストリーク日数×2（30日で頭打ち）
@@ -9537,70 +9648,6 @@ function GuideBookSheet({myLevel,jiro,onClose}) {
               <div style=${{fontSize:11.5,fontWeight:800,color:"var(--text)"}}>${q}</div>
               <div style=${{fontSize:11,color:"var(--sub)",lineHeight:1.65,marginTop:2}}>→ ${a}</div>
             </div>`)})}
-
-          <!-- ★隠しジロー図鑑★（2026-08-05 Kai要望）
-               条件を満たした瞬間に会える。会うまでは影と条件だけ見せる。 -->
-          ${H({t:"隠しジロー図鑑",
-               s:`記録の内容で会える、レアなジローたち。${jFound.length} / ${HIDDEN_JIRO.length} 体`
-                 + ((jiro&&jiro.pending>0) ? `　（あと${jiro.pending}体が会いに来ます）` : "")})}
-          <div style=${{display:"grid",gridTemplateColumns:"minmax(0,1fr) minmax(0,1fr)",gap:10,marginBottom:14}}>
-            ${HIDDEN_JIRO.map(j=>{
-              const have = jFound.indexOf(j.id) !== -1;
-              // ★コモンは最初から見せる★（2026-08-06 Kai要望）
-              //   何が待っているのか分からないと集める気にならない。
-              //   まず会える子を見せて、レア以上は影のままにしておく。
-              const shown = have || !!j.common;
-              const pg = jProg[j.id] || {now:0,need:0};
-              const rc = RARITY_COLOR[j.rarity] || "var(--sub)";
-              return html`
-                <div key=${j.id} style=${{border:"1px solid var(--border)",borderRadius:12,
-                              background:"var(--bg)",padding:"9px 10px",boxSizing:"border-box",
-                              minWidth:0,opacity:have?1:0.92}}>
-                  <div style=${{display:"flex",alignItems:"center",gap:4,marginBottom:6,minWidth:0}}>
-                    <span style=${{flexShrink:0,fontSize:7.5,fontWeight:800,color:"var(--faint)"}}>${j.no}</span>
-                    <span style=${{flexShrink:0,fontSize:7.5,fontWeight:800,color:"#fff",background:rc,
-                                   borderRadius:20,padding:"1px 5px"}}>${j.rarity}</span>
-                  </div>
-                  <!-- 正方形にすると1枚が大きくなりすぎて、7枚が空欄の帯になる。
-                       絵は96pxで十分読める（素材は400px以上を想定）。 -->
-                  <div style=${{position:"relative",height:96,borderRadius:10,
-                                background:"var(--card)",display:"flex",alignItems:"center",
-                                justifyContent:"center",overflow:"hidden",marginBottom:6}}>
-                    ${shown && j.art
-                      ? html`<img src=${j.art+"?v="+APP_BUILD} alt=${j.name} loading="lazy"
-                               style=${{maxWidth:"88%",maxHeight:"88%",objectFit:"contain",display:"block",
-                                        opacity:have?1:0.55}}/>`
-                      : html`<span style=${{fontSize:26,fontWeight:800,color:"var(--border)"}}>?</span>`}
-                  </div>
-                  <div style=${{fontSize:10,fontWeight:800,lineHeight:1.35,
-                                color:have?"var(--text)":"var(--sub)"}}>
-                    ${shown ? j.name : "？？？ジロー"}</div>
-                  <!-- ★出現条件はどのカードにも必ず出す★（2026-08-06 Kai要望）
-                       会えたあとも「どうやって会えたか」が分かるように残す。 -->
-                  <div style=${{display:"flex",alignItems:"flex-start",gap:4,marginTop:4}}>
-                    <span style=${{flexShrink:0,fontSize:7.5,fontWeight:800,color:rc,
-                                   background:`color-mix(in srgb, ${rc} 15%, transparent)`,
-                                   borderRadius:4,padding:"1px 4px",lineHeight:1.5,whiteSpace:"nowrap"}}>条件</span>
-                    <span style=${{flex:1,minWidth:0,fontSize:8.5,color:"var(--sub)",lineHeight:1.5}}>
-                      ${j.cond}</span>
-                  </div>
-                  ${have
-                    ? html`
-                      <div style=${{fontSize:8.5,fontWeight:800,color:rc,marginTop:4}}>✓ 達成ずみ</div>
-                      <div style=${{fontSize:8.8,color:"var(--sub)",lineHeight:1.5,marginTop:2}}>
-                        ${j.personality}<br/>${j.line}</div>`
-                    : (pg.need ? html`
-                        <div style=${{marginTop:5}}>
-                          <div style=${{height:4,borderRadius:4,background:"var(--border)",overflow:"hidden"}}>
-                            <div style=${{height:"100%",width:Math.round(Math.min(1,pg.now/pg.need)*100)+"%",
-                                          background:rc,borderRadius:4}}/>
-                          </div>
-                          <div style=${{fontSize:8,color:"var(--faint)",marginTop:3,fontWeight:700}}>
-                            あと ${Math.max(0,pg.need-pg.now)}（${pg.now} / ${pg.need}）</div>
-                        </div>` : "")}
-                </div>`;
-            })}
-          </div>
 
           <div style=${{background:"var(--accent-l)",border:"1px solid var(--accent)",borderRadius:14,
                         padding:"12px 14px",fontSize:11.5,color:"var(--accent)",fontWeight:700,
@@ -9816,6 +9863,7 @@ function SettingsScreen({onToast,onLogout,onGoalSaved,profile,onProfileSaved,onC
   const [openSec,setOpenSec]=useState("");
   const [flipped,setFlipped]=useState({});   // 階級カードをめくった状態
   const [guideOpen,setGuideOpen]=useState(false);  // 攻略本を開いているか
+  const [zukanOpen,setZukanOpen]=useState(false);  // ジロー図鑑を開いているか
   // 階級システムを開いたとき、レベルが分からなければ取りに行く。
   // ★この useEffect は openSec より後に書くこと★
   //   前に書いて "Cannot access 'openSec' before initialization" で
@@ -10099,6 +10147,15 @@ function SettingsScreen({onToast,onLogout,onGoalSaved,profile,onProfileSaved,onC
 
       ${GroupLabel("情報・ヘルプ")}
       <!-- 階級システム -->
+      <!-- ★ジロー図鑑★（2026-08-06 Kai要望で独立させた） -->
+      <${SettingsSec} k="zukan" icon="📔" title="ジロー図鑑" open=${openSec==="zukan"} onToggle=${()=>setOpenSec(openSec==="zukan"?"":"zukan")}>
+        <div style=${{fontSize:12,color:"var(--sub)",lineHeight:1.8,marginBottom:12}}>
+          記録した内容におうじて、いろんなジローに会えます。
+          コモンは最初から見えていて、レア以上は会うまで影のままです。
+        </div>
+        <button class="btn" onClick=${()=>setZukanOpen(true)}>ジロー図鑑をひらく</button>
+      <//>
+
       <${SettingsSec} k="rank" icon="🏆" title="階級システム" open=${openSec==="rank"} onToggle=${()=>setOpenSec(openSec==="rank"?"":"rank")}>
         <div style=${{display:"flex",gap:8,marginBottom:14}}>
           <div style=${{flex:1,background:"var(--bg)",borderRadius:10,padding:"12px",fontSize:12,lineHeight:1.8,color:"var(--sub)"}}>
@@ -10263,6 +10320,7 @@ function SettingsScreen({onToast,onLogout,onGoalSaved,profile,onProfileSaved,onC
       <//>
 
       ${guideOpen && html`<${GuideBookSheet} myLevel=${myLevel} jiro=${gameCache&&gameCache.jiro} onClose=${()=>setGuideOpen(false)}/>`}
+      ${zukanOpen && html`<${JiroZukanSheet} jiro=${gameCache&&gameCache.jiro} onClose=${()=>setZukanOpen(false)}/>`}
 
       <!-- 使い方 Q&A -->
       <${FAQSection}/>
@@ -10469,7 +10527,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260806-131321";
+const APP_BUILD = "20260806-132035";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
