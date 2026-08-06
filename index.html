@@ -1434,7 +1434,7 @@ const HIDDEN_JIRO = [
     art:"assets/jiro/tidy.png", cond:"片付け・掃除の記録が3回",
     personality:"几帳面・スッキリ好き", line:"「キレイな環境がパワーの源！」" },
   { id:"boss", no:"No.104", name:"社長ジロー", rarity:"Common", common:true,
-    art:"assets/jiro/boss.png", cond:"打ち合わせ・商談の記録が5回",
+    art:"assets/jiro/boss.png", cond:"打ち合わせ・商談の記録が3回",
     personality:"リーダー・決断力がある", line:"「みんなを引っ張るカリスマ経営者！」" },
   { id:"photo", no:"No.105", name:"写真家ジロー", rarity:"Common", common:true,
     art:"assets/jiro/photo.png", cond:"写真・撮影の記録が3回",
@@ -1455,13 +1455,13 @@ const HIDDEN_JIRO = [
     art:"assets/jiro/reader.png", cond:"読書の記録が1回",
     personality:"物静か・想像力豊か", line:"「本の中に、無限の世界がある。」" },
   { id:"calm", no:"No.111", name:"ととのえジロー", rarity:"Common", common:true,
-    art:"assets/jiro/calm.png", cond:"回復の記録が通算5件",
+    art:"assets/jiro/calm.png", cond:"回復の記録が通算3件",
     personality:"穏やか・癒し系", line:"「大丈夫、ちゃんと休めてるよ。」" },
   { id:"support", no:"No.112", name:"縁の下ジロー", rarity:"Common", common:true,
-    art:"assets/jiro/support.png", cond:"日常業務の記録が通算15件",
+    art:"assets/jiro/support.png", cond:"日常業務の記録が通算5件",
     personality:"縁の下・責任感が強い", line:"「ちゃんとやる、それが一番の近道。」" },
   { id:"stack", no:"No.113", name:"積み上げジロー", rarity:"Common", common:true,
-    art:"assets/jiro/stack.png", cond:"将来への投資の記録が通算10件",
+    art:"assets/jiro/stack.png", cond:"将来への投資の記録が通算5件",
     personality:"真面目・コツコツ型", line:"「未来の自分に、今をプレゼント。」" },
   { id:"dog", no:"No.114", name:"犬ジロー", rarity:"Common", common:true,
     art:"assets/jiro/dog.png", cond:"犬・お散歩の記録が3回",
@@ -1485,13 +1485,13 @@ const HIDDEN_JIRO = [
     art:"assets/jiro/yoga.png", cond:"ヨガ・瞑想の記録が2回",
     personality:"穏やか・自分に正直", line:"「心と体を整えて、毎日を豊かに。」" },
   { id:"night", no:"No.206", name:"夜ふかしジロー", rarity:"Rare",
-    art:"assets/jiro/night.png", cond:"23:00〜5:00の記録が通算10件",
+    art:"assets/jiro/night.png", cond:"23:00〜5:00の記録が通算5件",
     personality:"夜型・マイペース", line:"「今日はまだ始まったばかり。」" },
   { id:"straight", no:"No.207", name:"一直線ジロー", rarity:"Rare",
-    art:"assets/jiro/straight.png", cond:"目標に直結の記録が通算10件",
+    art:"assets/jiro/straight.png", cond:"目標に直結の記録が通算5件",
     personality:"ストイック・一直線", line:"「ブレずに、ゴールまで。」" },
   { id:"kind", no:"No.208", name:"思いやりジロー", rarity:"Rare",
-    art:"assets/jiro/kind.png", cond:"人間関係の記録が通算3件",
+    art:"assets/jiro/kind.png", cond:"人間関係の記録が通算2件",
     personality:"優しい・サポート好き", line:"「一緒なら、もっと頑張れるよね。」" },
   { id:"finance", no:"No.209", name:"ファイナンスジロー", rarity:"Rare",
     art:"assets/jiro/finance.png", cond:"お金まわりの記録が3回",
@@ -1518,16 +1518,16 @@ const HIDDEN_JIRO = [
     art:"assets/jiro/adventure.png", cond:"登山・街歩きの記録が2回",
     personality:"好奇心旺盛・自由人", line:"「新しい景色と体験が大好き！」" },
   { id:"nightguard", no:"No.306", name:"ナイトガードジロー", rarity:"Epic",
-    art:"assets/jiro/nightguard.png", cond:"23:00〜5:00の記録が通算25件",
+    art:"assets/jiro/nightguard.png", cond:"23:00〜5:00の記録が通算15件",
     personality:"責任感が強い・守り型", line:"「みんなの挑戦を、全力で守る！」" },
   { id:"muscle", no:"No.307", name:"ムキムキジロー", rarity:"Epic",
     art:"assets/jiro/muscle.png", cond:"筋トレ・ジムの記録が10回",
     personality:"努力家・意志が強い", line:"「努力は、裏切らない。」" },
   { id:"turbo", no:"No.401", name:"爆速ジロー", rarity:"Legendary",
-    art:"assets/jiro/turbo.png", cond:"日次スコア90点以上が3日連続",
+    art:"assets/jiro/turbo.png", cond:"日次スコア80点以上が3日連続",
     personality:"情熱的・負けず嫌い", line:"「限界？そんなの、昨日の話！」" },
   { id:"perfect", no:"No.402", name:"パーフェクトジロー", rarity:"Legendary",
-    art:"assets/jiro/perfect.png", cond:"日次スコア100点を通算20回",
+    art:"assets/jiro/perfect.png", cond:"日次スコア85点以上が通算5回",
     personality:"完璧主義・プライド高め", line:"「妥協はしない。」" },
   { id:"streak", no:"No.403", name:"ストリークジロー", rarity:"Legendary",
     art:"assets/jiro/streak.png", cond:"30日連続で記録",
@@ -8529,7 +8529,7 @@ const FAQ_CATEGORIES = [
     { q:"階級システム・図鑑・攻略本って？",
       a:"設定の「階級システム」で見られます。レベルに応じて7つの階級があり、階級が上がるとキャラクターの「ジローくん」の姿が変わります。\nまだ到達していない階級は、うっすら影だけ。届いたときにはじめて会えます（Lv.100の階級は名前も伏せてあります）。\n会えたジローくんのカードをタップすると裏返って、その子のプロフィール（分類・好き・苦手・口ぐせ・特徴）が読めます。\n右下の「攻略本」を押すと、育て方・XPの仕組み・階級ごとの攻略ポイント・つまずきの対策がまとまったページが開きます。\n階級とは別に「ジロー図鑑」があります（次の項目）。" },
     { q:"ジロー図鑑って？（隠しジロー）",
-      a:"ホームの📖、または設定の「ジロー図鑑」から開けます。カフェ・勉強・キャンプ・読書…といった、あなたが実際に記録した内容におうじて会える37体のジローが載っています。\n出現条件はどのカードにも書いてあります。条件を満たすと、その子の絵が出てきます（会えるのは1日に2体ずつなので、順番待ちになることがあります）。\nカードを押すと、絵・性格・口ぐせ・出現条件・あと何回で会えるかが大きく出ます。\nめずらしさは コモン（15体）→レア（11体）→エピック（7体）→レジェンダリー（3体）→アルティメット（1体）。コモンは最初から見えていて、レア以上は会うまで影のままです。" },
+      a:"ホームの📖、または設定の「ジロー図鑑」から開けます。カフェ・勉強・キャンプ・読書…といった、あなたが実際に記録した内容におうじて会える37体のジローが載っています。\n出現条件はどのカードにも書いてあります。条件を満たすと、その子の絵が出てきます（会えるのは1日に2体ずつなので、順番待ちになることがあります）。\nカードを押すと、絵・性格・口ぐせ・出現条件・あと何回で会えるかが大きく出ます。\nめずらしさは コモン（15体）→レア（11体）→エピック（7体）→レジェンダリー（3体）→アルティメット（1体）。コモンは最初から見えていて、レア以上は会うまで影のままです。\nレジェンダリーとアルティメットだけは、出現条件も伏せてあります（たどり着いた人だけが知れます）。" },
     { q:"ホーム画面のジローくんを変えたい",
       a:"ホーム画面の絵をタップするたびに、階級のジローくん → 会えた子…と順番に切り替わります（回せるのは直近5体まで）。いま誰が出ているかは絵のすぐ下に名前で出ます。\n図鑑の詳しいカードにある「ホーム画面に出す」を押すと、その子に固定できます。古い子でも選べます。\n何も選んでいないときは、①新しく会えた子がその日だけ出る ②3日に1日は、会えた子が順ぐりに遊びに来る ③それ以外は階級のジローくん、の順で決まります。誰が来るかは日付で決まるので、同じ日は何度開いても同じ子です。" },
     { q:"1日休んだら連続記録は消えちゃう？（🧊フリーズ）",
@@ -9703,6 +9703,10 @@ function JiroZukanSheet({jiro, onClose, picked, onPick}) {
   // ★絞り込み★（2026-08-06 Kai要望）37体になって、探すのに縦スクロールが長い
   const [filt, setFilt] = useState("ALL");
   const jFoundAt = (jiro && jiro.foundAt) || {};
+  // ★いちばん上の2つだけ条件を伏せる★（2026-08-06 Kai「見せすぎても良くない」）
+  //   コモン〜エピックは「何をすれば会えるか」が分かるほうが動ける。
+  //   レジェンダリー以上は、たどり着いた人へのごほうびなので伏せておく。
+  const hideCond = (j) => (j.rarity === "Legendary" || j.rarity === "Ultimate");
   const keep = (j) => {
     if (filt === "ALL") return true;
     const got = jFound.indexOf(j.id) !== -1;
@@ -9787,10 +9791,10 @@ function JiroZukanSheet({jiro, onClose, picked, onPick}) {
                                    background:`color-mix(in srgb, ${rc} 15%, transparent)`,
                                    borderRadius:4,padding:"1px 4px",lineHeight:1.5,whiteSpace:"nowrap"}}>条件</span>
                     <span style=${{flex:1,minWidth:0,fontSize:8.5,color:"var(--sub)",lineHeight:1.5}}>
-                      ${j.cond}</span>
+                      ${(hideCond(j)&&!have) ? "？？？（たどり着いた人だけが知れます）" : j.cond}</span>
                   </div>
                   <!-- 性格やセリフは詳しいカード（タップ）に置く。ここは一覧なので短く。 -->
-                  ${pg.need>0&&html`
+                  ${(pg.need>0 && !(hideCond(j)&&!have))&&html`
                     <div style=${{marginTop:5}}>
                       <div style=${{height:4,borderRadius:4,background:"var(--border)",overflow:"hidden"}}>
                         <div style=${{height:"100%",width:pg.pct+"%",background:rc,borderRadius:4}}/>
@@ -9855,8 +9859,9 @@ function JiroZukanSheet({jiro, onClose, picked, onPick}) {
                           borderRadius:12,padding:"9px 12px",margin:"14px 0 0",textAlign:"left"}}>
               <div style=${{fontSize:9.5,fontWeight:800,color:rc,letterSpacing:".08em",marginBottom:3}}>
                 出現条件</div>
-              <div style=${{fontSize:12.5,fontWeight:800,color:"var(--text)",lineHeight:1.5}}>${j.cond}</div>
-              ${pg.need>0&&html`
+              <div style=${{fontSize:12.5,fontWeight:800,color:"var(--text)",lineHeight:1.5}}>
+                ${(hideCond(j)&&!have) ? "？？？（たどり着いた人だけが知れます）" : j.cond}</div>
+              ${(pg.need>0 && !(hideCond(j)&&!have))&&html`
                 <div style=${{marginTop:6}}>
                   <div style=${{height:5,borderRadius:5,background:"var(--border)",overflow:"hidden"}}>
                     <div style=${{height:"100%",width:pg.pct+"%",background:rc,borderRadius:5}}/>
@@ -10916,7 +10921,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260806-160240";
+const APP_BUILD = "20260806-161610";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
