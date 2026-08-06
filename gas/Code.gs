@@ -12963,12 +12963,21 @@ function jiroWordsHit_(text) {
   return hit;
 }
 
-// 会えた子をホームに出しておく日数（2026-08-06 Kai要望）
-const JIRO_FEATURE_DAYS = 3;
+// ★会えた子をホームに出しておく日数★（2026-08-06 Kai「出現頻度のバランス」）
+//   3日にしていたら、待機の子が次々に来るあいだ階級のジローくんが
+//   一度も出なくなった。会えた当日だけホームを譲り、翌日からは
+//   画面側の「3日に1日は遊びに来る」で顔を出す形にする。
+const JIRO_FEATURE_DAYS = 1;
 // ★過去の記録から見つかった子は、少しずつ出す★（2026-08-06 Kai要望）
-//   一度に22体渡すと1回で終わってしまう。待機列に入れて1日この数だけ出す。
+//   一度に22体渡すと1回で終わってしまう。待機列に入れて1回にこの数だけ出す。
 //   これから達成した分は待たせない（その場でポップアップ）。
 const JIRO_RELEASE_PER_DAY = 2;
+// ★待機列を出すのは2日に1度★（2026-08-06）
+//   毎晩出すと、会えた子がホームを占め続けて階級の日が無くなる。
+//   あいだの日を空けることで「新しい子の日」と「階級の日」が交互になる。
+function jiroIsReleaseDay_() {
+  return Math.floor((Date.now() + 9 * 3600000) / 86400000) % 2 === 0;
+}
 
 const HIDDEN_JIRO = [
   { id:"cafe", no:"No.101", name:"カフェジロー", rarity:"Common", common:true,
@@ -13126,6 +13135,7 @@ function jiroReleasePending_(studentEmail) {
       if (String(data[i][iEm]) !== studentEmail) continue;
       const pending = jiroParsePending_(data[i][iP]);
       if (!pending.length) return [];
+      if (!jiroIsReleaseDay_()) return [];
       const out = pending.slice(0, JIRO_RELEASE_PER_DAY);
       const rest = pending.slice(JIRO_RELEASE_PER_DAY);
       const found = jiroParseFound_(data[i][iF]);

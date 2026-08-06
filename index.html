@@ -1589,8 +1589,10 @@ function JiroFoundModal() {
     <div style=${{position:"fixed",inset:0,height:"100dvh",background:"rgba(0,0,0,0.62)",zIndex:900,
                   display:"flex",alignItems:"center",justifyContent:"center",padding:20}}
       onClick=${e=>{ if(e.target===e.currentTarget) setQueue(q=>q.slice(1)); }}>
+      <!-- 小さい端末では中身が縦に収まらない。カードの中でスクロールさせる -->
       <div style=${{background:"var(--card)",borderRadius:20,padding:"24px 22px 20px",width:"100%",
                     maxWidth:320,boxSizing:"border-box",textAlign:"center",
+                    maxHeight:"90dvh",overflowY:"auto",overscrollBehavior:"contain",
                     boxShadow:"0 18px 50px rgba(0,0,0,0.35)"}}>
         <div style=${{fontSize:11.5,fontWeight:800,color:c,letterSpacing:".06em",marginBottom:3}}>
           ${g.no||""} ${g.rarity||""}</div>
@@ -1627,8 +1629,9 @@ function JiroFoundModal() {
         <!-- 太さは全部そろえる（2026-08-06 Kai指摘） -->
         <div style=${{background:"var(--bg)",borderRadius:12,padding:"11px 13px",margin:"16px 0 4px",
                       fontSize:12,fontWeight:400,color:"var(--sub)",lineHeight:1.8,textAlign:"left"}}>
-          これから3日間、ホーム画面にこの子が出ます。<br/>
-          そのあとはジロクに戻りますが、解放されて図鑑にはずっと残ります。
+          今日はホーム画面にこの子が出ます。<br/>
+          あしたからはジロクに戻りますが、3日に1日、順ぐりに遊びに来ます。<br/>
+          解放されて図鑑にはずっと残ります。
         </div>
         ${rest>0&&html`
           <div style=${{fontSize:11.5,color:c,fontWeight:700,marginTop:8}}>ほかにも ${rest} 体 会えています</div>`}
@@ -3662,6 +3665,8 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
         // ★図鑑で選んだ子は、古くても必ず入れる★（2026-08-06 Kai要望）
         //   直近5体だけだと、図鑑から選んでもホームに出せない子が出てしまう。
         //   選んだ子を先頭に置き、残りを新しい順に足して5体まで。
+        const foundAll = ((game && game.jiro && game.jiro.found) || [])
+          .map(id => HIDDEN_JIRO.find(x => x.id === id)).filter(x => x && x.art);
         const owned = (()=>{
           const fnd = (game && game.jiro && game.jiro.found) || [];
           const ids = [];
@@ -3671,16 +3676,27 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
           });
           return ids.map(id => HIDDEN_JIRO.find(x => x.id === id)).filter(x => x && x.art);
         })();
+        // ★今日のジロー★（2026-08-06 Kai「出現頻度のバランスを考えて」）
+        //   ホームの主役は階級のジローくん。それが「いまの自分」を表す絵だから。
+        //   ただし会えた子が出ないままだと、集める意味がなくなる。
+        //   そこで3日に1日だけ、会えた子が順ぐりに遊びに来る日をつくる。
+        //   日付から決めるので、同じ日は何度開いても同じ子（端末が変わっても同じ）。
+        const dayNo = Math.floor((Date.now() + 9 * 3600000) / 86400000);   // JSTの通し日
+        const isGuestDay = foundAll.length > 0 && (dayNo % 3 === 0);
+        const guestJ = isGuestDay
+          ? foundAll[Math.floor(dayNo / 3) % foundAll.length] : null;
         // ★既定は階級のジローくん★（2026-08-06 Kai指摘「階級キャラが表示されなくなった」）
         //   出現カードで「3日たったら階級のジローくんに戻ります」と約束しているのに、
         //   会えた子の先頭へ落ちる書き方になっていて、二度と戻らなかった。
         //   1. 自分で選んでいれば、それ（"rank" を選べば階級）
-        //   2. 選んでいなければ、会えたばかりの子を3日だけ
-        //   3. それも無ければ階級のジローくん
+        //   2. 選んでいなければ、会えたばかりの子（会えた当日）
+        //   3. 3日に1日の「遊びに来る日」なら、会えた子から順ぐりに1体
+        //   4. それ以外は階級のジローくん（ふだんの主役）
         const picked = (pickedJiro && pickedJiro !== "rank")
           ? (owned.find(x => x.id === pickedJiro) || null) : null;
         const featJ = picked
-          || ((!pickedJiro && feat) ? (owned.find(x => x.id === feat.id) || null) : null);
+          || ((!pickedJiro && feat) ? (foundAll.find(x => x.id === feat.id) || null) : null)
+          || (!pickedJiro ? guestJ : null);
         const showRank = !featJ;
         const artPath = (!showRank && featJ) ? featJ.art : (rank ? (RANK_ART[rank.name] || "") : "");
         const art  = artPath ? (artPath + "?v=" + APP_BUILD) : "";
@@ -3703,8 +3719,8 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
         const forNxt= game ? getXpForNextLevel(game.xp) : 0;
         const pct = forNxt ? Math.max(3, Math.min(100, Math.round(inLv / forNxt * 100))) : 100;
         return html`
-        <!-- 名前を下げたぶん、下に少しだけ余白を足す（かぶり回避・2026-08-06） -->
-        <div style=${{display:"flex",alignItems:"center",gap:11,marginBottom:18}}>
+        <!-- 名前を下げたぶん、下の列との間をあける（2026-08-06 Kai指摘・下余白はまだ余っている） -->
+        <div style=${{display:"flex",alignItems:"center",gap:11,marginBottom:26}}>
           ${art
             /* 隠しジローも背景を抜いてあるので、階級のキャラと同じ置き方にする
                （2026-08-06 Kai指摘。丸枠にすると階級のときと形が変わって落ち着かない）
@@ -8445,7 +8461,7 @@ const FAQ_CATEGORIES = [
     { q:"ジロー図鑑って？（隠しジロー）",
       a:"ホームの📖、または設定の「ジロー図鑑」から開けます。カフェ・勉強・キャンプ・読書…といった、あなたが実際に記録した内容におうじて会える37体のジローが載っています。\n出現条件はどのカードにも書いてあります。条件を満たすと、その子の絵が出てきます（会えるのは1日に2体ずつなので、順番待ちになることがあります）。\nカードを押すと、絵・性格・口ぐせ・出現条件・あと何回で会えるかが大きく出ます。\nめずらしさは コモン（15体）→レア（11体）→エピック（7体）→レジェンダリー（3体）→アルティメット（1体）。コモンは最初から見えていて、レア以上は会うまで影のままです。" },
     { q:"ホーム画面のジローくんを変えたい",
-      a:"ホーム画面の絵をタップするたびに、階級のジローくん → 会えた子…と順番に切り替わります（回せるのは直近5体まで）。いま誰が出ているかは絵のすぐ下に名前で出ます。\n図鑑の詳しいカードにある「ホーム画面に出す」を押すと、その子に固定できます。古い子でも選べます。\n何も選んでいないときは、新しく会えた子が3日だけ出て、そのあとは階級のジローくんに戻ります。" },
+      a:"ホーム画面の絵をタップするたびに、階級のジローくん → 会えた子…と順番に切り替わります（回せるのは直近5体まで）。いま誰が出ているかは絵のすぐ下に名前で出ます。\n図鑑の詳しいカードにある「ホーム画面に出す」を押すと、その子に固定できます。古い子でも選べます。\n何も選んでいないときは、①新しく会えた子がその日だけ出る ②3日に1日は、会えた子が順ぐりに遊びに来る ③それ以外は階級のジローくん、の順で決まります。誰が来るかは日付で決まるので、同じ日は何度開いても同じ子です。" },
     { q:"1日休んだら連続記録は消えちゃう？（🧊フリーズ）",
       a:"7日連続で記録するごとに「フリーズ🧊」が1個貯まります（最大2個）。\n記録できない日があっても、フリーズを持っていれば自動で1個使われて、連続記録とXPがそのまま守られます。使われた時は通知でお知らせします。\n今どれだけ持っているかは、ホーム画面の🔥連続日数の横（🧊×1など）と、みんなの頑張りの「連続記録ランキング」で確認できます。" },
     { q:"「ステータス」って何？",
@@ -10736,7 +10752,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260806-152847";
+const APP_BUILD = "20260806-154039";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
