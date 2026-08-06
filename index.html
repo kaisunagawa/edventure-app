@@ -3612,14 +3612,17 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
           });
           return ids.map(id => HIDDEN_JIRO.find(x => x.id === id)).filter(x => x && x.art);
         })();
-        // 自分で選んでいればそれ、無ければ直近に会えた子
-        //   会えているのに階級のままだと気づかれないので、既定は会えた子にする
-        //   （2026-08-06 Kai指摘）
-        const picked = owned.find(x => x.id === pickedJiro) || null;
-        const featJ = picked || (feat ? owned.find(x => x.id === feat.id) : null) || owned[0] || null;
-        const useFeat = !!featJ;
-        // 階級の姿も選べるようにする（"rank" を選んだとき）
-        const showRank = pickedJiro === "rank" || !featJ;
+        // ★既定は階級のジローくん★（2026-08-06 Kai指摘「階級キャラが表示されなくなった」）
+        //   出現カードで「3日たったら階級のジローくんに戻ります」と約束しているのに、
+        //   会えた子の先頭へ落ちる書き方になっていて、二度と戻らなかった。
+        //   1. 自分で選んでいれば、それ（"rank" を選べば階級）
+        //   2. 選んでいなければ、会えたばかりの子を3日だけ
+        //   3. それも無ければ階級のジローくん
+        const picked = (pickedJiro && pickedJiro !== "rank")
+          ? (owned.find(x => x.id === pickedJiro) || null) : null;
+        const featJ = picked
+          || ((!pickedJiro && feat) ? (owned.find(x => x.id === feat.id) || null) : null);
+        const showRank = !featJ;
         const art  = (!showRank && featJ) ? (featJ.art + "?v=" + APP_BUILD)
                              : (rank ? rankArt(rank.name) : "");
         // タップで次の子へ（階級 → 会えた子 → …と回る）
@@ -10643,7 +10646,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260806-135741";
+const APP_BUILD = "20260806-142644";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
