@@ -552,8 +552,8 @@ function doGet(e) {
         const hO = dataO[0];
         const iEmO = hO.indexOf("student_email"), iDtO = hO.indexOf("report_date");
         const iFinO = hO.indexOf("finalized_at"), iSnapO = hO.indexOf("snapshot_json");
-        const iOpO = hO.indexOf("operating_score"), iPtO = hO.indexOf("partial_score");
-        if ([iEmO, iDtO, iFinO, iSnapO, iOpO, iPtO].some(function (x) { return x === -1; })) {
+        const iOpO = hO.indexOf("operating_score");
+        if ([iEmO, iDtO, iFinO, iSnapO, iOpO].some(function (x) { return x === -1; })) {
           return jsonResponse({ ok: false, error: "column missing" });
         }
         const badO = [];
@@ -565,8 +565,7 @@ function doGet(e) {
           const shown = snap.displayed_score;
           if (shown === null || shown === undefined) continue;
           const colOp = String(dataO[i][iOpO] || "").trim();
-          const colPt = String(dataO[i][iPtO] || "").trim();
-          const colShown = colOp !== "" ? Number(colOp) : (colPt !== "" ? Number(colPt) : null);
+          const colShown = colOp !== "" ? Number(colOp) : null;
           if (colShown === Number(shown)) continue;                 // 一致していれば何もしない
           const rawD = dataO[i][iDtO];
           badO.push({ row: i + 1,
@@ -574,14 +573,7 @@ function doGet(e) {
             date: rawD instanceof Date ? Utilities.formatDate(rawD, "Asia/Tokyo", "yyyy-MM-dd")
                                        : String(rawD).slice(0, 10),
             snapshot: Number(shown), column: colShown });
-          if (!dryO) {
-            const op = (snap.operating_score === null || snap.operating_score === undefined)
-                         ? "" : snap.operating_score;
-            const pt = (snap.partial_score === null || snap.partial_score === undefined)
-                         ? "" : snap.partial_score;
-            shO.getRange(i + 1, iOpO + 1).setValue(op);
-            shO.getRange(i + 1, iPtO + 1).setValue(pt);
-          }
+          if (!dryO) shO.getRange(i + 1, iOpO + 1).setValue(Number(shown));
         }
         return jsonResponse({ ok: true, dry: dryO, count: badO.length,
           detail: badO.slice(0, 100) });
@@ -3315,10 +3307,13 @@ function finalizeDailyOpsReport(studentEmail, date) {
   //   内訳と点数は必ず同じ計算から同時に書く。
   p1Upsert("DailyOpsReport", "row_id", {
     row_id: row.row_id, student_email: studentEmail,
-    operating_score: (r.data.operating_score === null || r.data.operating_score === undefined)
-                       ? "" : r.data.operating_score,
-    partial_score:   (r.data.partial_score === null || r.data.partial_score === undefined)
-                       ? "" : r.data.partial_score,
+    // ★列は operating_score しか無い★（partial_score という列は存在しない）
+    //   読む側（一覧・ランキング・みんなの頑張り）はこの列を「その日の点数」として
+    //   扱っているので、画面に出している数字（displayed_score）を入れる。
+    //   全体の点数が出ない日は部分点が displayed になるが、
+    //   画面と一覧が食い違うほうが害が大きい。
+    operating_score: (r.data.displayed_score === null || r.data.displayed_score === undefined)
+                       ? "" : r.data.displayed_score,
     finalized_at: new Date().toISOString(),
     snapshot_json: JSON.stringify(Object.assign({}, r.data, { narrative: undefined })).slice(0, 45000)
   });
