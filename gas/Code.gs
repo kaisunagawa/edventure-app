@@ -412,6 +412,44 @@ function doGet(e) {
                      users: Object.keys(unknown[k].users).length, sample: unknown[k].sample }; })
             .sort(function (a, b) { return b.count - a.count; }) });
       }
+      // ★レポート点数の分布を見る（読むだけ）★（2026-08-06）
+      //   スコア基準の隠しジローが到達可能かを、勘ではなく実測で決めるため。
+      //     bash gas/ops.sh adminScoreDist
+      case "adminScoreDist": {
+        if (!verifyAdmin(e.parameter.coachEmail)) return jsonResponse({ ok: false, error: "not admin" });
+        const rs = reportsLite_();
+        const byUser = {};
+        rs.forEach(function (r) {
+          const sc = Number(r.score_precise || r.score || 0);
+          if (!isFinite(sc) || sc <= 0) return;
+          const em = String(r.student_email || "");
+          if (!byUser[em]) byUser[em] = [];
+          byUser[em].push({ d: String(r.date || "").slice(0, 10), s: sc });
+        });
+        const th = [95, 90, 85, 80, 75, 70];
+        const out = { 全レポート数: rs.length, 人数: Object.keys(byUser).length, 最高点: 0,
+                      以上の件数: {}, 以上の人数: {}, 連続3日達成の人数: {} };
+        th.forEach(function (n) { out["以上の件数"][n] = 0; out["以上の人数"][n] = 0; out["連続3日達成の人数"][n] = 0; });
+        Object.keys(byUser).forEach(function (em) {
+          const list = byUser[em].sort(function (a, b) { return a.d < b.d ? -1 : 1; });
+          list.forEach(function (x) { if (x.s > out["最高点"]) out["最高点"] = Math.round(x.s * 10) / 10; });
+          th.forEach(function (n) {
+            const c = list.filter(function (x) { return x.s >= n; }).length;
+            out["以上の件数"][n] += c;
+            if (c > 0) out["以上の人数"][n]++;
+            let run = 0, best = 0, prev = null;
+            list.forEach(function (x) {
+              if (x.s >= n) {
+                run = (prev && (new Date(x.d) - new Date(prev)) === 86400000) ? run + 1 : 1;
+              } else { run = 0; }
+              if (run > best) best = run;
+              prev = x.d;
+            });
+            if (best >= 3) out["連続3日達成の人数"][n]++;
+          });
+        });
+        return jsonResponse({ ok: true, 分布: out });
+      }
       // ★隠しジローを全員ぶん白紙に戻す★（2026-08-06 Kai判断）
       //   過去の記録から掘り出した子を配ると、今日やったことと関係なく届いて
       //   「記録したから会えた」という手ざわりが消える。ここで一度ゼロにして、
@@ -1508,6 +1546,7 @@ function doGet(e) {
       if (ACTION_POLICIES_WRITE[action] && studentEmail) {
         CacheService.getScriptCache().remove(homeCacheKey_(studentEmail));
         CacheService.getScriptCache().remove(reportCacheKey_(studentEmail));
+        CacheService.getScriptCache().remove(roadmapCacheKey_(studentEmail));
         CacheService.getScriptCache().remove("community_v2_" + studentEmail);
       }
     } catch (eCache) { /* 捨てられなくても応答は返す */ }
@@ -1599,6 +1638,7 @@ function doPost(e) {
       if (ACTION_POLICIES_WRITE[action] && studentEmail) {
         CacheService.getScriptCache().remove(homeCacheKey_(studentEmail));
         CacheService.getScriptCache().remove(reportCacheKey_(studentEmail));
+        CacheService.getScriptCache().remove(roadmapCacheKey_(studentEmail));
         CacheService.getScriptCache().remove("community_v2_" + studentEmail);
       }
     } catch (eC) { /* 捨てられなくても処理は続ける */ }
@@ -1926,6 +1966,7 @@ function invalidateStatusCache(studentEmail) {
   if (studentEmail) {
     try { CacheService.getScriptCache().remove(homeCacheKey_(studentEmail)); } catch (e) {}
     try { CacheService.getScriptCache().remove(reportCacheKey_(studentEmail)); } catch (e) {}
+    try { CacheService.getScriptCache().remove(roadmapCacheKey_(studentEmail)); } catch (e) {}
   }
 }
 
@@ -1936,6 +1977,27 @@ function homeCacheKey_(studentEmail) {
 // レポート画面（getReportHome）用。理由は同じ。
 function reportCacheKey_(studentEmail) {
   return "rpt_v1_" + sha256Hex(String(studentEmail)).slice(0, 32);
+}
+
+// 画面キャッシュの持ち回し時間。GASの上限は6時間。
+//   ★長くできる根拠★（2026-08-06）
+//   ・本人の書き込みは doGet/doPost の入口で必ず捨てる
+//   ・夜のレポート生成・確定処理でも捨てる
+//   ・つまり「中身が変わったのに古いまま」が起きない
+//   逆に短くすると、1日のうち何度もあの数秒を待つことになる。
+const VIEW_CACHE_SEC = 6 * 60 * 60;
+
+// ★その人の画面キャッシュを全部捨てる★（2026-08-06）
+//   本人の操作だけでなく、サーバーが勝手に書き換えたとき（夜のレポート生成、
+//   確定処理、コーチや管理者の操作）にも呼ぶこと。
+//   ここが漏れると「古い画面が出続ける」に直結する。
+function dropUserViewCaches_(studentEmail) {
+  if (!studentEmail) return;
+  const c = CacheService.getScriptCache();
+  try { c.remove(homeCacheKey_(studentEmail)); } catch (e) {}
+  try { c.remove(reportCacheKey_(studentEmail)); } catch (e) {}
+  try { c.remove(roadmapCacheKey_(studentEmail)); } catch (e) {}
+  try { c.remove("community_v2_" + studentEmail); } catch (e) {}
 }
 
 function computeAllStatuses(preloadedLogObjects) {
@@ -2089,7 +2151,7 @@ function getHomeData(studentEmail) {
     // 100KBを超えるとCacheServiceは保存できない。入らなければ持ち回さないだけ。
     try {
       const _j = JSON.stringify(_out);
-      if (_j.length < 95000) CacheService.getScriptCache().put(_ck, _j, 90);
+      if (_j.length < 95000) CacheService.getScriptCache().put(_ck, _j, VIEW_CACHE_SEC);
     } catch (e) { /* 入らなくても本体は返す */ }
     return _out;
   } finally { _sheetReadCacheOn = false; _sheetReadCache = {}; }
@@ -3637,6 +3699,7 @@ function finalizeDailyOpsReport(studentEmail, date) {
     finalized_at: new Date().toISOString(),
     snapshot_json: JSON.stringify(Object.assign({}, r.data, { narrative: undefined })).slice(0, 45000)
   });
+  try { dropUserViewCaches_(studentEmail); } catch (e) {}   // 点数が変わるので画面も作り直す
   return { ok: true, score: r.data.displayed_score };
 }
 
@@ -3716,6 +3779,10 @@ function appendReportRow(targetDate, studentEmail, report, logCount) {
     CacheService.getScriptCache().remove(ck);
   } catch (e) { /* ignore */ }
   try { postHighScoreAchievement(studentEmail, report.score); } catch (e) { /* ignore */ }
+  // ★夜のレポートを書いたら、その人の画面キャッシュを捨てる★（2026-08-06）
+  //   本人が触っていなくても中身が変わるため。ここが無いと、
+  //   朝アプリを開いても昨日のままの画面が出る。
+  try { dropUserViewCaches_(studentEmail); } catch (e) {}
   // ★爆速ジロー★ 90点以上が何日続いているかを数え直して置く（足し算ではない）。
   //   レポートは作り直されることがあるので、そのつど正しい連続数にそろえる。
   try {
@@ -4231,67 +4298,57 @@ function ownerCalColor_(cls) {
 //   いったん控えておき、1分おきの処理でまとめて書く。
 function queueOwnerCalendarWrite_(studentEmail, dateStr, timeBlock, task, cls) {
   if (!String(task || "").trim()) return;
-  // ★鍵をかけて読み書きする★
-  //   読んで→足して→書き戻す形なので、2人が同時に保存すると
-  //   片方の予定が消える。鍵が取れなければ、その場で書いて取りこぼさない。
-  const lock = LockService.getScriptLock();
-  let locked = false;
-  try { locked = lock.tryLock(5000); } catch (e) { locked = false; }
-  if (!locked) {
-    try { writeRecordToOwnerCalendar(studentEmail, dateStr, timeBlock, task, cls); } catch (e2) {}
-    return;
-  }
+  // ★鍵を取り合わない★（2026-08-06 Kai報告「記録するまで22秒」実測で判明）
+  //   以前は全員で1つの "calq" を読んで→足して→書き戻していたため、
+  //   鍵の順番待ちで最大5秒、取れなければその場でカレンダーAPIを叩いていた。
+  //   記録の保存がカレンダー処理に引きずられ、1件で22秒かかっていた。
+  //   1件につき1つの鍵（プロパティ）に書くだけにすれば、read-modify-write が
+  //   無くなるので鍵そのものが要らない。取り出す側がまとめて消す。
   try {
-    const props = PropertiesService.getScriptProperties();
-    const key = "calq";
-    let q = [];
-    try { q = JSON.parse(props.getProperty(key) || "[]"); } catch (e) { q = []; }
-    // 同じ人・同じ日・同じ時間帯のものは最新だけ残す
-    q = q.filter(function (x) {
-      return !(x.e === studentEmail && x.d === dateStr && x.t === timeBlock);
-    });
-    q.push({ e: studentEmail, d: dateStr, t: timeBlock, k: String(task).slice(0, 120), c: cls || "" });
-    if (q.length > 200) q = q.slice(-200);   // 溜めすぎない
-    props.setProperty(key, JSON.stringify(q));
+    const key = "calq1_" + Utilities.getUuid().slice(0, 12);
+    PropertiesService.getScriptProperties().setProperty(key, JSON.stringify({
+      e: studentEmail, d: dateStr, t: timeBlock, k: String(task).slice(0, 120), c: cls || ""
+    }));
   } catch (e) {
+    // 控えられなかったときだけ、その場で書く（取りこぼさないための保険）
     try { writeRecordToOwnerCalendar(studentEmail, dateStr, timeBlock, task, cls); } catch (e2) {}
-  } finally {
-    try { lock.releaseLock(); } catch (e) {}
   }
 }
 
 // 控えておいたカレンダー書き込みをまとめて処理する（1分おきのトリガーから呼ぶ）
 function flushOwnerCalendarQueue() {
   const props = PropertiesService.getScriptProperties();
-  const lock = LockService.getScriptLock();
-  // 取り出しも鍵をかける（取り出し中に足された分を落とさない）
-  let locked = false;
-  try { locked = lock.tryLock(10000); } catch (e) { locked = false; }
-  if (!locked) return { ok: true, done: 0, note: "他の処理が使用中。次の回に回す" };
-  let q = [];
-  try {
-    try { q = JSON.parse(props.getProperty("calq") || "[]"); } catch (e) { q = []; }
-    if (q.length) props.setProperty("calq", "[]");   // 先に空にする（二重に書かないため）
-  } finally { try { lock.releaseLock(); } catch (e) {} }
-  if (!q.length) return { ok: true, done: 0 };
-  const start = Date.now();
-  let done = 0;
-  const rest = [];
-  q.forEach(function (x) {
-    if (Date.now() - start > 4 * 60 * 1000) { rest.push(x); return; }
-    try { writeRecordToOwnerCalendar(x.e, x.d, x.t, x.k, x.c); done++; }
-    catch (err) { Logger.log("calq: " + err); }
-  });
-  if (rest.length) {
-    let l2 = false;
-    try { l2 = lock.tryLock(5000); } catch (e) { l2 = false; }
+  const items = [];
+  // ★新しい形式★ 1件につき1つのプロパティ（calq1_〜）。鍵は要らない。
+  let keys = [];
+  try { keys = props.getKeys().filter(function (k) { return k.indexOf("calq1_") === 0; }); } catch (e) {}
+  keys.forEach(function (k) {
     try {
-      let cur = [];
-      try { cur = JSON.parse(props.getProperty("calq") || "[]"); } catch (e) { cur = []; }
-      props.setProperty("calq", JSON.stringify(rest.concat(cur).slice(-200)));
-    } finally { if (l2) { try { lock.releaseLock(); } catch (e) {} } }
-  }
-  return { ok: true, done: done, left: rest.length };
+      const v = props.getProperty(k);
+      if (v) items.push({ key: k, x: JSON.parse(v) });
+    } catch (e) { try { props.deleteProperty(k); } catch (e2) {} }   // 壊れていれば捨てる
+  });
+  // ★古い形式★ まとめて1つに入れていた分。移行が終わるまで拾う。
+  try {
+    const oldQ = JSON.parse(props.getProperty("calq") || "[]");
+    if (oldQ.length) {
+      oldQ.forEach(function (x) { items.push({ key: null, x: x }); });
+      props.setProperty("calq", "[]");
+    }
+  } catch (e) {}
+
+  if (!items.length) return { ok: true, done: 0 };
+  const start = Date.now();
+  let done = 0, left = 0;
+  items.forEach(function (it) {
+    // 4分で切り上げる（GASの実行時間の上限に当たらないように）。残りは次の回。
+    if (Date.now() - start > 4 * 60 * 1000) { left++; return; }
+    try { writeRecordToOwnerCalendar(it.x.e, it.x.d, it.x.t, it.x.k, it.x.c); done++; }
+    catch (err) { Logger.log("calq: " + err); }
+    // 書けても書けなくても消す。失敗を延々と繰り返して詰まらせないため。
+    if (it.key) { try { props.deleteProperty(it.key); } catch (e) {} }
+  });
+  return { ok: true, done: done, left: left };
 }
 
 function writeRecordToOwnerCalendar(studentEmail, dateStr, timeBlock, task, cls) {
@@ -11753,6 +11810,25 @@ function withSheetCache_(fn) {
 }
 
 function getRoadmap(studentEmail) {
+  // ★持ち回す★（2026-08-06 Kai報告「目標ロードマップの読み込みがめちゃくちゃ遅い」）
+  //   実測3.4秒。中で Sprints・WeeklyGoals・Goals・DailyLog・GoalEntries を読む。
+  //   ホーム・レポートと同じ扱いにする（書き込みがあれば入口で捨てる）。
+  const _ck = "road_v1_" + sha256Hex(String(studentEmail)).slice(0, 32);
+  try {
+    const _hit = CacheService.getScriptCache().get(_ck);
+    if (_hit) { const o = JSON.parse(_hit); o.cached = true; return o; }
+  } catch (e) {}
+  const _r = getRoadmapCompute_(studentEmail);
+  try {
+    const _j = JSON.stringify(_r);
+    if (_j.length < 95000) CacheService.getScriptCache().put(_ck, _j, VIEW_CACHE_SEC);
+  } catch (e) {}
+  return _r;
+}
+function roadmapCacheKey_(studentEmail) {
+  return "road_v1_" + sha256Hex(String(studentEmail)).slice(0, 32);
+}
+function getRoadmapCompute_(studentEmail) {
   return withSheetCache_(function () {
     const out = { ok: true };
     try { out.sprints = getSprints(studentEmail, {}); } catch (e) { out.sprints = null; }
@@ -11776,7 +11852,7 @@ function getReportHome(studentEmail) {
   const _out = withSheetCache_(function () { return getReportHomeInner_(studentEmail); });
   try {
     const _j = JSON.stringify(_out);
-    if (_j.length < 95000) CacheService.getScriptCache().put(_ck, _j, 90);
+    if (_j.length < 95000) CacheService.getScriptCache().put(_ck, _j, VIEW_CACHE_SEC);
   } catch (e) {}
   return _out;
 }
@@ -15211,7 +15287,7 @@ const ADMIN_SECRET_ALLOWLIST = {
   // 一斉送信（Kaiの明示的な要望により残す）
   adminBroadcastLine:1, adminBroadcastLinePending:1, adminSendStudentCampaign:1,
   // セットアップ・保守
-  adminSetupTriggers:1, adminInstallTrigger:1, adminSetupPhase1:1, adminSetupAuth:1, adminPhase4DryRun:1, adminLegacyBackfill:1, adminWritePathStats:1, adminIssueTestSession:1, adminDropTestSessions:1, adminOpsSelfTest:1, adminActualMinutesAudit:1, adminXpCorrection:1, adminStreakRecalc:1, adminGrantFeature:1, adminUserDiag:1, adminReportScoreDryRun:1, adminReportGenTest:1, adminScoreConsistency:1, adminFinalizeOps:1, adminUnfinalizeOps:1, adminSmpDump:1, adminSmpWarmAll:1, adminLevelAudit:1, adminXpRestore:1, adminCleanupPlusLogs:1, adminClassAudit:1, adminRecolorCalendar:1, adminFixTokenVersion:1, adminPurgeChallenges:1, adminJiroBackfill:1, adminJiroReset:1, adminCommunityTiming:1, adminOpsScoreAudit:1, adminListTriggers:1, adminHomeTiming:1, adminScreenTiming:1, adminQuickLogTimings:1, adminScoreTrace:1, adminJiroSignals:1,
+  adminSetupTriggers:1, adminInstallTrigger:1, adminSetupPhase1:1, adminSetupAuth:1, adminPhase4DryRun:1, adminLegacyBackfill:1, adminWritePathStats:1, adminIssueTestSession:1, adminDropTestSessions:1, adminOpsSelfTest:1, adminActualMinutesAudit:1, adminXpCorrection:1, adminStreakRecalc:1, adminGrantFeature:1, adminUserDiag:1, adminReportScoreDryRun:1, adminReportGenTest:1, adminScoreConsistency:1, adminFinalizeOps:1, adminUnfinalizeOps:1, adminSmpDump:1, adminSmpWarmAll:1, adminLevelAudit:1, adminXpRestore:1, adminCleanupPlusLogs:1, adminClassAudit:1, adminRecolorCalendar:1, adminFixTokenVersion:1, adminPurgeChallenges:1, adminJiroBackfill:1, adminJiroReset:1, adminScoreDist:1, adminCommunityTiming:1, adminOpsScoreAudit:1, adminListTriggers:1, adminHomeTiming:1, adminScreenTiming:1, adminQuickLogTimings:1, adminScoreTrace:1, adminJiroSignals:1,
   authSetMode:1, authSetEnforce:1, authRoleApply:1, authRoleDryRun:1, authRevokeAll:1,
   authCleanupTestData:1, adminPurgeTestUsers:1, adminMigrateTasks:1, authBreakerReset:1, rotateSessionSecret:1,
   p1Backup:1, p1BackupInfo:1, p1PurgeArchived:1, weeklyBackup:1
