@@ -1531,6 +1531,32 @@ function announceJiroFound(res) {
   try { window.dispatchEvent(new CustomEvent("jiroku:jirofound", { detail: g })); } catch (e) {}
 }
 
+// ★まだ見せていない子を見つけて出す★（2026-08-06 Kai指摘「出現のカードが出てこない」）
+//   棚卸しや夜の放出はサーバー側で直接書くので、保存の応答を通らない。
+//   端末に「もう見せた子」を控えておき、増えていたらその場で出す。
+//   これで、どの経路で増えても必ずカードが出る。
+const JIRO_SEEN_KEY = "jiroku_announced_jiro";
+function announceNewlyFound(game) {
+  try {
+    const found = (game && game.jiro && game.jiro.found) || [];
+    if (!found.length) return;
+    let seen = [];
+    try { seen = JSON.parse(localStorage.getItem(JIRO_SEEN_KEY) || "[]"); } catch (e) {}
+    const fresh = found.filter(id => seen.indexOf(id) === -1);
+    if (!fresh.length) return;
+    localStorage.setItem(JIRO_SEEN_KEY, JSON.stringify(found));
+    const list = fresh.map(id => {
+      const j = HIDDEN_JIRO.find(x => x.id === id);
+      return j ? { id: j.id, no: j.no, name: j.name, rarity: j.rarity } : null;
+    }).filter(Boolean);
+    if (list.length) {
+      setTimeout(() => {
+        try { window.dispatchEvent(new CustomEvent("jiroku:jirofound", { detail: list })); } catch (e) {}
+      }, 900);
+    }
+  } catch (e) { /* 出せなくてもアプリは動かす */ }
+}
+
 // 会えたことを真ん中に出す。閉じるまで消えない（見逃さないように）
 function JiroFoundModal() {
   const [queue, setQueue] = useState([]);
@@ -2716,6 +2742,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
       if(d.game){
         setGame(d.game);
         localStorage.setItem("cache_gameStatus", JSON.stringify(d.game));
+        announceNewlyFound(d.game);   // 増えていたらカードを出す
         if(d.game.goals?.length){ localStorage.setItem("jiroku_goals",JSON.stringify(d.game.goals)); onGoalSaved(d.game.goals); }
       }
       if(d.schedule) setSchedule(d.schedule);
@@ -3572,8 +3599,10 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
           .map(id => HIDDEN_JIRO.find(x => x.id === id))
           .filter(x => x && x.art);
         // 自分で選んでいればそれ、無ければ直近に会えた子
+        //   会えているのに階級のままだと気づかれないので、既定は会えた子にする
+        //   （2026-08-06 Kai指摘）
         const picked = owned.find(x => x.id === pickedJiro) || null;
-        const featJ = picked || (feat ? owned.find(x => x.id === feat.id) : null);
+        const featJ = picked || (feat ? owned.find(x => x.id === feat.id) : null) || owned[0] || null;
         const useFeat = !!featJ;
         // 階級の姿も選べるようにする（"rank" を選んだとき）
         const showRank = pickedJiro === "rank" || !featJ;
@@ -10526,7 +10555,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260806-132108";
+const APP_BUILD = "20260806-132830";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
