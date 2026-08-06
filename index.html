@@ -10334,7 +10334,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260806-115705";
+const APP_BUILD = "20260806-115911";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
@@ -11877,6 +11877,8 @@ function App() {
         `)}
       </nav>
       ${toast&&html`<${Toast} msg=${toast} onDone=${()=>setToast(null)}/>`}
+      <!-- 新しいジローに会えたら真ん中に出す（どの画面から記録しても出る） -->
+      <${JiroFoundModal}/>
     </div>
   `;
 }
