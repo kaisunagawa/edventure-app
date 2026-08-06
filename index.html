@@ -3564,7 +3564,10 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
         //   3日だけホームのジローくんと入れ替える。絵が無い子は入れ替えない。
         const feat = game && game.jiro && game.jiro.featured;
         // 会えた子のうち、絵がある子だけが切り替えの対象
+        // ★ホームで回せるのは直近の5体まで★（2026-08-06 Kai要望）
+        //   何十体もあると押して探すのが大変。全部は図鑑で見る。
         const owned = ((game && game.jiro && game.jiro.found) || [])
+          .slice(-5).reverse()
           .map(id => HIDDEN_JIRO.find(x => x.id === id))
           .filter(x => x && x.art);
         // 自分で選んでいればそれ、無ければ直近に会えた子
@@ -9537,7 +9540,9 @@ function GuideBookSheet({myLevel,jiro,onClose}) {
 
           <!-- ★隠しジロー図鑑★（2026-08-05 Kai要望）
                条件を満たした瞬間に会える。会うまでは影と条件だけ見せる。 -->
-          ${H({t:"隠しジロー図鑑",s:`記録の内容で会える、レアなジローたち。${jFound.length} / ${HIDDEN_JIRO.length} 体`})}
+          ${H({t:"隠しジロー図鑑",
+               s:`記録の内容で会える、レアなジローたち。${jFound.length} / ${HIDDEN_JIRO.length} 体`
+                 + ((jiro&&jiro.pending>0) ? `　（あと${jiro.pending}体が会いに来ます）` : "")})}
           <div style=${{display:"grid",gridTemplateColumns:"minmax(0,1fr) minmax(0,1fr)",gap:10,marginBottom:14}}>
             ${HIDDEN_JIRO.map(j=>{
               const have = jFound.indexOf(j.id) !== -1;
@@ -10464,7 +10469,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260806-130715";
+const APP_BUILD = "20260806-131321";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 

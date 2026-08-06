@@ -466,22 +466,37 @@ function doGet(e) {
           outJ.push({ email: em, name: String(u.nickname || u.name || ""),
                       counts: c, found: r.found, count: r.found.length });
         });
+        // ★一度に全部は渡さない★（2026-08-06 Kai要望）
+        //   過去の記録から見つかった分は、最初の何体かだけ渡して、
+        //   残りは待機列に入れる。夜の処理で1日2体ずつ出す。
+        const FIRST_GIVE = 3;
         if (!dryJ) {
           const sh = getSheet("Users");
           const dataJ = sh.getDataRange().getValues();
           const hdrJ = dataJ[0];
           const iEmJ = hdrJ.indexOf("student_email");
-          let iCJ = hdrJ.indexOf("jiro_counts"), iFJ = hdrJ.indexOf("jiro_found");
+          let iCJ = hdrJ.indexOf("jiro_counts"), iFJ = hdrJ.indexOf("jiro_found"),
+              iPJ = hdrJ.indexOf("jiro_pending");
           if (iCJ === -1) { iCJ = hdrJ.length; sh.getRange(1, iCJ + 1).setValue("jiro_counts"); }
-          if (iFJ === -1) { iFJ = (iCJ === hdrJ.length ? hdrJ.length + 1 : hdrJ.length);
-                            sh.getRange(1, iFJ + 1).setValue("jiro_found"); }
+          if (iFJ === -1) { iFJ = sh.getLastColumn(); sh.getRange(1, iFJ + 1).setValue("jiro_found"); }
+          if (iPJ === -1) { iPJ = sh.getLastColumn(); sh.getRange(1, iPJ + 1).setValue("jiro_pending"); }
           const byEmail = {}; outJ.forEach(function (o) { byEmail[o.email] = o; });
           for (let i = 1; i < dataJ.length; i++) {
             const o = byEmail[String(dataJ[i][iEmJ])]; if (!o) continue;
             sh.getRange(i + 1, iCJ + 1).setValue(JSON.stringify(o.counts));
-            sh.getRange(i + 1, iFJ + 1).setValue(o.found.join(","));
+            // すでに持っている子はそのまま。新しく見つかった分だけ小分けにする
+            const already = jiroParseFound_(dataJ[i][iFJ]);
+            const fresh = o.found.filter(function (id) { return already.indexOf(id) === -1; });
+            const give = already.concat(fresh.slice(0, FIRST_GIVE));
+            const wait = jiroParsePending_(dataJ[i][iPJ]).concat(fresh.slice(FIRST_GIVE));
+            sh.getRange(i + 1, iFJ + 1).setValue(give.join(","));
+            sh.getRange(i + 1, iPJ + 1).setValue(wait.join(","));
           }
         }
+        outJ.forEach(function (o) {
+          o.いま渡す = o.found.slice(0, FIRST_GIVE).length;
+          o.待機 = Math.max(0, o.found.length - FIRST_GIVE);
+        });
         return jsonResponse({ ok: true, dry: dryJ, users: outJ.length,
           total_found: outJ.reduce(function (a, o) { return a + o.count; }, 0),
           detail: outJ.sort(function (a, b) { return b.count - a.count; }) });
@@ -3592,6 +3607,8 @@ function appendReportRow(targetDate, studentEmail, report, logCount) {
       abs.origin = (allMet && days >= 365 && (abs.perfect100 || 0) >= 100) ? 1 : 0;
     } catch (e3) {}
     jiroBumpUser_(studentEmail, {}, abs);
+    // 待機している子がいれば、今日のぶんを出す
+    try { jiroReleasePending_(studentEmail); } catch (e8) {}
   } catch (e) { /* 図鑑が更新できなくてもレポートは成功させる */ }
 }
 
@@ -4930,8 +4947,10 @@ function getGameStatus(studentEmail) {
       }
     }
   } catch (eF2) {}
+  const jiroPending = jiroParsePending_(user.jiro_pending);
   const jiro = {
     found: jiroFound,
+    pending: jiroPending.length,   // 待機中の体数（何体がこれから来るか）
     featured: jiroFeatured,
     total: HIDDEN_JIRO.length,
     progress: HIDDEN_JIRO.map(function (j) {
@@ -12787,6 +12806,10 @@ function jiroWordsHit_(text) {
 
 // 会えた子をホームに出しておく日数（2026-08-06 Kai要望）
 const JIRO_FEATURE_DAYS = 3;
+// ★過去の記録から見つかった子は、少しずつ出す★（2026-08-06 Kai要望）
+//   一度に22体渡すと1回で終わってしまう。待機列に入れて1日この数だけ出す。
+//   これから達成した分は待たせない（その場でポップアップ）。
+const JIRO_RELEASE_PER_DAY = 2;
 
 const HIDDEN_JIRO = [
   { id:"cafe", no:"No.101", name:"カフェジロー", rarity:"Common",
@@ -12877,6 +12900,11 @@ function jiroParseCounts_(raw) {
   if (typeof o === "string") { if (!o.trim()) return {}; try { o = JSON.parse(o); } catch (e) { return {}; } }
   return (o && typeof o === "object") ? o : {};
 }
+// 待機列（過去の記録から見つかったが、まだ出していない子）
+function jiroParsePending_(raw) {
+  return String(raw || "").split(",").map(function (x) { return x.trim(); }).filter(Boolean);
+}
+
 function jiroParseFound_(raw) {
   return String(raw || "").split(",").map(function (x) { return x.trim(); }).filter(Boolean);
 }
@@ -12912,6 +12940,40 @@ function jiroCollect_(studentEmail, deltas, force) {
     const j = HIDDEN_JIRO.find(function (x) { return x.id === id; });
     return j ? { id: j.id, no: j.no, name: j.name, rarity: j.rarity } : { id: id };
   }) };
+}
+
+// 待機列から今日のぶんを出す。出した子を返す（ポップアップに使う）。
+//   夜のレポートのときに1回だけ呼ぶ。
+function jiroReleasePending_(studentEmail) {
+  try {
+    const sheet = getSheet("Users");
+    const data = sheet.getDataRange().getValues();
+    const headers = data[0];
+    const iEm = headers.indexOf("student_email");
+    let iF = headers.indexOf("jiro_found"), iP = headers.indexOf("jiro_pending");
+    if (iF === -1) return [];
+    if (iP === -1) { iP = headers.length; sheet.getRange(1, iP + 1).setValue("jiro_pending"); return []; }
+    for (let i = 1; i < data.length; i++) {
+      if (String(data[i][iEm]) !== studentEmail) continue;
+      const pending = jiroParsePending_(data[i][iP]);
+      if (!pending.length) return [];
+      const out = pending.slice(0, JIRO_RELEASE_PER_DAY);
+      const rest = pending.slice(JIRO_RELEASE_PER_DAY);
+      const found = jiroParseFound_(data[i][iF]);
+      out.forEach(function (id) { if (found.indexOf(id) === -1) found.push(id); });
+      sheet.getRange(i + 1, iF + 1).setValue(found.join(","));
+      sheet.getRange(i + 1, iP + 1).setValue(rest.join(","));
+      // 出した子をホームに出す（いちばん最後の子）
+      try {
+        let iFeat = headers.indexOf("jiro_featured");
+        if (iFeat === -1) { iFeat = headers.length; sheet.getRange(1, iFeat + 1).setValue("jiro_featured"); }
+        const until = new Date(Date.now() + JIRO_FEATURE_DAYS * 86400000).toISOString();
+        sheet.getRange(i + 1, iFeat + 1).setValue(out[out.length - 1] + "|" + until);
+      } catch (eF) {}
+      return out;
+    }
+  } catch (e) { /* 出せなくても夜の処理は続ける */ }
+  return [];
 }
 
 // Users の1行だけを読み書きして反映する（分類の後からの変更など、
