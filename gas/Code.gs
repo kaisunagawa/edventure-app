@@ -3325,7 +3325,8 @@ function opsNarrative(studentEmail, cur, forceRefresh) {
   const apiKey = PropertiesService.getScriptProperties().getProperty("CLAUDE_API_KEY");
   if (apiKey) {
     try {
-      const res = UrlFetchApp.fetch("https://api.anthropic.com/v1/messages", {
+      var _tAi0 = Date.now();
+    const res = UrlFetchApp.fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
         payload: JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: 1200,
@@ -3858,6 +3859,7 @@ function aiCapExceeded(feature, email, limitPer6h) {
 }
 
 function quickLog(studentEmail, body) {
+  const _t0 = Date.now();
   // 自己経営力は計算に時間がかかるので取っておいている。書き換えたら
   // 古い結果に当たらないよう世代を進める（2026-08-05）。
   smpBumpEpoch_(studentEmail);
@@ -3893,14 +3895,18 @@ function quickLog(studentEmail, body) {
     return null;
   };
   let lastEnd = null;
-  sheetToObjects(getSheet("DailyLog"))
-    .filter(l => l.student_email === studentEmail && l.date === today)
+  // ★全員ぶんをオブジェクト化しない★（2026-08-06 Kai報告「記録するまでが遅い」）
+  //   ここで欲しいのは自分の今日の記録だけ。getFilteredRows は
+  //   先に行を絞ってから変換するので、記録が増えても重くならない。
+  getFilteredRows("DailyLog", "student_email", studentEmail)
+    .filter(l => l.date === today)
     .forEach(l => {
       const e = blockEnd(l.time_block);
       // 「今以前で最も遅い終了」を起点にする（後ろ/未来の記録には引きずられない）
       if (e && e <= nowStr && (!lastEnd || e > lastEnd)) lastEnd = e;
     });
 
+  const _tPrep = Date.now();
   const prompt = `ユーザーが「今日どう過ごしたか」を話し言葉でつぶやきました。これを時間記録に構造化してください。
 1つの活動だけなら1件でOKですが、1日の出来事をまとめて話している場合は、語られた活動を漏れなく全て別々の記録にしてください（件数の上限を気にせず、話に出てきた分だけ作る）。
 「誰に会ったか」「何時に何をしたか」など具体的な情報が入っていれば、それも記録に活かしてください。話に出てきたことを勝手に省略・要約して捨てないこと。
@@ -4012,6 +4018,7 @@ ${text}
   };
 
   const saved = [];
+  const _tSave0 = Date.now();
   let totalXp = 0, lastLevel = null, leveled = false;
   // 1日分をまとめて話す人にも対応するため件数の上限は事実上設けない。
   // 60件は1日24時間を分単位で分けても十分収まる安全弁（暴走・実行時間の保険）
@@ -4064,13 +4071,20 @@ ${text}
 
   if (saved.length === 0) return { ok: false, error: "記録の保存に失敗しました。もう一度お試しください" };
   // 複数件の時は先頭を代表として返しつつ、件数も返す（フロントのトースト用）
+  // ★どこで待たされているかを数字で残す★（2026-08-06）
+  //   下ごしらえ（記録の読み込み）／AI解析／保存 のどれが重いかを、
+  //   憶測ではなく実測で切り分けられるようにする。
   return {
     ok: true,
     count: saved.length,
     saved: saved[0],
     savedAll: saved,
     fallback: usedFallback,   // AI解析に失敗し、全文をそのまま1件保存した場合true
-    xp_gained: totalXp, level_up: leveled, level: lastLevel
+    xp_gained: totalXp, level_up: leveled, level: lastLevel,
+    ms: { 下ごしらえ: (typeof _tPrep !== "undefined" ? _tPrep - _t0 : null),
+          AI解析: (typeof _tAi0 !== "undefined" ? _tSave0 - _tAi0 : null),
+          保存: Date.now() - _tSave0,
+          合計: Date.now() - _t0, 件数: saved.length }
   };
 }
 
