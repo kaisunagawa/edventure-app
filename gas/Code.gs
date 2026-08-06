@@ -13631,7 +13631,12 @@ function authChallenge() {
 //   放っておくと際限なく増える。
 //   行は必ず時系列で追記されるので、古い側をまとめて1回で消す。
 function authPurgeOldChallenges() {
-  const KEEP_DAYS = 7;
+  // ★古さだけでなく、行数でも上限を設ける★（2026-08-05 実測）
+  //   authChallenge は誰でも叩ける入口で、実測で1日あたり約2,200行増えていた。
+  //   6日で13,283行。ログインのたびにこの全部を読むので、日ごとに遅くなる。
+  //   「7日より古い行」だけでは追いつかないため、総数の上限も決める。
+  const KEEP_DAYS = 3;
+  const KEEP_MAX_ROWS = 3000;         // これを超えたぶんは、古い側から消す
   const KEEP_MIN_ROWS = 500;          // 直近はどんなに古くても残す（調査用）
   const sh = getAuthSheet("AuthChallenges");
   const last = sh.getLastRow();
@@ -13659,7 +13664,9 @@ function authPurgeOldChallenges() {
   }
   // 直近 KEEP_MIN_ROWS 行は必ず残す
   const maxDeletable = (last - 1) - KEEP_MIN_ROWS;
-  const n = Math.min(lastOld, maxDeletable);
+  // 行数の上限を超えているぶんは、古さに関係なく古い側から消す
+  const overflow = Math.max(0, (last - 1) - KEEP_MAX_ROWS);
+  const n = Math.min(Math.max(lastOld, overflow), maxDeletable);
   if (n <= 0) return { ok: true, deleted: 0, rows: last - 1, lastOld: lastOld,
                        unreadable: unreadable, firstAt: String(col[0][0]).slice(0, 30) };
   sh.deleteRows(2, n);                // まとめて1回で消す
