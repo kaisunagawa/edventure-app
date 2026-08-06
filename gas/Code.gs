@@ -562,7 +562,15 @@ function doGet(e) {
           timeIt("tasks",        function () { getTasks(emH, { includeDone: "1" }); });
         } finally { _sheetReadCacheOn = false; _sheetReadCache = {}; }
         msH.__total = Date.now() - totalT0;
-        return jsonResponse({ ok: true, ms: msH });
+        // ★本体を実際に2回呼んで、持ち回しの効き目を測る★
+        //   部品を個別に呼ぶだけでは、キャッシュの効果が分からない。
+        try { CacheService.getScriptCache().remove(homeCacheKey_(emH)); } catch (e2) {}
+        const c1 = Date.now(); const r1 = getHomeData(emH); const ms1 = Date.now() - c1;
+        const c2 = Date.now(); const r2 = getHomeData(emH); const ms2 = Date.now() - c2;
+        return jsonResponse({ ok: true, ms: msH,
+          home: { 初回: ms1, "2回目": ms2,
+                  "2回目はキャッシュか": !!(r2 && r2.cached),
+                  "初回はキャッシュか": !!(r1 && r1.cached) } });
       }
       // みんなの頑張りが何秒かかっているかを測る（読むだけ・書き込みなし）
       //   bash gas/ops.sh adminCommunityTiming
