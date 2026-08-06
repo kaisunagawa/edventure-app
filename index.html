@@ -9454,12 +9454,11 @@ function JiroZukanSheet({jiro, onClose}) {
                                 justifyContent:"center",overflow:"hidden",marginBottom:6}}>
                     ${shown && j.art
                       ? html`<img src=${j.art+"?v="+APP_BUILD} alt=${j.name} loading="lazy"
-                               style=${{maxWidth:"88%",maxHeight:"88%",objectFit:"contain",display:"block",
-                                        opacity:have?1:0.55}}/>`
+                               style=${{maxWidth:"88%",maxHeight:"88%",objectFit:"contain",display:"block"}}/>`
                       : html`<span style=${{fontSize:26,fontWeight:800,color:"var(--border)"}}>?</span>`}
                   </div>
                   <div style=${{fontSize:10,fontWeight:800,lineHeight:1.35,
-                                color:have?"var(--text)":"var(--sub)"}}>
+                                color:shown?"var(--text)":"var(--sub)"}}>
                     ${shown ? j.name : "？？？ジロー"}</div>
                   <!-- ★出現条件はどのカードにも必ず出す★（2026-08-06 Kai要望）
                        会えたあとも「どうやって会えたか」が分かるように残す。 -->
@@ -10527,7 +10526,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260806-132035";
+const APP_BUILD = "20260806-132108";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
