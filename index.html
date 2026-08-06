@@ -1444,7 +1444,18 @@ const HIDDEN_JIRO = [
     line:"「ちゃんとやる、それが一番の近道。」", note:"目立たないけど欠かせない存在。" },
   { id:"turbo",    no:"No.107", name:"爆速ジロー",     rarity:"Epic", art:"assets/jiro/turbo.png",
     cond:"日次スコア90点以上が3日連続",   personality:"情熱的・負けず嫌い",
-    line:"「限界？そんなの、昨日の話！」", note:"勢いが止まらないスピードスター。" }
+    line:"「限界？そんなの、昨日の話！」", note:"勢いが止まらないスピードスター。" },
+  // ── 積み重ねの証（記録の中身ではなく、続けた結果で会える） ──
+  { id:"perfect",  no:"No.201", name:"パーフェクトジロー", rarity:"Legendary", art:"assets/jiro/perfect.png",
+    cond:"日次スコア100点を通算20回",     personality:"完璧主義・プライド高め",
+    line:"「妥協はしない。」",             note:"完璧を追い求めるストイックなジロー。" },
+  { id:"streak",   no:"No.202", name:"ストリークジロー",   rarity:"Legendary", art:"assets/jiro/streak.png",
+    cond:"30日連続で記録",                 personality:"継続の鬼・忍耐強い",
+    line:"「今日も、いつもどおり。」",     note:"「続けること」に人生をかけている。" },
+  { id:"origin",   no:"No.999", name:"？？？ジロー",       rarity:"Ultimate",  art:"assets/jiro/origin.png",
+    cond:"365日続ける・100点を100回・ほかのジロー全員と出会う",
+    personality:"神聖・すべての始まり",
+    line:"「君は、ここまで来た。」",       note:"すべてのジローたちの始祖。", secret:true }
 ];
 // ★新しく会えたら、真ん中に出して知らせる★（2026-08-06 Kai要望）
 //   小さなお知らせだと見逃す。何が起きたのか・これからどうなるのかを
@@ -2304,6 +2315,11 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
   const [report, setReport] = useState(null);
   const [schedule, setSchedule] = useState([]);
   const [game, setGame] = useState(null);
+  // ★ホームに出す子を自分で選べる★（2026-08-06 Kai要望）
+  //   会えた子が複数いるとき、タップで切り替える。選択は端末に覚えておく。
+  const [pickedJiro, setPickedJiro] = useState(()=>{
+    try { return localStorage.getItem("jiroku_picked_jiro") || ""; } catch(e) { return ""; }
+  });
   const [ranking, setRanking] = useState(null);
   const [showCommunity, setShowCommunity] = useState(false);
   const [statusSummary, setStatusSummary] = useState(null);
@@ -3482,10 +3498,27 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
         //   図鑑を開かない人にも「会えた」ことが伝わるように、
         //   3日だけホームのジローくんと入れ替える。絵が無い子は入れ替えない。
         const feat = game && game.jiro && game.jiro.featured;
-        const featJ = feat ? HIDDEN_JIRO.find(x=>x.id===feat.id) : null;
-        const useFeat = !!(featJ && featJ.art);
-        const art  = useFeat ? (featJ.art + "?v=" + APP_BUILD)
+        // 会えた子のうち、絵がある子だけが切り替えの対象
+        const owned = ((game && game.jiro && game.jiro.found) || [])
+          .map(id => HIDDEN_JIRO.find(x => x.id === id))
+          .filter(x => x && x.art);
+        // 自分で選んでいればそれ、無ければ直近に会えた子
+        const picked = owned.find(x => x.id === pickedJiro) || null;
+        const featJ = picked || (feat ? owned.find(x => x.id === feat.id) : null);
+        const useFeat = !!featJ;
+        // 階級の姿も選べるようにする（"rank" を選んだとき）
+        const showRank = pickedJiro === "rank" || !featJ;
+        const art  = (!showRank && featJ) ? (featJ.art + "?v=" + APP_BUILD)
                              : (rank ? rankArt(rank.name) : "");
+        // タップで次の子へ（階級 → 会えた子 → …と回る）
+        const cycle = () => {
+          if (!owned.length) return;
+          const order = ["rank"].concat(owned.map(x => x.id));
+          const cur = order.indexOf(showRank ? "rank" : featJ.id);
+          const next = order[(cur + 1) % order.length];
+          setPickedJiro(next);
+          try { localStorage.setItem("jiroku_picked_jiro", next); } catch(e) {}
+        };
         const lvLabel = rank
           ? `Lv.${game.level}`
           : "";
@@ -3496,10 +3529,27 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
         <div style=${{display:"flex",alignItems:"center",gap:11,marginBottom:14}}>
           ${art
             /* 隠しジローも背景を抜いてあるので、階級のキャラと同じ置き方にする
-               （2026-08-06 Kai指摘。丸枠にすると階級のときと形が変わって落ち着かない） */
-            ? html`<img src=${art} alt=${useFeat?featJ.name:(rank?rank.name:"")} width="118" height="118"
+               （2026-08-06 Kai指摘。丸枠にすると階級のときと形が変わって落ち着かない）
+               会えた子が複数いるときは、押すたびに切り替わる（2026-08-06 Kai要望） */
+            ? (owned.length
+              ? html`<button onClick=${cycle} aria-label="ジローくんを切り替える"
+                  style=${{position:"relative",background:"none",border:"none",padding:0,margin:0,
+                           flexShrink:0,cursor:"pointer",lineHeight:0,fontFamily:"inherit"}}>
+                  <img src=${art} alt=${showRank?(rank?rank.name:""):featJ.name} width="118" height="118"
+                    style=${{width:118,height:118,objectFit:"contain",display:"block",
+                             marginTop:-14,marginBottom:-14,marginLeft:-12,marginRight:-6}}/>
+                  <!-- 押せることが分かるよう、絵の左下に小さく出す。
+                       右に置くと名前の列と重なる（2026-08-06 描画で確認） -->
+                  <span style=${{position:"absolute",left:0,bottom:-2,
+                                 background:"rgba(255,255,255,0.92)",color:"#0E7490",
+                                 borderRadius:20,padding:"2px 7px",fontSize:9.5,fontWeight:800,
+                                 boxShadow:"0 2px 6px rgba(0,0,0,0.2)",whiteSpace:"nowrap",
+                                 pointerEvents:"none"}}>
+                    ⇄ ${owned.length + 1}</span>
+                </button>`
+              : html`<img src=${art} alt=${rank?rank.name:""} width="118" height="118"
                      style=${{width:118,height:118,objectFit:"contain",display:"block",flexShrink:0,
-                              marginTop:-14,marginBottom:-14,marginLeft:-12,marginRight:-6}}/>`
+                              marginTop:-14,marginBottom:-14,marginLeft:-12,marginRight:-6}}/>`)
             : html`<div style=${{width:56,height:56,borderRadius:"50%",background:"rgba(255,255,255,0.2)",
                                  display:"flex",alignItems:"center",justifyContent:"center",
                                  fontSize:28,flexShrink:0}}>${profile?.avatar||"🦊"}</div>`}
@@ -3522,13 +3572,14 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
               </div>`}
             <!-- ★なぜ姿が変わったのかを伝える★（2026-08-06）
                  説明が無いと「勝手に変わった」と思われる。残り日数も出す。 -->
-            ${useFeat&&html`
+            ${(!showRank&&featJ)&&html`
               <div style=${{display:"inline-flex",alignItems:"center",gap:5,marginTop:6,
                             background:"rgba(255,255,255,0.22)",borderRadius:20,padding:"3px 10px"}}>
                 <span style=${{fontSize:10.5,fontWeight:800,color:"#fff",whiteSpace:"nowrap"}}>
                   ${featJ.name}と一緒</span>
-                <span style=${{fontSize:9.5,color:"rgba(255,255,255,0.8)",whiteSpace:"nowrap"}}>
-                  あと${feat.daysLeft}日</span>
+                ${(feat&&feat.id===featJ.id)&&html`
+                  <span style=${{fontSize:9.5,color:"rgba(255,255,255,0.8)",whiteSpace:"nowrap"}}>
+                    あと${feat.daysLeft}日</span>`}
               </div>`}
             ${game&&html`
               <!-- 2つとも1行に収める。折り返すと縦に伸びて間延びする -->
@@ -10334,7 +10385,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260806-123802";
+const APP_BUILD = "20260806-124559";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 

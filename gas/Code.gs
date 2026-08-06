@@ -492,6 +492,39 @@ function doGet(e) {
         }
         return jsonResponse({ ok: true, dry: dryT, count: fixed.length, fixed: fixed });
       }
+      // ★起動が何秒かかっているかを、部品ごとに測る★（読むだけ・2026-08-06）
+      //   getHomeData は十数個の集計をまとめて返す。どれが重いのか分からないと
+      //   当てずっぽうで削ることになるので、部品ごとの秒数を出す。
+      //     bash gas/ops.sh adminHomeTiming
+      case "adminHomeTiming": {
+        if (!verifyAdmin(e.parameter.coachEmail)) return jsonResponse({ ok: false, error: "not admin" });
+        const emH = String(e.parameter.email || "").trim() || adminEmail();
+        const msH = {};
+        const timeIt = function (name, fn) {
+          const t0 = Date.now();
+          try { fn(); } catch (e2) { msH[name + "(失敗)"] = String(e2).slice(0, 60); }
+          msH[name] = Date.now() - t0;
+        };
+        _sheetReadCacheOn = true; _sheetReadCache = {};
+        const totalT0 = Date.now();
+        try {
+          timeIt("user",         function () { getUser(emH); });
+          timeIt("report",       function () { getReport(emH, {}); });
+          timeIt("game",         function () { getGameStatus(emH); });
+          timeIt("schedule",     function () { getSchedule(emH); });
+          timeIt("logs",         function () { getLogs(emH, {}); });
+          timeIt("ranking",      function () { getRanking(emH); });
+          timeIt("status",       function () { getStatusSummary(emH); });
+          timeIt("weekly",       function () { getWeeklySummary(emH); });
+          timeIt("intent",       function () { getIntent(emH); });
+          timeIt("todayActions", function () { getTodayActions(emH); });
+          timeIt("roadmap",      function () { getRoadmap(emH); });
+          timeIt("smp",          function () { getSelfMgmtPower(emH, { withPrev: "1", cacheOnly: "1" }); });
+          timeIt("tasks",        function () { getTasks(emH, { includeDone: "1" }); });
+        } finally { _sheetReadCacheOn = false; _sheetReadCache = {}; }
+        msH.__total = Date.now() - totalT0;
+        return jsonResponse({ ok: true, ms: msH });
+      }
       // みんなの頑張りが何秒かかっているかを測る（読むだけ・書き込みなし）
       //   bash gas/ops.sh adminCommunityTiming
       case "adminCommunityTiming": {
@@ -3422,8 +3455,37 @@ function appendReportRow(targetDate, studentEmail, report, logCount) {
   //   レポートは作り直されることがあるので、そのつど正しい連続数にそろえる。
   try {
     const runs = jiroHighScoreRun_(sheet, studentEmail, String(targetDate));
-    jiroBumpUser_(studentEmail, {}, { hiscore7: runs });
+    // ★積み重ねの証★（2026-08-06）
+    //   100点の回数・連続日数・全員と出会ったか。どれも「続けた結果」で決まるので
+    //   夜のレポートのときにまとめて数え直す。
+    const abs = { hiscore7: runs };
+    try { abs.perfect100 = jiroPerfectCount_(sheet, studentEmail); } catch (e2) {}
+    try {
+      const u = getFilteredRows("Users", "student_email", studentEmail)[0];
+      abs.streak = Number((u && u.streak) || 0);
+      // 「ほかの子と全員出会った」かどうか（オリジンだけは自分を数えない）
+      const found = jiroParseFound_(u && u.jiro_found);
+      const others = HIDDEN_JIRO.filter(function (j) { return j.id !== "origin"; });
+      const allMet = others.every(function (j) { return found.indexOf(j.id) !== -1; });
+      const days = Number(abs.streak || 0);
+      abs.origin = (allMet && days >= 365 && (abs.perfect100 || 0) >= 100) ? 1 : 0;
+    } catch (e3) {}
+    jiroBumpUser_(studentEmail, {}, abs);
   } catch (e) { /* 図鑑が更新できなくてもレポートは成功させる */ }
+}
+
+// Reports から「100点だった日」が通算で何回あるかを数える。
+function jiroPerfectCount_(sheet, studentEmail) {
+  const data = sheet.getDataRange().getValues();
+  const hdr = data[0];
+  const eIdx = hdr.indexOf("student_email"), sIdx = hdr.indexOf("score");
+  if (sIdx === -1) return 0;
+  let n = 0;
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][eIdx]) !== studentEmail) continue;
+    if (Number(data[i][sIdx] || 0) >= 100) n++;
+  }
+  return n;
 }
 
 // Reports から、その日を末尾とする「90点以上の連続日数」を数える。
@@ -12535,7 +12597,14 @@ const HIDDEN_JIRO = [
   { id:"support",  no:"No.106", name:"縁の下ジロー",   rarity:"Rare",
     key:"OPERATIONS",   need:15, cond:"日常業務の記録が通算15件" },
   { id:"turbo",    no:"No.107", name:"爆速ジロー",     rarity:"Epic",
-    key:"hiscore7",     need:3,  cond:"日次スコア90点以上が3日連続" }
+    key:"hiscore7",     need:3,  cond:"日次スコア90点以上が3日連続" },
+  // ── 積み重ねの証。記録の中身ではなく「続けた結果」で会える ──
+  { id:"perfect",  no:"No.201", name:"パーフェクトジロー", rarity:"Legendary",
+    key:"perfect100",   need:20, cond:"日次スコア100点を通算20回" },
+  { id:"streak",   no:"No.202", name:"ストリークジロー",   rarity:"Legendary",
+    key:"streak",       need:30, cond:"30日連続で記録" },
+  { id:"origin",   no:"No.999", name:"？？？ジロー",       rarity:"Ultimate",
+    key:"origin",       need:1,  cond:"365日続ける・100点を100回・ほかのジロー全員と出会う" }
 ];
 
 // 記録の時刻が「夜ふかし」に当たるか（23時〜翌5時のはじまり）
@@ -14518,7 +14587,7 @@ const ADMIN_SECRET_ALLOWLIST = {
   // 一斉送信（Kaiの明示的な要望により残す）
   adminBroadcastLine:1, adminBroadcastLinePending:1, adminSendStudentCampaign:1,
   // セットアップ・保守
-  adminSetupTriggers:1, adminInstallTrigger:1, adminSetupPhase1:1, adminSetupAuth:1, adminPhase4DryRun:1, adminLegacyBackfill:1, adminWritePathStats:1, adminIssueTestSession:1, adminDropTestSessions:1, adminOpsSelfTest:1, adminActualMinutesAudit:1, adminXpCorrection:1, adminStreakRecalc:1, adminGrantFeature:1, adminUserDiag:1, adminReportScoreDryRun:1, adminReportGenTest:1, adminScoreConsistency:1, adminFinalizeOps:1, adminUnfinalizeOps:1, adminSmpDump:1, adminSmpWarmAll:1, adminLevelAudit:1, adminXpRestore:1, adminCleanupPlusLogs:1, adminClassAudit:1, adminRecolorCalendar:1, adminFixTokenVersion:1, adminPurgeChallenges:1, adminJiroBackfill:1, adminCommunityTiming:1, adminOpsScoreAudit:1, adminListTriggers:1, adminScoreTrace:1,
+  adminSetupTriggers:1, adminInstallTrigger:1, adminSetupPhase1:1, adminSetupAuth:1, adminPhase4DryRun:1, adminLegacyBackfill:1, adminWritePathStats:1, adminIssueTestSession:1, adminDropTestSessions:1, adminOpsSelfTest:1, adminActualMinutesAudit:1, adminXpCorrection:1, adminStreakRecalc:1, adminGrantFeature:1, adminUserDiag:1, adminReportScoreDryRun:1, adminReportGenTest:1, adminScoreConsistency:1, adminFinalizeOps:1, adminUnfinalizeOps:1, adminSmpDump:1, adminSmpWarmAll:1, adminLevelAudit:1, adminXpRestore:1, adminCleanupPlusLogs:1, adminClassAudit:1, adminRecolorCalendar:1, adminFixTokenVersion:1, adminPurgeChallenges:1, adminJiroBackfill:1, adminCommunityTiming:1, adminOpsScoreAudit:1, adminListTriggers:1, adminHomeTiming:1, adminScoreTrace:1,
   authSetMode:1, authSetEnforce:1, authRoleApply:1, authRoleDryRun:1, authRevokeAll:1,
   authCleanupTestData:1, adminPurgeTestUsers:1, adminMigrateTasks:1, authBreakerReset:1, rotateSessionSecret:1,
   p1Backup:1, p1BackupInfo:1, p1PurgeArchived:1, weeklyBackup:1
