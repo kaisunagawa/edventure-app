@@ -2415,9 +2415,13 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
   // ★ホームに出す子を自分で選べる★（2026-08-06 Kai要望）
   //   会えた子が複数いるとき、タップで切り替える。選択は端末に覚えておく。
   const [zukanOpen, setZukanOpen] = useState(false);   // ジロー図鑑
-  const [pickedJiro, setPickedJiro] = useState(()=>{
-    try { return localStorage.getItem("jiroku_picked_jiro") || ""; } catch(e) { return ""; }
-  });
+  const [pickedJiro, setPickedJiro] = useState(readPickedJiro);
+  // 設定の図鑑から選ばれたときも、ここで受け取って描き直す
+  useEffect(()=>{
+    const on = (e) => setPickedJiro(String(e.detail || ""));
+    window.addEventListener("jiroku:pickjiro", on);
+    return () => window.removeEventListener("jiroku:pickjiro", on);
+  }, []);
   const [ranking, setRanking] = useState(null);
   const [showCommunity, setShowCommunity] = useState(false);
   const [statusSummary, setStatusSummary] = useState(null);
@@ -3630,9 +3634,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
           if (!owned.length) return;
           const order = ["rank"].concat(owned.map(x => x.id));
           const cur = order.indexOf(showRank ? "rank" : featJ.id);
-          const next = order[(cur + 1) % order.length];
-          setPickedJiro(next);
-          try { localStorage.setItem("jiroku_picked_jiro", next); } catch(e) {}
+          pickHomeJiro(order[(cur + 1) % order.length]);
         };
         const lvLabel = rank
           ? `Lv.${game.level}`
@@ -3655,12 +3657,13 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
                              marginTop:-14,marginBottom:-14,marginLeft:-12,marginRight:-6}}/>
                   <!-- ★誰と一緒かは絵のすぐ下に置く★（2026-08-06 Kai指摘「スペースとりすぎ」）
                        独立した帯にすると1段まるごと増える。絵の余白に重ねれば高さは増えない。 -->
-                  ${(!showRank&&featJ)&&html`
-                    <span style=${{position:"absolute",left:0,right:0,bottom:-11,
-                                   fontSize:9,fontWeight:700,lineHeight:1.2,textAlign:"center",
-                                   color:"rgba(255,255,255,0.82)",overflow:"hidden",
-                                   textOverflow:"ellipsis",whiteSpace:"nowrap",display:"block"}}>
-                      ${featJ.name}</span>`}
+                  <!-- 階級のときも名前を出す。押すと切り替わることが分かるように、
+                       いま誰が出ているかを必ず1行で示す（2026-08-06 Kai指摘） -->
+                  <span style=${{position:"absolute",left:0,right:0,bottom:-11,
+                                 fontSize:9,fontWeight:700,lineHeight:1.2,textAlign:"center",
+                                 color:"rgba(255,255,255,0.82)",overflow:"hidden",
+                                 textOverflow:"ellipsis",whiteSpace:"nowrap",display:"block"}}>
+                    ${(!showRank&&featJ) ? featJ.name : (rank ? rank.name : "")}</span>
                 </button>`
               : html`<img src=${art} alt=${rank?rank.name:""} width="118" height="118"
                      style=${{width:118,height:118,objectFit:"contain",display:"block",flexShrink:0,
@@ -3744,9 +3747,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
     ${showCommunity&&html`<${CommunityOverlay} onClose=${()=>setShowCommunity(false)}/>`}
     ${zukanOpen&&html`<${JiroZukanSheet} jiro=${game&&game.jiro} onClose=${()=>setZukanOpen(false)}
         picked=${pickedJiro}
-        onPick=${(id)=>{ setPickedJiro(id);
-          try { localStorage.setItem("jiroku_picked_jiro", id); } catch(e) {}
-          setZukanOpen(false); }}/>`}
+        onPick=${(id)=>{ pickHomeJiro(id); setZukanOpen(false); }}/>`}
 
     <!-- ★目標ロードマップ★（2026-08-05 Kai指定のデザインで作り直し）
          色・比率・文字の大きさ・アイコンまで指定どおりに合わせている。
@@ -8379,7 +8380,11 @@ const FAQ_CATEGORIES = [
     { q:"XPとレベルの仕組みは？",
       a:"記録1件につき+10XP、メモを書くと+5XP、その日の最初の1件だけ連続日数ボーナス（+2×連続日数・30日で頭打ち・最大+60）が付きます。\nレベルはLv.1〜Lv.100。Lv.100は累計83,040XPが頂点です。詳しくは設定→「階級システム」→「攻略本」に全部まとめてあります。\nXPは1つの記録につき1回だけ（初めて自己評価を入れたタイミング）付きます。評価を付けずに保存して後から評価を足した時もちゃんと付きますが、何度更新しても増えません。過去の日付への後付け記録ではXPは付きません。\n記録なしの日はXPが減り、連続記録もリセットされます。ただし🧊フリーズを持っていれば自動で守られます（次の項目参照）。" },
     { q:"階級システム・図鑑・攻略本って？",
-      a:"設定の「階級システム」で見られます。レベルに応じて7つの階級があり、階級が上がるとキャラクターの「ジローくん」の姿が変わります。\nまだ到達していない階級は、うっすら影だけ。届いたときにはじめて会えます（Lv.100の階級は名前も伏せてあります）。\n会えたジローくんのカードをタップすると裏返って、その子のプロフィール（分類・好き・苦手・口ぐせ・特徴）が読めます。\n右下の「攻略本」を押すと、育て方・XPの仕組み・階級ごとの攻略ポイント・つまずきの対策がまとまったページが開きます。" },
+      a:"設定の「階級システム」で見られます。レベルに応じて7つの階級があり、階級が上がるとキャラクターの「ジローくん」の姿が変わります。\nまだ到達していない階級は、うっすら影だけ。届いたときにはじめて会えます（Lv.100の階級は名前も伏せてあります）。\n会えたジローくんのカードをタップすると裏返って、その子のプロフィール（分類・好き・苦手・口ぐせ・特徴）が読めます。\n右下の「攻略本」を押すと、育て方・XPの仕組み・階級ごとの攻略ポイント・つまずきの対策がまとまったページが開きます。\n階級とは別に「ジロー図鑑」があります（次の項目）。" },
+    { q:"ジロー図鑑って？（隠しジロー）",
+      a:"ホームの📖、または設定の「ジロー図鑑」から開けます。カフェ・勉強・キャンプ・読書…といった、あなたが実際に記録した内容におうじて会える32体のジローが載っています。\n出現条件はどのカードにも書いてあります。条件を満たすと、その子の絵が出てきます（会えるのは1日に2体ずつなので、順番待ちになることがあります）。\nカードを押すと、絵・性格・口ぐせ・出現条件・あと何回で会えるかが大きく出ます。\nめずらしさは コモン（13体）→レア（9体）→エピック（6体）→レジェンダリー（3体）→アルティメット（1体）。コモンは最初から見えていて、レア以上は会うまで影のままです。" },
+    { q:"ホーム画面のジローくんを変えたい",
+      a:"ホーム画面の絵をタップするたびに、階級のジローくん → 会えた子…と順番に切り替わります（回せるのは直近5体まで）。いま誰が出ているかは絵のすぐ下に名前で出ます。\n図鑑の詳しいカードにある「ホーム画面に出す」を押すと、その子に固定できます。古い子でも選べます。\n何も選んでいないときは、新しく会えた子が3日だけ出て、そのあとは階級のジローくんに戻ります。" },
     { q:"1日休んだら連続記録は消えちゃう？（🧊フリーズ）",
       a:"7日連続で記録するごとに「フリーズ🧊」が1個貯まります（最大2個）。\n記録できない日があっても、フリーズを持っていれば自動で1個使われて、連続記録とXPがそのまま守られます。使われた時は通知でお知らせします。\n今どれだけ持っているかは、ホーム画面の🔥連続日数の横（🧊×1など）と、みんなの頑張りの「連続記録ランキング」で確認できます。" },
     { q:"「ステータス」って何？",
@@ -9452,6 +9457,28 @@ function jiroProgOf(p, have) {
   return { now: now, need: need, done: done, pct: pct };
 }
 
+// ★ホームに出す子は、どこから選んでも同じ場所に入れる★（2026-08-06）
+//   ホームの📖からも、設定の図鑑からも選べるようにする。
+//   端末に覚えさせたうえで合図を出し、ホームはそれを聞いて描き直す。
+const JIRO_PICK_KEY = "jiroku_picked_jiro";
+function pickHomeJiro(id) {
+  try { localStorage.setItem(JIRO_PICK_KEY, id); } catch (e) {}
+  try { window.dispatchEvent(new CustomEvent("jiroku:pickjiro", { detail: id })); } catch (e) {}
+}
+function readPickedJiro() {
+  try { return localStorage.getItem(JIRO_PICK_KEY) || ""; } catch (e) { return ""; }
+}
+// ★一度だけ、古い選択を解除する★（2026-08-06）
+//   「3日たったら階級のジローくんに戻る」に直す前は、勝手に会えた子が
+//   選ばれた形で端末に残ってしまっていた。そのままだと直しても戻らないので、
+//   新しい版を開いたときに1回だけ消す。選び直せばまた残る。
+try {
+  if (!localStorage.getItem("jiroku_pick_reset_v2")) {
+    localStorage.setItem("jiroku_pick_reset_v2", "1");
+    localStorage.removeItem(JIRO_PICK_KEY);
+  }
+} catch (e) {}
+
 function JiroZukanSheet({jiro, onClose, picked, onPick}) {
   const jFound = (jiro && jiro.found) || [];
   const jProg = {};
@@ -10439,7 +10466,9 @@ function SettingsScreen({onToast,onLogout,onGoalSaved,profile,onProfileSaved,onC
       <//>
 
       ${guideOpen && html`<${GuideBookSheet} myLevel=${myLevel} jiro=${gameCache&&gameCache.jiro} onClose=${()=>setGuideOpen(false)}/>`}
-      ${zukanOpen && html`<${JiroZukanSheet} jiro=${gameCache&&gameCache.jiro} onClose=${()=>setZukanOpen(false)}/>`}
+      ${zukanOpen && html`<${JiroZukanSheet} jiro=${gameCache&&gameCache.jiro} onClose=${()=>setZukanOpen(false)}
+          picked=${readPickedJiro()}
+          onPick=${(id)=>{ pickHomeJiro(id); setZukanOpen(false); }}/>`}
 
       <!-- 使い方 Q&A -->
       <${FAQSection}/>
@@ -10646,7 +10675,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260806-142644";
+const APP_BUILD = "20260806-145108";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
