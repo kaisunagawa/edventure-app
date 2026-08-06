@@ -1,6 +1,10 @@
 .DS_Store
 **/.DS_Store
 .preview/
+# ★検査スクリプトだけは追跡する★（2026-08-06）
+#   デプロイのスモークテストがこれらを呼ぶ。git管理外にしていたため、
+#   きれいな作業コピーからデプロイすると検査が全部falseになって止まった。
+!.preview/check_*.py
 preview_roadmap.html
 preview_editor.html
 preview_list.html
