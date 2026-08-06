@@ -12474,6 +12474,12 @@ function p1Text_(v, max) {
 // 目標階層をまとめて1回で返す。画面表示に必要なものを1リクエストに収める
 // （APIを何本も叩くとGASの同時実行待ちで一気に遅くなるため、getHomeDataと同じ方針）
 function getGoalTree(studentEmail) {
+  // ★同じシートを何度も読まない★（2026-08-06）
+  //   aggregateWeeklyActual が DailyLog・GoalEntries を読み、
+  //   このあと Goals・WeeklyGoals も読む。1回の呼び出しの間だけ覚えておく。
+  return withSheetCache_(function () { return getGoalTreeInner_(studentEmail); });
+}
+function getGoalTreeInner_(studentEmail) {
   const chk = p1RequireUser(studentEmail);
   if (!chk.ok) return chk;
 
@@ -13538,8 +13544,11 @@ function aggregateWeeklyActual(studentEmail, weekStart) {
     .filter(w => String(w.status || "ACTIVE").toUpperCase() !== "ARCHIVED");
   if (!weeklies.length) return {};
 
-  const logs = sheetToObjects(getSheet("DailyLog")).filter(l => {
-    if (l.student_email !== studentEmail) return false;
+  // ★全員ぶんをオブジェクト化しない★（2026-08-06 Kai報告「ボタンを押してから遅い」）
+  //   この関数はスプリントの週ごとに呼ばれる。2週間なら2回、
+  //   DailyLog 全体を毎回オブジェクト化していた（getSprints が8秒かかっていた原因）。
+  //   getFilteredRows は先に自分の行だけに絞ってから変換する。
+  const logs = getFilteredRows("DailyLog", "student_email", studentEmail).filter(l => {
     if (String(l.deleted_at || "").trim()) return false; // 論理削除済みは数えない
     const d = String(l.date).substring(0, 10);
     return d >= monday && d <= sunday;
@@ -15722,6 +15731,12 @@ function sprintProgress_(studentEmail, sprint, weeklies) {
 }
 
 function getSprints(studentEmail, body) {
+  // ★同じシートを何度も読まない★（2026-08-06）
+  //   週ごとに aggregateWeeklyActual が呼ばれ、そのたびに DailyLog・WeeklyGoals・
+  //   GoalEntries を読み直していた。1回の呼び出しの間だけ覚えておく。
+  return withSheetCache_(function () { return getSprintsInner_(studentEmail, body); });
+}
+function getSprintsInner_(studentEmail, body) {
   const chk = p1RequireUser(studentEmail);
   if (!chk.ok) return chk;
   const today = formatDate(new Date());
