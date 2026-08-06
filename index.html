@@ -8557,10 +8557,51 @@ const EDIT_IC = {
   shield: html`<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5" stroke-linejoin="round"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6l8-3z"/></svg>`,
 };
 
-function GoalEditor({draft, setDraft, onSave, onCancel, saving}) {
+// ★編集画面の共通の足元★（2026-08-06 Kai要望「3つで一貫性を持たせて」）
+//   3か月目標・2週間スプリント・今週の目標で、保存／やめる／しまう を同じ形にする。
+//   「しまう」は編集画面の一番下。一覧に削除ボタンを並べると誤爆するため。
+function EditorFooter({onSave, onCancel, saving, onArchive, archiveLabel}) {
+  return html`
+    <div>
+      <div style=${{display:"flex",gap:8,marginTop:14}}>
+        <button class="btn" onClick=${onSave} disabled=${saving}
+          style=${{flex:1,opacity:saving?.6:1}}>${saving?"保存中…":"保存する"}</button>
+        <button onClick=${onCancel}
+          style=${{background:"none",border:"1px solid var(--border)",borderRadius:10,padding:"0 16px",
+                   color:"var(--sub)",fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>やめる</button>
+      </div>
+      ${onArchive&&html`
+        <div style=${{borderTop:"1px solid var(--border)",marginTop:12,paddingTop:10}}>
+          <button onClick=${onArchive}
+            style=${{background:"none",border:"none",color:"var(--red,#d33)",fontSize:12.5,
+                     fontWeight:600,cursor:"pointer",fontFamily:"inherit",padding:"4px 0"}}>${archiveLabel}</button>
+          <div style=${{fontSize:10.5,color:"var(--faint)",lineHeight:1.6}}>
+            一覧から消えます。記録や実績は残ります。</div>
+        </div>`}
+    </div>`;
+}
+
+// ★折りたたみ★ 最初に決めることだけ見せて、細かい項目は畳んでおく
+function EditorMore({open, onToggle, children}) {
+  return html`
+    <div style=${{marginTop:12}}>
+      <button onClick=${onToggle}
+        style=${{background:"none",border:"none",color:"var(--accent)",fontSize:12.5,fontWeight:700,
+                 cursor:"pointer",fontFamily:"inherit",padding:"6px 0",display:"flex",alignItems:"center",gap:5}}>
+        <span style=${{fontSize:10}}>${open?"▼":"▶"}</span>もっと詳しく決める（あとでも大丈夫）
+      </button>
+      ${open&&children}
+    </div>`;
+}
+
+function GoalEditor({draft, setDraft, onSave, onCancel, saving, onArchive}) {
   const f=(k)=>(e)=>setDraft({...draft,[k]:e.target.value});
   const C = "#14B8A6";   // 3か月目標の色（ロードマップと同じ）
   const hint = (t)=>html`<div style=${{fontSize:11,color:"var(--sub)",lineHeight:1.7,marginBottom:6}}>${t}</div>`;
+  // ★項目が8つ並んでいて何が必須か分からない、という声への対応★（2026-08-06）
+  //   項目は減らさない（すでに書いた人のデータを消さないため）。
+  //   「まず決める3つ」だけ出して、残りは畳む。
+  const [more,setMore]=useState(false);
   return html`
     <div style=${{background:"var(--bg)",borderRadius:12,padding:"4px 14px 14px",border:"1px solid var(--border)",marginBottom:10}}>
       ${EditHead({color:C, icon:EDIT_IC.goal, text:"3か月で達成したいこと", req:true})}
@@ -8582,6 +8623,7 @@ function GoalEditor({draft, setDraft, onSave, onCancel, saving}) {
         <${GoalField} label="期限"><input class="inp" type="date" value=${draft.end_date} onChange=${f("end_date")}/><//>
       </div>
 
+      <${EditorMore} open=${more} onToggle=${()=>setMore(!more)}>
       ${EditHead({color:C, icon:EDIT_IC.me, text:"なぜこれをやるのか"})}
       ${hint("迷ったときに立ち返る場所です。うまく書けなくても大丈夫。")}
       <textarea class="txa" placeholder="例：家族との時間を増やしたいから、収入を仕組みで作れるようにしたい" value=${draft.why}
@@ -8596,15 +8638,14 @@ function GoalEditor({draft, setDraft, onSave, onCancel, saving}) {
       ${hint("目標を追ううちに壊しがちなものを、先に決めておきます。空欄でも構いません。")}
       <textarea class="txa" placeholder="例：睡眠6時間、週1回は家族と夕食" value=${draft.guardrails}
         onChange=${f("guardrails")} style=${{minHeight:44,padding:"9px 12px",resize:"none"}}/>
+      <//>
 
-      <div style=${{display:"flex",gap:8,marginTop:14}}>
-        <button class="btn" onClick=${onSave} disabled=${saving} style=${{flex:1,opacity:saving?.6:1}}>${saving?"保存中…":"保存する"}</button>
-        <button onClick=${onCancel} style=${{background:"none",border:"1px solid var(--border)",borderRadius:10,padding:"0 16px",color:"var(--sub)",fontSize:13,fontWeight:600,cursor:"pointer"}}>やめる</button>
-      </div>
+      <${EditorFooter} onSave=${onSave} onCancel=${onCancel} saving=${saving}
+        onArchive=${onArchive} archiveLabel="この3か月目標をしまう"/>
     </div>`;
 }
 
-function WeeklyGoalEditor({draft, setDraft, onSave, onCancel, saving}) {
+function WeeklyGoalEditor({draft, setDraft, onSave, onCancel, saving, onArchive}) {
   const f=(k)=>(e)=>setDraft({...draft,[k]:e.target.value});
   const isBool = draft.metric_type==="boolean";
   const C = "#4CAF50";   // 今週の目標の色（ロードマップと同じ）
@@ -8631,10 +8672,8 @@ function WeeklyGoalEditor({draft, setDraft, onSave, onCancel, saving}) {
         <input class="inp" type="number" inputmode="numeric" placeholder="3" value=${draft.min_line} onChange=${f("min_line")}/>
       `}
 
-      <div style=${{display:"flex",gap:8,marginTop:14}}>
-        <button class="btn" onClick=${onSave} disabled=${saving} style=${{flex:1,opacity:saving?.6:1}}>${saving?"保存中…":"保存"}</button>
-        <button onClick=${onCancel} style=${{background:"none",border:"1px solid var(--border)",borderRadius:10,padding:"0 14px",color:"var(--sub)",fontSize:12.5,fontWeight:600,cursor:"pointer"}}>やめる</button>
-      </div>
+      <${EditorFooter} onSave=${onSave} onCancel=${onCancel} saving=${saving}
+        onArchive=${onArchive} archiveLabel="この今週の目標をしまう"/>
     </div>`;
 }
 
@@ -8846,6 +8885,14 @@ function WeeklyGoalSheet({sprints, goals, editing, onClose, onSaved, onToast}) {
 
 function SprintSheet({goals, editing, onClose, onSaved, onToast}) {
   const today = formatDateStr(new Date());
+  // ★しまう★ 3か月目標・今週の目標と同じ言い回し・同じ位置にそろえる
+  const archiveSprint = async () => {
+    if (!editing || !editing.sprint_id) return;
+    if (!confirm("この2週間スプリントをしまいます。よろしいですか？\n（ぶら下がっている今週の目標は残ります）")) return;
+    const r = await gasPostJson("archiveGoalItem", { kind:"sprint", sprint_id: editing.sprint_id });
+    if (r && r.ok) { onToast && onToast("しまいました"); onSaved && onSaved(); onClose && onClose(); }
+    else onToast && onToast((r && r.error) || "しまえませんでした");
+  };
   const plus = (d,n)=>{ const x=new Date(d+"T00:00:00+09:00"); x.setDate(x.getDate()+n); return formatDateStr(x); };
   const [d, setD] = useState(()=> editing ? {...editing} : {
     name:"", link_quarterly_goal_id: (goals[0]&&goals[0].quarterly_goal_id)||"",
@@ -8998,6 +9045,16 @@ function SprintSheet({goals, editing, onClose, onSaved, onToast}) {
           </div>`}
 
         <button class="btn" disabled=${saving} onClick=${save} style=${{marginTop:4}}>${saving?"保存中…":"保存する"}</button>
+        <!-- ★3つの目標で「しまう」をそろえる★（2026-08-06 Kai要望）
+             編集中のスプリントにだけ出す。新規作成中には出さない。 -->
+        ${editing&&editing.sprint_id&&html`
+          <div style=${{borderTop:"1px solid var(--border)",marginTop:14,paddingTop:10}}>
+            <button onClick=${archiveSprint}
+              style=${{background:"none",border:"none",color:"var(--red,#d33)",fontSize:12.5,
+                       fontWeight:600,cursor:"pointer",fontFamily:"inherit",padding:"4px 0"}}>この2週間スプリントをしまう</button>
+            <div style=${{fontSize:10.5,color:"var(--faint)",lineHeight:1.6}}>
+              一覧から消えます。ぶら下がっている今週の目標はそのまま残ります。</div>
+          </div>`}
       </div>
     </div>`;
 }
@@ -9062,7 +9119,8 @@ function GoalTreeSheet({onClose, onToast}) {
   const fmt = v => { const n=num(v); return n===null ? "—" : (Math.round(n*10)/10).toLocaleString(); };
   // 週間目標の行（3か月直下でも、Sprintの下でも同じ形で出す）
   const wgRow = (w) => (wgDraft&&wgDraft.weekly_goal_id===w.weekly_goal_id)
-    ? html`<${WeeklyGoalEditor} draft=${wgDraft} setDraft=${setWgDraft} onSave=${saveWgRow} onCancel=${()=>setWgDraft(null)} saving=${saving}/>`
+    ? html`<${WeeklyGoalEditor} draft=${wgDraft} setDraft=${setWgDraft} onSave=${saveWgRow} onCancel=${()=>setWgDraft(null)} saving=${saving}
+                  onArchive=${wgDraft&&wgDraft.weekly_goal_id?()=>archive("weekly",wgDraft.weekly_goal_id):null}/>`
     : (()=>{
         const t = Number(w.std_line)>0?Number(w.std_line):Number(w.target_total);
         const u = w.unit || (w.metric_type==="DURATION"||w.metric_type==="minutes" ? "分" : "件");
@@ -9126,7 +9184,8 @@ function GoalTreeSheet({onClose, onToast}) {
           return html`
           <div key=${g.quarterly_goal_id} style=${{marginBottom:14}}>
             ${goalDraft&&goalDraft.quarterly_goal_id===g.quarterly_goal_id
-              ? html`<${GoalEditor} draft=${goalDraft} setDraft=${setGoalDraft} onSave=${saveGoalRow} onCancel=${()=>setGoalDraft(null)} saving=${saving}/>`
+              ? html`<${GoalEditor} draft=${goalDraft} setDraft=${setGoalDraft} onSave=${saveGoalRow} onCancel=${()=>setGoalDraft(null)} saving=${saving}
+                      onArchive=${goalDraft&&goalDraft.quarterly_goal_id?()=>archive("goal",goalDraft.quarterly_goal_id):null}/>`
               : html`
               <div class="card" style=${{padding:14}}>
                 <!-- ① 3か月目標 -->
@@ -9186,7 +9245,8 @@ function GoalTreeSheet({onClose, onToast}) {
                       <div style=${{marginTop:9,paddingLeft:10,borderLeft:`2px solid color-mix(in srgb, ${C_W} 40%, transparent)`}}>
                         ${spWg.map(w=>html`<div key=${w.weekly_goal_id}>${wgRow(w)}</div>`)}
                         ${wgDraft&&!wgDraft.weekly_goal_id&&wgDraft.link_sprint_id===sp.sprint_id
-                          ? html`<${WeeklyGoalEditor} draft=${wgDraft} setDraft=${setWgDraft} onSave=${saveWgRow} onCancel=${()=>setWgDraft(null)} saving=${saving}/>`
+                          ? html`<${WeeklyGoalEditor} draft=${wgDraft} setDraft=${setWgDraft} onSave=${saveWgRow} onCancel=${()=>setWgDraft(null)} saving=${saving}
+                  onArchive=${wgDraft&&wgDraft.weekly_goal_id?()=>archive("weekly",wgDraft.weekly_goal_id):null}/>`
                           : html`<button onClick=${()=>setWgDraft({...EMPTY_WG,link_quarterly_goal_id:g.quarterly_goal_id,link_sprint_id:sp.sprint_id})}
                               style=${{background:"none",border:"1.5px dashed var(--border)",borderRadius:9,padding:"7px",color:C_W,fontSize:11.5,fontWeight:700,cursor:"pointer",width:"100%"}}>
                               ＋ 今週やることを足す</button>`}
@@ -9552,6 +9612,14 @@ function readPickedJiro() {
 try {
   if (!localStorage.getItem("jiroku_pick_reset_v2")) {
     localStorage.setItem("jiroku_pick_reset_v2", "1");
+    localStorage.removeItem(JIRO_PICK_KEY);
+  }
+  // ★出したことの記録も白紙に戻す★（2026-08-06 Kai判断で全員リセット）
+  //   「もう出したから出さない」を端末が覚えているので、消しておかないと
+  //   数え直して同じ子に会えたときにカードが出ない。
+  if (!localStorage.getItem("jiroku_jiro_reset_v3")) {
+    localStorage.setItem("jiroku_jiro_reset_v3", "1");
+    localStorage.removeItem("jiroku_announced_jiro");
     localStorage.removeItem(JIRO_PICK_KEY);
   }
 } catch (e) {}
@@ -10752,7 +10820,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260806-154039";
+const APP_BUILD = "20260806-154834";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 

@@ -412,6 +412,37 @@ function doGet(e) {
                      users: Object.keys(unknown[k].users).length, sample: unknown[k].sample }; })
             .sort(function (a, b) { return b.count - a.count; }) });
       }
+      // ★隠しジローを全員ぶん白紙に戻す★（2026-08-06 Kai判断）
+      //   過去の記録から掘り出した子を配ると、今日やったことと関係なく届いて
+      //   「記録したから会えた」という手ざわりが消える。ここで一度ゼロにして、
+      //   これから記録するぶんだけで数え直す。
+      //   消すのは jiro_found / jiro_pending / jiro_counts / jiro_featured の4列。
+      //   dry=1 なら消さずに、何人ぶん消えるかだけ返す。
+      //     bash gas/ops.sh adminJiroReset dry=1
+      //     bash gas/ops.sh adminJiroReset
+      case "adminJiroReset": {
+        if (!verifyAdmin(e.parameter.coachEmail)) return jsonResponse({ ok: false, error: "not admin" });
+        const dryR = String(e.parameter.dry || "") === "1";
+        const shR = getSheet("Users");
+        const dataR = shR.getDataRange().getValues();
+        const hR = dataR[0];
+        const cols = ["jiro_found", "jiro_pending", "jiro_counts", "jiro_featured"]
+          .map(function (n) { return { name: n, i: hR.indexOf(n) }; })
+          .filter(function (c) { return c.i !== -1; });
+        if (!cols.length) return jsonResponse({ ok: false, error: "ジローの列がありません" });
+        let hit = 0;
+        const names = [];
+        for (let r = 1; r < dataR.length; r++) {
+          const had = cols.some(function (c) { return String(dataR[r][c.i] || "").trim() !== ""; });
+          if (!had) continue;
+          hit++;
+          names.push(String(dataR[r][hR.indexOf("student_email")] || ""));
+          if (dryR) continue;
+          cols.forEach(function (c) { shR.getRange(r + 1, c.i + 1).setValue(""); });
+        }
+        return jsonResponse({ ok: true, dry: dryR, 白紙にした人数: hit,
+                              消した列: cols.map(function (c) { return c.name; }), 対象: names });
+      }
       // ★隠しジローの棚卸し★（2026-08-05）
       //   これまでの記録を数えて、Users の jiro_counts / jiro_found を作り直す。
       //   dry=1 なら書き込まず、誰が何体になるかだけ返す。
@@ -12703,6 +12734,17 @@ function archiveGoalItem(studentEmail, body) {
     p1Upsert("WeeklyGoals", "weekly_goal_id", { weekly_goal_id: row.weekly_goal_id, status: status });
     return { ok: true };
   }
+  // ★2週間スプリントもしまえるようにする★（2026-08-06 Kai要望）
+  //   3か月目標・今週の目標だけが対象で、スプリントだけ消せなかった。
+  //   3つの導線をそろえるため、ここも同じ扱いにする。
+  //   ぶら下がっている今週の目標は消さない（スプリントは期間の区切りであって、
+  //   週の目標そのものではないため。3か月目標をしまうときとは意味が違う）。
+  if (kind === "sprint") {
+    const row = p1OwnedRow("Sprints", "sprint_id", body.sprint_id, studentEmail);
+    if (!row) return { ok: false, error: "not found" };
+    p1Upsert("Sprints", "sprint_id", { sprint_id: row.sprint_id, status: status });
+    return { ok: true };
+  }
   return { ok: false, error: "invalid kind" };
 }
 
@@ -15088,7 +15130,7 @@ const ADMIN_SECRET_ALLOWLIST = {
   // 一斉送信（Kaiの明示的な要望により残す）
   adminBroadcastLine:1, adminBroadcastLinePending:1, adminSendStudentCampaign:1,
   // セットアップ・保守
-  adminSetupTriggers:1, adminInstallTrigger:1, adminSetupPhase1:1, adminSetupAuth:1, adminPhase4DryRun:1, adminLegacyBackfill:1, adminWritePathStats:1, adminIssueTestSession:1, adminDropTestSessions:1, adminOpsSelfTest:1, adminActualMinutesAudit:1, adminXpCorrection:1, adminStreakRecalc:1, adminGrantFeature:1, adminUserDiag:1, adminReportScoreDryRun:1, adminReportGenTest:1, adminScoreConsistency:1, adminFinalizeOps:1, adminUnfinalizeOps:1, adminSmpDump:1, adminSmpWarmAll:1, adminLevelAudit:1, adminXpRestore:1, adminCleanupPlusLogs:1, adminClassAudit:1, adminRecolorCalendar:1, adminFixTokenVersion:1, adminPurgeChallenges:1, adminJiroBackfill:1, adminCommunityTiming:1, adminOpsScoreAudit:1, adminListTriggers:1, adminHomeTiming:1, adminScreenTiming:1, adminQuickLogTimings:1, adminScoreTrace:1, adminJiroSignals:1,
+  adminSetupTriggers:1, adminInstallTrigger:1, adminSetupPhase1:1, adminSetupAuth:1, adminPhase4DryRun:1, adminLegacyBackfill:1, adminWritePathStats:1, adminIssueTestSession:1, adminDropTestSessions:1, adminOpsSelfTest:1, adminActualMinutesAudit:1, adminXpCorrection:1, adminStreakRecalc:1, adminGrantFeature:1, adminUserDiag:1, adminReportScoreDryRun:1, adminReportGenTest:1, adminScoreConsistency:1, adminFinalizeOps:1, adminUnfinalizeOps:1, adminSmpDump:1, adminSmpWarmAll:1, adminLevelAudit:1, adminXpRestore:1, adminCleanupPlusLogs:1, adminClassAudit:1, adminRecolorCalendar:1, adminFixTokenVersion:1, adminPurgeChallenges:1, adminJiroBackfill:1, adminJiroReset:1, adminCommunityTiming:1, adminOpsScoreAudit:1, adminListTriggers:1, adminHomeTiming:1, adminScreenTiming:1, adminQuickLogTimings:1, adminScoreTrace:1, adminJiroSignals:1,
   authSetMode:1, authSetEnforce:1, authRoleApply:1, authRoleDryRun:1, authRevokeAll:1,
   authCleanupTestData:1, adminPurgeTestUsers:1, adminMigrateTasks:1, authBreakerReset:1, rotateSessionSecret:1,
   p1Backup:1, p1BackupInfo:1, p1PurgeArchived:1, weeklyBackup:1
