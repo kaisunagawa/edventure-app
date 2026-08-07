@@ -420,6 +420,34 @@ function doGet(e) {
                      users: Object.keys(unknown[k].users).length, sample: unknown[k].sample }; })
             .sort(function (a, b) { return b.count - a.count; }) });
       }
+      // ★Stripe同期がちゃんと最後まで走ったかを見る（読むだけ）★（2026-08-07）
+      //   実行ログはコードから読めないので、シートの stripe_synced_at の
+      //   新しさで判断する。全員が同じ日付なら、最後まで走りきっている。
+      //     bash gas/ops.sh adminStripeSyncStatus
+      case "adminStripeSyncStatus": {
+        if (!verifyAdmin(e.parameter.coachEmail)) return jsonResponse({ ok: false, error: "not admin" });
+        const shS = getStudentProfileSheet();
+        const dS = shS.getDataRange().getValues();
+        if (dS.length < 2) return jsonResponse({ ok: true, 行数: 0 });
+        const hS = dS[0];
+        const iAtS = hS.indexOf("stripe_synced_at"), iTotS = hS.indexOf("stripe_total_paid");
+        if (iAtS === -1) return jsonResponse({ ok: false, error: "stripe_synced_at 列がありません" });
+        const byDay = {};
+        let 未同期 = 0, 金額あり = 0;
+        for (let r = 1; r < dS.length; r++) {
+          const raw = dS[r][iAtS];
+          if (iTotS !== -1 && Number(dS[r][iTotS]) > 0) 金額あり++;
+          const s = String(raw || "").trim();
+          if (!s) { 未同期++; continue; }
+          const day = (raw instanceof Date)
+            ? Utilities.formatDate(raw, "Asia/Tokyo", "yyyy-MM-dd")
+            : s.slice(0, 10).replace(/\//g, "-");
+          byDay[day] = (byDay[day] || 0) + 1;
+        }
+        return jsonResponse({ ok: true, 行数: dS.length - 1, 未同期: 未同期, 金額あり: 金額あり,
+                              同期した日ごとの人数: byDay,
+                              今日: Utilities.formatDate(new Date(), "Asia/Tokyo", "yyyy-MM-dd") });
+      }
       // ★レポート点数の分布を見る（読むだけ）★（2026-08-06）
       //   スコア基準の隠しジローが到達可能かを、勘ではなく実測で決めるため。
       //     bash gas/ops.sh adminScoreDist
@@ -16263,7 +16291,7 @@ const ADMIN_SECRET_ALLOWLIST = {
   // 一斉送信（Kaiの明示的な要望により残す）
   adminBroadcastLine:1, adminBroadcastLinePending:1, adminSendStudentCampaign:1,
   // セットアップ・保守
-  adminSetupTriggers:1, adminInstallTrigger:1, adminSetupPhase1:1, adminSetupAuth:1, adminPhase4DryRun:1, adminLegacyBackfill:1, adminWritePathStats:1, adminIssueTestSession:1, adminDropTestSessions:1, adminOpsSelfTest:1, adminActualMinutesAudit:1, adminXpCorrection:1, adminStreakRecalc:1, adminGrantFeature:1, adminUserDiag:1, adminReportScoreDryRun:1, adminReportGenTest:1, adminScoreConsistency:1, adminFinalizeOps:1, adminUnfinalizeOps:1, adminSmpDump:1, adminSmpWarmAll:1, adminLevelAudit:1, adminXpRestore:1, adminCleanupPlusLogs:1, adminClassAudit:1, adminRecolorCalendar:1, adminFixTokenVersion:1, adminPurgeChallenges:1, adminJiroBackfill:1, adminJiroReset:1, adminScoreDist:1, adminCommunityTiming:1, adminOpsScoreAudit:1, adminListTriggers:1, adminHomeTiming:1, adminScreenTiming:1, adminQuickLogTimings:1, adminScoreTrace:1, adminJiroSignals:1, adminLogTimes:1, adminJiroFound:1, adminReportGenFailures:1,
+  adminSetupTriggers:1, adminInstallTrigger:1, adminSetupPhase1:1, adminSetupAuth:1, adminPhase4DryRun:1, adminLegacyBackfill:1, adminWritePathStats:1, adminIssueTestSession:1, adminDropTestSessions:1, adminOpsSelfTest:1, adminActualMinutesAudit:1, adminXpCorrection:1, adminStreakRecalc:1, adminGrantFeature:1, adminUserDiag:1, adminReportScoreDryRun:1, adminReportGenTest:1, adminScoreConsistency:1, adminFinalizeOps:1, adminUnfinalizeOps:1, adminSmpDump:1, adminSmpWarmAll:1, adminLevelAudit:1, adminXpRestore:1, adminCleanupPlusLogs:1, adminClassAudit:1, adminRecolorCalendar:1, adminFixTokenVersion:1, adminPurgeChallenges:1, adminJiroBackfill:1, adminJiroReset:1, adminScoreDist:1, adminStripeSyncStatus:1, adminCommunityTiming:1, adminOpsScoreAudit:1, adminListTriggers:1, adminHomeTiming:1, adminScreenTiming:1, adminQuickLogTimings:1, adminScoreTrace:1, adminJiroSignals:1, adminLogTimes:1, adminJiroFound:1, adminReportGenFailures:1,
   igStatus:1, igAuthUrl:1, igFetchNow:1, igDisconnect:1, igResetMetrics:1, igConfigure:1, adminAiUsage:1,
   authSetMode:1, authSetEnforce:1, authRoleApply:1, authRoleDryRun:1, authRevokeAll:1,
   authCleanupTestData:1, adminPurgeTestUsers:1, adminMigrateTasks:1, authBreakerReset:1, rotateSessionSecret:1,
