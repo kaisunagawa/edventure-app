@@ -7804,32 +7804,67 @@ function syncStripeTotals() {
     if (data[i][coachIdx]) targets.add(String(data[i][emailIdx]));
   }
 
-  targets.forEach(email => {
+  // ★時間切れで落ちていた★（2026-08-07 トリガー画面でエラー率50%）
+  //   38人ぶんStripeへ問い合わせ、1人につきシートへ3回書き込んでいた。
+  //   GASは6分で強制終了されるので、人数が増えるほど落ちる確率が上がる。
+  //   ・金額が変わっていない人は書き込まない（ほとんどの人は毎日同じ）
+  //   ・4分を過ぎたら残りは次回にまわす（落ちるより、途中まで確実に）
+  //   ・落ちたときは理由がログに残るようにする
+  const iTotal = headers.indexOf("stripe_total_paid");
+  const iCur = headers.indexOf("stripe_currency");
+  const iAt = headers.indexOf("stripe_synced_at");
+  if (iTotal === -1 || iCur === -1 || iAt === -1) {
+    Logger.log("Stripe同期: 必要な列がありません（stripe_total_paid / stripe_currency / stripe_synced_at）");
+    return;
+  }
+  const started = Date.now();
+  const LIMIT_MS = 4 * 60 * 1000;
+  let done = 0, skipped = 0, wrote = 0, left = 0;
+  const list = Array.from(targets);
+  for (let n = 0; n < list.length; n++) {
+    const email = list[n];
+    if (Date.now() - started > LIMIT_MS) { left = list.length - n; break; }
     try {
-      let rowIdx = -1;
+      let rowIdx = -1, curTotal = null;
       let stripeSearchEmail = email;
       for (let i = 1; i < data.length; i++) {
         if (String(data[i][emailIdx]) === email) {
           rowIdx = i + 1;
+          curTotal = data[i][iTotal];
           if (data[i][stripeEmailIdx]) stripeSearchEmail = String(data[i][stripeEmailIdx]);
           break;
         }
       }
       const result = fetchStripeTotalPaid(stripeSearchEmail);
-      if (!result) return;
+      done++;
+      if (!result) continue;
+      // 金額が前と同じなら、書き込まない（同期時刻だけのために3回書くのは高い）
+      if (rowIdx !== -1 && Number(curTotal) === Number(result.total)) { skipped++; continue; }
       if (rowIdx === -1) {
         const row = headers.map(h => h === "student_email" ? email : "");
         sheet.appendRow(row);
         rowIdx = sheet.getLastRow();
       }
-      sheet.getRange(rowIdx, headers.indexOf("stripe_total_paid") + 1).setValue(result.total);
-      sheet.getRange(rowIdx, headers.indexOf("stripe_currency") + 1).setValue(result.currency);
-      sheet.getRange(rowIdx, headers.indexOf("stripe_synced_at") + 1).setValue(now);
+      // 3列が隣り合っていれば1回で書く
+      const lo = Math.min(iTotal, iCur, iAt), hi = Math.max(iTotal, iCur, iAt);
+      if (hi - lo === 2) {
+        const buf = [null, null, null];
+        buf[iTotal - lo] = result.total; buf[iCur - lo] = result.currency; buf[iAt - lo] = now;
+        sheet.getRange(rowIdx, lo + 1, 1, 3).setValues([buf]);
+      } else {
+        sheet.getRange(rowIdx, iTotal + 1).setValue(result.total);
+        sheet.getRange(rowIdx, iCur + 1).setValue(result.currency);
+        sheet.getRange(rowIdx, iAt + 1).setValue(now);
+      }
+      wrote++;
     } catch (e) {
       Logger.log("Stripe同期失敗 (" + email + "): " + e.toString());
     }
-  });
-  Logger.log("Stripe同期完了");
+  }
+  Logger.log("Stripe同期完了 対象" + list.length + " 問合せ" + done
+             + " 書込" + wrote + " 変更なし" + skipped
+             + (left ? " 次回まわし" + left : "")
+             + " " + Math.round((Date.now() - started) / 1000) + "秒");
 }
 
 // Stripe同期がなぜ失敗するかを切り分けるための診断用。
