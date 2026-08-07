@@ -4943,9 +4943,9 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
          こちらも2026-08-02の変更で描画ブロックだけ消えていて、
          「変更」を押しても何も出ない状態だった（静的検査を追加して発見）。 -->
     ${showGoalTimeEdit&&ReactDOM.createPortal(html`
-      <div style=${{position:"fixed",inset:0,height:"100dvh",background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"flex-end",zIndex:500}}
+      <div style=${{position:"fixed",inset:0,height:"100dvh",background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"center",justifyContent:"center",padding:16,zIndex:500}}
         onClick=${e=>{if(e.target===e.currentTarget)setShowGoalTimeEdit(false);}}>
-        <div style=${{background:"var(--card)",borderRadius:"20px 20px 0 0",padding:"24px 20px calc(28px + env(safe-area-inset-bottom))",width:"100%",boxSizing:"border-box",maxHeight:"70dvh",overflowY:"auto"}}>
+        <div style=${{background:"var(--card)",borderRadius:20,boxShadow:"0 18px 50px rgba(0,0,0,0.35)",padding:"24px 20px 28px",width:"100%",maxWidth:420,boxSizing:"border-box",maxHeight:"84dvh",overflowY:"auto"}}>
           <div style=${{fontSize:18,fontWeight:800,marginBottom:4,color:"var(--text)"}}>1日の目標時間</div>
           <div style=${{fontSize:13,color:"var(--sub)",marginBottom:18,lineHeight:1.6}}>目標に関連した記録を、1日に何時間積みたいですか？無理なく続けられる時間を、自分で決めましょう。</div>
           <div style=${{display:"flex",alignItems:"center",justifyContent:"center",gap:24,marginBottom:20}}>
@@ -4974,8 +4974,8 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
          押しても何も出ない状態だった（2026-08-03にKaiが発見）。
          アンケートより手前に出す。 -->
     ${showIntentModal&&ReactDOM.createPortal(html`
-      <div style=${{position:"fixed",inset:0,height:"100dvh",background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"flex-end",zIndex:650}}>
-        <div style=${{background:"var(--card)",borderRadius:"20px 20px 0 0",padding:"24px 20px calc(28px + env(safe-area-inset-bottom))",width:"100%",boxSizing:"border-box",maxHeight:"88dvh",overflowY:"auto"}}>
+      <div style=${{position:"fixed",inset:0,height:"100dvh",background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"center",justifyContent:"center",padding:16,zIndex:650}}>
+        <div style=${{background:"var(--card)",borderRadius:20,boxShadow:"0 18px 50px rgba(0,0,0,0.35)",padding:"24px 20px 28px",width:"100%",maxWidth:420,boxSizing:"border-box",maxHeight:"84dvh",overflowY:"auto"}}>
           <div style=${{fontSize:18,fontWeight:800,marginBottom:4,color:"var(--text)"}}>${intentEditMode?"⭐ 今日のフォーカスを編集":"⭐ 今日いちばん達成したいことは？"}</div>
           <div style=${{fontSize:13,color:"var(--sub)",marginBottom:16,lineHeight:1.6}}>${intentEditMode?"やりたいことと、かける時間を編集できます。":"やりたいこと1つと、それに使う時間を決めましょう。今日はこの達成をコーチと一緒に目指します。"}</div>
           <label class="form-lbl" style=${{fontSize:11}}>達成したいこと</label>
@@ -5030,9 +5030,9 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
          1件ずつ詳細を開かないと分類できず、結局どのタブも同じ一覧に見えていた。
          ここで上から順に「仕事／プライベート」を押していけば終わる。 -->
     ${sortSheet && ReactDOM.createPortal(html`
-      <div style=${{position:"fixed",inset:0,height:"100dvh",background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"flex-end",zIndex:640}}
+      <div style=${{position:"fixed",inset:0,height:"100dvh",background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"center",justifyContent:"center",padding:16,zIndex:640}}
         onClick=${e=>{ if(e.target===e.currentTarget) setSortSheet(false); }}>
-        <div style=${{background:"var(--card)",width:"100%",maxWidth:520,margin:"0 auto",borderRadius:"20px 20px 0 0",
+        <div style=${{background:"var(--card)",width:"100%",maxWidth:420,maxWidth:520,margin:"0 auto",borderRadius:20,boxShadow:"0 18px 50px rgba(0,0,0,0.35)",
                       padding:"18px 20px calc(20px + env(safe-area-inset-bottom))",maxHeight:"86dvh",display:"flex",flexDirection:"column"}}>
           <div style=${{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
             <span style=${{fontSize:15,fontWeight:800,color:"var(--text)"}}>タスクを仕分ける</span>
@@ -5589,8 +5589,8 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
 
     <!-- Edit Modal -->
     ${editMode&&html`
-      <div style=${{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"flex-end",zIndex:200}}>
-        <div style=${{background:"var(--card)",borderRadius:"20px 20px 0 0",padding:"24px 20px 32px",width:"100%",boxSizing:"border-box",maxHeight:"80vh",overflowY:"auto"}}>
+      <div style=${{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"center",justifyContent:"center",padding:16,zIndex:200}}>
+        <div style=${{background:"var(--card)",borderRadius:20,boxShadow:"0 18px 50px rgba(0,0,0,0.35)",padding:"24px 20px 32px",width:"100%",maxWidth:420,boxSizing:"border-box",maxHeight:"84dvh",overflowY:"auto"}}>
           <div style=${{fontSize:17,fontWeight:800,marginBottom:4}}>今日のタスクを編集</div>
           <div style=${{fontSize:12,color:"var(--sub)",marginBottom:16}}>やることと、想定時間（分・任意）を入力できます。タイマーでそのタスクを選ぶと、その時間で始まります。</div>
           ${editItems.map((item,i)=>html`
@@ -7579,9 +7579,9 @@ function ReportScreen() {
           </div>`
     }
     ${workReport!==null&&html`
-      <div style=${{position:"fixed",inset:0,height:"100dvh",background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"flex-end",zIndex:500,overscrollBehavior:"contain"}}
+      <div style=${{position:"fixed",inset:0,height:"100dvh",background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"center",justifyContent:"center",padding:16,zIndex:500,overscrollBehavior:"contain"}}
         onClick=${e=>{if(e.target===e.currentTarget)setWorkReport(null);}}>
-        <div style=${{position:"relative",background:"var(--card)",width:"100%",borderRadius:"20px 20px 0 0",padding:"20px 20px calc(20px + env(safe-area-inset-bottom))",maxHeight:"85dvh",display:"flex",flexDirection:"column",overscrollBehavior:"contain"}}>
+        <div style=${{position:"relative",background:"var(--card)",width:"100%",maxWidth:420,borderRadius:20,boxShadow:"0 18px 50px rgba(0,0,0,0.35)",padding:"20px 20px 20px",maxHeight:"84dvh",display:"flex",flexDirection:"column",overscrollBehavior:"contain"}}>
           <button onClick=${()=>setWorkReport(null)} aria-label="閉じる"
             style=${{position:"absolute",top:10,right:12,background:"none",border:"none",fontSize:24,color:"var(--sub)",cursor:"pointer",lineHeight:1,padding:6,zIndex:1}}>×</button>
           <div style=${{fontSize:17,fontWeight:800,marginBottom:4,color:"var(--text)"}}>📋 業務報告書</div>
@@ -8411,9 +8411,9 @@ function TimerScreen({onToast, isActive}) {
     </div>
 
     ${showModal&&html`
-      <div style=${{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"flex-end",zIndex:200}}
+      <div style=${{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"center",justifyContent:"center",padding:16,zIndex:200}}
         onClick=${e=>{if(e.target===e.currentTarget)setShowModal(false);}}>
-        <div style=${{background:"var(--card)",borderRadius:"20px 20px 0 0",padding:"24px 20px calc(32px + env(safe-area-inset-bottom))",width:"100%",boxSizing:"border-box",maxHeight:"85dvh",overflowY:"auto",overscrollBehavior:"contain",WebkitOverflowScrolling:"touch"}}>
+        <div style=${{background:"var(--card)",borderRadius:20,boxShadow:"0 18px 50px rgba(0,0,0,0.35)",padding:"24px 20px 32px",width:"100%",maxWidth:420,boxSizing:"border-box",maxHeight:"84dvh",overflowY:"auto",overscrollBehavior:"contain",WebkitOverflowScrolling:"touch"}}>
           <div style=${{fontSize:20,fontWeight:800,marginBottom:4}}>お疲れ様でした！🎉</div>
           <div style=${{fontSize:13,color:"var(--sub)",marginBottom:20}}>
             ${sessionResult
@@ -10921,7 +10921,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260806-161610";
+const APP_BUILD = "20260807-163406";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
@@ -12166,9 +12166,9 @@ function QuickLogSheet({onClose,onToast}){
     }
   };
   return ReactDOM.createPortal(html`
-    <div style=${{position:"fixed",inset:0,height:"100dvh",background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"flex-end",zIndex:550}}
+    <div style=${{position:"fixed",inset:0,height:"100dvh",background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"center",justifyContent:"center",padding:16,zIndex:550}}
       onClick=${e=>{if(e.target===e.currentTarget)onClose();}}>
-      <div style=${{background:"var(--card)",borderRadius:"20px 20px 0 0",padding:"22px 20px calc(24px + env(safe-area-inset-bottom))",width:"100%",boxSizing:"border-box",maxHeight:"85dvh",overflowY:"auto",overscrollBehavior:"contain",WebkitOverflowScrolling:"touch"}}>
+      <div style=${{background:"var(--card)",borderRadius:20,boxShadow:"0 18px 50px rgba(0,0,0,0.35)",padding:"22px 20px 24px",width:"100%",maxWidth:420,boxSizing:"border-box",maxHeight:"84dvh",overflowY:"auto",overscrollBehavior:"contain",WebkitOverflowScrolling:"touch"}}>
         <div style=${{fontSize:18,fontWeight:800,marginBottom:4,color:"var(--text)"}}>🎙 今なにしてた？</div>
         <div style=${{fontSize:12.5,color:"var(--sub)",marginBottom:14,lineHeight:1.6}}>話すだけ・書くだけでOK。あとはAIが記録に整えます。<br/>1日分をまとめて話しても大丈夫。何時に誰と何をしたか、思い出すままにどうぞ。<br/>（キーボードのマイクを押すと声で入力できます）</div>
         <textarea ref=${inputRef} class="txa" placeholder="例：8時に起きて朝ごはん、10時から友達とカフェで勉強、昼は移動して13時に打ち合わせ…と1日を丸ごと話してもOK" value=${text}

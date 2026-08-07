@@ -96,6 +96,14 @@ function doGet(e) {
   const action = e.parameter.action;
   let studentEmail = e.parameter.studentEmail;
   const callback = e.parameter.callback;
+  // ★Instagramからの戻り★ redirect_uri はこのURL自身なので、
+  //   code と state が付いた素の呼び出しがここに来る。
+  //   state は igAuthUrl で発行したものと必ず突き合わせる（誰でも叩けるURLのため）
+  if (!action && e.parameter.code && String(e.parameter.state || "").indexOf("ig_") === 0) {
+    try { return igHandleCallback_(e); } catch (eIg) {
+      return HtmlService.createHtmlOutput("連携に失敗しました: " + String(eIg).slice(0, 200));
+    }
+  }
   try {
     let result;
     // ★トークンを送ってきたのに無効なら、ここで止める（従来経路へ落とさない）★
@@ -814,6 +822,69 @@ function doGet(e) {
                    first_write: accLT[k].first, last_write: accLT[k].last }; });
         rowsLT.sort(function (a, b) { return String(a.last_write) > String(b.last_write) ? 1 : -1; });
         return jsonResponse({ ok: true, date: dayLT, users: rowsLT.length, rows: rowsLT });
+      }
+      // AI費用の明細を読む（読むだけ）。days= でさかのぼる日数
+      case "adminAiUsage": {
+        if (!verifyAdmin(e.parameter.coachEmail)) return jsonResponse({ ok: false, error: "not admin" });
+        const dU = Math.min(120, Math.max(1, Number(e.parameter.days || 30)));
+        const cutU = formatDate(new Date(Date.now() - dU * 86400000));
+        const shU = getSheet("AiUsage");
+        if (!shU) return jsonResponse({ ok: true, rows: [], total: 0 });
+        const accU = {};
+        let totU = 0, cntU = 0;
+        sheetToObjects(shU).forEach(function (r) {
+          const dt = r.date instanceof Date ? formatDate(r.date) : String(r.date).slice(0, 10);
+          if (dt < cutU) return;
+          const k = String(r.feature || "(不明)") + " | " + String(r.model || "");
+          const c = Number(r.cost_usd) || 0;
+          const o = accU[k] || (accU[k] = { n: 0, cost: 0, inTok: 0, outTok: 0 });
+          o.n++; o.cost += c; o.inTok += Number(r.input_tokens) || 0; o.outTok += Number(r.output_tokens) || 0;
+          totU += c; cntU++;
+        });
+        const rowsU = Object.keys(accU).map(function (k) {
+          const o = accU[k];
+          return { key: k, calls: o.n,
+                   cost: Math.round(o.cost * 10000) / 10000,
+                   per_call: Math.round(o.cost / o.n * 10000) / 10000,
+                   in_tok: o.inTok, out_tok: o.outTok };
+        }).sort(function (a2, b2) { return b2.cost - a2.cost; });
+        return jsonResponse({ ok: true, days: dU, calls: cntU,
+                              total: Math.round(totU * 100) / 100, rows: rowsU });
+      }
+      // ── Instagram連携の運用コマンド ──
+      case "igStatus": {
+        if (!verifyAdmin(e.parameter.coachEmail)) return jsonResponse({ ok: false, error: "not admin" });
+        return jsonResponse(igStatus());
+      }
+      case "igAuthUrl": {
+        if (!verifyAdmin(e.parameter.coachEmail)) return jsonResponse({ ok: false, error: "not admin" });
+        return jsonResponse(igAuthUrl());
+      }
+      case "igFetchNow": {
+        if (!verifyAdmin(e.parameter.coachEmail)) return jsonResponse({ ok: false, error: "not admin" });
+        return jsonResponse(igFetchAll({ studentEmail: e.parameter.email || "",
+                                         limit: e.parameter.limit || "" }));
+      }
+      // 数字を紐づける本人と App ID を設定する（App Secret はここでは扱わない。
+      // 秘密はGASの画面から直接入れてもらう＝通信にもログにも残さない）
+      case "igConfigure": {
+        if (!verifyAdmin(e.parameter.coachEmail)) return jsonResponse({ ok: false, error: "not admin" });
+        if (e.parameter.owner) igSet_("IG_OWNER_EMAIL", String(e.parameter.owner).trim());
+        if (e.parameter.appId) igSet_(IG_P.appId, String(e.parameter.appId).trim());
+        return jsonResponse({ ok: true,
+          owner: igProp_("IG_OWNER_EMAIL"), appId_set: !!igProp_(IG_P.appId),
+          secret_set: !!igProp_(IG_P.appSecret), redirect_uri: igRedirectUri_() });
+      }
+      case "igDisconnect": {
+        if (!verifyAdmin(e.parameter.coachEmail)) return jsonResponse({ ok: false, error: "not admin" });
+        return jsonResponse(igDisconnect());
+      }
+      // 指標名の覚え直し（Metaが名前を変えたとき用）
+      case "igResetMetrics": {
+        if (!verifyAdmin(e.parameter.coachEmail)) return jsonResponse({ ok: false, error: "not admin" });
+        const pr = PropertiesService.getScriptProperties();
+        pr.deleteProperty(IG_P.metricsUser); pr.deleteProperty(IG_P.metricsMedia);
+        return jsonResponse({ ok: true, note: "次回の取得で試し直します" });
       }
       // レポート生成が失敗した記録を読む（読むだけ）。clear=1 で消せる。
       case "adminReportGenFailures": {
@@ -1598,6 +1669,11 @@ function doGet(e) {
       case "snsListPosts":    result = snsListPosts(studentEmail, e.parameter); break;
       case "snsSavePost":     result = snsSavePost(studentEmail, e.parameter); break;
       case "snsDeletePost":   result = snsDeletePost(studentEmail, e.parameter); break;
+      case "studioListCandidates": result = studioListCandidates(studentEmail, e.parameter); break;
+      case "studioGetCandidate":   result = studioGetCandidate(studentEmail, e.parameter); break;
+      case "studioSummary":        result = studioSummary(studentEmail, e.parameter); break;
+      case "studioIgStatus":       result = studioIgStatus(studentEmail); break;
+      case "studioHome":           result = studioHome(studentEmail, e.parameter); break;
       default: result = { ok: false, error: "Unknown action: " + action };
     }
     // ★書き込みのあとは、必ず起動データの持ち回しを捨てる★（2026-08-06）
@@ -1727,6 +1803,13 @@ function doPost(e) {
       case "snsSaveAccount": return jsonResponse(snsSaveAccount(studentEmail, body));
       case "snsSaveMetrics": return jsonResponse(snsSaveMetrics(studentEmail, body));
       case "snsSavePost":    return jsonResponse(snsSavePost(studentEmail, body));
+      case "studioListCandidates": return jsonResponse(studioListCandidates(studentEmail, body));
+      case "studioGetCandidate":   return jsonResponse(studioGetCandidate(studentEmail, body));
+      case "studioSummary":        return jsonResponse(studioSummary(studentEmail, body));
+      case "studioIgStatus":       return jsonResponse(studioIgStatus(studentEmail));
+      case "studioHome":           return jsonResponse(studioHome(studentEmail, body));
+      case "studioUpdateCandidate": return jsonResponse(studioUpdateCandidate(studentEmail, body));
+      case "studioPushToJiroku":   return jsonResponse(studioPushToJiroku(studentEmail, body));
       case "saveTodayActions": return jsonResponse(saveTodayActions(studentEmail, body));
       case "generateWorkReport": return jsonResponse(generateWorkReport(studentEmail, body));
       case "migrateLocalTasks": return jsonResponse(migrateLocalTasks(studentEmail, body));
@@ -2037,6 +2120,10 @@ function invalidateStatusCache(studentEmail) {
 function homeCacheKey_(studentEmail) {
   return "home_v1_" + sha256Hex(String(studentEmail)).slice(0, 32);
 }
+// Studio画面（studioHome）用。理由は同じ。
+function studioCacheKey_(studentEmail) {
+  return "studio_v1_" + sha256Hex(String(studentEmail)).slice(0, 32);
+}
 // レポート画面（getReportHome）用。理由は同じ。
 function reportCacheKey_(studentEmail) {
   return "rpt_v1_" + sha256Hex(String(studentEmail)).slice(0, 32);
@@ -2061,6 +2148,7 @@ function dropUserViewCaches_(studentEmail) {
   try { c.remove(reportCacheKey_(studentEmail)); } catch (e) {}
   try { c.remove(roadmapCacheKey_(studentEmail)); } catch (e) {}
   try { c.remove("community_v2_" + studentEmail); } catch (e) {}
+  try { c.remove(studioCacheKey_(studentEmail)); } catch (e) {}
 }
 
 function computeAllStatuses(preloadedLogObjects) {
@@ -7609,6 +7697,7 @@ function extractContractInfoFromBase64(base64Data, mimeType) {
       muteHttpExceptions: true
     });
     const data = JSON.parse(res.getContentText());
+    logAiUsage(data, "契約書の読み取り");   // 費用を残す（記録が無いと後から追えない）
     const text = data.content && data.content[0] && data.content[0].text;
     if (!text) return { ok: false, error: "AI応答が空でした" };
     const m = text.match(/\{[\s\S]*\}/);
@@ -7921,6 +8010,7 @@ ${logSummary}`;
     });
 
     const result = JSON.parse(response.getContentText());
+    logAiUsage(result, "自動返信");   // 費用を残す（記録が無いと後から追えない）
     if (!result.content || !result.content[0]) return;
 
     const replyText = stripSalutation(result.content[0].text);
@@ -9586,6 +9676,7 @@ ${logsText}
     });
     const rawText = res.getContentText();
     const result = JSON.parse(rawText);
+    logAiUsage(result, "1日のまとめ");   // 費用を残す（記録が無いと後から追えない）
     if (!result.content || !result.content[0]) {
       Logger.log("generateDaySummary: Claude応答にcontentなし: " + rawText.substring(0, 500));
       return null;
@@ -11689,9 +11780,18 @@ function snsAutoFetchAll() {
   sheetToObjects(getSnsAccountsSheet()).forEach(a => {
     try {
       if (a.platform === "youtube") snsFetchYoutubeStats(a);
-      // instagram / threads / tiktok は各APIの審査・トークン設定後にここへ追加する
+      // threads / tiktok は各APIの審査・トークン設定後にここへ追加する
     } catch (e) { Logger.log("snsAutoFetch error (" + a.student_email + "/" + a.platform + "): " + e); }
   });
+  // ★Instagramはここに相乗りさせる★
+  //   トリガーの枠が19/20で空きがないので、専用の定期実行は作らない。
+  //   アカウント指標は90日しか遡れないため、毎日ここで取って貯める。
+  try {
+    if (igProp_(IG_P.token)) {
+      const r = igFetchAll({});
+      Logger.log("Instagram取得: " + JSON.stringify(r).slice(0, 300));
+    }
+  } catch (eIg) { Logger.log("Instagram取得に失敗: " + eIg); }
 }
 
 function snsFetchYoutubeStats(account) {
@@ -11801,10 +11901,21 @@ function generateSnsIdeas(studentEmail, body) {
     ? `【この人の発信プロフィール】\nジャンル: ${profileRow.niche || "未設定"}\nターゲット層: ${profileRow.audience || "未設定"}\nトーン: ${profileRow.tone || "未設定"}\n発信の目的: ${profileRow.goal || "未設定"}`
     : "";
 
-  const logsText = logs.map(l => l.date + " " + l.time_block + " " + l.task + "：" + l.memo).join("\n");
-  const diaryText = diaryEntries.map(r => {
+  // ★元ログとの紐付けは、台本を作る瞬間にしか作れない★
+  //   「この投稿はどの記録から生まれたか」を後から復元する方法は無い。
+  //   そこで記録・日記に通し番号を振り、AIには番号で参照させて、
+  //   戻ってきた番号を log_id に引き直して保存する（2026-08-07）。
+  const refMap = {};
+  const logsText = logs.map(function (l, i) {
+    const n = String(i + 1);
+    refMap[n] = { kind: "log", id: String(l.log_id || ""), date: String(l.date || "") };
+    return "[" + n + "] " + l.date + " " + l.time_block + " " + l.task + "：" + l.memo;
+  }).join("\n");
+  const diaryText = diaryEntries.map(function (r, i) {
     const rd = r.date instanceof Date ? formatDate(r.date) : String(r.date);
-    return rd + "：" + r.diary;
+    const n = "J" + String(i + 1);
+    refMap[n] = { kind: "diary", id: "diary:" + rd, date: rd };
+    return "[" + n + "] " + rd + "：" + r.diary;
   }).join("\n");
 
   const outputSpec = platform.format === "text"
@@ -11813,9 +11924,17 @@ function generateSnsIdeas(studentEmail, body) {
 - angle: どんな切り口で語るか（失敗談／気づき／習慣化のコツ／数字の変化など）
 - post_text: ${platform.label}にそのまま投稿できる完成テキスト（改行を含む、150〜400文字程度）
 - source: どの記録・日記の内容を元にしたネタか（日付と要約）
+- title: 一覧に出す短い見出し（20〜32文字、体言止め可）
+- tags: 内容のタグを2〜3個（例: 仕事・気づき / AI・テクノロジー / 学び・教育 / 振り返り / 習慣・ライフスタイル）
+- source_refs: このネタの元になった記録・日記の番号を配列で（例: ["1","4","J2"]）。必ず1つ以上入れ、実在する番号だけを使うこと
+- content_score: 発信価値の総合点（0〜100の整数）
+- empathy: 共感スコア（0〜100の整数）
+- concreteness: 具体性（"高" / "中" / "低" のいずれか）
+- risk_level: 公開してよいかの機密リスク（"低" / "中" / "高"）。顧客名・社内事情・第三者の個人情報・未公開の数字が含まれるほど高くする
+- risk_note: risk_levelが"低"以外のとき、何が引っかかるかを1文で（"低"なら空文字）
 
 以下のJSON形式のみで返してください（説明文不要）:
-{ "ideas": [ { "hook": "...", "angle": "...", "post_text": "...", "source": "..." } ] }`
+{ "ideas": [ { "title": "...", "hook": "...", "angle": "...", "post_text": "...", "source": "...", "tags": ["..."], "source_refs": ["1"], "content_score": 80, "empathy": 75, "concreteness": "高", "risk_level": "低", "risk_note": "" } ] }`
     : platform.format === "image"
     ? `各ネタについて:
 - hook: 投稿の第一印象を決める一文
@@ -11823,18 +11942,34 @@ function generateSnsIdeas(studentEmail, body) {
 - visual_idea: どんな写真・画像を使うと良いか（具体的に）
 - caption_idea: 投稿につけるキャプション案（2〜4文、ハッシュタグは含めない）
 - source: どの記録・日記の内容を元にしたネタか（日付と要約）
+- title: 一覧に出す短い見出し（20〜32文字、体言止め可）
+- tags: 内容のタグを2〜3個（例: 仕事・気づき / AI・テクノロジー / 学び・教育 / 振り返り / 習慣・ライフスタイル）
+- source_refs: このネタの元になった記録・日記の番号を配列で（例: ["1","4","J2"]）。必ず1つ以上入れ、実在する番号だけを使うこと
+- content_score: 発信価値の総合点（0〜100の整数）
+- empathy: 共感スコア（0〜100の整数）
+- concreteness: 具体性（"高" / "中" / "低" のいずれか）
+- risk_level: 公開してよいかの機密リスク（"低" / "中" / "高"）。顧客名・社内事情・第三者の個人情報・未公開の数字が含まれるほど高くする
+- risk_note: risk_levelが"低"以外のとき、何が引っかかるかを1文で（"低"なら空文字）
 
 以下のJSON形式のみで返してください（説明文不要）:
-{ "ideas": [ { "hook": "...", "angle": "...", "visual_idea": "...", "caption_idea": "...", "source": "..." } ] }`
+{ "ideas": [ { "title": "...", "hook": "...", "angle": "...", "visual_idea": "...", "caption_idea": "...", "source": "...", "tags": ["..."], "source_refs": ["1"], "content_score": 80, "empathy": 75, "concreteness": "高", "risk_level": "低", "risk_note": "" } ] }`
     : `各ネタについて:
 - hook: 冒頭3秒で惹きつける一言（具体的な数字や意外性のある事実を使う）
 - angle: どんな切り口で語るか（失敗談／気づき／習慣化のコツ／数字の変化など）
 - script_beats: 話す流れを3〜4個の箇条書きで（各箇条は1文、独立して意味が通るように）
 - caption_idea: 投稿につけるキャプションの案（2〜3文、ハッシュタグは含めない）
 - source: どの記録・日記の内容を元にしたネタか（日付と要約）
+- title: 一覧に出す短い見出し（20〜32文字、体言止め可）
+- tags: 内容のタグを2〜3個（例: 仕事・気づき / AI・テクノロジー / 学び・教育 / 振り返り / 習慣・ライフスタイル）
+- source_refs: このネタの元になった記録・日記の番号を配列で（例: ["1","4","J2"]）。必ず1つ以上入れ、実在する番号だけを使うこと
+- content_score: 発信価値の総合点（0〜100の整数）
+- empathy: 共感スコア（0〜100の整数）
+- concreteness: 具体性（"高" / "中" / "低" のいずれか）
+- risk_level: 公開してよいかの機密リスク（"低" / "中" / "高"）。顧客名・社内事情・第三者の個人情報・未公開の数字が含まれるほど高くする
+- risk_note: risk_levelが"低"以外のとき、何が引っかかるかを1文で（"低"なら空文字）
 
 以下のJSON形式のみで返してください（説明文不要）:
-{ "ideas": [ { "hook": "...", "angle": "...", "script_beats": ["...", "..."], "caption_idea": "...", "source": "..." } ] }`;
+{ "ideas": [ { "title": "...", "hook": "...", "angle": "...", "script_beats": ["...", "..."], "caption_idea": "...", "source": "...", "tags": ["..."], "source_refs": ["1"], "content_score": 80, "empathy": 75, "concreteness": "高", "risk_level": "低", "risk_note": "" } ] }`;
 
   const prompt = `以下は本人が直近${days}日間にJIROKUアプリへ書いた「行動の記録メモ」と「日記」です。これらは全て実際に起きた出来事・本人の言葉です。
 ${profileText}
@@ -11866,20 +12001,678 @@ ${outputSpec}`;
 
   const rawText = res.getContentText();
   const result = JSON.parse(rawText);
+  // ★費用を残す★ ここはOpusを使うので1回あたりが他機能の10倍近い。
+  //   記録が無いと「Studioにいくらかかっているか」が永久に分からなくなる。
+  logAiUsage(result, "発信ネタ生成");
   if (!result.content || !result.content[0]) {
     return { ok: false, error: "APIエラー: " + rawText.substring(0, 300) };
   }
   try {
     const parsed = parseAiJson(result.content[0].text);
     if (!parsed) return { ok: false, error: "生成結果の解析に失敗しました。もう一度お試しください" };
+    // ★ここで紐付けを保存する★
+    //   返ってきた番号を log_id に引き直し、候補として残す。
+    //   保存に失敗しても生成結果は返す（画面が真っ白になる方が損）。
+    let ideas = parsed.ideas || [];
+    try {
+      ideas = studioSaveCandidates_(studentEmail, platformKey, platform.format, ideas, refMap);
+    } catch (eSave) { Logger.log("studioSaveCandidates_: " + eSave); }
     return {
-      ok: true, data: parsed.ideas || [],
+      ok: true, data: ideas,
       format: platform.format, platformLabel: platform.label,
       sourceCount: { logs: logs.length, diary: diaryEntries.length }
     };
   } catch (e) {
     return { ok: false, error: "JSONパースエラー: " + e.toString() };
   }
+}
+
+// ══════════════════════════════════════════════════════════════════
+// ★JIROKU Studio★（2026-08-07）
+//
+//   企画書「JIROKU Studio」の中核は「元ログ ⇄ 発信 ⇄ 成果」を繋ぐことにある。
+//   ここで一番大事なのは順番で、
+//   ★紐付けは台本を作る瞬間にしか作れない★という一点に尽きる。
+//   投稿してから「この投稿はどの記録から生まれたか」を復元する方法は無いので、
+//   生成したその場で候補として保存し、log_id を持たせる。
+//
+//   そしてループは「成果を見る」で終わらせない。
+//   分析から JIROKU のタスクへ戻す導線（studioPushToJiroku）までを含めて
+//   ひとつの機能とする。ここが無いと、ただのSNSツールになる。
+// ══════════════════════════════════════════════════════════════════
+
+const STUDIO_STATUS = { candidate: 1, scripted: 1, posted: 1, archived: 1 };
+
+function getStudioCandidatesSheet() {
+  let sheet = getSheet("StudioCandidates");
+  if (!sheet) {
+    sheet = SpreadsheetApp.openById(SPREADSHEET_ID).insertSheet("StudioCandidates");
+    sheet.appendRow(["candidate_id", "student_email", "created_at", "updated_at",
+                     "platform", "format", "title", "hook", "angle", "body_json",
+                     "source_log_ids", "source_dates", "tags", "status",
+                     "content_score", "empathy", "concreteness", "risk_level", "risk_note",
+                     "post_id", "posted_at", "pushed_task_id", "archived_at"]);
+  }
+  return sheet;
+}
+
+// 数字だけを取り出して0〜100に収める。AIが "80点" や null を返しても壊れないように。
+function studioNum_(v, dflt) {
+  const n = Number(String(v === undefined || v === null ? "" : v).replace(/[^0-9.\-]/g, ""));
+  if (isNaN(n)) return dflt;
+  return Math.max(0, Math.min(100, Math.round(n)));
+}
+function studioPick_(v, allowed, dflt) {
+  const s = String(v || "").trim();
+  return allowed.indexOf(s) >= 0 ? s : dflt;
+}
+
+// 生成された各ネタを候補として保存し、candidate_id と紐付け情報を足して返す
+function studioSaveCandidates_(studentEmail, platformKey, format, ideas, refMap) {
+  if (!Array.isArray(ideas) || !ideas.length) return ideas || [];
+  const sheet = getStudioCandidatesSheet();
+  const now = new Date().toISOString();
+  const rows = [];
+  const out = ideas.map(function (idea) {
+    // 番号 → log_id に引き直す。実在しない番号はここで落とす（AIの作り話を残さない）
+    const refs = Array.isArray(idea.source_refs) ? idea.source_refs : [];
+    const hit = refs.map(function (r) { return refMap[String(r).trim()]; }).filter(Boolean);
+    const logIds = hit.map(function (h) { return h.id; });
+    const dates  = hit.map(function (h) { return h.date; })
+      .filter(function (d, i, a) { return d && a.indexOf(d) === i; }).sort();
+
+    const id = "sc_" + Utilities.getUuid().slice(0, 12);
+    const risk = studioPick_(idea.risk_level, ["低", "中", "高"], "中");
+    const rec = {
+      candidate_id: id,
+      title: String(idea.title || idea.hook || "").slice(0, 120),
+      hook: String(idea.hook || ""),
+      angle: String(idea.angle || ""),
+      tags: (Array.isArray(idea.tags) ? idea.tags : []).map(String).slice(0, 4),
+      source_log_ids: logIds,
+      source_dates: dates,
+      content_score: studioNum_(idea.content_score, 60),
+      empathy: studioNum_(idea.empathy, 60),
+      concreteness: studioPick_(idea.concreteness, ["高", "中", "低"], "中"),
+      risk_level: risk,
+      // 機密リスクが「低」でないのに理由が無いと、承認する側が判断できない
+      risk_note: risk === "低" ? "" : String(idea.risk_note || "内容を確認してください").slice(0, 200),
+      status: "candidate"
+    };
+    rows.push([id, studentEmail, now, now, platformKey, format,
+               rec.title, rec.hook, rec.angle, JSON.stringify(idea),
+               logIds.join(","), dates.join(","), rec.tags.join(","), "candidate",
+               rec.content_score, rec.empathy, rec.concreteness, rec.risk_level, rec.risk_note,
+               "", "", "", ""]);
+    return Object.assign({}, idea, rec);
+  });
+  if (rows.length) {
+    sheet.getRange(sheet.getLastRow() + 1, 1, rows.length, rows[0].length).setValues(rows);
+  }
+  dropUserViewCaches_(studentEmail);
+  return out;
+}
+
+function studioRowToObj_(r) {
+  let body = {};
+  try { body = JSON.parse(r.body_json || "{}"); } catch (e) {}
+  const split = function (v) {
+    return String(v || "").split(",").map(function (x) { return x.trim(); }).filter(Boolean);
+  };
+  return {
+    candidate_id: String(r.candidate_id || ""),
+    created_at: String(r.created_at || ""),
+    platform: String(r.platform || ""),
+    format: String(r.format || ""),
+    title: String(r.title || ""),
+    hook: String(r.hook || ""),
+    angle: String(r.angle || ""),
+    tags: split(r.tags),
+    source_log_ids: split(r.source_log_ids),
+    source_dates: split(r.source_dates),
+    status: String(r.status || "candidate"),
+    content_score: Number(r.content_score) || 0,
+    empathy: Number(r.empathy) || 0,
+    concreteness: String(r.concreteness || ""),
+    risk_level: String(r.risk_level || ""),
+    risk_note: String(r.risk_note || ""),
+    post_id: String(r.post_id || ""),
+    pushed_task_id: String(r.pushed_task_id || ""),
+    body: body
+  };
+}
+
+// 候補の一覧。既定では捨てたものを除く
+function studioListCandidates(studentEmail, body) {
+  if (!getSheet("StudioCandidates")) return { ok: true, data: [] };
+  const wantStatus = String((body && body.status) || "").trim();
+  const limit = Math.min(200, Math.max(1, Number((body && body.limit) || 60)));
+  const rows = getFilteredRows("StudioCandidates", "student_email", studentEmail)
+    .filter(function (r) {
+      if (String(r.archived_at || "").trim()) return false;
+      if (wantStatus) return String(r.status || "") === wantStatus;
+      return String(r.status || "") !== "archived";
+    })
+    .map(studioRowToObj_)
+    .sort(function (a, b) { return String(b.created_at).localeCompare(String(a.created_at)); })
+    .slice(0, limit);
+  return { ok: true, data: rows };
+}
+
+// 候補1件の詳細。元になった記録の中身もここで一緒に返す
+// （画面から2回呼ぶとGASでは往復ぶんそのまま待ち時間になるため）
+function studioGetCandidate(studentEmail, body) {
+  const id = String((body && body.candidate_id) || "").trim();
+  if (!id) return { ok: false, error: "candidate_id がありません" };
+  const row = getFilteredRows("StudioCandidates", "student_email", studentEmail)
+    .find(function (r) { return String(r.candidate_id) === id; });
+  if (!row) return { ok: false, error: "見つかりません" };
+  const obj = studioRowToObj_(row);
+
+  // 元ログの実物を引く（紐付けが本当に生きているかは、ここで見える）
+  const wantLogs = {}, wantDates = {};
+  obj.source_log_ids.forEach(function (x) {
+    if (x.indexOf("diary:") === 0) wantDates[x.slice(6)] = 1; else wantLogs[x] = 1;
+  });
+  const sources = [];
+  getFilteredRows("DailyLog", "student_email", studentEmail).forEach(function (l) {
+    if (!wantLogs[String(l.log_id || "")]) return;
+    if (String(l.deleted_at || "").trim()) return;
+    sources.push({ kind: "log", log_id: String(l.log_id), date: String(l.date),
+                   time_block: String(l.time_block || ""), task: String(l.task || ""),
+                   memo: String(l.memo || ""),
+                   time_classification: String(l.time_classification || ""),
+                   actual_minutes: Number(l.actual_minutes) || 0 });
+  });
+  if (Object.keys(wantDates).length && getSheet("Journal")) {
+    sheetToObjects(getJournalSheet()).forEach(function (r) {
+      if (String(r.student_email) !== studentEmail) return;
+      const rd = r.date instanceof Date ? formatDate(r.date) : String(r.date).slice(0, 10);
+      if (!wantDates[rd]) return;
+      sources.push({ kind: "diary", log_id: "diary:" + rd, date: rd, task: "日記",
+                     memo: String(r.diary || ""), time_block: "", time_classification: "",
+                     actual_minutes: 0 });
+    });
+  }
+  sources.sort(function (a, b) {
+    return (a.date + a.time_block) > (b.date + b.time_block) ? 1 : -1; });
+  obj.sources = sources;
+  // 参照していた記録が消されている場合がある。黙って減らさず件数で示す
+  obj.sources_missing = obj.source_log_ids.length - sources.length;
+  return { ok: true, data: obj };
+}
+
+// 状態の更新（採用・台本化・投稿済み・保留・捨てる）と、手直しの保存
+function studioUpdateCandidate(studentEmail, body) {
+  const id = String((body && body.candidate_id) || "").trim();
+  if (!id) return { ok: false, error: "candidate_id がありません" };
+  const sheet = getStudioCandidatesSheet();
+  const data = sheet.getDataRange().getValues();
+  const h = data[0];
+  const iId = h.indexOf("candidate_id"), iEm = h.indexOf("student_email");
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][iId]) !== id) continue;
+    // ★持ち主以外は触れない★ candidate_id を知っていても他人の行は動かせない
+    if (String(data[i][iEm]) !== studentEmail) return { ok: false, error: "見つかりません" };
+    const set = function (col, v) {
+      const c = h.indexOf(col);
+      if (c >= 0) sheet.getRange(i + 1, c + 1).setValue(v);
+    };
+    if (body.status && STUDIO_STATUS[String(body.status)]) {
+      set("status", String(body.status));
+      if (String(body.status) === "posted") set("posted_at", new Date().toISOString());
+      if (String(body.status) === "archived") set("archived_at", new Date().toISOString());
+    }
+    if (body.title !== undefined) set("title", String(body.title).slice(0, 120));
+    if (body.post_id !== undefined) set("post_id", String(body.post_id).slice(0, 120));
+    if (body.body_json !== undefined) set("body_json", String(body.body_json).slice(0, 40000));
+    set("updated_at", new Date().toISOString());
+    dropUserViewCaches_(studentEmail);
+    return { ok: true, candidate_id: id };
+  }
+  return { ok: false, error: "見つかりません" };
+}
+
+// ★ループを閉じる★
+//   分析で分かったことを、JIROKU本体のタスクとして書き戻す。
+//   ここが無いと「次の投稿案」で終わり、企画書が差別化と呼んだ
+//   「Weekly Goal・Task・記録習慣へ返す」が実現しない。
+function studioPushToJiroku(studentEmail, body) {
+  const title = String((body && body.title) || "").trim();
+  if (!title) return { ok: false, error: "内容を入れてください" };
+  const candidateId = String((body && body.candidate_id) || "").trim();
+  const taskId = "t_" + Utilities.getUuid().slice(0, 12);
+  const date = String((body && body.date) || "").slice(0, 10) || logicalToday_();
+  const res = saveTask(studentEmail, {
+    task_id: taskId, create: "1", date: date,
+    title: title.slice(0, 120),
+    importance_level: String((body && body.importance_level) || "MEDIUM"),
+    estimated_minutes: Number((body && body.estimated_minutes) || 0) || "",
+    memo: String((body && body.memo) || "発信の振り返りから作成（JIROKU Studio）").slice(0, 500)
+  });
+  if (!res || !res.ok) return res || { ok: false, error: "タスクを作れませんでした" };
+  // どの候補から生まれたタスクかを残す（成果 → 次の行動 の矢印を記録に残す）
+  if (candidateId) {
+    try {
+      const sheet = getStudioCandidatesSheet();
+      const data = sheet.getDataRange().getValues();
+      const h = data[0];
+      const iId = h.indexOf("candidate_id"), iEm = h.indexOf("student_email"),
+            iT = h.indexOf("pushed_task_id");
+      for (let i = 1; i < data.length; i++) {
+        if (String(data[i][iId]) === candidateId && String(data[i][iEm]) === studentEmail) {
+          if (iT >= 0) sheet.getRange(i + 1, iT + 1).setValue(taskId);
+          break;
+        }
+      }
+    } catch (e) { Logger.log("studioPushToJiroku link: " + e); }
+  }
+  dropUserViewCaches_(studentEmail);
+  return { ok: true, task_id: taskId, date: date };
+}
+
+// ★画面の呼び出しは1回にまとめる★
+//   Apps Scriptは中身が空でも1往復およそ2.5秒かかり、しかも同じ人の呼び出しを
+//   順番に処理する。5回に分けると、それだけで10秒以上待たされる。
+//   レポート画面で同じ問題を getReportHome にまとめて直したのと同じやり方。
+function studioHome(studentEmail, body) {
+  const ck = studioCacheKey_(studentEmail);
+  const cache = CacheService.getScriptCache();
+  try {
+    const hit = cache.get(ck);
+    if (hit) { const o = JSON.parse(hit); o.cached = true; return o; }
+  } catch (e) {}
+  const out = withSheetCache_(function () {
+    const list = studioListCandidates(studentEmail, { limit: (body && body.limit) || 80 });
+    const sum = studioSummary(studentEmail, { days: 30 });
+    const ig = studioIgStatus(studentEmail);
+    const metrics = snsGetMetrics(studentEmail, { platform: "instagram", days: 30 });
+    const posts = snsListPosts(studentEmail, { platform: "instagram" });
+    return { ok: true, data: {
+      candidates: (list && list.data) || [],
+      summary: (sum && sum.data) || null,
+      ig: (ig && ig.data) || null,
+      igMetrics: (metrics && metrics.data) || [],
+      igPosts: (posts && posts.data) || []
+    } };
+  });
+  // 100KBを超えるとCacheServiceが黙って落とすので、入らなければ諦めて毎回作る
+  try {
+    const str = JSON.stringify(out);
+    if (str.length < 95000) cache.put(ck, str, VIEW_CACHE_SEC);
+  } catch (e) {}
+  return out;
+}
+
+// 貢献フロー（元記録 → 候補 → 台本 → 投稿）と、母数のはっきりした集計。
+// ★数が少ないうちは「傾向」と言い切らない★
+//   企画書のガードレール「事実・傾向・仮説を分ける」をここで守る。
+function studioSummary(studentEmail, body) {
+  const days = Math.min(180, Math.max(7, Number((body && body.days) || 30)));
+  const cutoff = formatDate(new Date(Date.now() - days * 86400000));
+  const rows = getSheet("StudioCandidates")
+    ? getFilteredRows("StudioCandidates", "student_email", studentEmail)
+        .filter(function (r) { return String(r.created_at || "").slice(0, 10) >= cutoff; })
+        .map(studioRowToObj_)
+    : [];
+
+  const srcSet = {};
+  let scripted = 0, posted = 0, pushed = 0, needsCheck = 0;
+  const byTag = {};
+  rows.forEach(function (r) {
+    r.source_log_ids.forEach(function (x) { srcSet[x] = 1; });
+    if (r.status === "scripted" || r.status === "posted") scripted++;
+    if (r.status === "posted") posted++;
+    if (r.pushed_task_id) pushed++;
+    if (r.risk_level !== "低") needsCheck++;
+    r.tags.forEach(function (t) { byTag[t] = (byTag[t] || 0) + 1; });
+  });
+  const sourceCount = Object.keys(srcSet).length;
+
+  // その期間に実際に記録した件数（発信に使えていない記録がどれだけあるか）
+  let logTotal = 0;
+  getFilteredRows("DailyLog", "student_email", studentEmail).forEach(function (l) {
+    if (String(l.deleted_at || "").trim()) return;
+    const d = l.date instanceof Date ? formatDate(l.date) : String(l.date).slice(0, 10);
+    if (d >= cutoff) logTotal++;
+  });
+
+  const pct = function (a, b) { return b > 0 ? Math.round(a / b * 1000) / 10 : null; };
+  return { ok: true, data: {
+    days: days,
+    log_total: logTotal,
+    source_used: sourceCount,
+    candidates: rows.length,
+    scripted: scripted,
+    posted: posted,
+    pushed_to_jiroku: pushed,
+    needs_check: needsCheck,
+    rate_script: pct(scripted, rows.length),
+    rate_post: pct(posted, scripted),
+    tags: Object.keys(byTag).map(function (k) { return { tag: k, n: byTag[k] }; })
+            .sort(function (a, b) { return b.n - a.n; }).slice(0, 8),
+    // ★母数が少ないうちは、傾向として読ませない★
+    confidence: posted >= 12 ? "傾向" : (posted >= 5 ? "参考" : "仮説")
+  } };
+}
+
+// ══════════════════════════════════════════════════════════════════
+// ★Instagram連携★（2026-08-07）
+//
+//   「Instagram API with Instagram Login」を使う。Facebookページは要らない。
+//   ★自分のアカウントだけなら審査は要らない★（Standard Access）。
+//   他人のアカウントを扱う段になって初めて App Review と事業者確認が要る。
+//
+//   ここで取った数字は SnsMetrics / SnsPosts に入れる。
+//   その2つは generateSnsIdeas が既に読んでいるので、
+//   繋いだ瞬間に「伸びている型に寄せた台本」が出るようになる。
+//
+//   ★アカウント指標は90日しか遡れない★ので、毎日取って貯めるしかない。
+//   専用のトリガーは作らない（枠が19/20で空きがない）。
+//   既にある snsAutoFetchAll（毎日21時）に相乗りさせる。
+// ══════════════════════════════════════════════════════════════════
+
+const IG_API = "https://graph.instagram.com";
+const IG_VER = "v23.0";
+// insights は 2025年に追加された権限。取れない場合は igAuthUrl で scope を外せる
+const IG_SCOPES = "instagram_business_basic,instagram_business_manage_insights";
+const IG_P = {
+  appId: "IG_APP_ID", appSecret: "IG_APP_SECRET",
+  token: "IG_ACCESS_TOKEN", expires: "IG_TOKEN_EXPIRES_AT",
+  userId: "IG_USER_ID", username: "IG_USERNAME",
+  state: "IG_OAUTH_STATE", lastSync: "IG_LAST_SYNC", lastError: "IG_LAST_ERROR",
+  metricsUser: "IG_METRICS_USER", metricsMedia: "IG_METRICS_MEDIA"
+};
+function igProp_(k) { return PropertiesService.getScriptProperties().getProperty(k) || ""; }
+function igSet_(k, v) { PropertiesService.getScriptProperties().setProperty(k, String(v)); }
+
+// リダイレクト先はこのウェブアプリ自身。Metaの管理画面にこの文字列をそのまま登録する
+function igRedirectUri_() { return ScriptApp.getService().getUrl(); }
+
+// 手順①：Kaiがこのリンクを開いてInstagramで許可する
+function igAuthUrl() {
+  const appId = igProp_(IG_P.appId);
+  if (!appId) return { ok: false, error: "IG_APP_ID が未設定です（GASのスクリプトプロパティに入れてください）" };
+  const state = "ig_" + Utilities.getUuid().slice(0, 16);
+  igSet_(IG_P.state, state);
+  const url = "https://www.instagram.com/oauth/authorize"
+    + "?client_id=" + encodeURIComponent(appId)
+    + "&redirect_uri=" + encodeURIComponent(igRedirectUri_())
+    + "&response_type=code"
+    + "&scope=" + encodeURIComponent(IG_SCOPES)
+    + "&state=" + encodeURIComponent(state);
+  return { ok: true, url: url, redirect_uri: igRedirectUri_() };
+}
+
+// 手順②：Instagramから戻ってきたところ（doGetから呼ぶ）
+//   ★stateを必ず照合する★ /exec は誰でも叩けるので、
+//   でたらめなcodeを投げ込まれてトークンを差し替えられないようにする。
+function igHandleCallback_(e) {
+  const okPage = function (msg, sub) {
+    return HtmlService.createHtmlOutput(
+      '<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
+      + '<style>body{font-family:-apple-system,"Hiragino Sans",sans-serif;background:#f6f6f9;color:#1c1b22;'
+      + 'display:flex;min-height:90vh;align-items:center;justify-content:center;padding:24px;margin:0}'
+      + '.c{background:#fff;border:1px solid #e5e4ec;border-radius:14px;padding:28px 24px;max-width:380px;text-align:center}'
+      + 'h1{font-size:17px;margin:0 0 10px}p{font-size:13px;color:#78767f;line-height:1.8;margin:0}</style></head>'
+      + '<body><div class="c"><h1>' + msg + '</h1><p>' + sub + '</p></div></body></html>');
+  };
+  const want = igProp_(IG_P.state);
+  const got = String(e.parameter.state || "");
+  if (!want || got !== want) return okPage("確認できませんでした", "連携をやり直してください。");
+  PropertiesService.getScriptProperties().deleteProperty(IG_P.state);
+
+  if (e.parameter.error) {
+    igSet_(IG_P.lastError, String(e.parameter.error_description || e.parameter.error));
+    return okPage("連携をキャンセルしました", "もう一度やり直せます。");
+  }
+  const r = igExchangeCode_(String(e.parameter.code || ""));
+  if (!r.ok) { igSet_(IG_P.lastError, r.error); return okPage("連携できませんでした", r.error); }
+  return okPage("Instagramと連携しました", "@" + r.username + " ／ この画面は閉じて大丈夫です。");
+}
+
+function igExchangeCode_(code) {
+  if (!code) return { ok: false, error: "コードがありません" };
+  const appId = igProp_(IG_P.appId), secret = igProp_(IG_P.appSecret);
+  if (!appId || !secret) return { ok: false, error: "IG_APP_ID / IG_APP_SECRET が未設定です" };
+
+  // 短命トークン（1時間）
+  const r1 = UrlFetchApp.fetch("https://api.instagram.com/oauth/access_token", {
+    method: "POST", muteHttpExceptions: true,
+    payload: { client_id: appId, client_secret: secret, grant_type: "authorization_code",
+               redirect_uri: igRedirectUri_(), code: code }
+  });
+  let j1; try { j1 = JSON.parse(r1.getContentText()); } catch (e) { return { ok: false, error: "応答を読めません: " + r1.getContentText().slice(0, 150) }; }
+  if (!j1.access_token) return { ok: false, error: "短期トークンを取れません: " + JSON.stringify(j1).slice(0, 200) };
+
+  // 長命トークン（60日）
+  const r2 = UrlFetchApp.fetch(IG_API + "/access_token?grant_type=ig_exchange_token"
+    + "&client_secret=" + encodeURIComponent(secret)
+    + "&access_token=" + encodeURIComponent(j1.access_token), { muteHttpExceptions: true });
+  let j2; try { j2 = JSON.parse(r2.getContentText()); } catch (e) { return { ok: false, error: "応答を読めません" }; }
+  if (!j2.access_token) return { ok: false, error: "長期トークンを取れません: " + JSON.stringify(j2).slice(0, 200) };
+
+  igSet_(IG_P.token, j2.access_token);
+  igSet_(IG_P.expires, new Date(Date.now() + (Number(j2.expires_in) || 5184000) * 1000).toISOString());
+  igSet_(IG_P.userId, String(j1.user_id || ""));
+  igSet_(IG_P.lastError, "");
+
+  let username = "";
+  try {
+    const me = igGet_("/me", { fields: "user_id,username,account_type" });
+    if (me.ok) { username = String(me.data.username || ""); igSet_(IG_P.username, username); }
+  } catch (e) {}
+  return { ok: true, username: username };
+}
+
+function igGet_(path, params) {
+  const token = igProp_(IG_P.token);
+  if (!token) return { ok: false, error: "未連携です" };
+  const q = Object.keys(params || {}).map(function (k) {
+    return k + "=" + encodeURIComponent(params[k]); }).join("&");
+  const url = IG_API + "/" + IG_VER + path + "?" + (q ? q + "&" : "") + "access_token=" + encodeURIComponent(token);
+  const res = UrlFetchApp.fetch(url, { muteHttpExceptions: true });
+  const txt = res.getContentText();
+  let j; try { j = JSON.parse(txt); } catch (e) { return { ok: false, error: "応答を読めません: " + txt.slice(0, 200) }; }
+  if (j.error) return { ok: false, error: String(j.error.message || "").slice(0, 300), raw: j.error };
+  return { ok: true, data: j };
+}
+
+// 期限の10日前を切ったら更新する。60日を過ぎると取り返せないので早めに動かす
+function igRefreshIfNeeded_() {
+  const token = igProp_(IG_P.token);
+  if (!token) return { ok: false, error: "未連携" };
+  const exp = new Date(igProp_(IG_P.expires) || 0).getTime();
+  if (isFinite(exp) && exp - Date.now() > 10 * 86400000) return { ok: true, skipped: true };
+  const res = UrlFetchApp.fetch(IG_API + "/refresh_access_token?grant_type=ig_refresh_token"
+    + "&access_token=" + encodeURIComponent(token), { muteHttpExceptions: true });
+  let j; try { j = JSON.parse(res.getContentText()); } catch (e) { return { ok: false, error: "応答を読めません" }; }
+  if (!j.access_token) { igSet_(IG_P.lastError, "更新失敗: " + JSON.stringify(j).slice(0, 200)); return { ok: false, error: "更新できません" }; }
+  igSet_(IG_P.token, j.access_token);
+  igSet_(IG_P.expires, new Date(Date.now() + (Number(j.expires_in) || 5184000) * 1000).toISOString());
+  return { ok: true, refreshed: true };
+}
+
+// ★指標名は公式に一覧が無く、2025年に変わっている★
+//   推測で決め打ちすると、ある日まるごと取れなくなる。
+//   一度だけ1つずつ試して、通った名前だけを覚えて使う。
+function igWorkingMetrics_(kind, candidates, probePath, extraParams) {
+  const key = kind === "user" ? IG_P.metricsUser : IG_P.metricsMedia;
+  const saved = igProp_(key);
+  if (saved) return saved.split(",").filter(Boolean);
+  const ok = [];
+  candidates.forEach(function (m) {
+    const p = Object.assign({ metric: m }, extraParams || {});
+    const r = igGet_(probePath + "/insights", p);
+    if (r.ok) ok.push(m);
+  });
+  if (ok.length) igSet_(key, ok.join(","));
+  return ok;
+}
+
+function igFetchAll(opts) {
+  const token = igProp_(IG_P.token);
+  if (!token) return { ok: false, error: "未連携です" };
+  igRefreshIfNeeded_();
+  const email = String((opts && opts.studentEmail) || igProp_("IG_OWNER_EMAIL") || "");
+  if (!email) return { ok: false, error: "IG_OWNER_EMAIL が未設定です（数字を紐づける人のメール）" };
+
+  const out = { account: null, media: 0, errors: [] };
+  const today = formatDate(new Date());
+
+  // ── アカウント全体 ───────────────────────────
+  const userMetrics = igWorkingMetrics_("user",
+    ["reach", "views", "profile_views", "accounts_engaged", "total_interactions", "likes", "comments", "saves"],
+    "/me", { period: "day", metric_type: "total_value" });
+  let followers = null;
+  const prof = igGet_("/me", { fields: "followers_count,media_count,username" });
+  if (prof.ok) { followers = Number(prof.data.followers_count); igSet_(IG_P.username, String(prof.data.username || "")); }
+  else out.errors.push("プロフィール: " + prof.error);
+
+  const acc = {};
+  if (userMetrics.length) {
+    const r = igGet_("/me/insights", { metric: userMetrics.join(","), period: "day", metric_type: "total_value" });
+    if (r.ok && Array.isArray(r.data.data)) {
+      r.data.data.forEach(function (m) {
+        const v = m.total_value ? m.total_value.value
+                : (m.values && m.values[0] ? m.values[0].value : null);
+        if (v !== null && v !== undefined) acc[m.name] = Number(v);
+      });
+    } else if (!r.ok) out.errors.push("アカウント指標: " + r.error);
+  }
+  try {
+    snsSaveMetrics(email, {
+      date: today, platform: "instagram",
+      followers: followers === null ? "" : followers,
+      reach: acc.reach === undefined ? "" : acc.reach,
+      impressions: acc.views === undefined ? "" : acc.views,
+      likes: acc.likes === undefined ? "" : acc.likes,
+      comments: acc.comments === undefined ? "" : acc.comments,
+      saves: acc.saves === undefined ? "" : acc.saves,
+      posts: prof.ok ? Number(prof.data.media_count) : "",
+      memo: "Instagram自動取得"
+    });
+    out.account = { followers: followers, metrics: acc };
+  } catch (e) { out.errors.push("保存(アカウント): " + e); }
+
+  // ── 投稿ごと ─────────────────────────────────
+  const limit = Math.min(50, Math.max(1, Number((opts && opts.limit) || 25)));
+  const ml = igGet_("/me/media", {
+    fields: "id,caption,media_type,media_product_type,permalink,timestamp",
+    limit: String(limit) });
+  if (!ml.ok) { out.errors.push("投稿一覧: " + ml.error); return { ok: true, data: out }; }
+  const items = (ml.data && ml.data.data) || [];
+
+  const mediaMetrics = items.length
+    ? igWorkingMetrics_("media",
+        ["views", "reach", "likes", "comments", "saved", "shares", "total_interactions"],
+        "/" + items[0].id, {})
+    : [];
+
+  items.forEach(function (it) {
+    const vals = {};
+    if (mediaMetrics.length) {
+      const r = igGet_("/" + it.id + "/insights", { metric: mediaMetrics.join(",") });
+      if (r.ok && Array.isArray(r.data.data)) {
+        r.data.data.forEach(function (m) {
+          const v = m.total_value ? m.total_value.value
+                  : (m.values && m.values[0] ? m.values[0].value : null);
+          if (v !== null && v !== undefined) vals[m.name] = Number(v);
+        });
+      }
+    }
+    try {
+      snsSavePost(email, {
+        post_id: "ig_" + it.id, platform: "instagram",
+        posted_at: String(it.timestamp || "").slice(0, 10),
+        hook: String(it.caption || "").split("\n")[0].slice(0, 120),
+        theme: String(it.media_product_type || it.media_type || ""),
+        url: String(it.permalink || ""),
+        views: vals.views === undefined ? "" : vals.views,
+        likes: vals.likes === undefined ? "" : vals.likes,
+        comments: vals.comments === undefined ? "" : vals.comments,
+        saves: vals.saved === undefined ? "" : vals.saved,
+        memo: "Instagram自動取得"
+      });
+      out.media++;
+    } catch (e) { out.errors.push("保存(投稿): " + e); }
+  });
+
+  // ★最後の接続★ 投稿を「どの候補から生まれたか」に結びつける。
+  //   ここが繋がって初めて「どの記録が伸びたか」が言える。
+  try { out.linked = igLinkPostsToCandidates_(email, items); } catch (e) { out.errors.push("紐付け: " + e); }
+
+  igSet_(IG_P.lastSync, new Date().toISOString());
+  dropUserViewCaches_(email);
+  return { ok: true, data: out };
+}
+
+// 投稿済みにした候補と、実際のInstagram投稿を突き合わせる。
+// キャプションの書き出しが一致するものを、控えめに1件だけ結ぶ（取り違えたら意味がない）
+function igLinkPostsToCandidates_(email, items) {
+  if (!getSheet("StudioCandidates") || !items.length) return 0;
+  const norm = function (s) { return String(s || "").replace(/\s+/g, "").slice(0, 24); };
+  const sheet = getStudioCandidatesSheet();
+  const data = sheet.getDataRange().getValues();
+  const h = data[0];
+  const iEm = h.indexOf("student_email"), iSt = h.indexOf("status"),
+        iPid = h.indexOf("post_id"), iBody = h.indexOf("body_json"), iHook = h.indexOf("hook");
+  let n = 0;
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][iEm]) !== email) continue;
+    if (String(data[i][iSt]) !== "posted") continue;
+    if (String(data[i][iPid] || "").trim()) continue;
+    let cap = "";
+    try { cap = JSON.parse(data[i][iBody] || "{}").caption_idea || ""; } catch (e) {}
+    const keys = [norm(cap), norm(data[i][iHook])].filter(function (x) { return x.length >= 8; });
+    if (!keys.length) continue;
+    const hit = items.filter(function (it) {
+      const c = norm(it.caption);
+      return keys.some(function (k) { return c.indexOf(k) === 0 || k.indexOf(c.slice(0, 12)) === 0; });
+    });
+    if (hit.length === 1) { sheet.getRange(i + 1, iPid + 1).setValue("ig_" + hit[0].id); n++; }
+  }
+  return n;
+}
+
+function igStatus() {
+  const token = igProp_(IG_P.token);
+  const exp = igProp_(IG_P.expires);
+  return { ok: true, data: {
+    configured: !!(igProp_(IG_P.appId) && igProp_(IG_P.appSecret)),
+    connected: !!token,
+    username: igProp_(IG_P.username),
+    expires_at: exp,
+    days_left: exp ? Math.floor((new Date(exp).getTime() - Date.now()) / 86400000) : null,
+    last_sync: igProp_(IG_P.lastSync),
+    last_error: igProp_(IG_P.lastError),
+    redirect_uri: igRedirectUri_(),
+    metrics_user: igProp_(IG_P.metricsUser),
+    metrics_media: igProp_(IG_P.metricsMedia)
+  } };
+}
+
+// Studio画面に出す用。★秘密は返さない★（トークンもApp Secretも含めない）。
+// 数字を紐づける本人以外には、連携の有無すら返さない。
+function studioIgStatus(studentEmail) {
+  const owner = igProp_("IG_OWNER_EMAIL");
+  if (!owner || String(studentEmail) !== owner) {
+    return { ok: true, data: { owner: false, connected: false } };
+  }
+  const st = igStatus().data;
+  return { ok: true, data: {
+    owner: true, configured: st.configured, connected: st.connected,
+    username: st.username, days_left: st.days_left,
+    last_sync: st.last_sync, last_error: st.last_error
+  } };
+}
+
+function igDisconnect() {
+  const p = PropertiesService.getScriptProperties();
+  [IG_P.token, IG_P.expires, IG_P.userId, IG_P.username, IG_P.state,
+   IG_P.lastSync, IG_P.lastError, IG_P.metricsUser, IG_P.metricsMedia]
+    .forEach(function (k) { p.deleteProperty(k); });
+  return { ok: true };
 }
 
 // レポート一覧画面の「時間の使い方」サマリー。直近14日の記録から
@@ -15274,7 +16067,8 @@ const ACTION_POLICIES_WRITE = {
   addGoalEntry:{}, updateGoalEntry:{}, deleteGoalEntry:{},
   saveTask:{}, deleteTask:{}, carryOverTask:{}, saveTaskMutations:{}, saveSprint:{}, migrateTasksToSheet:{},
   submitSurvey:{}, syncCalendar:{}, sendMessage:{}, saveWeeklyReflection:{}, saveContentProfile:{},
-  generateWorkReport:{}, snsSaveAccount:{}, snsSaveMetrics:{}, snsSavePost:{}
+  generateWorkReport:{}, snsSaveAccount:{}, snsSaveMetrics:{}, snsSavePost:{},
+  studioUpdateCandidate:{}, studioPushToJiroku:{}
 };
 // ── CP4: 本人データの読み取りAPI ──
 // ランキングや「みんなの頑張り」は共有情報なのでここには入れない
@@ -15431,6 +16225,7 @@ const ADMIN_SECRET_ALLOWLIST = {
   adminBroadcastLine:1, adminBroadcastLinePending:1, adminSendStudentCampaign:1,
   // セットアップ・保守
   adminSetupTriggers:1, adminInstallTrigger:1, adminSetupPhase1:1, adminSetupAuth:1, adminPhase4DryRun:1, adminLegacyBackfill:1, adminWritePathStats:1, adminIssueTestSession:1, adminDropTestSessions:1, adminOpsSelfTest:1, adminActualMinutesAudit:1, adminXpCorrection:1, adminStreakRecalc:1, adminGrantFeature:1, adminUserDiag:1, adminReportScoreDryRun:1, adminReportGenTest:1, adminScoreConsistency:1, adminFinalizeOps:1, adminUnfinalizeOps:1, adminSmpDump:1, adminSmpWarmAll:1, adminLevelAudit:1, adminXpRestore:1, adminCleanupPlusLogs:1, adminClassAudit:1, adminRecolorCalendar:1, adminFixTokenVersion:1, adminPurgeChallenges:1, adminJiroBackfill:1, adminJiroReset:1, adminScoreDist:1, adminCommunityTiming:1, adminOpsScoreAudit:1, adminListTriggers:1, adminHomeTiming:1, adminScreenTiming:1, adminQuickLogTimings:1, adminScoreTrace:1, adminJiroSignals:1, adminLogTimes:1, adminJiroFound:1, adminReportGenFailures:1,
+  igStatus:1, igAuthUrl:1, igFetchNow:1, igDisconnect:1, igResetMetrics:1, igConfigure:1, adminAiUsage:1,
   authSetMode:1, authSetEnforce:1, authRoleApply:1, authRoleDryRun:1, authRevokeAll:1,
   authCleanupTestData:1, adminPurgeTestUsers:1, adminMigrateTasks:1, authBreakerReset:1, rotateSessionSecret:1,
   p1Backup:1, p1BackupInfo:1, p1PurgeArchived:1, weeklyBackup:1
