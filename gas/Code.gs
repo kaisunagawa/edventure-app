@@ -851,6 +851,30 @@ function doGet(e) {
         rowsLT.sort(function (a, b) { return String(a.last_write) > String(b.last_write) ? 1 : -1; });
         return jsonResponse({ ok: true, date: dayLT, users: rowsLT.length, rows: rowsLT });
       }
+      // 鍵が設定されているかだけを見る。★値は絶対に返さない★
+      // 「動いていない定期処理」を見分けるために使う。
+      case "adminPropsCheck": {
+        if (!verifyAdmin(e.parameter.coachEmail)) return jsonResponse({ ok: false, error: "not admin" });
+        const names = ["STRIPE_SECRET_KEY", "CHATWORK_API_TOKEN", "CLAUDE_API_KEY",
+                       "YT_API_KEY", "IG_APP_ID", "IG_APP_SECRET", "IG_ACCESS_TOKEN",
+                       "IG_OWNER_EMAIL", "P1_ADMIN_SECRET"];
+        const prC = PropertiesService.getScriptProperties();
+        const outC = {};
+        names.forEach(function (n) { outC[n] = !!(prC.getProperty(n) || "").trim(); });
+        // Chatworkは鍵があっても、部屋が紐づいていなければ何も取らない
+        let cwRooms = 0;
+        try {
+          cwRooms = sheetToObjects(getStudentProfileSheet())
+            .filter(function (x) { return String(x.chatwork_room_id || "").trim(); }).length;
+        } catch (eC) {}
+        let stripeLinked = 0;
+        try {
+          stripeLinked = sheetToObjects(getStudentProfileSheet())
+            .filter(function (x) { return String(x.stripe_email || "").trim(); }).length;
+        } catch (eC) {}
+        return jsonResponse({ ok: true, set: outC,
+                              chatwork_rooms: cwRooms, stripe_linked: stripeLinked });
+      }
       // AI費用の明細を読む（読むだけ）。days= でさかのぼる日数
       case "adminAiUsage": {
         if (!verifyAdmin(e.parameter.coachEmail)) return jsonResponse({ ok: false, error: "not admin" });
@@ -1581,6 +1605,7 @@ function doGet(e) {
       case "getSelfMgmtPower": result = getSelfMgmtPower(studentEmail, e.parameter); break;
       case "getDailyOpsReport": result = getDailyOpsReport(studentEmail, e.parameter); break;
       case "getLogs":      result = getLogs(studentEmail, e.parameter); break;
+      case "getLogsRange": result = getLogsRange(studentEmail, e.parameter); break;
       case "getMessages":  result = getMessages(studentEmail); break;
       case "getSchedule":  result = getSchedule(studentEmail); break;
       case "getStudents":  result = getStudents(studentEmail); break;
@@ -1815,6 +1840,7 @@ function doPost(e) {
       case "updateLogTime": return jsonResponse(updateLogTime(studentEmail, body));
       case "setLogClassification": return jsonResponse(setLogClassification(studentEmail, body));
       case "clientError":  return jsonResponse(recordClientError(body));
+      case "getLogsRange": return jsonResponse(getLogsRange(studentEmail, body));
       case "getDayPlan":   return jsonResponse(getDayPlan(studentEmail, body));
       case "saveDayPlan":  return jsonResponse(saveDayPlan(studentEmail, body));
       case "saveWeeklyAvailable": return jsonResponse(saveWeeklyAvailable(studentEmail, body));
@@ -4106,6 +4132,68 @@ function getLogs(studentEmail, body) {
   return { ok: true, data: logs };
 }
 
+// ★何日ぶんかを1回で返す★（2026-08-07 Kai報告「まとめて分類の読み込みが遅い」）
+//   画面は直近7日を7回に分けて取りに行っていた。Apps Script は同じ人の
+//   リクエストを順番に処理するので、7回ぶんの待ち時間がそのまま積み上がる。
+//   1回にまとめれば、シートを読むのも1回で済む。
+//   返す形は getLogs と同じ（日付ごとの入れ物にして返す）。
+function getLogsRange(studentEmail, body) {
+  const days = Math.max(1, Math.min(31, Number(body && body.days) || 7));
+  const endDate = (body && body.date) ? String(body.date) : formatDate(new Date());
+  const want = {};
+  for (let k = 0; k < days; k++) {
+    const d = new Date(endDate + "T00:00:00+09:00");
+    d.setDate(d.getDate() - k);
+    want[Utilities.formatDate(d, "Asia/Tokyo", "yyyy-MM-dd")] = [];
+  }
+  const sheet = getSheet("DailyLog");
+  const data = dailyLogValues_(sheet);
+  const headers = data[0];
+  const emailIdx = headers.indexOf("student_email");
+  const dateIdx = headers.indexOf("date");
+  const idx = {
+    log_id: headers.indexOf("log_id"),
+    time_block: headers.indexOf("time_block"),
+    task: headers.indexOf("task"),
+    focus_level: headers.indexOf("focus_level"),
+    memo: headers.indexOf("memo"),
+    goal_related: headers.indexOf("goal_related"),
+    actual_minutes: headers.indexOf("actual_minutes"),
+    duration_confirmed: headers.indexOf("duration_confirmed"),
+    link_task_id: headers.indexOf("link_task_id"),
+    time_classification: headers.indexOf("time_classification"),
+    classification_method: headers.indexOf("classification_method"),
+    classification_reason_code: headers.indexOf("classification_reason_code"),
+  };
+  const g = function (row, k) { return idx[k] === -1 ? "" : String(row[idx[k]] || ""); };
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][emailIdx]) !== studentEmail) continue;
+    const rawDate = data[i][dateIdx];
+    const rowDate = rawDate instanceof Date
+      ? Utilities.formatDate(rawDate, "Asia/Tokyo", "yyyy-MM-dd")
+      : String(rawDate);
+    if (!want[rowDate]) continue;
+    want[rowDate].push({
+      log_id: g(data[i], "log_id"),
+      time_block: g(data[i], "time_block"),
+      task: g(data[i], "task"),
+      focus_level: g(data[i], "focus_level"),
+      memo: g(data[i], "memo"),
+      goal_related: g(data[i], "goal_related") || "false",
+      actual_minutes: g(data[i], "actual_minutes"),
+      duration_confirmed: g(data[i], "duration_confirmed"),
+      link_task_id: g(data[i], "link_task_id"),
+      time_classification: g(data[i], "time_classification"),
+      classification_method: g(data[i], "classification_method"),
+      classification_reason_code: g(data[i], "classification_reason_code"),
+    });
+  }
+  Object.keys(want).forEach(function (d) {
+    want[d].sort(function (a, b) { return a.time_block > b.time_block ? 1 : -1; });
+  });
+  return { ok: true, data: want };
+}
+
 // 独り言（クイック記録）: 自由に話した/書いた一言をAIが構造化して、その場で記録する。
 // 「通知が来たらすぐ、話すだけで終わる」体験のため、時間帯・タスク・集中度の仕分けを
 // 全部AIに任せる。既存のsaveLogの保存経路（カレンダー書き戻し・XP等）にそのまま乗せる
@@ -4353,6 +4441,11 @@ ${text}
   const _tSave0 = Date.now();
   let totalXp = 0, lastLevel = null, leveled = false;
   // 1日分をまとめて話す人にも対応するため件数の上限は事実上設けない。
+  const jiroDelta = {};   // 件数ぶんの増分をためて、最後に1回だけ渡す
+  let jiroGainedAll = [], jiroSoonAll = [];
+  // ★DailyLogの読み込みを1回にまとめる★（2026-08-07 実測で15件82秒）
+  //   中の saveLog が1件ごとにシートを丸ごと読み直していた。
+  withDailyLogSnapshot_(function () {
   // 60件は1日24時間を分単位で分けても十分収まる安全弁（暴走・実行時間の保険）
   records.slice(0, 60).forEach(function (r) {
     const fnum = Math.max(1, Math.min(5, Number(r.focus_level) || 3));
@@ -4398,7 +4491,14 @@ ${text}
       saved.push({ time_block: tb, date: recDate, task: r.task, focus_level: fnum, goal_related: r.goal_related === true });
       if (sr.xp_gained) totalXp += sr.xp_gained;
       if (sr.level_up) { leveled = true; lastLevel = sr.level; }
+      // 後回しにしたジローの増分を足していく（最後に1回だけ渡す）
+      if (sr.jiro_deferred) {
+        Object.keys(sr.jiro_deferred).forEach(function (k) {
+          jiroDelta[k] = (jiroDelta[k] || 0) + Number(sr.jiro_deferred[k] || 0);
+        });
+      }
     }
+  });
   });
 
   // ★まとめて1回だけ★ 件数ぶん繰り返していたのをここへ寄せる。
@@ -4410,6 +4510,12 @@ ${text}
     const savedToday = saved.some(function (x) { return x.date === today; });
     if (savedToday) { try { updateStreak(studentEmail); } catch (e) {} }
     try { invalidateStatusCache(studentEmail); } catch (e) {}
+    // ためておいたジローの増分を、ここで1回だけ数える
+    try {
+      const jr = jiroCollect_(studentEmail, jiroDelta, false);
+      if (jr && jr.gained && jr.gained.length) jiroGainedAll = jr.gained;
+      if (jr && jr.soon) jiroSoonAll = jr.soon;
+    } catch (e) { /* 図鑑が更新できなくても、記録そのものは成功させる */ }
   }
   if (saved.length === 0) return { ok: false, error: "記録の保存に失敗しました。もう一度お試しください" };
   // 複数件の時は先頭を代表として返しつつ、件数も返す（フロントのトースト用）
@@ -4423,6 +4529,8 @@ ${text}
     savedAll: saved,
     fallback: usedFallback,   // AI解析に失敗し、全文をそのまま1件保存した場合true
     xp_gained: totalXp, level_up: leveled, level: lastLevel,
+    // まとめて数えたジローの結果（会えた子・あと1回の子）もその場で返す
+    jiro_gained: jiroGainedAll, jiro_soon: jiroSoonAll,
     ms: quickLogNoteTiming_({ 下ごしらえ: (typeof _tPrep !== "undefined" ? _tPrep - _t0 : null),
           AI解析: (typeof _tAi0 !== "undefined" ? _tSave0 - _tAi0 : null),
           保存: Date.now() - _tSave0,
@@ -4656,6 +4764,36 @@ function logicalToday_(base) {
 //   連続日数もキャッシュ破棄も「最後に1回」で足りる処理なのに、毎回やっていた。
 //   呼び出し側（quickLog）が、ループのあとに1回だけ自分で行う。
 //   既定は false なので、他の呼び出し元の動きは一切変わらない。
+// ★同じリクエストの中で DailyLog を何度も読まない★（2026-08-07 実測）
+//   独り言は1回で最大15件を保存するが、saveLog は1件ごとに
+//   DailyLog を丸ごと読み直していた。15件なら15回。実測で15件82秒。
+//   最初の1回だけ読み、以後は控えを使う。保存した行は控えにも足すので、
+//   同じ時間帯の重複チェックも件数の集計もこれまでどおり正しく動く。
+//   ★書き換えたら必ず控えにも反映すること★ 忘れると、
+//   同じ時間帯に2件目を入れたときXPが二重に付く。
+var _dlSnapOn = false, _dlSnap = null;
+function withDailyLogSnapshot_(fn) {
+  const already = _dlSnapOn;
+  if (!already) { _dlSnapOn = true; _dlSnap = null; }
+  try { return fn(); }
+  finally { if (!already) { _dlSnapOn = false; _dlSnap = null; } }
+}
+function dailyLogValues_(sheet) {
+  if (_dlSnapOn && _dlSnap) return _dlSnap;
+  const v = sheet.getDataRange().getValues();
+  if (_dlSnapOn) _dlSnap = v;
+  return v;
+}
+function dailyLogSnapAppend_(headers, fields) {
+  if (!_dlSnapOn || !_dlSnap) return;
+  const row = new Array(headers.length).fill("");
+  Object.keys(fields).forEach(function (k) {
+    const i = headers.indexOf(k);
+    if (i !== -1) row[i] = fields[k];
+  });
+  _dlSnap.push(row);
+}
+
 function saveLog(studentEmail, body, opts) {
   const _defer = !!(opts && opts.deferAggregates);
   // 自己経営力は計算に時間がかかるので取っておいている。書き換えたら
@@ -4673,7 +4811,7 @@ function saveLog(studentEmail, body, opts) {
   const isPast = targetDate !== today;
 
   // Upsert: 同じ日・同じ時間帯があれば更新
-  const data = sheet.getDataRange().getValues();
+  const data = dailyLogValues_(sheet);
   const headers = data[0];
   const emailIdx = headers.indexOf("student_email");
   const dateIdx = headers.indexOf("date");
@@ -4737,6 +4875,10 @@ function saveLog(studentEmail, body, opts) {
       rowU[headers.indexOf("memo")] = body.memo || "";
       if (grIdx < rowU.length) rowU[grIdx] = body.goal_related || "false";
       sheet.getRange(i + 1, 1, 1, rowU.length).setValues([rowU]);
+      // 控えも同じ内容にしておく（次の1件が古い内容を見ないように）
+      if (_dlSnapOn && _dlSnap && _dlSnap[i]) {
+        for (let c = 0; c < rowU.length; c++) _dlSnap[i][c] = rowU[c];
+      }
       // カレンダーへの書き込みは、記録の保存を待たせない（あとでまとめて処理する）
       queueOwnerCalendarWrite_(studentEmail, targetDate, String(body.time_block), body.task, body.time_classification);
       if (!isPast && !_defer) { updateStreak(studentEmail); invalidateStatusCache(studentEmail); }
@@ -4745,17 +4887,18 @@ function saveLog(studentEmail, body, opts) {
       // 評価なしで保存→あとで評価を足した修正でも確実に付き、付与済みの記録は何度更新しても増えない
       if (!isPast && !prevAwarded && newFocus) {
         sheet.getRange(i+1, awardedIdx+1).setValue("TRUE");
+        if (_dlSnapOn && _dlSnap && _dlSnap[i]) _dlSnap[i][awardedIdx] = "TRUE";
         if (String(body.goal_related) === "true") incrementGoalBlocksAndNotify(studentEmail, 1);
         const xpResult = addXP(studentEmail, body.memo, todaysLogCount, {
           totalLogs, memoCount: memoCount + ((body.memo || "").trim() ? 1 : 0)
         }, String(data[i][0]));
         const jd1 = writeP1LogFields(sheet, i + 1, studentEmail, targetDate, String(body.time_block), body);
-        const jr1 = jiroCollect_(studentEmail, jd1, false);
-        return { ok: true, log_id: String(data[i][0]), updated: true, ...xpResult, jiro_gained: jr1.gained };
+        const jr1 = _defer ? { gained: [], deferred: jd1 } : jiroCollect_(studentEmail, jd1, false);
+        return { ok: true, log_id: String(data[i][0]), updated: true, ...xpResult, jiro_gained: jr1.gained, jiro_deferred: jr1.deferred };
       }
       const jd2 = writeP1LogFields(sheet, i + 1, studentEmail, targetDate, String(body.time_block), body);
-      const jr2 = jiroCollect_(studentEmail, jd2, false);
-      return { ok: true, log_id: String(data[i][0]), updated: true, xp_gained: 0, jiro_gained: jr2.gained };
+      const jr2 = _defer ? { gained: [], deferred: jd2 } : jiroCollect_(studentEmail, jd2, false);
+      return { ok: true, log_id: String(data[i][0]), updated: true, xp_gained: 0, jiro_gained: jr2.gained, jiro_deferred: jr2.deferred };
     }
   }
 
@@ -4763,6 +4906,14 @@ function saveLog(studentEmail, body, opts) {
   const newRow = sheet.getLastRow() + 1;
   sheet.appendRow([logId, studentEmail, targetDate, "", body.task, body.focus_level, body.memo || "", now, body.goal_related || "false"]);
   sheet.getRange(newRow, 4).setNumberFormat("@").setValue(String(body.time_block));
+  // 控えにも同じ行を足す（次の1件が、この行を「もうある」と見られるように）
+  dailyLogSnapAppend_(headers, {
+    log_id: logId, student_email: studentEmail, date: targetDate,
+    time_block: String(body.time_block), task: body.task,
+    focus_level: body.focus_level, memo: body.memo || "", created_at: now,
+    goal_related: body.goal_related || "false",
+    xp_awarded: (isPast || !String(body.focus_level || "").trim()) ? "FALSE" : "TRUE"
+  });
   const jdNew = writeP1LogFields(sheet, newRow, studentEmail, targetDate, String(body.time_block), body);
   // 新しい記録なので、時間帯などの判定もここで1回だけ行う
   if (!isPast) {
@@ -4782,19 +4933,23 @@ function saveLog(studentEmail, body, opts) {
   const newFocusN = String(body.focus_level || "").trim();
   // 過去日の後付け入力はストリーク・XPの対象外（後から稼げない）
   if (isPast) { sheet.getRange(newRow, awardedIdxN + 1).setValue("FALSE"); return { ok: true, log_id: logId, xp_gained: 0 }; }
-  const jrNew = jiroCollect_(studentEmail, jdNew, false);
+  // ★まとめて保存するときは、ジローの数え上げも最後に1回だけ★（2026-08-07 実測）
+  //   1件ごとに Users を読み書きしていた（1件あたり往復4回）。
+  //   独り言のように15件まとめて入るときは、そのぶん待ち時間になる。
+  //   連続日数と同じ扱いにして、増分だけ返し、呼び出し側が最後にまとめて渡す。
+  const jrNew = _defer ? { gained: [], deferred: jdNew } : jiroCollect_(studentEmail, jdNew, false);
 
   if (!_defer) { updateStreak(studentEmail); invalidateStatusCache(studentEmail); }
   // 評価が入っている記録だけ、その場でXPを付与して「付与済み」の印を付ける。
   // 評価なしで保存した場合は付与せず未付与のままにし、あとで評価を足した更新時に付与する
-  if (!newFocusN) { sheet.getRange(newRow, awardedIdxN + 1).setValue("FALSE"); return { ok: true, log_id: logId, xp_gained: 0, jiro_gained: jrNew.gained }; }
+  if (!newFocusN) { sheet.getRange(newRow, awardedIdxN + 1).setValue("FALSE"); return { ok: true, log_id: logId, xp_gained: 0, jiro_gained: jrNew.gained, jiro_deferred: jrNew.deferred }; }
   sheet.getRange(newRow, awardedIdxN + 1).setValue("TRUE");
   if (String(body.goal_related) === "true") incrementGoalBlocksAndNotify(studentEmail, 1);
   const xpResult = addXP(studentEmail, body.memo, todaysLogCount + 1, {
     totalLogs: totalLogs + 1,
     memoCount: memoCount + ((body.memo || "").trim() ? 1 : 0)
   }, logId);
-  return { ok: true, log_id: logId, ...xpResult, jiro_gained: jrNew.gained };
+  return { ok: true, log_id: logId, ...xpResult, jiro_gained: jrNew.gained, jiro_deferred: jrNew.deferred };
 }
 
 // カレンダーから、その開始時刻のJIROKU記録イベントを消す。
@@ -16140,7 +16295,7 @@ const ACTION_POLICIES_WRITE = {
 // ── CP4: 本人データの読み取りAPI ──
 // ランキングや「みんなの頑張り」は共有情報なのでここには入れない
 const ACTION_POLICIES_READ = {
-  getUser:{}, getLogs:{}, getReport:{}, getReportList:{}, getHomeData:{}, getGoalTree:{},
+  getUser:{}, getLogs:{}, getLogsRange:{}, getReport:{}, getReportList:{}, getHomeData:{}, getGoalTree:{},
   getReportHome:{}, getReportDetail:{}, getRoadmap:{}, listGoalEntries:{},
   getGameStatus:{}, getJournal:{}, getInsights:{}, getWeeklySummary:{}, getMonthlyReview:{}, getSelfMgmtPower:{}, getDailyOpsReport:{}, getDayPlan:{},
   getTimeUse:{}, getAchievements:{}, getMessages:{}, p1Status2:{}, getTasks:{}, getSprints:{}
@@ -16292,7 +16447,7 @@ const ADMIN_SECRET_ALLOWLIST = {
   adminBroadcastLine:1, adminBroadcastLinePending:1, adminSendStudentCampaign:1,
   // セットアップ・保守
   adminSetupTriggers:1, adminInstallTrigger:1, adminSetupPhase1:1, adminSetupAuth:1, adminPhase4DryRun:1, adminLegacyBackfill:1, adminWritePathStats:1, adminIssueTestSession:1, adminDropTestSessions:1, adminOpsSelfTest:1, adminActualMinutesAudit:1, adminXpCorrection:1, adminStreakRecalc:1, adminGrantFeature:1, adminUserDiag:1, adminReportScoreDryRun:1, adminReportGenTest:1, adminScoreConsistency:1, adminFinalizeOps:1, adminUnfinalizeOps:1, adminSmpDump:1, adminSmpWarmAll:1, adminLevelAudit:1, adminXpRestore:1, adminCleanupPlusLogs:1, adminClassAudit:1, adminRecolorCalendar:1, adminFixTokenVersion:1, adminPurgeChallenges:1, adminJiroBackfill:1, adminJiroReset:1, adminScoreDist:1, adminStripeSyncStatus:1, adminCommunityTiming:1, adminOpsScoreAudit:1, adminListTriggers:1, adminHomeTiming:1, adminScreenTiming:1, adminQuickLogTimings:1, adminScoreTrace:1, adminJiroSignals:1, adminLogTimes:1, adminJiroFound:1, adminReportGenFailures:1,
-  igStatus:1, igAuthUrl:1, igFetchNow:1, igDisconnect:1, igResetMetrics:1, igConfigure:1, adminAiUsage:1,
+  igStatus:1, igAuthUrl:1, igFetchNow:1, igDisconnect:1, igResetMetrics:1, igConfigure:1, adminAiUsage:1, adminPropsCheck:1,
   authSetMode:1, authSetEnforce:1, authRoleApply:1, authRoleDryRun:1, authRevokeAll:1,
   authCleanupTestData:1, adminPurgeTestUsers:1, adminMigrateTasks:1, authBreakerReset:1, rotateSessionSecret:1,
   p1Backup:1, p1BackupInfo:1, p1PurgeArchived:1, weeklyBackup:1

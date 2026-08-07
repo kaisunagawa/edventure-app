@@ -1820,9 +1820,19 @@ function BulkClassifySheet({date, onClose, onSaved, onToast}) {
   const [doneCount, setDoneCount] = useState(0);
   useEffect(()=>{
     let alive = true;
-    // 今日を含む直近7日。日ごとの取得なので7回に分けて、まとめて待つ
+    // ★7日ぶんを1回で取る★（2026-08-07 Kai報告「読み込みが遅い」）
+    //   以前は日ごとに7回に分けて呼んでいた。Apps Script は同じ人の
+    //   リクエストを順番に処理するので、7回ぶんの待ち時間が積み上がっていた。
+    //   古い版のサーバーに当たったときのために、失敗したら元のやり方に戻す。
     const days = Array.from({length:7}, (_,i)=>addDays(date, -i));
-    Promise.all(days.map(d=>gasApi("getLogs",{date:d}).then(r=>({d, list:(r&&r.ok&&r.data)||[]})).catch(()=>({d,list:[]}))))
+    const fetchAll = () => gasApi("getLogsRange",{date, days:7})
+      .then(r=>{
+        if(!(r&&r.ok&&r.data&&typeof r.data==="object"&&!Array.isArray(r.data))) throw new Error("range not available");
+        return days.map(d=>({d, list:(r.data[d])||[]}));
+      })
+      .catch(()=>Promise.all(days.map(d=>
+        gasApi("getLogs",{date:d}).then(r=>({d, list:(r&&r.ok&&r.data)||[]})).catch(()=>({d,list:[]})))));
+    fetchAll()
       .then(res=>{
         if(!alive) return;
         const out = [];
@@ -10924,7 +10934,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260807-174132";
+const APP_BUILD = "20260807-231500";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
@@ -12143,6 +12153,10 @@ function QuickLogSheet({onClose,onToast}){
       }
       if(r.xp_gained){ msg+=` +${r.xp_gained}XP`; if(r.level_up)msg+=` Lv.${r.level}！`; }
       onToast(msg);
+      // ★独り言でもジローのカードを出す★（2026-08-07）
+      //   これまでは次にホームを開いたときまで出なかった。
+      //   サーバーがまとめて数えるようになったので、その場で返せる。
+      setTimeout(()=>announceJiroFound(r), 1200);
       // 独り言で作った記録も、フォーム/タイマーと同様にGoogleカレンダーへ書き戻す。
       // （以前は独り言だけカレンダー書き込みが漏れており、音声・独り言の記録が
       //  カレンダーに反映されない原因になっていた）。savedAll=保存された各レコード。
