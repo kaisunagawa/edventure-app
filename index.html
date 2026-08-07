@@ -51,6 +51,11 @@
       --border:   #E5E7EB;
       --text:     #1F2937;
       --sub:      #9CA3AF;
+      /* ★--faint を定義する★（2026-08-07 Kai報告「文字が黒くて見づらい」）
+         8か所で var(--faint) を使っていたのに、定義がどこにも無かった。
+         定義の無い変数を使うと color の指定そのものが無効になり、
+         ボタンの中では既定の黒になる。暗いテーマで真っ黒になっていた。 */
+      --faint:    #AEB5BD;
       --accent:   #0891B2;
       --accent-l: #CFFAFE;
       --glow:     rgba(8,145,178,.12);
@@ -349,6 +354,7 @@
         --border:   #2B333A;
         --text:     #E8ECEF;
         --sub:      #7E8A94;
+        --faint:    #6B7680;
         --accent:   #22B8D4;
         --accent-l: #123A44;
         --glow:     rgba(34,184,212,.15);
@@ -9778,7 +9784,9 @@ function JiroZukanSheet({jiro, onClose, picked, onPick}) {
                   style=${{border:"1px solid var(--border)",borderRadius:12,textAlign:"left",
                               background:"var(--bg)",padding:"9px 10px",boxSizing:"border-box",
                               minWidth:0,opacity:have?1:0.92,cursor:"pointer",
-                              fontFamily:"inherit",display:"block",width:"100%"}}>
+                              fontFamily:"inherit",display:"block",width:"100%",
+                              /* ボタンの中は文字色を受け継がない。指定しないと既定の黒になる */
+                              color:"var(--text)"}}>
                   <div style=${{display:"flex",alignItems:"center",gap:4,marginBottom:6,minWidth:0}}>
                     <span style=${{flexShrink:0,fontSize:7.5,fontWeight:800,color:"var(--faint)"}}>${j.no}</span>
                     <span style=${{flexShrink:0,fontSize:7.5,fontWeight:800,color:"#fff",background:rc,
@@ -10934,7 +10942,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260807-231500";
+const APP_BUILD = "20260808-012452";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
