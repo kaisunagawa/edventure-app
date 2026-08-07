@@ -9360,9 +9360,9 @@ function GoalTreeSheet({onClose, onToast}) {
     </div>`;
 }
 
-// セキュリティ強化にともなう一度きりの再ログイン案内。
-// 既にログイン済みの人はログイン画面を通らないため、そのままではセッションを
-// 取得できない。ここで一度だけ入り直してもらう。データや設定は消えない。
+// セッションが切れた人に、入り直してもらう画面。
+// ログイン済みの人はログイン画面を通らないため、そのままではセッションを
+// 取り直せない。ここから入り直してもらう。データや設定は消えない。
 // ログイン待ちの表示。回るマークに加えて、経過に応じて文言を変える。
 // 同じ画面のまま止まって見えると「固まった」と感じてしまうため。
 function LoginWaiting() {
@@ -9395,10 +9395,13 @@ function ReauthGate() {
     <div class="login-wrap">
       <div class="login-logo"><svg width="72" height="72" viewBox="0 0 72 72" xmlns="http://www.w3.org/2000/svg"><circle cx="36" cy="36" r="36" fill="#0891B2"/><circle cx="36" cy="36" r="25" fill="none" stroke="rgba(255,255,255,0.2)" stroke-width="4.5"/><path d="M36 11 A25 25 0 1 1 14.5 50" fill="none" stroke="#fff" stroke-width="4.5" stroke-linecap="round"/></svg></div>
       <div class="login-title">JIROKU</div>
-      <div class="login-sub">安全のため、一度ログインし直してください</div>
+      <div class="login-sub">ログインの有効期限が切れました</div>
       <div class="login-box" style=${{alignItems:"center",textAlign:"center"}}>
         <div style=${{fontSize:13,color:"var(--sub)",lineHeight:1.9,marginBottom:18}}>
-          ログインの仕組みを新しくしました。<br/>
+          <!-- ★8月1日の移行の文言をそのまま使わない★（2026-08-07）
+               いまはただの期限切れでも「仕組みを新しくしました」と出ていて、
+               受け取る側は「また何か変わったのか」と身構えてしまう。 -->
+          安全のため、ログインは一定期間で切れます。<br/>
           お手数ですが、もう一度Googleでログインしてください。<br/>
           <b style=${{color:"var(--text)"}}>記録・目標・設定はそのまま残ります。</b>
           ${pendingOpCount()>0 ? html`<br/><br/><b style=${{color:"var(--accent)"}}>
@@ -10921,7 +10924,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260807-163406";
+const APP_BUILD = "20260807-174132";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 

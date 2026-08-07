@@ -14564,11 +14564,15 @@ function setLogClassification(studentEmail, body) {
     //   サーバーから直接書き込む人（google_calendar_id を持つ人）は、
     //   画面側の書き込みを止めているため、ここで塗り直さないと
     //   分類を変えてもカレンダーだけ前の色のまま残ってしまう。
+    // ★色の塗り直しも控えておく★（2026-08-07 実測）
+    //   「まとめて仕分け」で20件直すと、ここでカレンダーAPIを20回叩いていた。
+    //   1分おきの flushOwnerCalendarQueue が拾うので、色が変わるまで最大1分。
+    //   待たされずに次を仕分けられることのほうが大事だと判断した。
     try {
       const iDate = headers.indexOf("date"), iTb = headers.indexOf("time_block"), iTask = headers.indexOf("task");
       const rawD = data[i][iDate];
       const dStr = rawD instanceof Date ? Utilities.formatDate(rawD, "Asia/Tokyo", "yyyy-MM-dd") : String(rawD).slice(0, 10);
-      writeRecordToOwnerCalendar(studentEmail, dStr, String(data[i][iTb]), String(data[i][iTask]), want);
+      queueOwnerCalendarWrite_(studentEmail, dStr, String(data[i][iTb]), String(data[i][iTask]), want);
     } catch (e) { /* 色が変わらなくても分類の保存は成功させる */ }
     // ★隠しジローのカウンター★ 付け替えなので、前の分類は-1・新しい分類は+1
     let jiroGained = [];
