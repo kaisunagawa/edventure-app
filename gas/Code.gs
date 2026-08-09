@@ -7178,7 +7178,38 @@ function submitSurvey(studentEmail, body) {
   if (!(sat >= 1 && sat <= 5)) return { ok: false, error: "満足度は1〜5で指定してください" };
   const comment = String(body.comment || "").trim().slice(0, 1000);
   getSurveySheet().appendRow([formatDate(new Date()), studentEmail, sat, comment, new Date().toISOString()]);
+  // ★届いたその場で管理者へ知らせる★（2026-08-07 Kai要望）
+  //   これまではシートに溜まるだけで、誰も見ていなかった。
+  //   ★2のような声こそ早く届く必要がある（気づくのが遅れるほど離れてしまう）。
+  try { notifyAdminSurvey_(studentEmail, sat, comment); } catch (e) { Logger.log("アンケート通知に失敗: " + e); }
   return { ok: true, data: { saved: true } };
+}
+
+// アンケートが届いたことを管理者のLINEへ流す（LINEが無ければメール）
+function notifyAdminSurvey_(studentEmail, sat, comment) {
+  const admin = adminEmail();
+  const users = sheetToObjects(getSheet("Users"));
+  const me = users.find(function (x) { return x.student_email === studentEmail; });
+  const au = users.find(function (x) { return x.student_email === admin; });
+  const who = me ? String(me.nickname || me.name || studentEmail) : studentEmail;
+  const stars = "★".repeat(sat) + "☆".repeat(5 - sat);
+  // 平均も一緒に出す（1件だけ見ても良し悪しが分からないため）
+  let avgLine = "";
+  try {
+    const all = sheetToObjects(getSurveySheet())
+      .map(function (s) { return Number(s.satisfaction); })
+      .filter(function (n) { return n >= 1 && n <= 5; });
+    if (all.length) {
+      const avg = Math.round(all.reduce(function (a, b) { return a + b; }, 0) / all.length * 10) / 10;
+      avgLine = "\n\nこれまでの平均\n" + avg + " / 5（" + all.length + "件）";
+    }
+  } catch (e2) {}
+  const head = (sat <= 3 ? "⚠️ 満足度アンケート（要確認）" : "満足度アンケートが届きました");
+  const text = head + "\n\n" + who + " さん\n" + stars + "（" + sat + " / 5）"
+             + (comment ? "\n\nコメント\n" + comment : "\n\n（コメントなし）")
+             + avgLine;
+  if (au && au.line_user_id && sendLineMessage(au.line_user_id, text)) return;
+  MailApp.sendEmail(admin, "JIROKU 満足度アンケート " + sat + "/5", text);
 }
 
 // 過去のレポート（breakdown_reasonsが未生成のもの）に、後からコメントだけを
@@ -18712,6 +18743,15 @@ function dailyOpsHealthCheck(dryRun) {
     catch (e) { Logger.log("ops health mail error: " + e); sentBy = "failed"; }
   }
   Logger.log("dailyOpsHealthCheck: " + head + " missing7=" + missing7);
+
+  // ★SNSの数字取りをここに相乗りさせる★（2026-08-10）
+  //   専用トリガー（毎日21時）を1枠使っていたが、定期実行は20個までで
+  //   19個まで埋まっていた。枠が尽きると夜のレポートの再開トリガーが作れず、
+  //   静かに人が欠ける。ここは23:59なので、
+  //   ★その日の数字がほぼ出そろってから取れる＝21時より正確★。
+  //   点検の送信はもう終わっているので、重くても報告は遅れない。
+  try { snsAutoFetchAll(); } catch (eSns) { Logger.log("snsAutoFetchAll: " + eSns); }
+
   return { ok: true, data: { text: text, problems: problems.length, sent: sentBy !== "failed", sentBy: sentBy } };
 }
 

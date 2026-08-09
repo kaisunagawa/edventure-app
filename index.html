@@ -2482,7 +2482,12 @@ const EVALS = [
   {l:"5 — 完璧にできた", c:"e5"},{l:"4 — よくできた", c:"e4"},
   {l:"3 — まあまあだった", c:"e3"},{l:"2 — もう少しだった", c:"e2"},{l:"1 — 全然だめだった", c:"e1"},
 ];
-const ALL_TIME_BLOCKS = ["05:00-06:00","06:00-07:00","07:00-08:00","08:00-09:00","09:00-10:00","10:00-11:00","11:00-12:00","12:00-13:00","13:00-14:00","14:00-15:00","15:00-16:00","16:00-17:00","17:00-18:00","18:00-19:00","19:00-20:00","20:00-21:00","21:00-22:00","22:00-23:00","23:00-24:00"];
+// ★深夜0時〜5時の枠が無かった★（2026-08-07 kyokaさんのアンケート★2）
+//   「夜中や朝方にやる事があるが、時間枠がないので記録がやりにくい」
+//   05:00始まりだったので、0時〜5時に何かをしても記録する場所が無かった。
+//   記録できない日ができ、そのぶん連続記録が切れていた。
+const ALL_TIME_BLOCKS = ["00:00-01:00","01:00-02:00","02:00-03:00","03:00-04:00","04:00-05:00",
+  "05:00-06:00","06:00-07:00","07:00-08:00","08:00-09:00","09:00-10:00","10:00-11:00","11:00-12:00","12:00-13:00","13:00-14:00","14:00-15:00","15:00-16:00","16:00-17:00","17:00-18:00","18:00-19:00","19:00-20:00","20:00-21:00","21:00-22:00","22:00-23:00","23:00-24:00"];
 const getLogHours = () => JSON.parse(localStorage.getItem("jiroku_log_hours")||'{"start":6,"end":23}');
 // 1日の目標時間（目標に関連した記録を何時間積むか）。固定の8h基準ではなく、
 // 本人が自分で決めた目標に対する達成度を測れるようにする。デフォルトは2時間
@@ -10441,7 +10446,7 @@ function SettingsScreen({onToast,onLogout,onGoalSaved,profile,onProfileSaved,onC
           <div style=${{flex:1}}>
             <div style=${{fontSize:11,color:"var(--sub)",marginBottom:6,fontWeight:500}}>開始</div>
             <select class="inp" style=${{padding:"10px 8px",textAlign:"center"}} value=${logStart} onChange=${e=>setLogStart(Number(e.target.value))}>
-              ${Array.from({length:20},(_,i)=>i+5).map(h=>html`<option key=${h} value=${h}>${String(h).padStart(2,"0")}:00</option>`)}
+              ${Array.from({length:25},(_,i)=>i).map(h=>html`<option key=${h} value=${h}>${String(h).padStart(2,"0")}:00</option>`)}
             </select>
           </div>
           <div style=${{color:"var(--sub)",marginTop:18,fontSize:18,fontWeight:300}}>→</div>
@@ -10942,7 +10947,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260808-012452";
+const APP_BUILD = "20260810-013401";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
