@@ -851,6 +851,88 @@ function doGet(e) {
         rowsLT.sort(function (a, b) { return String(a.last_write) > String(b.last_write) ? 1 : -1; });
         return jsonResponse({ ok: true, date: dayLT, users: rowsLT.length, rows: rowsLT });
       }
+      // 指定した名前の定期実行だけを消す。★名前を必ず指定させる★
+      //   「全部消す」経路は作らない（一度に消すと夜のレポートごと止まる）。
+      //   apply=1 が無ければ、消さずに対象だけ返す。
+      case "adminDeleteTrigger": {
+        if (!verifyAdmin(e.parameter.coachEmail)) return jsonResponse({ ok: false, error: "not admin" });
+        const wantT = String(e.parameter.handler || "").trim();
+        if (!wantT) return jsonResponse({ ok: false, error: "handler=関数名 を指定してください" });
+        const dryT = String(e.parameter.apply || "") !== "1";
+        const allT = ScriptApp.getProjectTriggers();
+        const hitT = allT.filter(function (t) { return t.getHandlerFunction() === wantT; });
+        if (!hitT.length) return jsonResponse({ ok: false, error: "見つかりません: " + wantT,
+                                                total: allT.length });
+        if (dryT) {
+          return jsonResponse({ ok: true, dry: true, handler: wantT, matched: hitT.length,
+            total_before: allT.length, note: "apply=1 で実際に削除します" });
+        }
+        let delT = 0;
+        hitT.forEach(function (t) { try { ScriptApp.deleteTrigger(t); delT++; } catch (eT) {} });
+        return jsonResponse({ ok: true, dry: false, handler: wantT, deleted: delT,
+                              total_after: ScriptApp.getProjectTriggers().length });
+      }
+      // 過去の欠落レポートだけを埋める（★LINEは一切送らない★）。
+      //   夜の穴埋めは「過去2日」までなので、それより古い日は自動では埋まらない。
+      //   既にレポートがある日は絶対に触らない（作り直しでAI費用が跳ねるのを防ぐ）。
+      //   点数の確定まで夜と同じ手順を踏む（踏まないと画面と一覧で点数が食い違う）。
+      case "adminBackfillReports": {
+        if (!verifyAdmin(e.parameter.coachEmail)) return jsonResponse({ ok: false, error: "not admin" });
+        const daysB = String(e.parameter.dates || "").split(",")
+          .map(function (x) { return x.trim().slice(0, 10); })
+          .filter(function (x) { return /^\d{4}-\d{2}-\d{2}$/.test(x); });
+        if (!daysB.length) return jsonResponse({ ok: false, error: "dates=YYYY-MM-DD,... を指定してください" });
+        const dryB = String(e.parameter.apply || "") !== "1";
+
+        const usersB = sheetToObjects(getSheet("Users"))
+          .filter(function (u) { return String(u.is_active || "").toUpperCase() === "TRUE"; });
+        const logsB = sheetToObjects(getSheet("DailyLog"));
+        const haveB = {};
+        sheetToObjects(getSheet("Reports")).forEach(function (r) {
+          const d = r.date instanceof Date ? formatDate(r.date) : String(r.date).slice(0, 10);
+          haveB[String(r.student_email) + "|" + d] = 1;
+        });
+
+        const planB = [];
+        usersB.forEach(function (u) {
+          daysB.forEach(function (day) {
+            if (haveB[u.student_email + "|" + day]) return;   // 既にある日は触らない
+            const mine = logsB.filter(function (l) {
+              if (String(l.student_email) !== u.student_email) return false;
+              if (String(l.deleted_at || "").trim()) return false;
+              const d = l.date instanceof Date ? formatDate(l.date) : String(l.date).slice(0, 10);
+              return d === day;
+            });
+            if (!mine.length) return;                          // 記録が無い日は対象外
+            planB.push({ user: u, date: day, logs: mine.sort(function (a2, b2) {
+              return String(a2.time_block) > String(b2.time_block) ? 1 : -1; }) });
+          });
+        });
+
+        if (dryB) {
+          return jsonResponse({ ok: true, dry: true, count: planB.length,
+            rows: planB.map(function (x) {
+              return { name: String(x.user.name || x.user.nickname || ""), date: x.date, logs: x.logs.length }; }),
+            note: "apply=1 を付けると実際に作ります（LINEは送りません）" });
+        }
+
+        const doneB = [], failB = [];
+        planB.forEach(function (x) {
+          try {
+            const rep = generateReportWithClaude(x.user.student_email, x.user.name, x.logs);
+            if (!rep) { failB.push({ name: x.user.name, date: x.date, reason: REPORT_GEN_LAST_ERROR }); return; }
+            appendReportRow(x.date, x.user.student_email, rep, x.logs.length);
+            // 夜と同じく点数を確定させる（やらないと一覧と詳細で食い違う）
+            try {
+              if (hasFeature(x.user, OPS_FEATURE_KEY)) finalizeDailyOpsReport(x.user.student_email, x.date);
+            } catch (eF) {}
+            dropUserViewCaches_(x.user.student_email);
+            doneB.push({ name: String(x.user.name || ""), date: x.date, score: rep.score });
+          } catch (eB) { failB.push({ name: String(x.user.name || ""), date: x.date, reason: String(eB).slice(0, 150) }); }
+        });
+        return jsonResponse({ ok: true, dry: false, created: doneB.length,
+                              failed: failB.length, rows: doneB, failures: failB, sent_line: false });
+      }
       // 鍵が設定されているかだけを見る。★値は絶対に返さない★
       // 「動いていない定期処理」を見分けるために使う。
       case "adminPropsCheck": {
@@ -8590,6 +8672,14 @@ ${EMOJI_STYLE}
     const pick = pool[(hour + new Date().getDate()) % pool.length];
     notifyUserTimeSlot(user, "⏱ 記録タイム", pick, pick + "\n📝 " + APP_URL + "#quick");
   });
+
+  // ★Chatworkの取り込みをここに相乗りさせる★（2026-08-10）
+  //   どちらも毎時なので、専用トリガーを分ける必要がない。
+  //   定期実行の枠は20個までで、19個まで埋まっていた。枠は仕組みの余裕そのもので、
+  //   足りなくなると夜のレポートの再開トリガーが作れず、静かに人が欠ける。
+  //   ★リマインダーの後に置く★ 取り込みが重くても通知を遅らせないため。
+  //   失敗しても通知側は巻き込まない。
+  try { syncChatworkMessages(); } catch (eCw) { Logger.log("syncChatworkMessages: " + eCw); }
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -8861,7 +8951,27 @@ function nightlyReport() {
   }
 
   const resumeDate = props.getProperty("NIGHTLY_REPORT_RESUME_DATE");
-  const startIndex = (resumeDate === today) ? Number(props.getProperty("NIGHTLY_REPORT_RESUME_INDEX") || 0) : 0;
+  const isResume = (resumeDate === today);
+
+  // ★「何件目から」で再開してはいけない★（2026-08-10 修正）
+  //   jobs は毎回組み直され、既に作れた分は needsReport() が false になって
+  //   一覧から消える。つまり再開時の配列は前回より短い。
+  //   そこへ前回の番号を当てると for(i=4; i<3; i++) のようになり、
+  //   残っている人が1人も処理されないまま、エラーも出さずに終わる。
+  //   実際に 8/5〜8/7 で7件が無言で欠落した。
+  //   ★残っている仕事だけが並んでいるのだから、常に先頭から回す★
+  const startIndex = 0;
+
+  // 何度やっても終わらないとき（毎回同じ所で落ちる等）に、
+  // 1分ごとの再開が永久に続かないよう回数で止める
+  const resumeCount = isResume ? Number(props.getProperty("NIGHTLY_REPORT_RESUME_COUNT") || 0) : 0;
+  const RESUME_MAX = 6;
+  if (resumeCount >= RESUME_MAX) {
+    Logger.log("nightlyReport: 再開が" + RESUME_MAX + "回に達したので打ち切ります（" + today + "）");
+    props.deleteProperty("NIGHTLY_REPORT_RESUME_DATE");
+    props.deleteProperty("NIGHTLY_REPORT_RESUME_COUNT");
+    return;
+  }
 
   const users = sheetToObjects(getSheet("Users")).filter(u => u.is_active.toUpperCase() === "TRUE");
   // 各シートは一度だけ読む（生徒ごとにReports全読みするとO(N^2)で遅く、
@@ -8931,7 +9041,7 @@ function nightlyReport() {
 
   // XP減少・ストリークリセット（当日記録なしのユーザー）は軽い処理なので
   // 初回起動時にまとめて実行する（再開時に二重適用しない）
-  if (startIndex === 0) {
+  if (!isResume) {
     users.forEach(u => {
       const dset = logDatesByEmail.get(u.student_email);
       if (!dset || !dset.has(today)) {
@@ -8945,7 +9055,9 @@ function nightlyReport() {
       // 時間切れ: 続きから再開できるよう位置を保存し、1分後に自分自身を再実行するトリガーを張る。
       // 作ったトリガーのIDを控えておき、次回起動の冒頭で必ず削除する（溜まり防止）
       props.setProperty("NIGHTLY_REPORT_RESUME_DATE", today);
-      props.setProperty("NIGHTLY_REPORT_RESUME_INDEX", String(i));
+      props.setProperty("NIGHTLY_REPORT_RESUME_COUNT", String(resumeCount + 1));
+      // 位置は保存しない（上の説明のとおり、番号での再開が欠落の原因だった）
+      props.deleteProperty("NIGHTLY_REPORT_RESUME_INDEX");
       try {
         const t = ScriptApp.newTrigger("nightlyReport").timeBased().after(60 * 1000).create();
         props.setProperty("NIGHTLY_REPORT_RESUME_TRIGGER_ID", t.getUniqueId());
@@ -9025,6 +9137,7 @@ function nightlyReport() {
   // 全員処理完了。再開用の状態が残っていればクリアする
   props.deleteProperty("NIGHTLY_REPORT_RESUME_DATE");
   props.deleteProperty("NIGHTLY_REPORT_RESUME_INDEX");
+  props.deleteProperty("NIGHTLY_REPORT_RESUME_COUNT");
   props.deleteProperty("NIGHTLY_REPORT_RESUME_TRIGGER_ID");
 }
 
@@ -16438,7 +16551,7 @@ function isAssignedTo(actorEmail, targetEmail) {
 // Kaiの有効なセッションを必須とし、鍵では通さない。
 const ADMIN_SECRET_ALLOWLIST = {
   // 状態の確認
-  authConfig:1, p1Status:1, authInspect:1, authCohort:1, authAuditTail:1, lineLinkAudit:1, adminSystemHealth:1,
+  authConfig:1, p1Status:1, authInspect:1, authCohort:1, authAuditTail:1, lineLinkAudit:1, adminSystemHealth:1, adminGetOverview:1,
   // 定期処理の手動実行・補完
   adminOpsHealthCheck:1, adminRunNightlyReport:1, adminRunNightlyCoachMessage:1,
   adminBackfillReports:1, adminBackfillReportsForDate:1, adminBackfillReportReasons:1,
@@ -16447,7 +16560,7 @@ const ADMIN_SECRET_ALLOWLIST = {
   adminBroadcastLine:1, adminBroadcastLinePending:1, adminSendStudentCampaign:1,
   // セットアップ・保守
   adminSetupTriggers:1, adminInstallTrigger:1, adminSetupPhase1:1, adminSetupAuth:1, adminPhase4DryRun:1, adminLegacyBackfill:1, adminWritePathStats:1, adminIssueTestSession:1, adminDropTestSessions:1, adminOpsSelfTest:1, adminActualMinutesAudit:1, adminXpCorrection:1, adminStreakRecalc:1, adminGrantFeature:1, adminUserDiag:1, adminReportScoreDryRun:1, adminReportGenTest:1, adminScoreConsistency:1, adminFinalizeOps:1, adminUnfinalizeOps:1, adminSmpDump:1, adminSmpWarmAll:1, adminLevelAudit:1, adminXpRestore:1, adminCleanupPlusLogs:1, adminClassAudit:1, adminRecolorCalendar:1, adminFixTokenVersion:1, adminPurgeChallenges:1, adminJiroBackfill:1, adminJiroReset:1, adminScoreDist:1, adminStripeSyncStatus:1, adminCommunityTiming:1, adminOpsScoreAudit:1, adminListTriggers:1, adminHomeTiming:1, adminScreenTiming:1, adminQuickLogTimings:1, adminScoreTrace:1, adminJiroSignals:1, adminLogTimes:1, adminJiroFound:1, adminReportGenFailures:1,
-  igStatus:1, igAuthUrl:1, igFetchNow:1, igDisconnect:1, igResetMetrics:1, igConfigure:1, adminAiUsage:1, adminPropsCheck:1,
+  igStatus:1, igAuthUrl:1, igFetchNow:1, igDisconnect:1, igResetMetrics:1, igConfigure:1, adminAiUsage:1, adminPropsCheck:1, adminBackfillReports:1, adminDeleteTrigger:1,
   authSetMode:1, authSetEnforce:1, authRoleApply:1, authRoleDryRun:1, authRevokeAll:1,
   authCleanupTestData:1, adminPurgeTestUsers:1, adminMigrateTasks:1, authBreakerReset:1, rotateSessionSecret:1,
   p1Backup:1, p1BackupInfo:1, p1PurgeArchived:1, weeklyBackup:1
