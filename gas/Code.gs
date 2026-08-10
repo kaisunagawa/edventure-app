@@ -9831,14 +9831,29 @@ function computeReportBreakdownCore_(studentEmail, logs, user, tasks, journal, w
   const streak = Number((user && user.streak) || 0);
   const consistency = clamp(20 * Math.min(1, Math.pow(streak / 14, 0.8)));
 
+  // ★割合の項目は、件数の裏づけで割り引く★（2026-08-10 Kai報告・実データで確認）
+  //   メモ・集中・目標は「割合」で出している。記録が1件しか無い日でも、
+  //   その1件のメモを書き、自己評価を5にし、目標に関連づければ、
+  //   3項目とも満点になっていた。実際に1件の記録で71点が出ていた
+  //   （記録3.0／メモ8.0／集中20.0／目標20.0／継続20.0）。
+  //   1件の割合は信用できないので、件数が増えるほど信用する形にする。
+  //     1件→0.41  2件→0.58  3件→0.71  6件で満点扱い
+  //   ★「記録」と「継続」には掛けない★
+  //     記録は件数そのものなので二重に割り引くことになる。
+  //     継続は過去の連続日数で、今日の量とは別の軸。
+  const cov = n > 0 ? Math.min(1, Math.sqrt(n / 6)) : 0;
+  const memoC = clamp(memo * cov);
+  const focusC = clamp(focus * cov);
+  const goalC = clamp(goal * cov);
+
   // ★休みの日は、記録の量で責めない★
   //   休みと決めた曜日は「たくさん記録したか」を求めない。
   //   記録量に関する2項目だけ、達成の基準をゆるめる（休んだ日が0点にならないように）
-  let records2 = records, memo2 = memo;
+  let records2 = records, memo2 = memoC;
   try {
     if (isRestDay(user || {}, date)) {
       records2 = clamp(Math.max(records, 20 * Math.min(1, n / 3)));   // 3コマで満点扱い
-      memo2 = clamp(Math.max(memo, memoLogs.length ? 14 : 0));        // 1件でも書けていれば及第
+      memo2 = clamp(Math.max(memoC, memoLogs.length ? 14 : 0));       // 1件でも書けていれば及第
     }
   } catch (e) {}
   // ★測れないものを0点にしない★（2026-08-03 dry-runで発覚）
@@ -9848,7 +9863,7 @@ function computeReportBreakdownCore_(studentEmail, logs, user, tasks, journal, w
   const measurable = { records: true, memo: true, consistency: true,
                        focus: fv.length > 0,
                        goal: (goalCount > 0 || tasks.length > 0 || wp !== null) };
-  const rawParts = { records: records2, memo: memo2, focus: focus, goal: goal, consistency: consistency };
+  const rawParts = { records: records2, memo: memo2, focus: focusC, goal: goalC, consistency: consistency };
   const okKeys = Object.keys(rawParts).filter(function (k) { return measurable[k]; });
   const avgOk = okKeys.length ? okKeys.reduce(function (a2, k) { return a2 + rawParts[k]; }, 0) / okKeys.length : 0;
   Object.keys(rawParts).forEach(function (k) { if (!measurable[k]) rawParts[k] = avgOk; });
