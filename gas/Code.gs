@@ -9793,6 +9793,20 @@ function computeReportBreakdown_(studentEmail, logs, user, dateStr) {
 function computeReportBreakdownCore_(studentEmail, logs, user, tasks, journal, weekProgress, date) {
   const n = logs.length;
   const clamp = function (v) { return Math.max(0, Math.min(20, v)); };
+  // ★記録が1件も無い日は0点★（2026-08-10 検査で発覚）
+  //   「測れないものは、測れた軸の平均で埋める」という手当てがあるため、
+  //   記録0件でも連続日数から点が回り込み、20点が付いていた。
+  //   いまは0件の日にレポートを作っていないので表には出ていないが、
+  //   作るようになった瞬間に「何もしていない日に20点」が起きる。
+  if (n === 0) {
+    const z = { records: 0, memo: 0, focus: 0, goal: 0, consistency: 0 };
+    return { score: 0, score_precise: 0, breakdown: z, raw: z,
+             facts: { blocks: 0, memo_logs: 0, memo_chars: 0, focus_avg: 0, goal_count: 0,
+                      goal_rate: 0, streak: Number((user && user.streak) || 0),
+                      tasks_total: 0, tasks_done: 0, tasks_started: 0,
+                      daily_focus: "未設定", week_progress: null, rest_day: false,
+                      estimated_axes: [] } };
+  }
   // 記録した時間帯の数。10コマで満点、それ以上は少しずつ伸びる
   const records = clamp(n === 0 ? 0 : 20 * Math.min(1, Math.pow(n / 10, 0.85)));
   // メモ。書いた割合(4割)と、書いた量(6割)の両方を見る
@@ -9845,6 +9859,11 @@ function computeReportBreakdownCore_(studentEmail, logs, user, tasks, journal, w
   const memoC = clamp(memo * cov);
   const focusC = clamp(focus * cov);
   const goalC = clamp(goal * cov);
+  // ★継続は、割り引き方をゆるくする★（2026-08-10 Kai判断）
+  //   連続日数は事実なので消さない。ただし1件だけ記録した日に満点が付くのは甘い。
+  //   6割は連続日数そのまま、4割だけ今日の記録量で見る。
+  //     1件→76%  2件→83%  3件→89%  6件以上→100%
+  const consistencyC = clamp(consistency * (0.6 + 0.4 * cov));
 
   // ★休みの日は、記録の量で責めない★
   //   休みと決めた曜日は「たくさん記録したか」を求めない。
@@ -9863,7 +9882,7 @@ function computeReportBreakdownCore_(studentEmail, logs, user, tasks, journal, w
   const measurable = { records: true, memo: true, consistency: true,
                        focus: fv.length > 0,
                        goal: (goalCount > 0 || tasks.length > 0 || wp !== null) };
-  const rawParts = { records: records2, memo: memo2, focus: focusC, goal: goalC, consistency: consistency };
+  const rawParts = { records: records2, memo: memo2, focus: focusC, goal: goalC, consistency: consistencyC };
   const okKeys = Object.keys(rawParts).filter(function (k) { return measurable[k]; });
   const avgOk = okKeys.length ? okKeys.reduce(function (a2, k) { return a2 + rawParts[k]; }, 0) / okKeys.length : 0;
   Object.keys(rawParts).forEach(function (k) { if (!measurable[k]) rawParts[k] = avgOk; });

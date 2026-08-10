@@ -96,10 +96,8 @@ b{color:var(--n900);font-weight:700;}
 .btn:hover{background:var(--brand-d);box-shadow:0 14px 26px -10px rgba(8,145,178,.6);}
 .btn:active{transform:translateY(2px);border-bottom-width:1px;
   box-shadow:0 5px 12px -6px rgba(8,145,178,.5);}
-.btn .li{width:32px;height:32px;border-radius:50%;background:#fff;flex-shrink:0;
-  display:flex;align-items:center;justify-content:center;
-  color:var(--line);font-family:'DM Sans',sans-serif;font-size:9.5px;font-weight:800;
-  letter-spacing:.01em;line-height:1;}
+.btn .li{width:32px;height:32px;flex-shrink:0;display:block;}
+.line-ic{width:100%;height:100%;display:block;}
 .btn .arw{margin-left:6px;font-size:15px;opacity:.85;flex-shrink:0;}
 .dark .btn{border-bottom-color:#04627A;}
 .btn-note{font-size:12.5px;color:var(--n400);margin-top:14px;line-height:1.85;}
@@ -402,9 +400,7 @@ b{color:var(--n900);font-weight:700;}
   font-size:13px;font-weight:700;padding:11px 18px;border-radius:11px;white-space:nowrap;
   border-bottom:2px solid var(--brand-d);transition:background .18s;}
 .hd-cta:hover{background:var(--brand-d);}
-.hd-cta .li{width:24px;height:24px;border-radius:50%;background:#fff;flex-shrink:0;
-  display:flex;align-items:center;justify-content:center;
-  color:var(--line);font-family:'DM Sans',sans-serif;font-size:7.5px;font-weight:800;line-height:1;}
+.hd-cta .li{width:24px;height:24px;flex-shrink:0;display:block;}
 @media(min-width:1080px){
   .hd-nav{display:flex;} .hd-cta{display:inline-flex;} .hd-burger{display:none;}
   .hd-menu{display:none;} .hd-in{height:80px;}
@@ -672,7 +668,7 @@ footer{border-top:1px solid var(--n200);padding:44px 0 56px;background:var(--n50
       <a href="../../">ログイン</a>
     </nav>
     <a class="hd-cta" href="https://lin.ee/5pElLYY" target="_blank" rel="noopener">
-      <span class="li">LINE</span>LINEで無料セッション予約</a>
+      <span class="li"><svg class="line-ic" viewBox="0 0 24 24" aria-hidden="true"><rect width="24" height="24" rx="5.4" fill="#06C755"/><g transform="translate(1.95,2.15) scale(0.845)"><path fill="#fff" d="M12 3C6.8 3 2.6 6.4 2.6 10.6c0 3.8 3.3 6.9 7.8 7.5.3.06.7.2.8.46.1.24.07.6.03.85l-.13.78c-.04.23-.18.9.79.49.97-.4 5.24-3.09 7.15-5.29 1.32-1.45 1.95-2.92 1.95-4.79C21 6.4 17.2 3 12 3z"/></g><text x="12" y="11.05" text-anchor="middle" dominant-baseline="middle" fill="#06C755" font-family="DM Sans, Helvetica, Arial, sans-serif" font-size="5.15" font-weight="800" letter-spacing="0.12">LINE</text></svg></span>LINEで無料セッション予約</a>
     <button class="hd-burger" id="burger" aria-label="メニューを開く" aria-expanded="false" aria-controls="hdmenu">
       <span></span><span></span><span></span>
     </button>
@@ -687,7 +683,7 @@ footer{border-top:1px solid var(--n200);padding:44px 0 56px;background:var(--n50
       <a href="../../">ログイン</a>
     </nav>
     <a class="btn" href="https://lin.ee/5pElLYY" target="_blank" rel="noopener">
-      <span class="li">LINE</span>LINEで無料セッション予約<span class="arw">→</span></a>
+      <span class="li"><svg class="line-ic" viewBox="0 0 24 24" aria-hidden="true"><rect width="24" height="24" rx="5.4" fill="#06C755"/><g transform="translate(1.95,2.15) scale(0.845)"><path fill="#fff" d="M12 3C6.8 3 2.6 6.4 2.6 10.6c0 3.8 3.3 6.9 7.8 7.5.3.06.7.2.8.46.1.24.07.6.03.85l-.13.78c-.04.23-.18.9.79.49.97-.4 5.24-3.09 7.15-5.29 1.32-1.45 1.95-2.92 1.95-4.79C21 6.4 17.2 3 12 3z"/></g><text x="12" y="11.05" text-anchor="middle" dominant-baseline="middle" fill="#06C755" font-family="DM Sans, Helvetica, Arial, sans-serif" font-size="5.15" font-weight="800" letter-spacing="0.12">LINE</text></svg></span>LINEで無料セッション予約<span class="arw">→</span></a>
   </div>
 </header>
 
@@ -707,7 +703,7 @@ footer{border-top:1px solid var(--n200);padding:44px 0 56px;background:var(--n50
       <div class="hero-cta rv">
         <div class="hcta">
           <a class="btn" href="https://lin.ee/5pElLYY" target="_blank" rel="noopener">
-            <span class="li">LINE</span>LINEで無料セッション予約<span class="arw">→</span></a>
+            <span class="li"><svg class="line-ic" viewBox="0 0 24 24" aria-hidden="true"><rect width="24" height="24" rx="5.4" fill="#06C755"/><g transform="translate(1.95,2.15) scale(0.845)"><path fill="#fff" d="M12 3C6.8 3 2.6 6.4 2.6 10.6c0 3.8 3.3 6.9 7.8 7.5.3.06.7.2.8.46.1.24.07.6.03.85l-.13.78c-.04.23-.18.9.79.49.97-.4 5.24-3.09 7.15-5.29 1.32-1.45 1.95-2.92 1.95-4.79C21 6.4 17.2 3 12 3z"/></g><text x="12" y="11.05" text-anchor="middle" dominant-baseline="middle" fill="#06C755" font-family="DM Sans, Helvetica, Arial, sans-serif" font-size="5.15" font-weight="800" letter-spacing="0.12">LINE</text></svg></span>LINEで無料セッション予約<span class="arw">→</span></a>
           <div class="hcta-note">約30分・オンライン ／ その場で契約不要</div>
         </div>
         <div class="hcta">
@@ -1527,7 +1523,7 @@ footer{border-top:1px solid var(--n200);padding:44px 0 56px;background:var(--n50
       </div>
     </div>
     <div class="narrow center rv" style="margin-top:34px;">
-      <a class="btn" href="https://lin.ee/5pElLYY" target="_blank" rel="noopener"><span class="li">LINE</span>LINEで無料セッション予約<span class="arw">→</span></a>
+      <a class="btn" href="https://lin.ee/5pElLYY" target="_blank" rel="noopener"><span class="li"><svg class="line-ic" viewBox="0 0 24 24" aria-hidden="true"><rect width="24" height="24" rx="5.4" fill="#06C755"/><g transform="translate(1.95,2.15) scale(0.845)"><path fill="#fff" d="M12 3C6.8 3 2.6 6.4 2.6 10.6c0 3.8 3.3 6.9 7.8 7.5.3.06.7.2.8.46.1.24.07.6.03.85l-.13.78c-.04.23-.18.9.79.49.97-.4 5.24-3.09 7.15-5.29 1.32-1.45 1.95-2.92 1.95-4.79C21 6.4 17.2 3 12 3z"/></g><text x="12" y="11.05" text-anchor="middle" dominant-baseline="middle" fill="#06C755" font-family="DM Sans, Helvetica, Arial, sans-serif" font-size="5.15" font-weight="800" letter-spacing="0.12">LINE</text></svg></span>LINEで無料セッション予約<span class="arw">→</span></a>
       <div class="btn-note">料金のご案内も、この30分の中で。その場で契約する必要はありません。</div>
     </div>
   </div>
@@ -1549,7 +1545,7 @@ footer{border-top:1px solid var(--n200);padding:44px 0 56px;background:var(--n50
     <p class="lead mb40 rv">その場で契約する必要はありません。</p>
     <div class="rv">
       <a class="btn" href="https://lin.ee/5pElLYY" target="_blank" rel="noopener">
-        <span class="li">LINE</span>LINEで無料セッションを予約する<span class="arw">→</span></a>
+        <span class="li"><svg class="line-ic" viewBox="0 0 24 24" aria-hidden="true"><rect width="24" height="24" rx="5.4" fill="#06C755"/><g transform="translate(1.95,2.15) scale(0.845)"><path fill="#fff" d="M12 3C6.8 3 2.6 6.4 2.6 10.6c0 3.8 3.3 6.9 7.8 7.5.3.06.7.2.8.46.1.24.07.6.03.85l-.13.78c-.04.23-.18.9.79.49.97-.4 5.24-3.09 7.15-5.29 1.32-1.45 1.95-2.92 1.95-4.79C21 6.4 17.2 3 12 3z"/></g><text x="12" y="11.05" text-anchor="middle" dominant-baseline="middle" fill="#06C755" font-family="DM Sans, Helvetica, Arial, sans-serif" font-size="5.15" font-weight="800" letter-spacing="0.12">LINE</text></svg></span>LINEで無料セッションを予約する<span class="arw">→</span></a>
       <div class="btn-note">LINE公式アカウントの友だち追加から、日程をご案内します。</div>
     </div>
   </div>
@@ -1567,7 +1563,7 @@ footer{border-top:1px solid var(--n200);padding:44px 0 56px;background:var(--n50
     </p>
     <div class="rv">
       <a class="btn" href="https://lin.ee/5pElLYY" target="_blank" rel="noopener">
-        <span class="li">LINE</span>LINEで無料セッションを予約する<span class="arw">→</span></a>
+        <span class="li"><svg class="line-ic" viewBox="0 0 24 24" aria-hidden="true"><rect width="24" height="24" rx="5.4" fill="#06C755"/><g transform="translate(1.95,2.15) scale(0.845)"><path fill="#fff" d="M12 3C6.8 3 2.6 6.4 2.6 10.6c0 3.8 3.3 6.9 7.8 7.5.3.06.7.2.8.46.1.24.07.6.03.85l-.13.78c-.04.23-.18.9.79.49.97-.4 5.24-3.09 7.15-5.29 1.32-1.45 1.95-2.92 1.95-4.79C21 6.4 17.2 3 12 3z"/></g><text x="12" y="11.05" text-anchor="middle" dominant-baseline="middle" fill="#06C755" font-family="DM Sans, Helvetica, Arial, sans-serif" font-size="5.15" font-weight="800" letter-spacing="0.12">LINE</text></svg></span>LINEで無料セッションを予約する<span class="arw">→</span></a>
       <div class="btn-note">自分という事業を、今日から経営しよう。</div>
     </div>
   </div>
