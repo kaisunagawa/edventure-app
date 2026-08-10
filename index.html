@@ -6369,39 +6369,27 @@ function LogScreen({onToast, isActive}) {
 
   return html`<div>
     <div class="ph">
-      <div class="ph-title-accent">記録を入力</div>
+      <!-- ★見出しと同じ行に置く★（2026-08-10 Kai指摘「段落を使いすぎ」）
+           1段まるごと使わず、「記録を入力」の右に小さく置く。 -->
+      <div style=${{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10}}>
+        <div class="ph-title-accent">記録を入力</div>
+        <button onClick=${()=>{ try{ window.dispatchEvent(new CustomEvent("jiroku:openquick")); }catch(e){} }}
+          title="話すだけで記録する"
+          style=${{flexShrink:0,display:"flex",alignItems:"center",gap:5,
+                   background:"linear-gradient(135deg, var(--hero1) 0%, var(--hero2) 100%)",
+                   border:"none",borderRadius:20,padding:"6px 11px 6px 9px",cursor:"pointer",
+                   fontFamily:"inherit",boxShadow:"0 2px 8px rgba(8,145,178,0.28)"}}>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.4"
+               stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/><path d="M19 10v1a7 7 0 0 1-14 0v-1"/><line x1="12" y1="19" x2="12" y2="22"/></svg>
+          <span style=${{fontSize:11.5,fontWeight:800,color:"#fff",whiteSpace:"nowrap"}}>話すだけ</span>
+        </button>
+      </div>
       <div class="date-nav">
         <button onClick=${()=>setDate(addDays(date,-1))}>‹</button>
         <span>${isToday(date)?"今日":date}</span>
         <button onClick=${()=>setDate(addDays(date,1))} disabled=${isToday(date)}>›</button>
       </div>
     </div>
-
-    <!-- ★話すだけで記録できることを、記録画面で伝える★（2026-08-10 Kai指摘）
-         マイクのボタンは「記録タブでは出さない」条件になっていたため、
-         いちばん記録したい人にだけ見えていなかった。
-         使い方を言葉で説明するより、言えばいい文をそのまま見せる。 -->
-    ${isToday(date) && html`
-      <button onClick=${()=>{ try{ window.dispatchEvent(new CustomEvent("jiroku:openquick")); }catch(e){} }}
-        style=${{display:"flex",alignItems:"center",gap:11,width:"calc(100% - 32px)",margin:"0 16px 14px",
-                 background:"linear-gradient(135deg, var(--hero1) 0%, var(--hero2) 100%)",
-                 border:"none",borderRadius:14,padding:"13px 15px",cursor:"pointer",
-                 fontFamily:"inherit",textAlign:"left",
-                 boxShadow:"0 4px 14px rgba(8,145,178,0.25)"}}>
-        <span style=${{flexShrink:0,width:34,height:34,borderRadius:"50%",background:"rgba(255,255,255,0.22)",
-                       display:"flex",alignItems:"center",justifyContent:"center"}}>
-          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2"
-               stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/><path d="M19 10v1a7 7 0 0 1-14 0v-1"/><line x1="12" y1="19" x2="12" y2="22"/></svg>
-        </span>
-        <span style=${{flex:1,minWidth:0}}>
-          <span style=${{display:"block",fontSize:13.5,fontWeight:800,color:"#fff",marginBottom:2}}>
-            話すだけで記録できます</span>
-          <span style=${{display:"block",fontSize:11.5,color:"rgba(255,255,255,0.85)",lineHeight:1.6,
-                         overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
-            「8時から9時まで朝ごはんを食べてた」</span>
-        </span>
-        <span style=${{flexShrink:0,fontSize:15,color:"rgba(255,255,255,0.85)"}}>›</span>
-      </button>`}
 
     <div>
       <div ref=${timeRef} class="time-bar">
@@ -10973,7 +10961,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260810-154448";
+const APP_BUILD = "20260810-155115";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
