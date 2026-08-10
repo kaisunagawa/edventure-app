@@ -3059,14 +3059,24 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
       flushCalendarQueue();
       // 過去の記録の取りこぼしを1日1回だけ遡って補完する（独り言など、以前カレンダーに
       // 書けていなかった分をここで拾う）。直近14日分を裏でゆっくり処理する
+      // ★14往復を1往復にする★（2026-08-10 Kai報告「記録したあとの読み込みが遅い」）
+      //   これまでは1日ずつ getLogs を14回、しかも await で直列に呼んでいた。
+      //   GASは同じ人のリクエストを1件ずつしか処理しないので、この14本が
+      //   終わるまで、ホームもレポートも保存も、ぜんぶ後ろで待たされていた。
+      //   1日1回とはいえ、その日の初回起動が丸ごと遅くなる原因になっていた。
+      //   同じ内容を1回で取れる getLogsRange が既にあるので、そちらを使う。
       (async ()=>{
         const today = formatDateStr(new Date());
         if(localStorage.getItem("cal_backfill_done")===today) return;
-        for(let k=1;k<=14;k++){
-          const d = addDays(today,-k);
-          try{ const r = await gasApi("getLogs",{date:d}); if(r&&r.ok) await reconcileCalendarForDate(d, r.data); }catch(e){}
-        }
-        localStorage.setItem("cal_backfill_done", today);
+        try{
+          const r = await gasApi("getLogsRange", { date: addDays(today,-1), days: 14 });
+          if(r && r.ok && r.data){
+            for(const d of Object.keys(r.data)){
+              try{ await reconcileCalendarForDate(d, r.data[d]); }catch(e){}
+            }
+            localStorage.setItem("cal_backfill_done", today);
+          }
+        }catch(e){}
       })();
       fetchCalendarEvents(formatDateStr(new Date())).then(evs=>{
         if(evs&&evs.length) setSchedule(evs.map(e=>({time:e.time,title:e.title,sub:e.sub})));
@@ -10980,7 +10990,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260810-155918";
+const APP_BUILD = "20260810-171401";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 

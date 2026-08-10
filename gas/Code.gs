@@ -4953,9 +4953,9 @@ function logicalToday_(base) {
 var _dlSnapOn = false, _dlSnap = null;
 function withDailyLogSnapshot_(fn) {
   const already = _dlSnapOn;
-  if (!already) { _dlSnapOn = true; _dlSnap = null; }
+  if (!already) { _dlSnapOn = true; _dlSnap = null; _usersSnap = null; _xpIdsSnap = null; }
   try { return fn(); }
-  finally { if (!already) { _dlSnapOn = false; _dlSnap = null; } }
+  finally { if (!already) { _dlSnapOn = false; _dlSnap = null; _usersSnap = null; _xpIdsSnap = null; } }
 }
 function dailyLogValues_(sheet) {
   if (_dlSnapOn && _dlSnap) return _dlSnap;
@@ -4963,6 +4963,21 @@ function dailyLogValues_(sheet) {
   if (_dlSnapOn) _dlSnap = v;
   return v;
 }
+// ★一括保存の間は、Users と XpEvents も1回だけ読む★（2026-08-10 実測）
+//   独り言は1件ごとに addXP が Users を丸ごと、xpLedgerHas_ が XpEvents を
+//   丸ごと読み直していた。11件なら22回。1件あたり7秒の主因。
+//   ★書き換えたら必ず控えにも反映すること★ 忘れるとXPが古い値から計算される。
+var _usersSnap = null, _xpIdsSnap = null;
+function usersValues_(sheet) {
+  if (_dlSnapOn && _usersSnap) return _usersSnap;
+  const v = sheet.getDataRange().getValues();
+  if (_dlSnapOn) _usersSnap = v;
+  return v;
+}
+function usersSnapSet_(rowIdx, colIdx, value) {
+  if (_dlSnapOn && _usersSnap && _usersSnap[rowIdx]) _usersSnap[rowIdx][colIdx] = value;
+}
+
 function dailyLogSnapAppend_(headers, fields) {
   if (!_dlSnapOn || !_dlSnap) return;
   const row = new Array(headers.length).fill("");
@@ -5442,17 +5457,40 @@ function saveLogMulti(studentEmail, body) {
 // XPを足した記録を台帳へ残す。sourceId が同じものが既にあれば足さない
 function xpLedgerHas_(studentEmail, sourceId) {
   if (!sourceId) return false;
-  return p1List("XpEvents", studentEmail).some(function (e) {
+  // 一括保存の間は、その人のぶんだけ1回読んで控えておく（1件ごとに全体を読まない）
+  if (_dlSnapOn) {
+    if (!_xpIdsSnap) {
+      _xpIdsSnap = {};
+      p1ListMine_("XpEvents", studentEmail).forEach(function (e) {
+        if (!String(e.reversed_at || "").trim()) _xpIdsSnap[String(e.source_id)] = 1;
+      });
+    }
+    return !!_xpIdsSnap[String(sourceId)];
+  }
+  return p1ListMine_("XpEvents", studentEmail).some(function (e) {
     return String(e.source_id) === String(sourceId) && !String(e.reversed_at || "").trim(); });
 }
+// ★台帳は「足すだけ」なのでロックを取らない★（2026-08-10 実測）
+//   p1Upsert は同じidがあれば書き換える仕組みで、そのために毎回ロックを取る。
+//   event_id は毎回新しく作るので書き換えは起こらない＝ロックは不要。
+//   11件まとめて保存すると、ロックの取り合いがそのまま待ち時間になっていた。
 function xpLedgerAdd_(studentEmail, sourceType, sourceId, amount, reason) {
   if (!sourceId) return;
-  p1Upsert("XpEvents", "event_id", {
+  const rec = {
     event_id: "xpe_" + Date.now() + "_" + Math.random().toString(36).slice(2, 6),
     student_email: studentEmail, source_type: sourceType, source_id: String(sourceId),
     amount: Number(amount) || 0, reason: reason || "",
     created_at: new Date().toISOString(), reversed_at: "", reversal_reason: ""
-  });
+  };
+  try {
+    const sh = getP1Sheet("XpEvents");
+    const hd = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0];
+    sh.appendRow(hd.map(function (h) { return rec[h] === undefined ? "" : rec[h]; }));
+    if (_dlSnapOn && _xpIdsSnap) _xpIdsSnap[String(sourceId)] = 1;
+  } catch (e) {
+    // 追記に失敗したときだけ、従来のやり方に落とす（記録そのものは守る）
+    try { p1Upsert("XpEvents", "event_id", rec); } catch (e2) { Logger.log("xpLedgerAdd_: " + e2); }
+  }
 }
 // Users.xp を増減する（台帳とセットで使う）
 function xpApplyDelta_(studentEmail, delta) {
@@ -5580,7 +5618,7 @@ function addXP(studentEmail, memo, todaysLogCount, logSummary, sourceId) {
     return { xp_gained: 0, total_xp: 0, level: 1, level_up: false, badges: "", duplicate: true };
   }
   const usersSheet = getSheet("Users");
-  const data = usersSheet.getDataRange().getValues();
+  const data = usersValues_(usersSheet);
   const headers = data[0];
   const emailIdx = headers.indexOf("student_email");
   let xpIdx = headers.indexOf("xp");
@@ -5609,11 +5647,15 @@ function addXP(studentEmail, memo, todaysLogCount, logSummary, sourceId) {
     const levelUp = newLevel > oldLevel;
 
     usersSheet.getRange(i+1, xpIdx+1).setValue(newXP);
+    usersSnapSet_(i, xpIdx, newXP);   // 次の1件が古いXPから計算しないように
     // 到達した最高レベルを控えておく（減点の下限に使う）
     try {
       var iPk = headers.indexOf("peak_level");
       if (iPk === -1) { iPk = headers.length; usersSheet.getRange(1, iPk + 1).setValue("peak_level"); }
-      if (newLevel > Number(data[i][iPk] || 0)) usersSheet.getRange(i+1, iPk+1).setValue(newLevel);
+      if (newLevel > Number(data[i][iPk] || 0)) {
+        usersSheet.getRange(i+1, iPk+1).setValue(newLevel);
+        usersSnapSet_(i, iPk, newLevel);
+      }
     } catch (e) {}
     xpLedgerAdd_(studentEmail, "LOG", sourceId, gained, memo && memo.trim() ? "log_with_memo" : "log");
 
@@ -5621,6 +5663,7 @@ function addXP(studentEmail, memo, todaysLogCount, logSummary, sourceId) {
     const newBadges = checkBadges(studentEmail, currentBadges, newXP, streak, logSummary);
     if (newBadges !== currentBadges) {
       usersSheet.getRange(i+1, badgesIdx+1).setValue(newBadges);
+      usersSnapSet_(i, badgesIdx, newBadges);
     }
 
     return { xp_gained: gained, total_xp: newXP, level: newLevel, level_up: levelUp, badges: newBadges };
