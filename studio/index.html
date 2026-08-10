@@ -507,24 +507,28 @@ function InstagramPanel({ ig, metrics, posts }) {
 }
 
 // ── 生成 ───────────────────────────────────────
-function GenerateBar({ onDone, onToast }) {
+function GenerateBar({ onDone, onToast, quota }) {
   const [platform, setPlatform] = useState("reels");
-  // ★既定は3本★ 週2〜3本が現実の量。10本出しても作れず、できていない感覚だけが残る。
-  const [count, setCount] = useState(3);
-  const [days, setDays] = useState(14);
+  // ★既定は5本★ 費用の約7割が入力で、本数を増やしてもほとんど増えない。
+  //   1回で3本を2回押すより、5本を1回で出すほうが半額以下になる。
+  const [count, setCount] = useState(5);
+  // ★既定は7日★ 入力が費用の大半で、日数がそのまま効く（14日→7日でおよそ半分）
+  const [days, setDays] = useState(7);
   const [busy, setBusy] = useState(false);
+  const left = quota ? quota.left : null;
+  const out = left !== null && left <= 0;
 
   async function run() {
     setBusy(true);
     const r = await api("generateSnsIdeas", { platform, count: String(count), days: String(days) });
     setBusy(false);
     if (r && r.ok) { onToast((r.data || []).length + "件の候補ができました"); onDone(); }
-    else onToast((r && r.error) || "生成できませんでした");
+    else { onToast((r && r.error) || "生成できませんでした"); onDone(); }
   }
 
   return html`
-    <div class="card" style=${{ padding: "14px 16px", marginBottom: "14px",
-        display: "flex", gap: "10px", alignItems: "flex-end", flexWrap: "wrap" }}>
+    <div class="card" style=${{ padding: "14px 16px", marginBottom: "14px" }}>
+     <div style=${{ display: "flex", gap: "10px", alignItems: "flex-end", flexWrap: "wrap" }}>
       <div style=${{ flex: "1 1 190px", minWidth: "160px" }}>
         <div style=${{ fontSize: "11px", fontWeight: 700, color: "var(--sub)", marginBottom: "5px" }}>出す先</div>
         <select class="inp" value=${platform} onChange=${e => setPlatform(e.target.value)}>
@@ -543,9 +547,21 @@ function GenerateBar({ onDone, onToast }) {
           ${[7, 14, 30, 60].map(n => html`<option key=${n} value=${n}>${n}日</option>`)}
         </select>
       </div>
-      <button class="btn" disabled=${busy} onClick=${run} style=${{ flex: "0 0 auto", height: "38px" }}>
-        ${busy ? html`<${React.Fragment}><span class="spin" style=${{ borderTopColor: "#fff", borderColor: "rgba(255,255,255,.35)", borderTopColor: "#fff" }}></span>記録から探しています…<//>` : "記録から候補を作る"}
-      </button>
+      <div style=${{ flex: "0 0 auto", display: "flex", flexDirection: "column", alignItems: "flex-end", gap: "4px" }}>
+        <button class="btn" disabled=${busy || out} onClick=${run} style=${{ height: "38px" }}>
+          ${busy ? html`<${React.Fragment}><span class="spin" style=${{ borderColor: "rgba(255,255,255,.35)", borderTopColor: "#fff" }}></span>記録から探しています…<//>` : "記録から候補を作る"}
+        </button>
+        ${left !== null && html`
+          <div style=${{ fontSize: "11px", color: out ? "var(--amber)" : "var(--faint)", whiteSpace: "nowrap" }}>
+            ${out ? "今週の上限に達しました" : `今週あと ${left} 回`}
+          </div>`}
+      </div>
+     </div>
+     ${left !== null && html`
+       <div style=${{ fontSize: "11.5px", color: "var(--sub)", lineHeight: 1.75,
+           marginTop: "11px", paddingTop: "11px", borderTop: "1px solid var(--border)" }}>
+         1回で複数本まとめて出せます。分けて押すより、まとめて出すほうが安く済みます（3本を2回＝約38円／8本を1回＝約30円）。
+       </div>`}
     </div>`;
 }
 
@@ -561,6 +577,7 @@ function App() {
   const onToast = useCallback(m => { setToast(m); setTimeout(() => setToast(""), 3200); }, []);
 
   const [ig, setIg] = useState(null);
+  const [quota, setQuota] = useState(null);
   const [igMetrics, setIgMetrics] = useState([]);
   const [igPosts, setIgPosts] = useState([]);
 
@@ -574,6 +591,7 @@ function App() {
     setIg(d.ig || null);
     setIgMetrics(Array.isArray(d.igMetrics) ? d.igMetrics : []);
     setIgPosts(Array.isArray(d.igPosts) ? d.igPosts : []);
+    setQuota(d.quota || null);
   }, []);
 
   const reload = useCallback(async () => {
@@ -625,7 +643,7 @@ function App() {
       <${SummaryStrip} s=${sum} />
       <${FlowRow} s=${sum} />
       <${InstagramPanel} ig=${ig} metrics=${igMetrics} posts=${igPosts} />
-      <${GenerateBar} onDone=${reload} onToast=${onToast} />
+      <${GenerateBar} onDone=${reload} onToast=${onToast} quota=${quota} />
 
       <div style=${{ display: "grid", gap: "16px", gridTemplateColumns: sel ? "minmax(0,1fr) minmax(0,1fr)" : "1fr" }}
            class="studio-cols">

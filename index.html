@@ -6377,6 +6377,32 @@ function LogScreen({onToast, isActive}) {
       </div>
     </div>
 
+    <!-- ★話すだけで記録できることを、記録画面で伝える★（2026-08-10 Kai指摘）
+         マイクのボタンは「記録タブでは出さない」条件になっていたため、
+         いちばん記録したい人にだけ見えていなかった。
+         使い方を言葉で説明するより、言えばいい文をそのまま見せる。 -->
+    ${isToday(date) && html`
+      <button onClick=${()=>{ try{ window.dispatchEvent(new CustomEvent("jiroku:openquick")); }catch(e){} }}
+        style=${{display:"flex",alignItems:"center",gap:11,width:"calc(100% - 32px)",margin:"0 16px 14px",
+                 background:"linear-gradient(135deg, var(--hero1) 0%, var(--hero2) 100%)",
+                 border:"none",borderRadius:14,padding:"13px 15px",cursor:"pointer",
+                 fontFamily:"inherit",textAlign:"left",
+                 boxShadow:"0 4px 14px rgba(8,145,178,0.25)"}}>
+        <span style=${{flexShrink:0,width:34,height:34,borderRadius:"50%",background:"rgba(255,255,255,0.22)",
+                       display:"flex",alignItems:"center",justifyContent:"center"}}>
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2"
+               stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/><path d="M19 10v1a7 7 0 0 1-14 0v-1"/><line x1="12" y1="19" x2="12" y2="22"/></svg>
+        </span>
+        <span style=${{flex:1,minWidth:0}}>
+          <span style=${{display:"block",fontSize:13.5,fontWeight:800,color:"#fff",marginBottom:2}}>
+            話すだけで記録できます</span>
+          <span style=${{display:"block",fontSize:11.5,color:"rgba(255,255,255,0.85)",lineHeight:1.6,
+                         overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+            「8時から9時まで朝ごはんを食べてた」</span>
+        </span>
+        <span style=${{flexShrink:0,fontSize:15,color:"rgba(255,255,255,0.85)"}}>›</span>
+      </button>`}
+
     <div>
       <div ref=${timeRef} class="time-bar">
         ${timeBlocks.map(t=>html`<button key=${t}
@@ -10947,7 +10973,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260810-013401";
+const APP_BUILD = "20260810-154448";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
@@ -11655,6 +11681,55 @@ function TutorialMiniAddHome() {
     </div>
   <//>`;
 }
+// ── ここから、あとで足したミニ画面（2026-08-10 チュートリアル更新）──
+//   時間の6分類・目標ロードマップ・階級は、チュートリアルを作ったあとに
+//   入った中核機能。触れていないと「聞いていない機能」のまま使われずに終わる。
+function TutorialMiniClass() {
+  const CL = [["目標に直結","#2563EB"],["将来への投資","#7C3AED"],["日常業務","#0891B2"],
+              ["回復","#16A34A"],["人間関係","#F59E0B"],["計画外の時間","#64748B"]];
+  return html`<${TutorialMiniScreen}>
+    <div style=${{fontSize:10,color:"var(--sub)"}}>この時間はどれ？</div>
+    <div style=${{display:"flex",flexWrap:"wrap",gap:5}}>
+      ${CL.map(([l,c],i)=>html`
+        <div key=${l} style=${{fontSize:8.5,fontWeight:700,padding:"5px 8px",borderRadius:99,
+            color:i===0?"#fff":c, background:i===0?c:"var(--bg)",
+            border:`1px solid ${i===0?c:"var(--border)"}`}}>${l}</div>`)}
+    </div>
+    <div style=${{fontSize:8.5,color:"var(--sub)",lineHeight:1.5,marginTop:2}}>
+      選ぶだけ。あとでレポートが「何に時間を使ったか」を出します。
+    </div>
+  <//>`;
+}
+function TutorialMiniGoals() {
+  // ★枠は高さ190px★ 3行を余白ごと詰めないと最後の行が下で切れる（2026-08-10 実機で確認）
+  const ROWS = [["3か月目標","月商100万円",72],["2週間目標","新規10件に提案",45],["今週","架電を毎日20件",60]];
+  return html`<${TutorialMiniScreen}>
+    <div style=${{fontSize:10.5,fontWeight:800,color:"var(--text)",marginBottom:1}}>目標ロードマップ</div>
+    <div style=${{display:"flex",flexDirection:"column",gap:5}}>
+      ${ROWS.map(([l,t,v])=>html`
+        <div key=${l} style=${{background:"var(--bg)",border:"1px solid var(--border)",borderRadius:7,padding:"4px 7px"}}>
+          <div style=${{fontSize:7.5,color:"var(--sub)",lineHeight:1.3}}>${l}</div>
+          <div style=${{fontSize:9,fontWeight:700,color:"var(--text)",marginBottom:2,lineHeight:1.3,
+              overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>${t}</div>
+          <div style=${{height:3.5,background:"var(--card)",borderRadius:99}}>
+            <div style=${{width:`${v}%`,height:"100%",borderRadius:99,background:"var(--accent)"}}/>
+          </div>
+        </div>`)}
+    </div>
+  <//>`;
+}
+function TutorialMiniRank() {
+  return html`<${TutorialMiniScreen}>
+    <div style=${{flex:1,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:5}}>
+      <div style=${{fontSize:28}}>🦊</div>
+      <div style=${{fontSize:10.5,fontWeight:800,color:"var(--text)"}}>Lv.12 ジロー</div>
+      <div style=${{width:"70%",height:5,background:"var(--bg)",borderRadius:99}}>
+        <div style=${{width:"62%",height:"100%",borderRadius:99,background:"var(--accent)"}}/>
+      </div>
+      <div style=${{fontSize:8,color:"var(--sub)"}}>次のレベルまで 140 XP</div>
+    </div>
+  <//>`;
+}
 // PWAとしてホーム画面から起動している（=スタンドアロン表示）かどうか。
 // iOSは navigator.standalone、その他は display-mode:standalone メディアクエリで判定
 const isStandaloneDisplay = () =>
@@ -11868,12 +11943,15 @@ function StudentSetupGate({email, lineLinked, onRecheck, onSkip}){
 }
 
 const TUTORIAL_STEPS = [
-  { mock:TutorialMiniWelcome, title:"JIROKUへようこそ", body:"時間の使い方を記録して、AIコーチと一緒に振り返る習慣化アプリです。まずは基本の使い方を簡単にご案内します。" },
-  { mock:TutorialMiniLog, title:"記録タブで時間帯を記録", body:"時間帯を選んで「何をしましたか？」と自己評価、そしてメモを入れて保存します。メモには、うまくできたか・感じたこと・改善点を書きましょう。振り返って気づくことが習慣化の一番のポイントです。" },
-  { mock:TutorialMiniMulti, title:"まとめて記録も可能", body:"会議や移動など、同じ内容が続いた時は「まとめて記録」で複数の時間帯に一括保存できます。" },
-  { mock:TutorialMiniCalendar, title:"カレンダー連携で自動入力", body:"設定でGoogleカレンダーと連携すると、予定が記録に自動で入るので、選んで保存するだけになります。" },
-  { mock:TutorialMiniReport, title:"AIレポートとステータス", body:"毎晩、その日の記録をもとにAIがスコアとフィードバックを届けます。ホーム画面の「ステータス」は、続けるほど伸びる指標です。" },
-  { mock:TutorialMiniLine, title:"LINE連携でリマインダーを受け取る", body:"LINE公式アカウントを友だち追加し、設定 →「LINE連携」で出した連携コードを送ると連携完了。リマインダーやレポートが届くようになります。" },
+  { mock:TutorialMiniWelcome, title:"JIROKUへようこそ", body:"時間の使い方を記録して、AIコーチと一緒に振り返るアプリです。記録は1件30秒。まずは基本だけご案内します。" },
+  { mock:TutorialMiniLog, title:"記録タブで、その時間を残す", body:"時間帯を選んで「何をしたか」「どれくらいできたか」、そしてメモを書きます。メモがいちばん大事です。うまくいったか・感じたこと・次どうするかを一言でいいので残してください。振り返って気づくことが、習慣化の一番のポイントです。" },
+  { mock:TutorialMiniClass, title:"その時間を6つに分ける", body:"「目標に直結／将来への投資／日常業務／回復／人間関係／計画外の時間」から選びます。選ぶだけで、レポートが「何に時間を使っていたか」を出してくれます。迷ったら直感で大丈夫。あとから変えられます。" },
+  { mock:TutorialMiniMulti, title:"入力をラクにする3つの方法", body:"①まとめて記録：同じ内容が続いた時間帯を一括で保存\n②独り言：画面右下のボタンから、話すだけ・書くだけで記録\n③タイマー：集中時間を計ると、終了時にそのまま記録になります" },
+  { mock:TutorialMiniCalendar, title:"カレンダー連携で自動入力", body:"設定でGoogleカレンダーとつなぐと、予定がそのまま記録の候補になります。選んで保存するだけになり、書き込んだ記録は分類ごとに色分けされてカレンダーにも戻ります。" },
+  { mock:TutorialMiniGoals, title:"目標とつなげる", body:"ホームの「目標ロードマップ」で、3か月目標 → 2週間目標 → 今週の目標をつなげます。日々の記録がどの目標に効いているかが見えるようになり、AIもそこを踏まえて声をかけます。" },
+  { mock:TutorialMiniReport, title:"毎晩、AIがレポートを届けます", body:"その日の記録をもとに、AIが点数とフィードバックを作ります。点数は記録の量・メモの深さ・集中度・目標との関係・継続の5つから決まります。「気づき」タブには、あなたの傾向をまとめたものが溜まっていきます。" },
+  { mock:TutorialMiniRank, title:"続けるほど育ちます", body:"記録するとXPが貯まり、レベルと階級が上がります。条件を満たすと隠れたキャラクターにも会えます。「みんなの頑張り」では、他の人がどれくらい記録しているかも見られます。" },
+  { mock:TutorialMiniLine, title:"LINE連携でリマインダーを受け取る", body:"LINE公式アカウントを友だち追加し、設定 →「LINE連携」で出した連携コードを送ると連携完了。リマインダーや夜のレポートが届くようになります。" },
   { mock:TutorialMiniAddHome, title:"ホーム画面に追加しよう", body:"次のプッシュ通知を使うには、まずJIROKUをホーム画面に追加する必要があります。\niPhoneの場合：共有ボタン（□に↑）→「ホーム画面に追加」\nAndroidの場合：メニュー（⋮）→「ホーム画面に追加」またはインストール\n追加できたら、一度そのアイコンからこのページを開き直してください。",
     skipIf: isStandaloneDisplay },
   { mock:TutorialMiniPush, title:"プッシュ通知を有効にしよう", body:"タイマー終了・記録リマインダーなどの通知を、アプリを閉じていても受け取れるようにします。習慣化に欠かせない機能なので、必ず有効にしてください。", pushStep:true },
@@ -12200,7 +12278,18 @@ function QuickLogSheet({onClose,onToast}){
       onClick=${e=>{if(e.target===e.currentTarget)onClose();}}>
       <div style=${{background:"var(--card)",borderRadius:20,boxShadow:"0 18px 50px rgba(0,0,0,0.35)",padding:"22px 20px 24px",width:"100%",maxWidth:420,boxSizing:"border-box",maxHeight:"84dvh",overflowY:"auto",overscrollBehavior:"contain",WebkitOverflowScrolling:"touch"}}>
         <div style=${{fontSize:18,fontWeight:800,marginBottom:4,color:"var(--text)"}}>🎙 今なにしてた？</div>
-        <div style=${{fontSize:12.5,color:"var(--sub)",marginBottom:14,lineHeight:1.6}}>話すだけ・書くだけでOK。あとはAIが記録に整えます。<br/>1日分をまとめて話しても大丈夫。何時に誰と何をしたか、思い出すままにどうぞ。<br/>（キーボードのマイクを押すと声で入力できます）</div>
+        <!-- ★使い方より、言えばいい文をそのまま見せる★（2026-08-10 Kai指摘）
+             「AIが構造化します」より「こう言えばいい」のほうが伝わる。 -->
+        <div style=${{fontSize:12.5,color:"var(--sub)",marginBottom:12,lineHeight:1.7}}>
+          <b style=${{color:"var(--text)"}}>キーボードの🎤を押して、こう言うだけ。</b></div>
+        <div style=${{background:"var(--bg)",border:"1px solid var(--border)",borderRadius:11,
+                      padding:"10px 12px",marginBottom:12}}>
+          <div style=${{fontSize:13,color:"var(--text)",lineHeight:1.8}}>
+            「8時から9時まで朝ごはんを食べてた」<br/>
+            「10時から2時間カフェで資料づくり」</div>
+          <div style=${{fontSize:11,color:"var(--sub)",marginTop:6,lineHeight:1.6}}>
+            時間もまとめて言えば、そのとおりに入ります。1日分を続けて話しても大丈夫です。</div>
+        </div>
         <textarea ref=${inputRef} class="txa" placeholder="例：8時に起きて朝ごはん、10時から友達とカフェで勉強、昼は移動して13時に打ち合わせ…と1日を丸ごと話してもOK" value=${text}
           onInput=${e=>setText(e.target.value)} style=${{minHeight:110,marginBottom:14,fontSize:15}}/>
         <button class="btn" disabled=${!text.trim()||saving} style=${{opacity:text.trim()?1:0.5}} onClick=${save}>
@@ -12348,6 +12437,12 @@ function App() {
   const [profile,setProfile]=useState(()=>({nickname:CURRENT_USER?.nickname||CURRENT_USER?.name||"",avatar:CURRENT_USER?.avatar||"🦊"}));
   // 独り言（クイック記録）。通知やアプリのURLに #quick が付いていたら自動で開く
   const [showQuick,setShowQuick]=useState(false);
+  // 記録画面の入口など、離れた場所からも独り言を開けるようにする（2026-08-10）
+  useEffect(()=>{
+    const on=()=>setShowQuick(true);
+    window.addEventListener("jiroku:openquick",on);
+    return ()=>window.removeEventListener("jiroku:openquick",on);
+  },[]);
   // 月1回の満足度アンケート。今月未回答なら少し遅れて表示する。
   // 「あとで」は3日スヌーズ（同じ月内に再表示）、回答したらその月はもう出さない。
   // 初日から出すと鬱陶しいので、告知・チュートリアルが出ていない時だけ表示する

@@ -851,6 +851,102 @@ function doGet(e) {
         rowsLT.sort(function (a, b) { return String(a.last_write) > String(b.last_write) ? 1 : -1; });
         return jsonResponse({ ok: true, date: dayLT, users: rowsLT.length, rows: rowsLT });
       }
+      // LPなど外に出す数字のもと（読むだけ）。★盛らない★ 実数だけを返す。
+      case "adminStats": {
+        if (!verifyAdmin(e.parameter.coachEmail)) return jsonResponse({ ok: false, error: "not admin" });
+        const usersS2 = sheetToObjects(getSheet("Users"));
+        const activeS = usersS2.filter(function (u) { return String(u.is_active || "").toUpperCase() === "TRUE"; });
+        const logsS = sheetToObjects(getSheet("DailyLog"))
+          .filter(function (l) { return !String(l.deleted_at || "").trim(); });
+        const repS = sheetToObjects(getSheet("Reports"));
+
+        // 記録した人・日
+        const byUser = {}, allDays = {};
+        let minDate = "9999", maxDate = "0000";
+        logsS.forEach(function (l) {
+          const d = l.date instanceof Date ? formatDate(l.date) : String(l.date || "").slice(0, 10);
+          const em = String(l.student_email || "");
+          if (!d || !em) return;
+          (byUser[em] || (byUser[em] = {}))[d] = 1;
+          allDays[d] = 1;
+          if (d < minDate) minDate = d;
+          if (d > maxDate) maxDate = d;
+        });
+        const everRecorded = Object.keys(byUser);
+
+        // 直近14日に1回でも記録した人（＝いま動いている人）
+        const cut14 = formatDate(new Date(Date.now() - 14 * 86400000));
+        const active14 = everRecorded.filter(function (em) {
+          return Object.keys(byUser[em]).some(function (d) { return d >= cut14; });
+        });
+        // 記録日数が7日以上ある人（＝続いた人）
+        const kept7 = everRecorded.filter(function (em) { return Object.keys(byUser[em]).length >= 7; });
+
+        // 平均点（Reportsのscore）
+        let sum = 0, cnt = 0;
+        repS.forEach(function (r) {
+          const v = Number(r.score);
+          if (isFinite(v) && v > 0) { sum += v; cnt++; }
+        });
+
+        return jsonResponse({ ok: true,
+          users_total: usersS2.length,
+          users_active_flag: activeS.length,
+          users_ever_recorded: everRecorded.length,
+          users_recorded_last14d: active14.length,
+          users_recorded_7days_or_more: kept7.length,
+          records_total: logsS.length,
+          record_days_total: Object.keys(allDays).length,
+          first_record: minDate === "9999" ? "" : minDate,
+          last_record: maxDate === "0000" ? "" : maxDate,
+          reports_total: repS.length,
+          avg_score: cnt ? Math.round(sum / cnt * 10) / 10 : null,
+          scored_reports: cnt });
+      }
+      // 初回アンケートの回答が実際に入っているかを見る（読むだけ・本文は出さない）。
+      //   「聞いたのに使っていない」を防ぐための点検。
+      case "adminOnboardingAudit": {
+        if (!verifyAdmin(e.parameter.coachEmail)) return jsonResponse({ ok: false, error: "not admin" });
+        const usersO = sheetToObjects(getSheet("Users"))
+          .filter(function (u) { return String(u.is_active || "").toUpperCase() === "TRUE"; });
+        let hasProf = 0, hasTone = 0, hasInt = 0;
+        const toneCount = {}, rowsO = [];
+        usersO.forEach(function (u) {
+          const prof = String(u.onboarding_profile || "").trim();
+          const tone = String(u.coach_tone || "").trim();
+          const itv = String(u.notify_interval || "").trim();
+          if (prof) hasProf++;
+          if (tone) { hasTone++; toneCount[tone] = (toneCount[tone] || 0) + 1; }
+          if (itv) hasInt++;
+          rowsO.push({ name: String(u.name || u.nickname || ""),
+                       answered: !!prof,
+                       // 本文は出さない。何問ぶん入っているかだけ見る（区切りは " / "）
+                       items: prof ? prof.split(" / ").length : 0,
+                       tone: tone, interval: itv });
+        });
+        return jsonResponse({ ok: true, active_users: usersO.length,
+          answered: hasProf, tone_set: hasTone, interval_set: hasInt,
+          tone_breakdown: toneCount, rows: rowsO });
+      }
+      // Studioの週あたり生成回数の上限を見る／変える。
+      //   1回およそ14〜19円（Opus）。回数がそのまま費用なので、ここが原価の栓。
+      //   email= を付けるとその人の今週の使用状況も返す。
+      case "adminStudioLimit": {
+        if (!verifyAdmin(e.parameter.coachEmail)) return jsonResponse({ ok: false, error: "not admin" });
+        const prS = PropertiesService.getScriptProperties();
+        if (e.parameter.value !== undefined && String(e.parameter.value).trim() !== "") {
+          const nS = Number(e.parameter.value);
+          if (!isFinite(nS) || nS < 0 || nS > 50) {
+            return jsonResponse({ ok: false, error: "value は 0〜50 で指定してください" });
+          }
+          prS.setProperty("STUDIO_WEEKLY_LIMIT", String(Math.floor(nS)));
+        }
+        const outS = { ok: true, limit: studioWeeklyLimit_(),
+                       default: STUDIO_WEEKLY_LIMIT_DEFAULT };
+        const emS = String(e.parameter.email || "").trim();
+        if (emS) outS.usage = studioWeekUsage_(emS);
+        return jsonResponse(outS);
+      }
       // 指定した名前の定期実行だけを消す。★名前を必ず指定させる★
       //   「全部消す」経路は作らない（一度に消すと夜のレポートごと止まる）。
       //   apply=1 が無ければ、消さずに対象だけ返す。
@@ -4284,7 +4380,8 @@ function getLogsRange(studentEmail, body) {
 // 応答オブジェクトを渡すだけで「いつ・どの機能・どのモデル・何トークン・いくら」を
 // AiUsageシートに記録できる。非Anthropic応答(usage無し)は静かに無視する
 var AI_PRICE_PER_MTOK = { // [入力$/100万tok, 出力$/100万tok]
-  "claude-opus-4-8": [5, 25],
+  "claude-opus-5": [5, 25],
+  "claude-opus-4-8": [5, 25],   // 過去の記録の集計用に残す（新規では使わない）
   "claude-sonnet-5": [3, 15],
   "claude-haiku-4-5-20251001": [1, 5]
 };
@@ -6840,7 +6937,7 @@ objectionsは、ヒアリング内容から予想されるものを2〜3個。`;
   const res = UrlFetchApp.fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
-    payload: JSON.stringify({ model: "claude-opus-4-8", max_tokens: 2500, messages: [{ role: "user", content: prompt }] }),
+    payload: JSON.stringify({ model: "claude-opus-5", thinking: { type: "disabled" }, max_tokens: 2500, messages: [{ role: "user", content: prompt }] }),
     muteHttpExceptions: true
   });
   const result = JSON.parse(res.getContentText()); logAiUsage(result, "営業トーク生成");
@@ -9611,7 +9708,7 @@ ${tasksText}
   // 原因の要約もエラー文に含めて、次回すぐ診断できるようにする
   // 上司に出す文書なので品質最優先。フォールバック先も高品質モデルにする
   // （以前Haikuに落ちた際、内容が薄い報告書になったため）
-  const MODELS = ["claude-sonnet-5", "claude-opus-4-8"];
+  const MODELS = ["claude-sonnet-5", "claude-opus-5"];
   let lastErr = "";
   for (let mi = 0; mi < MODELS.length; mi++) {
     try {
@@ -11327,7 +11424,7 @@ ${material}
   const res = UrlFetchApp.fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
-    payload: JSON.stringify({ model: "claude-opus-4-8", max_tokens: 2500, messages: [{ role: "user", content: prompt }] }),
+    payload: JSON.stringify({ model: "claude-opus-5", thinking: { type: "disabled" }, max_tokens: 2500, messages: [{ role: "user", content: prompt }] }),
     muteHttpExceptions: true
   });
   const result = JSON.parse(res.getContentText()); logAiUsage(result, "気づき");
@@ -11451,7 +11548,7 @@ ${taskList}
   const res = UrlFetchApp.fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
-    payload: JSON.stringify({ model: "claude-opus-4-8", max_tokens: 2000, messages: [{ role: "user", content: prompt }] }),
+    payload: JSON.stringify({ model: "claude-opus-5", thinking: { type: "disabled" }, max_tokens: 2000, messages: [{ role: "user", content: prompt }] }),
     muteHttpExceptions: true
   });
   const result = JSON.parse(res.getContentText()); logAiUsage(result, "時間テーマ");
@@ -11677,7 +11774,7 @@ function generateTalentReport(email, targetEmail) {
   const res = UrlFetchApp.fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
-    payload: JSON.stringify({ model: "claude-opus-4-8", max_tokens: 8000, messages: [{ role: "user", content: prompt }] }),
+    payload: JSON.stringify({ model: "claude-opus-5", thinking: { type: "disabled" }, max_tokens: 8000, messages: [{ role: "user", content: prompt }] }),
     muteHttpExceptions: true
   });
   const result = JSON.parse(res.getContentText()); logAiUsage(result, "行動アセスメント帳票");
@@ -11789,7 +11886,7 @@ function generateGakuchika(email, targetEmail) {
     + "}";
 
   // 学生（cohort付き）はSonnet、それ以外はOpus（コスト方針をaskMyPastと統一）
-  const model = String(user.cohort || "").trim() ? "claude-sonnet-5" : "claude-opus-4-8";
+  const model = String(user.cohort || "").trim() ? "claude-sonnet-5" : "claude-opus-5";
   const res = UrlFetchApp.fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
@@ -11872,7 +11969,7 @@ evidenceは根拠にした記録を1〜4件。
   // 本人の人生データを扱う中核体験なので、他機能のHaikuより上位のモデルを使う。
   // ただしコスト最適化のため、学生（cohortタグ付き）はSonnetにする（十分な品質で単価は約半分）。
   // 有料クライアント等（cohortなし）は最上位のOpusのままにする。
-  const askModel = (user && String(user.cohort || "").trim()) ? "claude-sonnet-5" : "claude-opus-4-8";
+  const askModel = (user && String(user.cohort || "").trim()) ? "claude-sonnet-5" : "claude-opus-5";
   const res = UrlFetchApp.fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
@@ -12227,7 +12324,21 @@ function generateSnsIdeas(studentEmail, body) {
   const apiKey = PropertiesService.getScriptProperties().getProperty("CLAUDE_API_KEY");
   if (!apiKey) return { ok: false, error: "CLAUDE_API_KEY未設定" };
 
-  const days = Number(body.days) || 30;
+  // ★AIを呼ぶ前に上限を見る★ 呼んでから止めても費用は発生してしまう
+  const quota = studioWeekUsage_(studentEmail);
+  if (quota.left <= 0) {
+    const nextAt = quota.oldest
+      ? Utilities.formatDate(new Date(new Date(quota.oldest).getTime() + 7 * 86400000),
+                             "Asia/Tokyo", "M月d日 H時")
+      : "";
+    return { ok: false, quota: quota,
+             error: "今週の生成は上限（" + quota.limit + "回）に達しました。"
+                    + (nextAt ? nextAt + "にまた使えます。" : "")
+                    + "1回で複数本まとめて出せるので、本数を増やしてお試しください。" };
+  }
+  // ★さかのぼりの既定は7日★ 費用の約7割が入力で、日数がそのまま効く。
+  //   14日→7日でおよそ半分になる（1回19円→13円）。
+  const days = Number(body.days) || 7;
   const cutoff = formatDate(new Date(Date.now() - days * 86400000));
   const count = Math.min(20, Math.max(1, Number(body.count) || 5));
   // 毎日投稿すると同じ日の記録から何度もネタを作ってしまうため、フロント側で
@@ -12357,7 +12468,7 @@ ${outputSpec}`;
     headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
     // SNSコンテンツは公開物として質が直接見える成果物のため、他機能のHaikuより
     // 上位のOpusを使う（コスト差は無視できる規模の個人利用のため許容）
-    payload: JSON.stringify({ model: "claude-opus-4-8", max_tokens: 3500, messages: [{ role: "user", content: prompt }] }),
+    payload: JSON.stringify({ model: "claude-opus-5", thinking: { type: "disabled" }, max_tokens: 3500, messages: [{ role: "user", content: prompt }] }),
     muteHttpExceptions: true
   });
 
@@ -12382,7 +12493,8 @@ ${outputSpec}`;
     return {
       ok: true, data: ideas,
       format: platform.format, platformLabel: platform.label,
-      sourceCount: { logs: logs.length, diary: diaryEntries.length }
+      sourceCount: { logs: logs.length, diary: diaryEntries.length },
+      quota: studioWeekUsage_(studentEmail)
     };
   } catch (e) {
     return { ok: false, error: "JSONパースエラー: " + e.toString() };
@@ -12404,6 +12516,34 @@ ${outputSpec}`;
 // ══════════════════════════════════════════════════════════════════
 
 const STUDIO_STATUS = { candidate: 1, scripted: 1, posted: 1, archived: 1 };
+
+// ★1回の生成は約19円★（Opus・実測。入力が費用の約7割で、本数を増やしても
+//   ほとんど増えない）。だから上限は「何本出すか」ではなく「何回押すか」に付ける。
+//   週2回なら1人あたり月およそ110〜170円。16人でも月2,000〜2,700円に収まる。
+//   ★数値はスクリプトプロパティで変えられる★（STUDIO_WEEKLY_LIMIT）。
+const STUDIO_WEEKLY_LIMIT_DEFAULT = 2;
+function studioWeeklyLimit_() {
+  const v = Number(PropertiesService.getScriptProperties()
+    .getProperty("STUDIO_WEEKLY_LIMIT") || STUDIO_WEEKLY_LIMIT_DEFAULT);
+  return (isFinite(v) && v >= 0) ? v : STUDIO_WEEKLY_LIMIT_DEFAULT;
+}
+
+// 直近7日に何回生成したか。1回の生成で作られた候補は created_at が同じなので、
+// その種類数を数えれば「押した回数」になる（別表を作らずに済む）。
+function studioWeekUsage_(studentEmail) {
+  const limit = studioWeeklyLimit_();
+  if (!getSheet("StudioCandidates")) return { used: 0, limit: limit, left: limit, oldest: "" };
+  const since = new Date(Date.now() - 7 * 86400000).toISOString();
+  const stamps = {};
+  getFilteredRows("StudioCandidates", "student_email", studentEmail).forEach(function (r) {
+    const c = String(r.created_at || "");
+    if (c && c >= since) stamps[c] = 1;
+  });
+  const keys = Object.keys(stamps).sort();
+  return { used: keys.length, limit: limit,
+           left: Math.max(0, limit - keys.length),
+           oldest: keys.length ? keys[0] : "" };
+}
 
 function getStudioCandidatesSheet() {
   let sheet = getSheet("StudioCandidates");
@@ -12642,7 +12782,16 @@ function studioHome(studentEmail, body) {
   const cache = CacheService.getScriptCache();
   try {
     const hit = cache.get(ck);
-    if (hit) { const o = JSON.parse(hit); o.cached = true; return o; }
+    if (hit) {
+      const o = JSON.parse(hit);
+      o.cached = true;
+      // ★残り回数だけは毎回取り直す★
+      //   これは費用を止めるための数字で、古い値を返すと
+      //   「押せないはずなのに押せる／押せるはずなのに押せない」が起きる。
+      //   上限を変えた直後に画面が追随しない事故が実際に起きた（2026-08-10）。
+      try { o.data.quota = studioWeekUsage_(studentEmail); } catch (eQ) {}
+      return o;
+    }
   } catch (e) {}
   const out = withSheetCache_(function () {
     const list = studioListCandidates(studentEmail, { limit: (body && body.limit) || 80 });
@@ -12655,7 +12804,8 @@ function studioHome(studentEmail, body) {
       summary: (sum && sum.data) || null,
       ig: (ig && ig.data) || null,
       igMetrics: (metrics && metrics.data) || [],
-      igPosts: (posts && posts.data) || []
+      igPosts: (posts && posts.data) || [],
+      quota: studioWeekUsage_(studentEmail)
     } };
   });
   // 100KBを超えるとCacheServiceが黙って落とすので、入らなければ諦めて毎回作る
@@ -16591,7 +16741,7 @@ const ADMIN_SECRET_ALLOWLIST = {
   adminBroadcastLine:1, adminBroadcastLinePending:1, adminSendStudentCampaign:1,
   // セットアップ・保守
   adminSetupTriggers:1, adminInstallTrigger:1, adminSetupPhase1:1, adminSetupAuth:1, adminPhase4DryRun:1, adminLegacyBackfill:1, adminWritePathStats:1, adminIssueTestSession:1, adminDropTestSessions:1, adminOpsSelfTest:1, adminActualMinutesAudit:1, adminXpCorrection:1, adminStreakRecalc:1, adminGrantFeature:1, adminUserDiag:1, adminReportScoreDryRun:1, adminReportGenTest:1, adminScoreConsistency:1, adminFinalizeOps:1, adminUnfinalizeOps:1, adminSmpDump:1, adminSmpWarmAll:1, adminLevelAudit:1, adminXpRestore:1, adminCleanupPlusLogs:1, adminClassAudit:1, adminRecolorCalendar:1, adminFixTokenVersion:1, adminPurgeChallenges:1, adminJiroBackfill:1, adminJiroReset:1, adminScoreDist:1, adminStripeSyncStatus:1, adminCommunityTiming:1, adminOpsScoreAudit:1, adminListTriggers:1, adminHomeTiming:1, adminScreenTiming:1, adminQuickLogTimings:1, adminScoreTrace:1, adminJiroSignals:1, adminLogTimes:1, adminJiroFound:1, adminReportGenFailures:1,
-  igStatus:1, igAuthUrl:1, igFetchNow:1, igDisconnect:1, igResetMetrics:1, igConfigure:1, adminAiUsage:1, adminPropsCheck:1, adminBackfillReports:1, adminDeleteTrigger:1,
+  igStatus:1, igAuthUrl:1, igFetchNow:1, igDisconnect:1, igResetMetrics:1, igConfigure:1, adminAiUsage:1, adminPropsCheck:1, adminBackfillReports:1, adminDeleteTrigger:1, adminStudioLimit:1, adminOnboardingAudit:1, adminStats:1,
   authSetMode:1, authSetEnforce:1, authRoleApply:1, authRoleDryRun:1, authRevokeAll:1,
   authCleanupTestData:1, adminPurgeTestUsers:1, adminMigrateTasks:1, authBreakerReset:1, rotateSessionSecret:1,
   p1Backup:1, p1BackupInfo:1, p1PurgeArchived:1, weeklyBackup:1
