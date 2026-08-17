@@ -6735,37 +6735,45 @@ function LogScreen({onToast, isActive}) {
                 <span style=${{fontSize:10,color:"var(--sub)",border:"1px solid var(--border)",
                                borderRadius:20,padding:"1px 7px",whiteSpace:"nowrap"}}>時間を直す</span>
               </button>
-              <button onClick=${()=>{handleBlockSelect(l.time_block);window.scrollTo?.(0,0);}}
-                style=${{display:"flex",alignItems:"flex-start",gap:10,width:"100%",background:"none",border:"none",
-                         padding:0,cursor:"pointer",fontFamily:"inherit",textAlign:"left"}}>
-                <span style=${{flex:1,minWidth:0,fontSize:13.5,fontWeight:700,color:"var(--text)",
-                               lineHeight:1.5,overflowWrap:"anywhere"}}>${l.task}</span>
-                <span style=${{flexShrink:0,color:"var(--sub)",fontSize:16}}>›</span>
-              </button>
+              <!-- ★矢印はメモ、タスク名は編集★（2026-08-17 Kai要望）
+                   1つのボタンにまとめていたので押し分けられなかった。
+                   メモがある記録だけ矢印を出し、押すと下に本文が開く。 -->
+              <div style=${{display:"flex",alignItems:"flex-start",gap:8}}>
+                <button onClick=${()=>{handleBlockSelect(l.time_block);window.scrollTo?.(0,0);}}
+                  style=${{flex:1,minWidth:0,background:"none",border:"none",padding:0,cursor:"pointer",
+                           fontFamily:"inherit",textAlign:"left"}}>
+                  <span style=${{display:"block",fontSize:13.5,fontWeight:700,color:"var(--text)",
+                                 lineHeight:1.5,overflowWrap:"anywhere"}}>${l.task}</span>
+                </button>
+                ${l.memo&&html`
+                  <button onClick=${()=>setOpenMemo(o=>({...o,[memoKey]:!o[memoKey]}))}
+                    aria-label=${memoOn?"メモを閉じる":"メモを見る"}
+                    aria-expanded=${memoOn?"true":"false"}
+                    style=${{flexShrink:0,background:"none",border:"none",cursor:"pointer",fontFamily:"inherit",
+                             padding:"2px 4px",margin:"-2px -4px 0 0",lineHeight:1,
+                             color:memoOn?"var(--cyan)":"var(--sub)",fontSize:16,
+                             transform:memoOn?"rotate(90deg)":"none",transition:"transform .16s, color .16s"}}>›</button>`}
+              </div>
 
               <!-- ★自己評価と分類を同じ行に並べる★（2026-08-17 Kai要望）
                    「よくできた」と「日常業務」が別々の段になっていて、
                    1件あたり3段使っていた。横に並べて1段にする。 -->
               <div style=${{display:"flex",flexWrap:"wrap",alignItems:"center",gap:6,marginTop:7}}>
                 ${focusStr&&html`
-                  <button onClick=${l.memo?(()=>setOpenMemo(o=>({...o,[memoKey]:!o[memoKey]}))):undefined}
-                    title=${l.memo?"押すとメモが出ます":""}
-                    style=${{display:"inline-flex",alignItems:"center",gap:6,padding:"5px 11px",
-                             borderRadius:99,background:"var(--bg)",border:"1px solid var(--border)",
-                             cursor:l.memo?"pointer":"default",fontFamily:"inherit"}}>
-                    <span style=${{width:10,height:10,borderRadius:"50%",background:DOT[num]||"var(--sub)",flexShrink:0}}/>
-                    <span style=${{fontSize:11.5,color:"var(--text)"}}>${num?num+"・":""}${focusLabel||focusStr}</span>
-                    ${l.memo&&html`<span style=${{fontSize:9,color:"var(--sub)",lineHeight:1}}>${memoOn?"▲":"▼"}</span>`}
-                  </button>`}
+                  <span style=${{display:"inline-flex",alignItems:"center",gap:5,padding:"3px 9px",
+                                 borderRadius:99,background:"var(--bg)",border:"1px solid var(--border)"}}>
+                    <span style=${{width:8,height:8,borderRadius:"50%",background:DOT[num]||"var(--sub)",flexShrink:0}}/>
+                    <span style=${{fontSize:10.5,color:"var(--sub)"}}>${num?num+"・":""}${focusLabel||focusStr}</span>
+                  </span>`}
                 ${clsEditing===l.log_id
                   ? TIME_CLASS_OPTS.map(([k,lb])=>html`
                       <button key=${k} onClick=${()=>saveClass(l,k)}
-                        style=${{padding:"5px 11px",borderRadius:99,fontSize:11.5,cursor:"pointer",fontFamily:"inherit",
+                        style=${{padding:"4px 10px",borderRadius:99,fontSize:10.5,cursor:"pointer",fontFamily:"inherit",
                                  border:`1px solid ${l.time_classification===k?(TIME_CLASS_COLOR[k]||"var(--cyan)"):"var(--border)"}`,
                                  background:"transparent",
                                  color:l.time_classification===k?(TIME_CLASS_COLOR[k]||"var(--cyan)"):"var(--sub)"}}>${lb}</button>`)
                   : html`<button onClick=${()=>setClsEditing(l.log_id)}
-                      style=${{padding:"5px 12px",borderRadius:99,fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit",
+                      style=${{padding:"3px 10px",borderRadius:99,fontSize:10.5,fontWeight:600,cursor:"pointer",fontFamily:"inherit",
                                border:`1px solid ${clsLabel?(TIME_CLASS_COLOR[l.time_classification]||"var(--cyan)"):"var(--border)"}`,
                                background:"transparent",
                                color:clsLabel?(TIME_CLASS_COLOR[l.time_classification]||"var(--cyan)"):"var(--sub)"}}>
@@ -10989,7 +10997,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260817-192214";
+const APP_BUILD = "20260817-192930";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
