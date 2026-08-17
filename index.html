@@ -6710,6 +6710,11 @@ function LogScreen({onToast, isActive}) {
           // 今の分類に無い値（昔の分類など）は「未分類」として扱う。
           // そうしないとラベルが空の丸い枠だけが出てしまう。
           const clsLabel = TIME_CLASS_LABEL[l.time_classification] || "";
+          // ★段落を増やさない★（2026-08-17 Kai要望）
+          //   「メモを見る」という行を1段まるごと使っていた。
+          //   自己評価の札そのものを押してメモを開く形にして、1段減らす。
+          const memoKey = l.log_id || (l.date + "|" + l.time_block);
+          const memoOn = !!openMemo[memoKey];
           return html`
           <div key=${l.log_id||i} style=${{display:"flex",gap:12}}>
             <!-- 時刻の線 -->
@@ -6737,30 +6742,21 @@ function LogScreen({onToast, isActive}) {
                                lineHeight:1.5,overflowWrap:"anywhere"}}>${l.task}</span>
                 <span style=${{flexShrink:0,color:"var(--sub)",fontSize:16}}>›</span>
               </button>
-              ${focusStr&&html`
-                <span style=${{display:"inline-flex",alignItems:"center",gap:6,marginTop:7,padding:"4px 11px",
-                               borderRadius:99,background:"var(--bg)",border:"1px solid var(--border)"}}>
-                  <span style=${{width:10,height:10,borderRadius:"50%",background:DOT[num]||"var(--sub)",flexShrink:0}}/>
-                  <span style=${{fontSize:11.5,color:"var(--text)"}}>${num?num+"・":""}${focusLabel||focusStr}</span>
-                </span>`}
-              ${l.memo&&(()=>{
-                const key = l.log_id || (l.date+"|"+l.time_block);
-                const on = !!openMemo[key];
-                return html`
-                  <div style=${{marginTop:7}}>
-                    <button onClick=${()=>setOpenMemo(o=>({...o,[key]:!o[key]}))}
-                      style=${{display:"inline-flex",alignItems:"center",gap:5,background:"none",border:"none",
-                               padding:0,cursor:"pointer",fontFamily:"inherit"}}>
-                      <span style=${{fontSize:11,color:"var(--sub)",border:"1px solid var(--border)",
-                                     borderRadius:20,padding:"2px 9px",whiteSpace:"nowrap"}}>
-                        メモ ${on?"を閉じる":"を見る"}</span>
-                    </button>
-                    ${on&&html`
-                      <div style=${{fontSize:12,color:"var(--sub)",lineHeight:1.8,marginTop:6,
-                                    overflowWrap:"anywhere"}}>${l.memo}</div>`}
-                  </div>`;
-              })()}
-              <div style=${{display:"flex",flexWrap:"wrap",gap:6,marginTop:8}}>
+
+              <!-- ★自己評価と分類を同じ行に並べる★（2026-08-17 Kai要望）
+                   「よくできた」と「日常業務」が別々の段になっていて、
+                   1件あたり3段使っていた。横に並べて1段にする。 -->
+              <div style=${{display:"flex",flexWrap:"wrap",alignItems:"center",gap:6,marginTop:7}}>
+                ${focusStr&&html`
+                  <button onClick=${l.memo?(()=>setOpenMemo(o=>({...o,[memoKey]:!o[memoKey]}))):undefined}
+                    title=${l.memo?"押すとメモが出ます":""}
+                    style=${{display:"inline-flex",alignItems:"center",gap:6,padding:"5px 11px",
+                             borderRadius:99,background:"var(--bg)",border:"1px solid var(--border)",
+                             cursor:l.memo?"pointer":"default",fontFamily:"inherit"}}>
+                    <span style=${{width:10,height:10,borderRadius:"50%",background:DOT[num]||"var(--sub)",flexShrink:0}}/>
+                    <span style=${{fontSize:11.5,color:"var(--text)"}}>${num?num+"・":""}${focusLabel||focusStr}</span>
+                    ${l.memo&&html`<span style=${{fontSize:9,color:"var(--sub)",lineHeight:1}}>${memoOn?"▲":"▼"}</span>`}
+                  </button>`}
                 ${clsEditing===l.log_id
                   ? TIME_CLASS_OPTS.map(([k,lb])=>html`
                       <button key=${k} onClick=${()=>saveClass(l,k)}
@@ -6775,6 +6771,9 @@ function LogScreen({onToast, isActive}) {
                                color:clsLabel?(TIME_CLASS_COLOR[l.time_classification]||"var(--cyan)"):"var(--sub)"}}>
                       ${clsLabel||"分類を選ぶ"}</button>`}
               </div>
+              ${l.memo&&memoOn&&html`
+                <div style=${{fontSize:12,color:"var(--sub)",lineHeight:1.8,marginTop:7,
+                              overflowWrap:"anywhere"}}>${l.memo}</div>`}
             </div>
           </div>`;
         })}
@@ -10990,7 +10989,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260810-171401";
+const APP_BUILD = "20260817-192214";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 

@@ -5062,12 +5062,18 @@ function saveLog(studentEmail, body, opts) {
       if (i === matchRow && String(data[i][timeIdx]) !== String(body.time_block)) {
         sheet.getRange(i + 1, timeIdx + 1).setNumberFormat("@");
       }
+      // ★XPのフラグも、この1回の書き込みに含める★（2026-08-17 実測 保存4〜8秒）
+      //   これまでは行を書いた直後に xp_awarded だけをもう一度書いていた。
+      //   GASはシートへの書き込み1回ごとに往復が起きるので、そのぶん待たされる。
+      //   付けるかどうかはここで既に判定できるので、まとめて1回で書く。
+      const willAward = (!isPast && !prevAwarded && !!newFocus);
       const rowU = data[i].slice();
       rowU[timeIdx] = String(body.time_block);
       rowU[headers.indexOf("task")] = body.task;
       rowU[focusIdx] = body.focus_level;
       rowU[headers.indexOf("memo")] = body.memo || "";
       if (grIdx < rowU.length) rowU[grIdx] = body.goal_related || "false";
+      if (willAward && awardedIdx < rowU.length) rowU[awardedIdx] = "TRUE";
       sheet.getRange(i + 1, 1, 1, rowU.length).setValues([rowU]);
       // 控えも同じ内容にしておく（次の1件が古い内容を見ないように）
       if (_dlSnapOn && _dlSnap && _dlSnap[i]) {
@@ -5079,18 +5085,21 @@ function saveLog(studentEmail, body, opts) {
 
       // 「まだXP未付与」かつ「今回きちんと評価が入っている」記録にだけ、1回だけXPを付与する。
       // 評価なしで保存→あとで評価を足した修正でも確実に付き、付与済みの記録は何度更新しても増えない
-      if (!isPast && !prevAwarded && newFocus) {
-        sheet.getRange(i+1, awardedIdx+1).setValue("TRUE");
+      if (willAward) {
+        // 上の1回で書けなかったとき（列がまだ無い等）だけ、従来どおり単独で書く
+        if (!(awardedIdx < rowU.length)) sheet.getRange(i + 1, awardedIdx + 1).setValue("TRUE");
         if (_dlSnapOn && _dlSnap && _dlSnap[i]) _dlSnap[i][awardedIdx] = "TRUE";
         if (String(body.goal_related) === "true") incrementGoalBlocksAndNotify(studentEmail, 1);
         const xpResult = addXP(studentEmail, body.memo, todaysLogCount, {
           totalLogs, memoCount: memoCount + ((body.memo || "").trim() ? 1 : 0)
         }, String(data[i][0]));
-        const jd1 = writeP1LogFields(sheet, i + 1, studentEmail, targetDate, String(body.time_block), body);
+        const jd1 = writeP1LogFields(sheet, i + 1, studentEmail, targetDate, String(body.time_block), body,
+                                    { headers: headers, rowVals: rowU });
         const jr1 = _defer ? { gained: [], deferred: jd1 } : jiroCollect_(studentEmail, jd1, false);
         return { ok: true, log_id: String(data[i][0]), updated: true, ...xpResult, jiro_gained: jr1.gained, jiro_deferred: jr1.deferred };
       }
-      const jd2 = writeP1LogFields(sheet, i + 1, studentEmail, targetDate, String(body.time_block), body);
+      const jd2 = writeP1LogFields(sheet, i + 1, studentEmail, targetDate, String(body.time_block), body,
+                                  { headers: headers, rowVals: rowU });
       const jr2 = _defer ? { gained: [], deferred: jd2 } : jiroCollect_(studentEmail, jd2, false);
       return { ok: true, log_id: String(data[i][0]), updated: true, xp_gained: 0, jiro_gained: jr2.gained, jiro_deferred: jr2.deferred };
     }
@@ -15200,16 +15209,24 @@ function recomputeTaskActualMinutes_(studentEmail, taskId) {
 }
 
 // 戻り値: 隠しジローのカウンターに足すべき増減（呼び出し元がまとめて反映する）
-function writeP1LogFields(sheet, rowNum, studentEmail, targetDate, timeBlock, body) {
+// known = { headers, rowVals } … 呼び出し元がすでに読んでいる行。
+//   渡されたときは、ここでシートを読み直さない（往復2回ぶん減る）。
+function writeP1LogFields(sheet, rowNum, studentEmail, targetDate, timeBlock, body, known) {
   const jiroDelta = {};
   try {
     // ★1セルずつ書かない★（2026-08-05 Kai報告「記録ボタンの待ち時間が長い」）
     //   1回の setValue ごとにシートへの往復が発生する。ここは最大10か所あり、
     //   さらに分類の確認で1セルずつ読み直してもいた。
     //   行をまるごと1回だけ読み、まとめて1回だけ書く。
-    const lastCol = sheet.getLastColumn();
-    const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
-    const rowVals = sheet.getRange(rowNum, 1, 1, lastCol).getValues()[0];
+    // ★同じ行を2度読まない★（2026-08-17 実測。記録1件で保存4〜8秒）
+    //   saveLog はこの直前に DailyLog を丸ごと読んでいる。
+    //   ヘッダーもこの行の中身も手元にあるのに、ここで getValues を
+    //   2回やって取り直していた。渡されたらそれを使う。
+    const hasKnown = !!(known && known.headers && known.rowVals
+                        && known.rowVals.length === known.headers.length);
+    const lastCol = hasKnown ? known.headers.length : sheet.getLastColumn();
+    const headers = hasKnown ? known.headers : sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+    const rowVals = hasKnown ? known.rowVals.slice() : sheet.getRange(rowNum, 1, 1, lastCol).getValues()[0];
     let dirty = false;
     const set = (col, val) => {
       const i = headers.indexOf(col);
