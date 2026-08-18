@@ -2765,7 +2765,18 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
   });
   const [condOpen, setCondOpen] = useState(false);
   const [condSaving, setCondSaving] = useState(false);
-  const [condDraft, setCondDraft] = useState({sleep:"", exercise:"", meal:""});
+  const [condDraft, setCondDraft] = useState({sleep:"", exercise:"", meal:"", bed:"", wake:""});
+  // ★寝た時刻と起きた時刻から睡眠時間を出す★（2026-08-18 Kai要望）
+  //   「7時間」と自分で計算して入れるより、寝た時刻と起きた時刻のほうが思い出しやすい。
+  //   日をまたぐ（23:30→6:30）ので、起床が就寝より前なら24時間足す。
+  const hoursBetween = (bed, wake) => {
+    const p = v => { const m = String(v||"").match(/^(\d{1,2}):(\d{2})$/); return m ? Number(m[1])*60+Number(m[2]) : null; };
+    const b = p(bed), w = p(wake);
+    if (b === null || w === null) return null;
+    const min = (w - b + 1440) % 1440;
+    if (min === 0) return null;
+    return Math.round(min / 6) / 10;   // 0.1時間きざみ
+  };
   // 画面に出ている今日の値を、下書きの初期値にする
   useEffect(()=>{
     const t = cond && cond.today;
@@ -5133,6 +5144,20 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
                 onInput=${e=>setCondDraft(d=>({...d,sleep:e.target.value}))}/>
               <span style=${{fontSize:11.5,color:"var(--sub)"}}>時間</span>
             </div>
+            <!-- ★時刻から出せるようにする★（2026-08-18 Kai要望）
+                 何時間寝たかを暗算するより、寝た時刻と起きた時刻のほうが思い出しやすい。 -->
+            <div style=${{display:"flex",alignItems:"center",gap:6,marginBottom:12,paddingLeft:"3.2em",flexWrap:"wrap"}}>
+              <span style=${{fontSize:10.5,color:"var(--sub)"}}>時刻から出す</span>
+              <input class="inp" type="time" value=${condDraft.bed}
+                style=${{width:98,margin:0,textAlign:"center",padding:"7px 4px",fontSize:12}}
+                onInput=${e=>setCondDraft(d=>{const nd={...d,bed:e.target.value};
+                  const h=hoursBetween(nd.bed,nd.wake); if(h!==null) nd.sleep=String(h); return nd;})}/>
+              <span style=${{fontSize:10.5,color:"var(--sub)"}}>→</span>
+              <input class="inp" type="time" value=${condDraft.wake}
+                style=${{width:98,margin:0,textAlign:"center",padding:"7px 4px",fontSize:12}}
+                onInput=${e=>setCondDraft(d=>{const nd={...d,wake:e.target.value};
+                  const h=hoursBetween(nd.bed,nd.wake); if(h!==null) nd.sleep=String(h); return nd;})}/>
+            </div>
             <div style=${{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
               <span style=${{fontSize:11.5,color:"var(--text)",fontWeight:700,width:"3.2em",flexShrink:0}}>運動</span>
               <div style=${{display:"flex",gap:6,flexWrap:"wrap"}}>
@@ -5156,7 +5181,11 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
               </div>
             </div>
             <div style=${{fontSize:10.5,color:"var(--sub)",lineHeight:1.7,marginBottom:10}}>
-              食事は「整えられた」と思えたら4か5。厳密でなくて大丈夫です。
+              食事は「整えられた」と思えたら4か5。厳密でなくて大丈夫です。<br/>
+              <!-- ★細かく残したい人の行き先を示す★（2026-08-18 Kai要望）
+                   コンディションは1日1回の要約。細かい記録の場所は、もともと記録タブにある。 -->
+              もっと細かく残したいときは、記録タブへ。「ジムで筋トレ」のように書けば、
+              かけた時間としても残ります。
             </div>
             <button onClick=${saveCondition} disabled=${condSaving}
               style=${{width:"100%",padding:"11px",borderRadius:11,border:"none",background:"var(--accent)",
@@ -11308,7 +11337,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260818-123147";
+const APP_BUILD = "20260818-124105";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
