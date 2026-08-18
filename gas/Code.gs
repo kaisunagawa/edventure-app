@@ -5312,10 +5312,32 @@ function saveLog(studentEmail, body, opts) {
     }
   }
 
-  const logId = "log_" + Date.now();
+  // ★新しい1件を、1回の書き込みで作る★（2026-08-18 実測 保存8〜15秒）
+  //   これまでは appendRow → 時間帯の書式 → 時間帯の値 → xp_awarded と
+  //   分けて書いていた。GASはシートへの往復1回ごとに時間がかかるので、
+  //   話すだけで5件入れると、この往復がそのまま待ち時間になっていた。
+  //   行の中身を先に全部組み立てて、1回で書く。
+  const logId = "log_" + Date.now() + "_" + Math.floor(Math.random() * 1000);
   const newRow = sheet.getLastRow() + 1;
-  sheet.appendRow([logId, studentEmail, targetDate, "", body.task, body.focus_level, body.memo || "", now, body.goal_related || "false"]);
-  sheet.getRange(newRow, 4).setNumberFormat("@").setValue(String(body.time_block));
+  const width = Math.max(headers.length, 9);
+  let awardedIdxPre = headers.indexOf("xp_awarded");
+  if (awardedIdxPre === -1) {
+    awardedIdxPre = headers.length;
+    sheet.getRange(1, awardedIdxPre + 1).setValue("xp_awarded");
+    headers.push("xp_awarded");
+  }
+  const newFocusPre = String(body.focus_level || "").trim();
+  const rowN = new Array(Math.max(width, awardedIdxPre + 1)).fill("");
+  const setN = function (col, val) { const ci = headers.indexOf(col); if (ci !== -1) rowN[ci] = val; };
+  setN("log_id", logId); setN("student_email", studentEmail); setN("date", targetDate);
+  setN("time_block", String(body.time_block)); setN("task", body.task);
+  setN("focus_level", body.focus_level); setN("memo", body.memo || "");
+  setN("created_at", now); setN("goal_related", body.goal_related || "false");
+  rowN[awardedIdxPre] = (isPast || !newFocusPre) ? "FALSE" : "TRUE";
+  // 時間帯は「09:00-10:00」を日付と誤解されないよう文字列書式にする
+  const tbCol = headers.indexOf("time_block");
+  if (tbCol !== -1) sheet.getRange(newRow, tbCol + 1).setNumberFormat("@");
+  sheet.getRange(newRow, 1, 1, rowN.length).setValues([rowN]);
   // 控えにも同じ行を足す（次の1件が、この行を「もうある」と見られるように）
   dailyLogSnapAppend_(headers, {
     log_id: logId, student_email: studentEmail, date: targetDate,
@@ -5324,7 +5346,8 @@ function saveLog(studentEmail, body, opts) {
     goal_related: body.goal_related || "false",
     xp_awarded: (isPast || !String(body.focus_level || "").trim()) ? "FALSE" : "TRUE"
   });
-  const jdNew = writeP1LogFields(sheet, newRow, studentEmail, targetDate, String(body.time_block), body);
+  const jdNew = writeP1LogFields(sheet, newRow, studentEmail, targetDate, String(body.time_block), body,
+                                 { headers: headers, rowVals: rowN });
   // 新しい記録なので、時間帯などの判定もここで1回だけ行う
   if (!isPast) {
     jdNew.records = (jdNew.records || 0) + 1;
@@ -5337,12 +5360,9 @@ function saveLog(studentEmail, body, opts) {
       .forEach(function (k) { jdNew["w_" + k] = (jdNew["w_" + k] || 0) + 1; });
   }
   queueOwnerCalendarWrite_(studentEmail, targetDate, String(body.time_block), body.task, body.time_classification);
-  let awardedIdxN = headers.indexOf("xp_awarded");
-  if (awardedIdxN === -1) { awardedIdxN = headers.length; sheet.getRange(1, awardedIdxN + 1).setValue("xp_awarded"); }
-
-  const newFocusN = String(body.focus_level || "").trim();
+  const newFocusN = newFocusPre;   // 上の1回の書き込みで xp_awarded まで入れてある
   // 過去日の後付け入力はストリーク・XPの対象外（後から稼げない）
-  if (isPast) { sheet.getRange(newRow, awardedIdxN + 1).setValue("FALSE"); return { ok: true, log_id: logId, xp_gained: 0 }; }
+  if (isPast) return { ok: true, log_id: logId, xp_gained: 0 };
   // ★まとめて保存するときは、ジローの数え上げも最後に1回だけ★（2026-08-07 実測）
   //   1件ごとに Users を読み書きしていた（1件あたり往復4回）。
   //   独り言のように15件まとめて入るときは、そのぶん待ち時間になる。
@@ -5352,8 +5372,7 @@ function saveLog(studentEmail, body, opts) {
   if (!_defer) { updateStreak(studentEmail); invalidateStatusCache(studentEmail); }
   // 評価が入っている記録だけ、その場でXPを付与して「付与済み」の印を付ける。
   // 評価なしで保存した場合は付与せず未付与のままにし、あとで評価を足した更新時に付与する
-  if (!newFocusN) { sheet.getRange(newRow, awardedIdxN + 1).setValue("FALSE"); return { ok: true, log_id: logId, xp_gained: 0, jiro_gained: jrNew.gained, jiro_deferred: jrNew.deferred }; }
-  sheet.getRange(newRow, awardedIdxN + 1).setValue("TRUE");
+  if (!newFocusN) return { ok: true, log_id: logId, xp_gained: 0, jiro_gained: jrNew.gained, jiro_deferred: jrNew.deferred };
   if (String(body.goal_related) === "true") incrementGoalBlocksAndNotify(studentEmail, 1);
   const xpResult = addXP(studentEmail, body.memo, todaysLogCount + 1, {
     totalLogs: totalLogs + 1,
@@ -9251,23 +9270,48 @@ function updateStreak(studentEmail) {
 
   const today = formatDate(new Date());
   const yesterday = formatDate(new Date(Date.now() - 86400000));
+  let freezeIdxU = headers.indexOf("streak_freeze");
+  if (freezeIdxU === -1) {
+    freezeIdxU = headers.length + ((streakIdx === headers.length ? 1 : 0) + (lastLogDateIdx === headers.length ? 1 : 0));
+    sheet.getRange(1, freezeIdxU + 1).setValue("streak_freeze");
+  }
 
   for (let i = 1; i < data.length; i++) {
     if (String(data[i][emailIdx]) !== studentEmail) continue;
     const rawLLD = data[i][lastLogDateIdx];
     const lastLogDate = rawLLD instanceof Date ? Utilities.formatDate(rawLLD, "Asia/Tokyo", "yyyy-MM-dd") : String(rawLLD || "");
     const currentStreak = Number(data[i][streakIdx] || 0);
+    const freezesU = (freezeIdxU < data[i].length) ? Number(data[i][freezeIdxU] || 0) : 0;
 
     let newStreak;
+    let usedFreeze = false;
     if (lastLogDate === today) return; // 今日すでに更新済み
     if (lastLogDate === yesterday) {
       newStreak = currentStreak + 1; // 連続
     } else {
-      newStreak = 1; // リセット
+      // ★1日休んだだけなら、フリーズで橋渡しする★（2026-08-18 Kai報告）
+      //   フリーズを消費する処理は夜のレポート（nightlyReport）の中にしか無く、
+      //   夜の処理が落ちた日は誰も守られず、翌日みんなの連続記録が黙って切れていた。
+      //   実際、45日continuedしていたKaiがフリーズを2個持ったまま1に戻っていた。
+      //   毎日の判定側でも同じルールを持たせて、夜の処理の成否に依存させない。
+      //   ルールは検算用の recomputeStreak_ と同じ（間が1日だけ＝gap===2）。
+      const gapU = lastLogDate
+        ? Math.round((new Date(today + "T00:00:00+09:00") - new Date(lastLogDate + "T00:00:00+09:00")) / 86400000)
+        : 0;
+      if (gapU === 2 && freezesU > 0 && currentStreak > 0) {
+        newStreak = currentStreak + 1;
+        usedFreeze = true;
+      } else {
+        newStreak = 1; // リセット
+      }
     }
 
     sheet.getRange(i + 1, streakIdx + 1).setValue(newStreak);
     sheet.getRange(i + 1, lastLogDateIdx + 1).setValue(today);
+    if (usedFreeze) {
+      sheet.getRange(i + 1, freezeIdxU + 1).setValue(freezesU - 1);
+      Logger.log(studentEmail + ": フリーズ1つで連続記録を継続（" + currentStreak + "→" + newStreak + "）");
+    }
 
     // ── コミュニティのシェア欄を賑やかに＆偏りなく ──
     // updateStreakは「その日の最初の記録」で1回だけ動くので、ここでのシェアは1日1回/人。
@@ -9290,9 +9334,9 @@ function updateStreak(studentEmail) {
     // ストリークフリーズの獲得: 7日連続ごとに1個（最大2個まで保有）。
     // 続けたご褒美として「休んでも消えない保険」が貯まる（Duolingo方式）
     if (newStreak > 0 && newStreak % 7 === 0) {
-      let freezeIdx = headers.indexOf("streak_freeze");
-      if (freezeIdx === -1) { freezeIdx = headers.length; sheet.getRange(1, freezeIdx + 1).setValue("streak_freeze"); }
-      const freezes = freezeIdx < data[i].length ? Number(data[i][freezeIdx] || 0) : 0;
+      const freezeIdx = freezeIdxU;
+      const freezes = usedFreeze ? Math.max(0, freezesU - 1)
+                                 : (freezeIdx < data[i].length ? Number(data[i][freezeIdx] || 0) : 0);
       if (freezes < 2) {
         sheet.getRange(i + 1, freezeIdx + 1).setValue(freezes + 1);
         try { postAchievementMessage(studentEmail, freezeShareMessage(newStreak), { category: "freeze", cooldownDays: 5 }); } catch (e) {}
