@@ -724,6 +724,15 @@ function doGet(e) {
       }
       // 独り言の「記録する」が何秒かかったか（直近5回・読むだけ）
       //   bash gas/ops.sh adminQuickLogTimings
+      // 記録の保存が段階ごとに何秒かかったか（直近10件・読むだけ）
+      //   bash gas/ops.sh adminSaveLogTimings
+      case "adminSaveLogTimings": {
+        if (!verifyAdmin(e.parameter.coachEmail)) return jsonResponse({ ok: false, error: "not admin" });
+        let arrS = [];
+        try { arrS = JSON.parse(PropertiesService.getScriptProperties()
+                 .getProperty("SAVELOG_TIMINGS") || "[]"); } catch (e2) {}
+        return jsonResponse({ ok: true, count: arrS.length, timings: arrS });
+      }
       case "adminQuickLogTimings": {
         if (!verifyAdmin(e.parameter.coachEmail)) return jsonResponse({ ok: false, error: "not admin" });
         let arr = [];
@@ -5129,8 +5138,22 @@ function dailyLogSnapAppend_(headers, fields) {
   _dlSnap.push(row);
 }
 
+// ★記録の保存を段階ごとに測る★（2026-08-18）
+//   「記録するのが遅い」の中身を、推測ではなく実際の保存から拾う。
+//   直近10件だけ持つ。測れなくても保存は必ず成功させる。
+function saveLogNoteTiming_(marks) {
+  try {
+    const props = PropertiesService.getScriptProperties();
+    const prev = JSON.parse(props.getProperty("SAVELOG_TIMINGS") || "[]");
+    prev.push({ at: new Date().toISOString().slice(11, 19), ms: marks });
+    props.setProperty("SAVELOG_TIMINGS", JSON.stringify(prev.slice(-10)));
+  } catch (e) {}
+}
+
 function saveLog(studentEmail, body, opts) {
   const _defer = !!(opts && opts.deferAggregates);
+  const _T0 = Date.now(); let _tp = _T0; const _mk = {};
+  const _mark = function (name) { const n = Date.now(); _mk[name] = n - _tp; _tp = n; };
   // 自己経営力は計算に時間がかかるので取っておいている。書き換えたら
   // 古い結果に当たらないよう世代を進める（2026-08-05）。
   smpBumpEpoch_(studentEmail);
@@ -5147,6 +5170,7 @@ function saveLog(studentEmail, body, opts) {
 
   // Upsert: 同じ日・同じ時間帯があれば更新
   const data = dailyLogValues_(sheet);
+  _mark("DailyLog読み");
   const headers = data[0];
   const emailIdx = headers.indexOf("student_email");
   const dateIdx = headers.indexOf("date");
@@ -5216,13 +5240,16 @@ function saveLog(studentEmail, body, opts) {
       if (grIdx < rowU.length) rowU[grIdx] = body.goal_related || "false";
       if (willAward && awardedIdx < rowU.length) rowU[awardedIdx] = "TRUE";
       sheet.getRange(i + 1, 1, 1, rowU.length).setValues([rowU]);
+      _mark("行を書く");
       // 控えも同じ内容にしておく（次の1件が古い内容を見ないように）
       if (_dlSnapOn && _dlSnap && _dlSnap[i]) {
         for (let c = 0; c < rowU.length; c++) _dlSnap[i][c] = rowU[c];
       }
       // カレンダーへの書き込みは、記録の保存を待たせない（あとでまとめて処理する）
       queueOwnerCalendarWrite_(studentEmail, targetDate, String(body.time_block), body.task, body.time_classification);
+      _mark("カレンダー予約");
       if (!isPast && !_defer) { updateStreak(studentEmail); invalidateStatusCache(studentEmail); }
+      _mark("連続記録＋キャッシュ破棄");
 
       // 「まだXP未付与」かつ「今回きちんと評価が入っている」記録にだけ、1回だけXPを付与する。
       // 評価なしで保存→あとで評価を足した修正でも確実に付き、付与済みの記録は何度更新しても増えない
@@ -5234,14 +5261,21 @@ function saveLog(studentEmail, body, opts) {
         const xpResult = addXP(studentEmail, body.memo, todaysLogCount, {
           totalLogs, memoCount: memoCount + ((body.memo || "").trim() ? 1 : 0)
         }, String(data[i][0]));
+        _mark("XP付与");
         const jd1 = writeP1LogFields(sheet, i + 1, studentEmail, targetDate, String(body.time_block), body,
                                     { headers: headers, rowVals: rowU });
+        _mark("追加項目を書く");
         const jr1 = _defer ? { gained: [], deferred: jd1 } : jiroCollect_(studentEmail, jd1, false);
+        _mark("ジロー判定");
+        _mk.合計 = Date.now() - _T0; if (!_defer) saveLogNoteTiming_(_mk);
         return { ok: true, log_id: String(data[i][0]), updated: true, ...xpResult, jiro_gained: jr1.gained, jiro_deferred: jr1.deferred };
       }
       const jd2 = writeP1LogFields(sheet, i + 1, studentEmail, targetDate, String(body.time_block), body,
                                   { headers: headers, rowVals: rowU });
+      _mark("追加項目を書く");
       const jr2 = _defer ? { gained: [], deferred: jd2 } : jiroCollect_(studentEmail, jd2, false);
+      _mark("ジロー判定");
+      _mk.合計 = Date.now() - _T0; if (!_defer) saveLogNoteTiming_(_mk);
       return { ok: true, log_id: String(data[i][0]), updated: true, xp_gained: 0, jiro_gained: jr2.gained, jiro_deferred: jr2.deferred };
     }
   }
@@ -17109,7 +17143,7 @@ const ADMIN_SECRET_ALLOWLIST = {
   // 一斉送信（Kaiの明示的な要望により残す）
   adminBroadcastLine:1, adminBroadcastLinePending:1, adminSendStudentCampaign:1,
   // セットアップ・保守
-  adminSetupTriggers:1, adminInstallTrigger:1, adminSetupPhase1:1, adminSetupAuth:1, adminPhase4DryRun:1, adminLegacyBackfill:1, adminWritePathStats:1, adminIssueTestSession:1, adminDropTestSessions:1, adminOpsSelfTest:1, adminActualMinutesAudit:1, adminXpCorrection:1, adminStreakRecalc:1, adminGrantFeature:1, adminUserDiag:1, adminReportScoreDryRun:1, adminReportGenTest:1, adminScoreConsistency:1, adminFinalizeOps:1, adminUnfinalizeOps:1, adminSmpDump:1, adminSmpWarmAll:1, adminLevelAudit:1, adminXpRestore:1, adminCleanupPlusLogs:1, adminClassAudit:1, adminRecolorCalendar:1, adminFixTokenVersion:1, adminPurgeChallenges:1, adminJiroBackfill:1, adminJiroReset:1, adminScoreDist:1, adminStripeSyncStatus:1, adminCommunityTiming:1, adminOpsScoreAudit:1, adminListTriggers:1, adminHomeTiming:1, adminScreenTiming:1, adminReportTiming:1, adminQuickLogTimings:1, adminScoreTrace:1, adminJiroSignals:1, adminLogTimes:1, adminJiroFound:1, adminReportGenFailures:1,
+  adminSetupTriggers:1, adminInstallTrigger:1, adminSetupPhase1:1, adminSetupAuth:1, adminPhase4DryRun:1, adminLegacyBackfill:1, adminWritePathStats:1, adminIssueTestSession:1, adminDropTestSessions:1, adminOpsSelfTest:1, adminActualMinutesAudit:1, adminXpCorrection:1, adminStreakRecalc:1, adminGrantFeature:1, adminUserDiag:1, adminReportScoreDryRun:1, adminReportGenTest:1, adminScoreConsistency:1, adminFinalizeOps:1, adminUnfinalizeOps:1, adminSmpDump:1, adminSmpWarmAll:1, adminLevelAudit:1, adminXpRestore:1, adminCleanupPlusLogs:1, adminClassAudit:1, adminRecolorCalendar:1, adminFixTokenVersion:1, adminPurgeChallenges:1, adminJiroBackfill:1, adminJiroReset:1, adminScoreDist:1, adminStripeSyncStatus:1, adminCommunityTiming:1, adminOpsScoreAudit:1, adminListTriggers:1, adminHomeTiming:1, adminScreenTiming:1, adminReportTiming:1, adminSaveLogTimings:1, adminQuickLogTimings:1, adminScoreTrace:1, adminJiroSignals:1, adminLogTimes:1, adminJiroFound:1, adminReportGenFailures:1,
   igStatus:1, igAuthUrl:1, igFetchNow:1, igDisconnect:1, igResetMetrics:1, igConfigure:1, adminAiUsage:1, adminPropsCheck:1, adminBackfillReports:1, adminDeleteTrigger:1, adminStudioLimit:1, adminOnboardingAudit:1, adminStats:1,
   authSetMode:1, authSetEnforce:1, authRoleApply:1, authRoleDryRun:1, authRevokeAll:1,
   authCleanupTestData:1, adminPurgeTestUsers:1, adminMigrateTasks:1, authBreakerReset:1, rotateSessionSecret:1,
