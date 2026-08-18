@@ -4562,6 +4562,17 @@ function quickLog(studentEmail, body) {
   //   ひと続きの夜の作業が2日に分断されていた。
   //   深夜0時〜4時は「前の日の続き」として、同じ日付にまとめる。
   const today = logicalToday_(now);
+  // ★前の日のぶんも、まとめて話せるようにする★（2026-08-18 kyokaさん要望）
+  //   「昨日ぶんを思い出して話す」ができないと、その日に入れ損ねた人が
+  //   翌日あきらめることになる。日付を受け取れるようにする。
+  //   未来と、7日より前は受け付けない（打ち間違いで遠い日に書かないため）。
+  let targetDay = today;
+  const askedDay = String(body.date || "").trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(askedDay) && askedDay <= today) {
+    const diffDays = Math.round((new Date(today + "T00:00:00+09:00") - new Date(askedDay + "T00:00:00+09:00")) / 86400000);
+    if (diffDays >= 0 && diffDays <= 7) targetDay = askedDay;
+  }
+  const isPastDay = targetDay !== today;
 
   const user = sheetToObjects(getSheet("Users")).find(u => u.student_email === studentEmail);
   const goalsText = user ? effectiveGoalsText(user.student_email, user) : "";
@@ -4590,14 +4601,25 @@ function quickLog(studentEmail, body) {
     });
 
   const _tPrep = Date.now();
-  const prompt = `ユーザーが「今日どう過ごしたか」を話し言葉でつぶやきました。これを時間記録に構造化してください。
+  // ★過去の日を話しているときは「今」を基準にしない★（2026-08-18）
+  //   「今の時刻に近い方を選ぶ」は、今日ぶんを話しているから成り立つ判断。
+  //   昨日を思い出して話すときにそれを当てると、時刻が今に引き寄せられる。
+  const pastNote = isPastDay
+    ? `\n\n【重要】これは「${targetDay}」の出来事を、あとから思い出して話しています。`
+      + `“今この瞬間”は関係ありません。時刻は話に出てきたとおりに読み取ってください。`
+      + `午前/午後の明示がない「◯時」は、1日の流れ（朝→昼→夜）から自然な方を選んでください。`
+      + `「今」「さっき」を基準にした判断は使わないでください。`
+    : "";
+  const prompt = `ユーザーが「${isPastDay ? targetDay + " をどう過ごしたか" : "今日どう過ごしたか"}」を話し言葉でつぶやきました。これを時間記録に構造化してください。
 1つの活動だけなら1件でOKですが、1日の出来事をまとめて話している場合は、語られた活動を漏れなく全て別々の記録にしてください（件数の上限を気にせず、話に出てきた分だけ作る）。
 「誰に会ったか」「何時に何をしたか」など具体的な情報が入っていれば、それも記録に活かしてください。話に出てきたことを勝手に省略・要約して捨てないこと。
+
+${pastNote}
 
 【つぶやき】
 ${text}
 
-【現在時刻】${hour}時
+【現在時刻】${hour}時${isPastDay ? "（ただし記録するのは " + targetDay + " のぶんです）" : ""}
 【この人の目標】${goalsText || "未設定"}
 
 【各記録の作り方】
@@ -4739,9 +4761,12 @@ ${text}
     //   その記録だけ前の日に付ける。「1時から作業した」のような
     //   深夜そのものの話は、今日のままにする。
     const startH = parseInt(String(tb).slice(0, 2), 10);
-    const recDate = (hour < 5 && startH >= 12)
-      ? formatDate(new Date(new Date(today + "T00:00:00+09:00").getTime() - 86400000))
-      : today;
+    // 過去の日を指定して話しているときは、その日にそのまま付ける
+    // （深夜の「昨夜のこと」の振り分けは、今日ぶんを話しているときの話）
+    const recDate = isPastDay ? targetDay
+      : ((hour < 5 && startH >= 12)
+          ? formatDate(new Date(new Date(today + "T00:00:00+09:00").getTime() - 86400000))
+          : today);
     const sr = saveLog(studentEmail, {
       date: recDate,
       time_block: tb,

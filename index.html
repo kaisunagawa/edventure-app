@@ -11313,7 +11313,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260818-163425";
+const APP_BUILD = "20260818-164640";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
@@ -12553,6 +12553,11 @@ function FeatureAnnounce({onClose,onGo}){
 function QuickLogSheet({onClose,onToast}){
   const [text,setText]=useState("");
   const [saving,setSaving]=useState(false);
+  // ★いつのぶんを話すか選べるようにする★（2026-08-18 kyokaさん要望）
+  //   その日のうちに入れ損ねると、翌日あきらめることになっていた。
+  //   0=今日 / 1=昨日 / 2=一昨日。
+  const [dayBack,setDayBack]=useState(0);
+  const dayOf=(n)=>addDays(formatDateStr(new Date()), -n);
   const inputRef=React.useRef(null);
   useEffect(()=>{ setTimeout(()=>{ try{inputRef.current&&inputRef.current.focus();}catch(e){} },200); },[]);
   const save=async()=>{
@@ -12561,7 +12566,7 @@ function QuickLogSheet({onClose,onToast}){
     setSaving(true);
     let r;
     try{
-      r=await gasPostJson("quickLog",{text:t});
+      r=await gasPostJson("quickLog", dayBack>0 ? {text:t, date:dayOf(dayBack)} : {text:t});
     }catch(e){
       // 通信エラー等でも「保存中…」で固まらないようにし、入力は消さずに残す
       setSaving(false);
@@ -12617,7 +12622,17 @@ function QuickLogSheet({onClose,onToast}){
     <div style=${{position:"fixed",inset:0,height:"100dvh",background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"center",justifyContent:"center",padding:16,zIndex:550}}
       onClick=${e=>{if(e.target===e.currentTarget)onClose();}}>
       <div style=${{background:"var(--card)",borderRadius:20,boxShadow:"0 18px 50px rgba(0,0,0,0.35)",padding:"22px 20px 24px",width:"100%",maxWidth:420,boxSizing:"border-box",maxHeight:"84dvh",overflowY:"auto",overscrollBehavior:"contain",WebkitOverflowScrolling:"touch"}}>
-        <div style=${{fontSize:18,fontWeight:800,marginBottom:4,color:"var(--text)"}}>🎙 今なにしてた？</div>
+        <div style=${{fontSize:18,fontWeight:800,marginBottom:10,color:"var(--text)"}}>
+          ${dayBack===0?"🎙 今なにしてた？":"🎙 "+["","昨日","一昨日"][dayBack]+"は何してた？"}</div>
+        <!-- ★いつのぶんか★ 前の日を思い出して話せるように -->
+        <div style=${{display:"flex",gap:6,marginBottom:12}}>
+          ${[[0,"今日"],[1,"昨日"],[2,"一昨日"]].map(([n,lb])=>html`
+            <button key=${n} onClick=${()=>setDayBack(n)}
+              style=${{flex:1,padding:"7px 0",borderRadius:9,fontSize:12.5,fontWeight:700,cursor:"pointer",
+                       fontFamily:"inherit",background:dayBack===n?"var(--accent-l)":"transparent",
+                       border:`1px solid ${dayBack===n?"var(--accent)":"var(--border)"}`,
+                       color:dayBack===n?"var(--accent)":"var(--sub)"}}>${lb}</button>`)}
+        </div>
         <!-- ★使い方より、言えばいい文をそのまま見せる★（2026-08-10 Kai指摘）
              「AIが構造化します」より「こう言えばいい」のほうが伝わる。 -->
         <div style=${{fontSize:12.5,color:"var(--sub)",marginBottom:12,lineHeight:1.7}}>
@@ -12629,11 +12644,16 @@ function QuickLogSheet({onClose,onToast}){
             「10時から2時間カフェで資料づくり」</div>
           <div style=${{fontSize:11,color:"var(--sub)",marginTop:6,lineHeight:1.6}}>
             時間もまとめて言えば、そのとおりに入ります。1日分を続けて話しても大丈夫です。</div>
+          ${dayBack>0&&html`
+            <div style=${{fontSize:11,color:"var(--accent)",marginTop:7,lineHeight:1.6,fontWeight:600}}>
+              ${dayOf(dayBack)}（${["","昨日","一昨日"][dayBack]}）のぶんとして記録します。
+              <span style=${{color:"var(--sub)",fontWeight:400}}>過去の日はXPが付きません。</span>
+            </div>`}
         </div>
         <textarea ref=${inputRef} class="txa" placeholder="例：8時に起きて朝ごはん、10時から友達とカフェで勉強、昼は移動して13時に打ち合わせ…と1日を丸ごと話してもOK" value=${text}
           onInput=${e=>setText(e.target.value)} style=${{minHeight:110,marginBottom:14,fontSize:15}}/>
         <button class="btn" disabled=${!text.trim()||saving} style=${{opacity:text.trim()?1:0.5}} onClick=${save}>
-          ${saving?"記録中…":"これを記録する"}
+          ${saving?"記録中…":(dayBack===0?"これを記録する":["","昨日","一昨日"][dayBack]+"のぶんとして記録する")}
         </button>
         <button onClick=${onClose}
           style=${{display:"block",width:"100%",marginTop:8,background:"none",border:"none",color:"var(--sub)",fontSize:13,cursor:"pointer",fontFamily:"inherit",padding:8}}>閉じる</button>
