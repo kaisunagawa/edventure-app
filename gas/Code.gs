@@ -694,6 +694,26 @@ function doGet(e) {
           timeR("timeUse", function () { getTimeUseSummary(emR); });
         } finally { _sheetReadCacheOn = false; _sheetReadCache = {}; _journalTail = null; }
         msR.__total = Date.now() - tAll;
+        // ★list の中を割る★（2026-08-18）
+        //   list が4〜6秒なのは分かっているが、中のどれが重いか分からないまま
+        //   3回続けて見当違いを直してしまった。部品ごとに測る。
+        _sheetReadCacheOn = true; _sheetReadCache = {}; _journalTail = null;
+        const inR = {};
+        const tIn = function (name, fn) { const t0 = Date.now(); let n = null;
+          try { n = fn(); } catch (er) { inR[name + "_error"] = String(er).slice(0, 80); }
+          inR[name] = Date.now() - t0;
+          if (n && n.length !== undefined) inR[name + "_件数"] = n.length;
+          return n; };
+        try {
+          tIn("Reports読み",      function () { return getFilteredRows("Reports", "student_email", emR); });
+          tIn("Users1行",         function () { return userRow_(emR); });
+          tIn("DailyOps読み",     function () { return p1ListMine_("DailyOpsReport", emR); });
+          tIn("今日ぶん再計算",   function () { return computeDailyOpsFacts(emR, formatDate(new Date())); });
+          tIn("DailyLog絞り",     function () { return getFilteredRows("DailyLog", "student_email", emR); });
+          tIn("Tasks読み",        function () { return p1ListMine_("Tasks", emR); });
+          tIn("WeeklyGoals読み",  function () { return p1ListMine_("WeeklyGoals", emR); });
+        } finally { _sheetReadCacheOn = false; _sheetReadCache = {}; _journalTail = null; }
+        msR.__listの内訳 = inR;
         try { CacheService.getScriptCache().remove(reportCacheKey_(emR)); } catch (e2) {}
         const a1 = Date.now(); const x1 = getReportHome(emR); const m1 = Date.now() - a1;
         const a2 = Date.now(); const x2 = getReportHome(emR); const m2 = Date.now() - a2;
