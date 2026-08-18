@@ -677,6 +677,31 @@ function doGet(e) {
                   "2回目はキャッシュか": !!(r2 && r2.cached),
                   "初回はキャッシュか": !!(r1 && r1.cached) } });
       }
+      // ★レポート画面の内訳を測る（読むだけ）★
+      //     bash gas/ops.sh adminReportTiming email=xxx@example.com
+      case "adminReportTiming": {
+        if (!verifyAdmin(e.parameter.coachEmail)) return jsonResponse({ ok: false, error: "not admin" });
+        const emR = String(e.parameter.email || "").trim();
+        if (!emR) return jsonResponse({ ok: false, error: "email が要ります" });
+        const msR = {};
+        const timeR = function (name, fn) { const t0 = Date.now(); try { fn(); } catch (er) { msR[name + "_error"] = String(er).slice(0, 120); } msR[name] = Date.now() - t0; };
+        _sheetReadCacheOn = true; _sheetReadCache = {}; _journalTail = null;
+        const tAll = Date.now();
+        try {
+          timeR("list",    function () { getReportList(emR); });
+          timeR("weekly",  function () { getWeeklySummary(emR); });
+          timeR("monthly", function () { getMonthlyReview(emR); });
+          timeR("timeUse", function () { getTimeUseSummary(emR); });
+        } finally { _sheetReadCacheOn = false; _sheetReadCache = {}; _journalTail = null; }
+        msR.__total = Date.now() - tAll;
+        try { CacheService.getScriptCache().remove(reportCacheKey_(emR)); } catch (e2) {}
+        const a1 = Date.now(); const x1 = getReportHome(emR); const m1 = Date.now() - a1;
+        const a2 = Date.now(); const x2 = getReportHome(emR); const m2 = Date.now() - a2;
+        return jsonResponse({ ok: true, ms: msR,
+          report: { 初回: m1, "2回目": m2,
+                    "2回目はキャッシュか": !!(x2 && x2.cached),
+                    "初回はキャッシュか": !!(x1 && x1.cached) } });
+      }
       // 独り言の「記録する」が何秒かかったか（直近5回・読むだけ）
       //   bash gas/ops.sh adminQuickLogTimings
       case "adminQuickLogTimings": {
@@ -1796,6 +1821,8 @@ function doGet(e) {
       case "saveWeeklyAvailable": result = saveWeeklyAvailable(studentEmail, e.parameter); break;
       case "quickLog":     result = quickLog(studentEmail, e.parameter); break;
       case "parseTasks":   result = parseTasks(studentEmail, e.parameter); break;
+      case "saveCondition": result = saveCondition(studentEmail, e.parameter); break;
+      case "getCondition":  result = getCondition(studentEmail); break;
       case "saveLogMulti": result = saveLogMulti(studentEmail, e.parameter); break;
       case "coachGetStudents":      result = coachGetStudents(e.parameter.coachEmail); break;
       case "adminTagCohortByJoinDate": result = adminTagCohortByJoinDate(e.parameter.coachEmail, e.parameter.date, e.parameter.cohort); break;
@@ -2025,6 +2052,8 @@ function doPost(e) {
       case "saveWeeklyAvailable": return jsonResponse(saveWeeklyAvailable(studentEmail, body));
       case "quickLog":     return jsonResponse(quickLog(studentEmail, body));
       case "parseTasks":   return jsonResponse(parseTasks(studentEmail, body));
+      case "saveCondition": return jsonResponse(saveCondition(studentEmail, body));
+      case "getCondition":  return jsonResponse(getCondition(studentEmail));
       case "saveLogMulti": return jsonResponse(saveLogMulti(studentEmail, body));
       case "sendMessage":  return jsonResponse(sendMessage(studentEmail, body));
       case "saveSettings": return jsonResponse(saveSettings(studentEmail, body));
@@ -2513,6 +2542,7 @@ function getHomeData(studentEmail) {
       })(),
       weekly:       safe(function () { return getWeeklySummary(studentEmail); }),
       intent:       safe(function () { return getIntent(studentEmail); }),
+      condition:    safe(function () { return getCondition(studentEmail); }),
       todayActions: safe(function () { return getTodayActions(studentEmail); })
     };
     // ★ロードマップと自己経営力もここに載せる★（2026-08-05 起動高速化）
@@ -10506,13 +10536,30 @@ function getTodayActions(studentEmail) {
 }
 
 function getIntent(studentEmail) {
+  // ★Journalを丸ごと読まない★（2026-08-17 実測 2,341ms → 276ms）
+  //   欲しいのは「その人の、今日の1行」だけなのに、
+  //   sheetToObjects でシート全体を読んで全行をオブジェクトに変換していた。
+  //   Journalは日付順に増えるので、今日の行は必ず末尾のかたまりの中にある。
+  //   コンディションと同じ末尾読みを共有するので、読み込みは1回で済む。
   const today = formatDate(new Date());
-  if (!getSheet("Journal")) return { ok: true, data: null };
-  const row = sheetToObjects(getJournalSheet()).find(r => {
-    const rd = r.date instanceof Date ? Utilities.formatDate(r.date, "Asia/Tokyo", "yyyy-MM-dd") : String(r.date);
-    return r.student_email === studentEmail && rd === today;
-  });
-  return { ok: true, data: row && row.intent ? { intent: row.intent, done: String(row.intent_done) === "true", hours: row.intent_hours ? Number(row.intent_hours) : null } : null };
+  const t = journalTail_(800);
+  if (!t) return { ok: true, data: null };
+  const head = t.headers, vals = t.rows;
+  const iEmail = head.indexOf("student_email"), iDate = head.indexOf("date");
+  const iIntent = head.indexOf("intent"), iDone = head.indexOf("intent_done"), iHours = head.indexOf("intent_hours");
+  if (iEmail === -1 || iDate === -1 || iIntent === -1) return { ok: true, data: null };
+  for (let i = vals.length - 1; i >= 0; i--) {
+    const r = vals[i];
+    if (String(r[iEmail]) !== studentEmail) continue;
+    const rd = r[iDate] instanceof Date
+      ? Utilities.formatDate(r[iDate], "Asia/Tokyo", "yyyy-MM-dd") : String(r[iDate]);
+    if (rd !== today) continue;
+    if (!r[iIntent]) return { ok: true, data: null };
+    return { ok: true, data: { intent: r[iIntent],
+      done: String(iDone === -1 ? "" : r[iDone]) === "true",
+      hours: (iHours !== -1 && r[iHours]) ? Number(r[iHours]) : null } };
+  }
+  return { ok: true, data: null };
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -13372,9 +13419,104 @@ function igDisconnect() {
 //   すでに有効なとき（getHomeData 経由など）は何もせず、状態も壊さない。
 function withSheetCache_(fn) {
   const already = _sheetReadCacheOn;
-  if (!already) { _sheetReadCacheOn = true; _sheetReadCache = {}; }
+  if (!already) { _sheetReadCacheOn = true; _sheetReadCache = {}; _journalTail = null; }
   try { return fn(); }
-  finally { if (!already) { _sheetReadCacheOn = false; _sheetReadCache = {}; } }
+  finally { if (!already) { _sheetReadCacheOn = false; _sheetReadCache = {}; _journalTail = null; } }
+}
+
+// ★Journalの末尾だけを1回読んで使い回す★（2026-08-18）
+//   1人1日1行なので、今日と直近1週間は必ず末尾のかたまりに入っている。
+//   今日のフォーカスもコンディションもここを見るので、読み込みは1回で済む。
+var _journalTail = null;
+function journalTail_(nRows) {
+  if (_sheetReadCacheOn && _journalTail) return _journalTail;
+  const sh = getJournalSheet();
+  if (!sh) return null;
+  const last = sh.getLastRow();
+  if (last < 2) return null;
+  const width = sh.getLastColumn();
+  const headers = sh.getRange(1, 1, 1, width).getValues()[0];
+  const want = Math.max(200, Math.min(2000, nRows || 800));
+  const from = Math.max(2, last - (want - 1));
+  const rows = sh.getRange(from, 1, last - from + 1, width).getValues();
+  const out = { headers: headers, rows: rows };
+  if (_sheetReadCacheOn) _journalTail = out;
+  return out;
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// コンディション（睡眠・運動・食事）（2026-08-18 Kai要望）
+//   「健康アプリ」を足すのではなく、時間の使い方と結びつけて見るための材料。
+//   入れ物は Journal の同じ行。新しいシートを作らないので、読み込みは増えない。
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// 目安。あとで人ごとに変えられるようにする前提で、まず全員同じ値から始める。
+const COND_TARGET = { sleepHours: 7, exerciseDaysPerWeek: 3, mealDaysPerWeek: 5 };
+const COND_EXERCISE_SCORE = { none: 0, light: 0.5, solid: 1 };
+
+function saveCondition(studentEmail, body) {
+  const f = {};
+  if (body.sleep_hours !== undefined) {
+    const v = Number(body.sleep_hours);
+    f.sleep_hours = (isFinite(v) && v > 0) ? Math.min(24, Math.round(v * 10) / 10) : "";
+  }
+  if (body.exercise !== undefined) {
+    const v = String(body.exercise || "");
+    f.exercise = (v === "none" || v === "light" || v === "solid") ? v : "";
+  }
+  if (body.meal !== undefined) {
+    const v = Number(body.meal);
+    f.meal = (isFinite(v) && v >= 1 && v <= 5) ? Math.round(v) : "";
+  }
+  if (!Object.keys(f).length) return { ok: false, error: "missing params" };
+  upsertJournalRow(studentEmail, logicalToday_(), f);
+  return { ok: true };
+}
+
+// 直近7日を集計して、目安に対する達成度（0〜100）を3つ返す。
+// 記録が無い日は「0点」ではなく「その日は数えない」。
+// 始めたばかりの人が、入れていないだけで低く出るのを避けるため。
+function getCondition(studentEmail) {
+  const t = journalTail_(800);
+  const today = logicalToday_();
+  const from = Utilities.formatDate(new Date(new Date(today + "T00:00:00+09:00").getTime() - 6 * 86400000),
+                                    "Asia/Tokyo", "yyyy-MM-dd");
+  const empty = { ok: true, data: { days: 0, today: null,
+    axes: { sleep: null, exercise: null, meal: null }, score: null, target: COND_TARGET } };
+  if (!t) return empty;
+  const h = t.headers;
+  const iEmail = h.indexOf("student_email"), iDate = h.indexOf("date");
+  const iSleep = h.indexOf("sleep_hours"), iEx = h.indexOf("exercise"), iMeal = h.indexOf("meal");
+  if (iEmail === -1 || iDate === -1) return empty;
+  let sleepSum = 0, sleepDays = 0, exDays = 0, mealDays = 0, days = 0;
+  let todayRow = null;
+  for (let i = 0; i < t.rows.length; i++) {
+    const r = t.rows[i];
+    if (String(r[iEmail]) !== studentEmail) continue;
+    const d = r[iDate] instanceof Date
+      ? Utilities.formatDate(r[iDate], "Asia/Tokyo", "yyyy-MM-dd") : String(r[iDate]).slice(0, 10);
+    if (d < from || d > today) continue;
+    const sleep = (iSleep !== -1) ? Number(r[iSleep]) : NaN;
+    const ex = (iEx !== -1) ? String(r[iEx] || "") : "";
+    const meal = (iMeal !== -1) ? Number(r[iMeal]) : NaN;
+    const has = (isFinite(sleep) && sleep > 0) || ex || (isFinite(meal) && meal > 0);
+    if (!has) continue;
+    days++;
+    if (isFinite(sleep) && sleep > 0) { sleepSum += sleep; sleepDays++; }
+    if (COND_EXERCISE_SCORE[ex] !== undefined) exDays += COND_EXERCISE_SCORE[ex];
+    if (isFinite(meal) && meal >= 4) mealDays++;
+    if (d === today) todayRow = { sleep_hours: isFinite(sleep) ? sleep : null, exercise: ex || null,
+                                  meal: isFinite(meal) ? meal : null };
+  }
+  if (!days) return empty;
+  const pct = function (v) { return Math.max(0, Math.min(100, Math.round(v * 100))); };
+  const axes = {
+    sleep: sleepDays ? pct((sleepSum / sleepDays) / COND_TARGET.sleepHours) : null,
+    exercise: pct(exDays / COND_TARGET.exerciseDaysPerWeek),
+    meal: pct(mealDays / COND_TARGET.mealDaysPerWeek)
+  };
+  const got = [axes.sleep, axes.exercise, axes.meal].filter(function (x) { return x !== null; });
+  const score = got.length ? Math.round(got.reduce(function (a, b) { return a + b; }, 0) / got.length) : null;
+  return { ok: true, data: { days: days, today: todayRow, axes: axes, score: score, target: COND_TARGET } };
 }
 
 function getRoadmap(studentEmail) {
@@ -16909,7 +17051,7 @@ const ADMIN_SECRET_ALLOWLIST = {
   // 一斉送信（Kaiの明示的な要望により残す）
   adminBroadcastLine:1, adminBroadcastLinePending:1, adminSendStudentCampaign:1,
   // セットアップ・保守
-  adminSetupTriggers:1, adminInstallTrigger:1, adminSetupPhase1:1, adminSetupAuth:1, adminPhase4DryRun:1, adminLegacyBackfill:1, adminWritePathStats:1, adminIssueTestSession:1, adminDropTestSessions:1, adminOpsSelfTest:1, adminActualMinutesAudit:1, adminXpCorrection:1, adminStreakRecalc:1, adminGrantFeature:1, adminUserDiag:1, adminReportScoreDryRun:1, adminReportGenTest:1, adminScoreConsistency:1, adminFinalizeOps:1, adminUnfinalizeOps:1, adminSmpDump:1, adminSmpWarmAll:1, adminLevelAudit:1, adminXpRestore:1, adminCleanupPlusLogs:1, adminClassAudit:1, adminRecolorCalendar:1, adminFixTokenVersion:1, adminPurgeChallenges:1, adminJiroBackfill:1, adminJiroReset:1, adminScoreDist:1, adminStripeSyncStatus:1, adminCommunityTiming:1, adminOpsScoreAudit:1, adminListTriggers:1, adminHomeTiming:1, adminScreenTiming:1, adminQuickLogTimings:1, adminScoreTrace:1, adminJiroSignals:1, adminLogTimes:1, adminJiroFound:1, adminReportGenFailures:1,
+  adminSetupTriggers:1, adminInstallTrigger:1, adminSetupPhase1:1, adminSetupAuth:1, adminPhase4DryRun:1, adminLegacyBackfill:1, adminWritePathStats:1, adminIssueTestSession:1, adminDropTestSessions:1, adminOpsSelfTest:1, adminActualMinutesAudit:1, adminXpCorrection:1, adminStreakRecalc:1, adminGrantFeature:1, adminUserDiag:1, adminReportScoreDryRun:1, adminReportGenTest:1, adminScoreConsistency:1, adminFinalizeOps:1, adminUnfinalizeOps:1, adminSmpDump:1, adminSmpWarmAll:1, adminLevelAudit:1, adminXpRestore:1, adminCleanupPlusLogs:1, adminClassAudit:1, adminRecolorCalendar:1, adminFixTokenVersion:1, adminPurgeChallenges:1, adminJiroBackfill:1, adminJiroReset:1, adminScoreDist:1, adminStripeSyncStatus:1, adminCommunityTiming:1, adminOpsScoreAudit:1, adminListTriggers:1, adminHomeTiming:1, adminScreenTiming:1, adminReportTiming:1, adminQuickLogTimings:1, adminScoreTrace:1, adminJiroSignals:1, adminLogTimes:1, adminJiroFound:1, adminReportGenFailures:1,
   igStatus:1, igAuthUrl:1, igFetchNow:1, igDisconnect:1, igResetMetrics:1, igConfigure:1, adminAiUsage:1, adminPropsCheck:1, adminBackfillReports:1, adminDeleteTrigger:1, adminStudioLimit:1, adminOnboardingAudit:1, adminStats:1,
   authSetMode:1, authSetEnforce:1, authRoleApply:1, authRoleDryRun:1, authRevokeAll:1,
   authCleanupTestData:1, adminPurgeTestUsers:1, adminMigrateTasks:1, authBreakerReset:1, rotateSessionSecret:1,
