@@ -5060,12 +5060,24 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
           <div style=${{display:"flex",alignItems:"center",gap:14}}>
             <${ConditionRadar} axes=${cond.axes} size=${132}/>
             <div style=${{flex:1,minWidth:0}}>
-              ${cond.score!==null&&html`
-                <div style=${{display:"flex",alignItems:"baseline",gap:4,marginBottom:8}}>
-                  <span style=${{fontSize:26,fontWeight:800,color:"var(--accent)",lineHeight:1,
-                                 fontVariantNumeric:"tabular-nums"}}>${cond.score}</span>
-                  <span style=${{fontSize:11,color:"var(--sub)",fontWeight:700}}>/ 100</span>
-                </div>`}
+              <!-- ★材料が足りないうちは断定しない★（2026-08-18 Kai指摘）
+                   1日分の数字で「コンディション100」と出るのは、この指標の意味と合わない。 -->
+              ${cond.score!==null
+                ? html`
+                  <div style=${{display:"flex",alignItems:"baseline",gap:5,marginBottom:8,flexWrap:"wrap"}}>
+                    <span style=${{fontSize:26,fontWeight:800,color:"var(--accent)",lineHeight:1,
+                                   fontVariantNumeric:"tabular-nums"}}>${cond.score}</span>
+                    <span style=${{fontSize:11,color:"var(--sub)",fontWeight:700}}>/ 100</span>
+                    ${cond.provisional&&html`
+                      <span style=${{fontSize:9.5,fontWeight:800,color:"var(--sub)",
+                                     border:"1px solid var(--border)",borderRadius:20,padding:"1px 7px"}}>
+                        暫定${cond.days_to_fix?"・あと"+cond.days_to_fix+"日":""}</span>`}
+                  </div>`
+                : html`
+                  <div style=${{fontSize:11.5,color:"var(--sub)",lineHeight:1.7,marginBottom:8}}>
+                    総合はあと${cond.days_to_score||1}日で出ます<br/>
+                    <span style=${{fontSize:10.5,color:"var(--faint)"}}>1日ぶんだと、まだ傾向が読めないためです</span>
+                  </div>`}
               <!-- ★あと何をすれば100%かを添える★（2026-08-18 Kai要望）
                    点数だけだと「なぜ低いのか」が分からない。 -->
               ${[["sleep","睡眠"],["exercise","運動"],["meal","食事"]].map(([k,lb])=>html`
@@ -11296,7 +11308,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260818-121835";
+const APP_BUILD = "20260818-123147";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 

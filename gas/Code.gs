@@ -13625,7 +13625,17 @@ function getCondition(studentEmail) {
       : (axes.meal >= 100 ? "目安どおり"
         : "あと " + r1(COND_TARGET.mealScale - mealSum / mealDays) + " 段階")
   };
-  return { ok: true, data: { days: days, today: todayRow, axes: axes, score: score,
+  // ★材料が足りないうちは「総合」を断定しない★（2026-08-18 Kai指摘）
+  //   1日目に睡眠だけ入れると、平均7時間＝100点となり「コンディション100」と出る。
+  //   数字1つで満点を言い切るのは、この指標の意味と合わない。
+  //   軸ごとの数字は事実なのでそのまま出し、まとめの点数だけ3日たってから出す。
+  //   7日そろうまでは「暫定」と正直に添える（自己経営力と同じ考え方）。
+  const COND_MIN_DAYS = 3;
+  return { ok: true, data: { days: days, today: todayRow, axes: axes,
+                             score: days >= COND_MIN_DAYS ? score : null,
+                             provisional: days < 7,
+                             days_to_score: Math.max(0, COND_MIN_DAYS - days),
+                             days_to_fix: Math.max(0, 7 - days),
                              target: COND_TARGET, hint: hint } };
 }
 
