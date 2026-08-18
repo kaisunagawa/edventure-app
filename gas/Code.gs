@@ -3221,15 +3221,31 @@ function opsBand(score) {
 function computeDailyOpsFacts(studentEmail, dateStr, fixture) {
   const date = String(dateStr || formatDate(new Date())).slice(0, 10);
   const fx = fixture || null;
-  const logs = fx ? (fx.logs || []) : sheetToObjects(getSheet("DailyLog")).filter(function (l) {
+  // ★全員ぶんをオブジェクト化しない★（2026-08-18 実測 getReportList 4.3〜4.8秒）
+  //   欲しいのは「自分の、その日ぶん」だけなのに、
+  //   DailyLog（2,024行）と Journal を全行オブジェクトに変換してから絞っていた。
+  //   この関数はレポート一覧を開くたびに呼ばれるので、そのまま待ち時間になる。
+  //   getFilteredRows は先に自分の行だけに絞ってから変換する。
+  const logs = fx ? (fx.logs || []) : getFilteredRows("DailyLog", "student_email", studentEmail).filter(function (l) {
     // 論理削除された記録は数えない（消したのに評価へ残るのを防ぐ）
-    return String(l.student_email) === studentEmail && String(l.date).slice(0, 10) === date &&
-           !String(l.deleted_at || "").trim(); });
+    return String(l.date).slice(0, 10) === date && !String(l.deleted_at || "").trim(); });
   const tasks = fx ? (fx.tasks || []) : p1ListMine_("Tasks", studentEmail).filter(function (t) {
     return !String(t.deleted_at || "").trim() && p1DateOut_(t.date) === date; });
-  const journal = fx ? (fx.journal || {}) : (sheetToObjects(getJournalSheet()).find(function (r) {
-    const rd = r.date instanceof Date ? Utilities.formatDate(r.date, "Asia/Tokyo", "yyyy-MM-dd") : String(r.date).slice(0, 10);
-    return String(r.student_email) === studentEmail && rd === date; }) || {});
+  const journal = fx ? (fx.journal || {}) : (function () {
+    // Journalは1人1日1行。今日の行は末尾のかたまりにあるので、そこだけ見る。
+    const t = journalTail_(800);
+    if (!t) return {};
+    const iEmail = t.headers.indexOf("student_email"), iDate = t.headers.indexOf("date");
+    if (iEmail === -1 || iDate === -1) return {};
+    for (let i = t.rows.length - 1; i >= 0; i--) {
+      const r = t.rows[i];
+      if (String(r[iEmail]) !== studentEmail) continue;
+      const rd = r[iDate] instanceof Date
+        ? Utilities.formatDate(r[iDate], "Asia/Tokyo", "yyyy-MM-dd") : String(r[iDate]).slice(0, 10);
+      if (rd === date) return rowToObject(r, t.headers);
+    }
+    return {};
+  })();
   const wgs = fx ? (fx.weekly_goals || []) : p1ListMine_("WeeklyGoals", studentEmail).filter(function (w) { return p1Status_(w.status, "ACTIVE") === "ACTIVE"; });
 
   // state 既定は insufficient_data（測る手段が無い＝分母に残して充足度を下げる）。
