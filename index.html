@@ -2760,7 +2760,8 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
   const [talkOpen, setTalkOpen] = useState(false);
   const [talkText, setTalkText] = useState("");
   const [talkBusy, setTalkBusy] = useState(false);
-  const makeTasksFromTalk = async () => {
+  // where … "intent"（朝のフォーカス画面） / "edit"（今日のタスクの編集画面）
+  const makeTasksFromTalk = async (where) => {
     const t = talkText.trim();
     if (!t || talkBusy) return;
     setTalkBusy(true);
@@ -2772,10 +2773,15 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
       onToast&&onToast((r&&r.error)||"うまく分けられませんでした。話した内容はそのまま残っています");
       return;   // 入力は消さない
     }
-    // すでに書いてあるぶんは残し、話したぶんを足す
-    const kept = intentTasks.filter(x=>String(x&&x.text||"").trim());
     const add = r.tasks.map(x=>({ text:String(x.title||""), min: x.minutes>0 ? String(x.minutes) : "" }));
-    setIntentTasks([...kept, ...add, {text:"",min:""}]);
+    // すでに書いてあるぶんは残し、話したぶんを足す
+    if (where === "edit") {
+      const keptE = editItems.filter(x=>String(x&&x.text||"").trim());
+      setEditItems([...keptE, ...add]);
+    } else {
+      const kept = intentTasks.filter(x=>String(x&&x.text||"").trim());
+      setIntentTasks([...kept, ...add, {text:"",min:""}]);
+    }
     setTalkText(""); setTalkOpen(false);
     onToast&&onToast(r.fallback ? `${add.length}件に分けました（そのままの言葉で入れています）` : `${add.length}件のタスクにしました`);
   };
@@ -5080,7 +5086,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
                 placeholder="例：午前は提案書を1時間、そのあと新規に架電。夕方ジムに行く。"
                 style=${{margin:0,resize:"vertical",lineHeight:1.7}}
                 onInput=${e=>setTalkText(e.target.value)}/>
-              <button onClick=${makeTasksFromTalk} disabled=${!talkText.trim()||talkBusy}
+              <button onClick=${()=>makeTasksFromTalk("intent")} disabled=${!talkText.trim()||talkBusy}
                 style=${{width:"100%",marginTop:8,padding:"10px",borderRadius:10,border:"none",
                          background:"var(--accent)",color:"#fff",fontSize:12.5,fontWeight:700,
                          cursor:talkText.trim()&&!talkBusy?"pointer":"default",
@@ -5678,8 +5684,40 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
     ${editMode&&html`
       <div style=${{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"center",justifyContent:"center",padding:16,zIndex:200}}>
         <div style=${{background:"var(--card)",borderRadius:20,boxShadow:"0 18px 50px rgba(0,0,0,0.35)",padding:"24px 20px 32px",width:"100%",maxWidth:420,boxSizing:"border-box",maxHeight:"84dvh",overflowY:"auto"}}>
-          <div style=${{fontSize:17,fontWeight:800,marginBottom:4}}>今日のタスクを編集</div>
+          <div style=${{display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:10,marginBottom:4}}>
+            <div style=${{fontSize:17,fontWeight:800}}>今日のタスクを編集</div>
+            <!-- ★ここからも話すだけで作れる★（2026-08-17 Kai要望）
+                 朝のポップアップを待たなくても使えるようにする。 -->
+            <button onClick=${()=>setTalkOpen(v=>!v)}
+              style=${{flexShrink:0,display:"inline-flex",alignItems:"center",gap:6,height:30,
+                       background:talkOpen?"var(--accent-l)":"linear-gradient(135deg, var(--hero1) 0%, var(--hero2) 100%)",
+                       border:"none",borderRadius:15,padding:"0 12px 0 10px",cursor:"pointer",fontFamily:"inherit"}}>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke=${talkOpen?"var(--accent)":"#fff"}
+                   stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/>
+                <path d="M19 10v1a7 7 0 0 1-14 0v-1"/><line x1="12" y1="19" x2="12" y2="22"/></svg>
+              <span style=${{fontSize:11.5,fontWeight:800,color:talkOpen?"var(--accent)":"#fff",whiteSpace:"nowrap",lineHeight:1}}>話すだけ</span>
+            </button>
+          </div>
           <div style=${{fontSize:12,color:"var(--sub)",marginBottom:16}}>やることと、想定時間（分・任意）を入力できます。タイマーでそのタスクを選ぶと、その時間で始まります。</div>
+          ${talkOpen&&html`
+            <div style=${{background:"var(--bg)",border:"1px solid var(--border)",borderRadius:12,
+                          padding:"10px 11px",marginBottom:14}}>
+              <div style=${{fontSize:11,color:"var(--sub)",lineHeight:1.7,marginBottom:7}}>
+                今日やることを、思いつくまま話してください。<br/>
+                キーボードのマイクを押すと声で入力できます。
+              </div>
+              <textarea class="inp" rows="3" value=${talkText} disabled=${talkBusy}
+                placeholder="例：午前は提案書を1時間、そのあと新規に架電。夕方ジムに行く。"
+                style=${{margin:0,resize:"vertical",lineHeight:1.7}}
+                onInput=${e=>setTalkText(e.target.value)}/>
+              <button onClick=${()=>makeTasksFromTalk("edit")} disabled=${!talkText.trim()||talkBusy}
+                style=${{width:"100%",marginTop:8,padding:"10px",borderRadius:10,border:"none",
+                         background:"var(--accent)",color:"#fff",fontSize:12.5,fontWeight:700,
+                         cursor:talkText.trim()&&!talkBusy?"pointer":"default",
+                         opacity:talkText.trim()&&!talkBusy?1:0.5,fontFamily:"inherit"}}>
+                ${talkBusy?"分けています…":"タスクにする"}</button>
+            </div>`}
           ${editItems.map((item,i)=>html`
             <div key=${i} style=${{display:"flex",gap:8,alignItems:"center",marginBottom:10}}>
               <input class="inp" style=${{flex:1,margin:0}} value=${item.text}
@@ -5702,7 +5740,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
           ${editError && html`<div style=${{background:"var(--red-l)",border:"1px solid var(--red)",color:"var(--red)",
             borderRadius:10,padding:"10px 12px",fontSize:12.5,lineHeight:1.8,marginBottom:10,whiteSpace:"pre-wrap"}}>${editError}</div>`}
           <button class="btn" onClick=${saveEdit} style=${{marginBottom:10}}>保存する</button>
-          <button onClick=${()=>setEditMode(false)}
+          <button onClick=${()=>{setEditMode(false);setTalkOpen(false);setTalkText("");}}
             style=${{width:"100%",background:"none",border:"none",color:"var(--sub)",fontSize:13,padding:"8px",cursor:"pointer"}}>キャンセル</button>
         </div>
       </div>
@@ -11053,7 +11091,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260818-095802";
+const APP_BUILD = "20260818-100617";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
