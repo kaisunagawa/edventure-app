@@ -3238,6 +3238,45 @@ function opsBand(score) {
 
 // その日の経営事実を数値化する。AIは呼ばない（同じ入力なら同じ結果）
 // fixture を渡すとシートを読まずに計算する（テスト用）
+// ★その日ぶんの記録だけを、末尾から取り出す★（2026-08-18 実測）
+//   DailyLogは追記されるので、ある日の記録は末尾のかたまりに入っている。
+//   ただし「末尾に入っている」と言い切れるのは、
+//   その日付が末尾のかたまりの中でいちばん古い日付より後のときだけ。
+//   そうでなければ、これまでどおり全件から絞る（正しさを優先する）。
+function dailyLogRowsFor_(studentEmail, date) {
+  const sh = getSheet("DailyLog");
+  const last = sh.getLastRow();
+  if (last < 2) return [];
+  const N = 900;
+  if (last - 1 > N) {
+    const width = sh.getLastColumn();
+    const headers = sh.getRange(1, 1, 1, width).getValues()[0];
+    const iEm = headers.indexOf("student_email"), iDt = headers.indexOf("date");
+    if (iEm !== -1 && iDt !== -1) {
+      const from = last - N + 1;
+      const rows = sh.getRange(from, 1, last - from + 1, width).getValues();
+      const dOf = function (v) {
+        return v instanceof Date ? Utilities.formatDate(v, "Asia/Tokyo", "yyyy-MM-dd") : String(v).slice(0, 10); };
+      let oldest = null;
+      for (let i = 0; i < rows.length; i++) {
+        const d = dOf(rows[i][iDt]);
+        if (d && (oldest === null || d < oldest)) oldest = d;
+      }
+      if (oldest !== null && date > oldest) {
+        const out = [];
+        for (let i = 0; i < rows.length; i++) {
+          if (String(rows[i][iEm]) !== studentEmail) continue;
+          if (dOf(rows[i][iDt]) !== date) continue;
+          out.push(rowToObject(rows[i], headers));
+        }
+        return out;
+      }
+    }
+  }
+  return getFilteredRows("DailyLog", "student_email", studentEmail)
+    .filter(function (l) { return String(l.date).slice(0, 10) === date; });
+}
+
 function computeDailyOpsFacts(studentEmail, dateStr, fixture) {
   const date = String(dateStr || formatDate(new Date())).slice(0, 10);
   const fx = fixture || null;
@@ -3246,9 +3285,9 @@ function computeDailyOpsFacts(studentEmail, dateStr, fixture) {
   //   DailyLog（2,024行）と Journal を全行オブジェクトに変換してから絞っていた。
   //   この関数はレポート一覧を開くたびに呼ばれるので、そのまま待ち時間になる。
   //   getFilteredRows は先に自分の行だけに絞ってから変換する。
-  const logs = fx ? (fx.logs || []) : getFilteredRows("DailyLog", "student_email", studentEmail).filter(function (l) {
+  const logs = fx ? (fx.logs || []) : dailyLogRowsFor_(studentEmail, date).filter(function (l) {
     // 論理削除された記録は数えない（消したのに評価へ残るのを防ぐ）
-    return String(l.date).slice(0, 10) === date && !String(l.deleted_at || "").trim(); });
+    return !String(l.deleted_at || "").trim(); });
   const tasks = fx ? (fx.tasks || []) : p1ListMine_("Tasks", studentEmail).filter(function (t) {
     return !String(t.deleted_at || "").trim() && p1DateOut_(t.date) === date; });
   const journal = fx ? (fx.journal || {}) : (function () {
