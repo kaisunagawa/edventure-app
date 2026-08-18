@@ -2757,6 +2757,48 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
   // ★話すだけで今日のタスクを作る★（2026-08-17 Kai要望）
   //   朝、やることを口で言うだけで一覧になるように。
   //   ただし勝手に保存はしない。候補を出して、直してから保存させる。
+  // ★コンディション（睡眠・運動・食事）★（2026-08-18 Kai要望）
+  //   健康アプリを足すのではなく、時間の使い方と並べて見るための材料。
+  //   入れ物は今日のフォーカスと同じ Journal の行なので、読み込みは増えない。
+  const [cond, setCond] = useState(()=>{
+    try { return JSON.parse(localStorage.getItem("cache_condition")||"null"); } catch(e){ return null; }
+  });
+  const [condOpen, setCondOpen] = useState(false);
+  const [condSaving, setCondSaving] = useState(false);
+  const [condDraft, setCondDraft] = useState({sleep:"", exercise:"", meal:""});
+  // 画面に出ている今日の値を、下書きの初期値にする
+  useEffect(()=>{
+    const t = cond && cond.today;
+    if (!t) return;
+    setCondDraft(d=>({
+      sleep: d.sleep!=="" ? d.sleep : (t.sleep_hours!=null ? String(t.sleep_hours) : ""),
+      exercise: d.exercise || (t.exercise || ""),
+      meal: d.meal!=="" ? d.meal : (t.meal!=null ? String(t.meal) : "")
+    }));
+  }, [cond]);
+  const saveCondition = async () => {
+    if (condSaving) return;
+    const body = {};
+    if (String(condDraft.sleep).trim()!=="") body.sleep_hours = String(condDraft.sleep).trim();
+    if (condDraft.exercise) body.exercise = condDraft.exercise;
+    if (String(condDraft.meal).trim()!=="") body.meal = String(condDraft.meal).trim();
+    if (!Object.keys(body).length) { onToast&&onToast("どれか1つ入れてください"); return; }
+    setCondSaving(true);
+    // 先に画面へ反映してから送る（保存を待たせない）
+    const nextToday = {
+      sleep_hours: body.sleep_hours!==undefined ? Number(body.sleep_hours) : (cond&&cond.today&&cond.today.sleep_hours)||null,
+      exercise: body.exercise!==undefined ? body.exercise : (cond&&cond.today&&cond.today.exercise)||null,
+      meal: body.meal!==undefined ? Number(body.meal) : (cond&&cond.today&&cond.today.meal)||null };
+    setCond(c=>({...(c||{axes:{},score:null,days:0}), today: nextToday}));
+    setCondOpen(false);
+    const r = await gasPostJson("saveCondition", body).catch(()=>null);
+    setCondSaving(false);
+    if (!(r&&r.ok)) { onToast&&onToast("保存できませんでした。もう一度お試しください"); return; }
+    onToast&&onToast("今日のコンディションを記録しました");
+    // 7日ぶんの点数を取り直す（裏で）
+    gasApi("getCondition").then(x=>{ if(x&&x.ok&&x.data){ setCond(x.data);
+      try{ localStorage.setItem("cache_condition", JSON.stringify(x.data)); }catch(e){} } }).catch(()=>{});
+  };
   const [talkOpen, setTalkOpen] = useState(false);
   const [talkText, setTalkText] = useState("");
   const [talkBusy, setTalkBusy] = useState(false);
@@ -2911,6 +2953,8 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
         if(d.game.goals?.length){ localStorage.setItem("jiroku_goals",JSON.stringify(d.game.goals)); onGoalSaved(d.game.goals); }
       }
       if(d.schedule) setSchedule(d.schedule);
+      if(d.condition){ setCond(d.condition);
+        try{ localStorage.setItem("cache_condition", JSON.stringify(d.condition)); }catch(e){} }
       if(d.logs){
         setTodayLogs(d.logs);
         // 今日の記録のうち、まだカレンダーに書けていないものを補完（独り言等の取りこぼし対策）
@@ -4435,6 +4479,99 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
         </div>
       </div>`;
     })()}
+
+    <!-- ── コンディション（睡眠・運動・食事）──（2026-08-18 Kai要望）
+         時間の使い方と並べて見るための材料。入れ物は今日のフォーカスと同じ行なので、
+         シートの読み込みは増えていない。 -->
+    <div style=${{margin:"12px 16px 0",background:"var(--card)",borderRadius:20,
+                  border:"1px solid var(--border)",padding:"16px 16px 14px"}}>
+      <div style=${{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,marginBottom:4}}>
+        <span style=${{fontSize:13.5,fontWeight:800,color:"var(--text)"}}>コンディション</span>
+        <span style=${{fontSize:10.5,color:"var(--sub)"}}>直近7日</span>
+      </div>
+      ${(cond&&cond.days>0)
+        ? html`
+          <div style=${{display:"flex",alignItems:"center",gap:14}}>
+            <${ConditionRadar} axes=${cond.axes} size=${132}/>
+            <div style=${{flex:1,minWidth:0}}>
+              ${cond.score!==null&&html`
+                <div style=${{display:"flex",alignItems:"baseline",gap:4,marginBottom:8}}>
+                  <span style=${{fontSize:26,fontWeight:800,color:"var(--accent)",lineHeight:1,
+                                 fontVariantNumeric:"tabular-nums"}}>${cond.score}</span>
+                  <span style=${{fontSize:11,color:"var(--sub)",fontWeight:700}}>/ 100</span>
+                </div>`}
+              ${[["sleep","睡眠","目安 "+((cond.target&&cond.target.sleepHours)||7)+"時間"],
+                 ["exercise","運動","目安 週"+((cond.target&&cond.target.exerciseDaysPerWeek)||3)],
+                 ["meal","食事","目安 週"+((cond.target&&cond.target.mealDaysPerWeek)||5)+"日"]].map(([k,lb,memo])=>html`
+                <div key=${k} style=${{display:"grid",gridTemplateColumns:"2.6em 1fr 2.6em",gap:7,
+                                       alignItems:"center",marginBottom:6}}>
+                  <span style=${{fontSize:11,color:"var(--text)",fontWeight:700}}>${lb}</span>
+                  <span style=${{height:5,borderRadius:99,background:"var(--bg)",display:"block",overflow:"hidden"}}>
+                    <span style=${{display:"block",height:"100%",borderRadius:99,background:"var(--accent)",
+                                   width:Math.max(0,Math.min(100,Number(cond.axes[k]||0)))+"%"}}/></span>
+                  <span style=${{fontSize:10.5,color:"var(--sub)",textAlign:"right",fontVariantNumeric:"tabular-nums"}}>
+                    ${cond.axes[k]===null||cond.axes[k]===undefined?"—":cond.axes[k]}</span>
+                </div>`)}
+              <div style=${{fontSize:10,color:"var(--sub)",marginTop:2}}>${cond.days}日ぶんで計算</div>
+            </div>
+          </div>`
+        : html`
+          <div style=${{fontSize:12,color:"var(--sub)",lineHeight:1.75,margin:"6px 0 4px"}}>
+            睡眠・運動・食事を入れると、7日ぶんの傾向がここに出ます。<br/>
+            記録の無い日は数えないので、途中から始めても大丈夫です。
+          </div>`}
+      ${condOpen
+        ? html`
+          <div style=${{marginTop:12,paddingTop:12,borderTop:"1px solid var(--border)"}}>
+            <div style=${{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
+              <span style=${{fontSize:11.5,color:"var(--text)",fontWeight:700,width:"3.2em",flexShrink:0}}>睡眠</span>
+              <input class="inp" type="number" inputmode="decimal" step="0.5" min="0" max="24"
+                value=${condDraft.sleep} placeholder="6.5"
+                style=${{width:76,margin:0,textAlign:"center",padding:"9px 6px"}}
+                onInput=${e=>setCondDraft(d=>({...d,sleep:e.target.value}))}/>
+              <span style=${{fontSize:11.5,color:"var(--sub)"}}>時間</span>
+            </div>
+            <div style=${{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
+              <span style=${{fontSize:11.5,color:"var(--text)",fontWeight:700,width:"3.2em",flexShrink:0}}>運動</span>
+              <div style=${{display:"flex",gap:6,flexWrap:"wrap"}}>
+                ${[["none","なし"],["light","軽く"],["solid","しっかり"]].map(([v,lb])=>html`
+                  <button key=${v} onClick=${()=>setCondDraft(d=>({...d,exercise:d.exercise===v?"":v}))}
+                    style=${{padding:"6px 12px",borderRadius:99,fontSize:11.5,fontWeight:600,cursor:"pointer",
+                             fontFamily:"inherit",background:"transparent",
+                             border:`1px solid ${condDraft.exercise===v?"var(--accent)":"var(--border)"}`,
+                             color:condDraft.exercise===v?"var(--accent)":"var(--sub)"}}>${lb}</button>`)}
+              </div>
+            </div>
+            <div style=${{display:"flex",alignItems:"center",gap:8,marginBottom:12}}>
+              <span style=${{fontSize:11.5,color:"var(--text)",fontWeight:700,width:"3.2em",flexShrink:0}}>食事</span>
+              <div style=${{display:"flex",gap:6}}>
+                ${[1,2,3,4,5].map(v=>html`
+                  <button key=${v} onClick=${()=>setCondDraft(d=>({...d,meal:String(d.meal)===String(v)?"":String(v)}))}
+                    style=${{width:34,height:34,borderRadius:"50%",fontSize:12.5,fontWeight:700,cursor:"pointer",
+                             fontFamily:"inherit",background:"transparent",
+                             border:`1px solid ${String(condDraft.meal)===String(v)?"var(--accent)":"var(--border)"}`,
+                             color:String(condDraft.meal)===String(v)?"var(--accent)":"var(--sub)"}}>${v}</button>`)}
+              </div>
+            </div>
+            <div style=${{fontSize:10.5,color:"var(--sub)",lineHeight:1.7,marginBottom:10}}>
+              食事は「整えられた」と思えたら4か5。厳密でなくて大丈夫です。
+            </div>
+            <button onClick=${saveCondition} disabled=${condSaving}
+              style=${{width:"100%",padding:"11px",borderRadius:11,border:"none",background:"var(--accent)",
+                       color:"#fff",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit",
+                       opacity:condSaving?0.6:1}}>${condSaving?"保存中…":"今日のぶんを記録する"}</button>
+            <button onClick=${()=>setCondOpen(false)}
+              style=${{width:"100%",marginTop:6,background:"none",border:"none",color:"var(--sub)",
+                       fontSize:12,cursor:"pointer",fontFamily:"inherit",padding:6}}>閉じる</button>
+          </div>`
+        : html`
+          <button onClick=${()=>setCondOpen(true)}
+            style=${{width:"100%",marginTop:12,padding:"10px",borderRadius:11,
+                     border:"1px solid var(--accent)",background:"none",color:"var(--accent)",
+                     fontSize:12.5,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
+            ${(cond&&cond.today&&(cond.today.sleep_hours||cond.today.exercise||cond.today.meal))
+              ? "今日のぶんを直す" : "今日のぶんを記録する"}</button>`}
+    </div>
 
     ${entrySheet&&html`<${GoalEntrySheet} goal=${entrySheet.goal} entry=${entrySheet.entry}
       weekly=${!!entrySheet.weekly}
@@ -7056,6 +7193,45 @@ const BREAKDOWN_TIPS = {
   goal:        {icon:"rocket",  text:"目標に関連する記録の積み重ねで育ちます。しばらく離れると落ちるので継続が大事です。"},
   consistency: {icon:"flame",   text:"記録した日数の積み重ねで育ちます。1日1記録を続けることで維持され、休むと落ちていきます。"},
 };
+
+// ★3軸のレーダー（睡眠・運動・食事）★（2026-08-18 Kai要望）
+//   旧ステータス用の BreakdownRadar は5軸に固定だったので、別に小さく描く。
+//   まだ記録が無い軸は線を引かない（0点として描くと、入れていないだけなのに
+//   「できていない」ように見えてしまうため）。
+const COND_AXES = [["sleep","睡眠"],["exercise","運動"],["meal","食事"]];
+function ConditionRadar({axes, size}) {
+  const S = size || 132;
+  const cx = S/2, cy = S/2 + 4, maxR = S*0.34;
+  const start = -Math.PI/2, step = (Math.PI*2)/3;
+  const pt = (i, frac) => {
+    const a = start + i*step;
+    return [cx + Math.cos(a)*maxR*frac, cy + Math.sin(a)*maxR*frac];
+  };
+  const ring = f => COND_AXES.map((_,i)=>pt(i,f).map(n=>n.toFixed(1)).join(",")).join(" ");
+  const vals = COND_AXES.map(([k])=>{
+    const v = axes && axes[k];
+    return (v===null||v===undefined) ? null : Math.max(0,Math.min(100,Number(v)))/100;
+  });
+  const known = vals.filter(v=>v!==null).length;
+  const poly = COND_AXES.map((_,i)=>pt(i, vals[i]===null?0:vals[i]).map(n=>n.toFixed(1)).join(",")).join(" ");
+  return html`
+    <svg width=${S} height=${S} viewBox=${"0 0 "+S+" "+S} style=${{display:"block",flexShrink:0}}>
+      ${[0.34,0.67,1].map(f=>html`
+        <polygon key=${f} points=${ring(f)} fill="none" stroke="var(--border)" stroke-width="1"/>`)}
+      ${COND_AXES.map((_,i)=>{
+        const [x,y]=pt(i,1);
+        return html`<line key=${i} x1=${cx} y1=${cy} x2=${x.toFixed(1)} y2=${y.toFixed(1)}
+                      stroke="var(--border)" stroke-width="1"/>`;
+      })}
+      ${known>=2&&html`<polygon points=${poly} fill="var(--accent)" fill-opacity="0.18"
+                        stroke="var(--accent)" stroke-width="2" stroke-linejoin="round"/>`}
+      ${COND_AXES.map(([k,label],i)=>{
+        const [x,y]=pt(i,1.42);
+        return html`<text key=${k} x=${x.toFixed(1)} y=${(y+4).toFixed(1)} text-anchor="middle"
+                      font-size="10.5" font-weight="700" fill="var(--sub)">${label}</text>`;
+      })}
+    </svg>`;
+}
 
 function BreakdownRadar({breakdown}) {
   const N = BREAKDOWN_CATS.length;
@@ -11091,7 +11267,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260818-100617";
+const APP_BUILD = "20260818-104053";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
