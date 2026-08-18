@@ -4500,9 +4500,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
                                  fontVariantNumeric:"tabular-nums"}}>${cond.score}</span>
                   <span style=${{fontSize:11,color:"var(--sub)",fontWeight:700}}>/ 100</span>
                 </div>`}
-              ${[["sleep","睡眠","目安 "+((cond.target&&cond.target.sleepHours)||7)+"時間"],
-                 ["exercise","運動","目安 週"+((cond.target&&cond.target.exerciseDaysPerWeek)||3)],
-                 ["meal","食事","目安 週"+((cond.target&&cond.target.mealDaysPerWeek)||5)+"日"]].map(([k,lb,memo])=>html`
+              ${[["sleep","睡眠"],["exercise","運動"],["meal","食事"]].map(([k,lb])=>html`
                 <div key=${k} style=${{display:"grid",gridTemplateColumns:"2.6em 1fr 2.6em",gap:7,
                                        alignItems:"center",marginBottom:6}}>
                   <span style=${{fontSize:11,color:"var(--text)",fontWeight:700}}>${lb}</span>
@@ -4513,6 +4511,16 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
                     ${cond.axes[k]===null||cond.axes[k]===undefined?"—":cond.axes[k]}</span>
                 </div>`)}
               <div style=${{fontSize:10,color:"var(--sub)",marginTop:2}}>${cond.days}日ぶんで計算</div>
+              <!-- ★今日入れた値をそのまま出す★（2026-08-18 Kai指摘）
+                   点数だけだと、保存できたのかどうかが分からない。 -->
+              ${cond.today&&(cond.today.sleep_hours||cond.today.exercise||cond.today.meal)&&html`
+                <div style=${{fontSize:10.5,color:"var(--text)",marginTop:6,lineHeight:1.6}}>
+                  今日：${[
+                    cond.today.sleep_hours ? cond.today.sleep_hours+"時間" : null,
+                    ({none:"運動なし",light:"軽く運動",solid:"しっかり運動"})[cond.today.exercise] || null,
+                    cond.today.meal ? "食事"+cond.today.meal : null
+                  ].filter(Boolean).join("・")}
+                </div>`}
             </div>
           </div>`
         : html`
@@ -11274,7 +11282,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260818-112855";
+const APP_BUILD = "20260818-114244";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 

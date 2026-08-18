@@ -2361,7 +2361,14 @@ function getReportList(studentEmail) {
       const today = formatDate(new Date());
       const finalizedToday = opsRows.some(function (r) {
         return String(r.report_date).slice(0, 10) === today && String(r.finalized_at || "").trim(); });
+      // ★一覧に今日の行が無いなら、計算しない★（2026-08-18 実測 1,802〜2,210ms）
+      //   一覧は Reports にある日付しか表示しない。夜のレポートが作られる22時までは
+      //   今日の行が無いので、ここで計算した値は一度も使われずに捨てられていた。
+      //   その計算に DailyLog・Tasks・WeeklyGoals・Journal を読んでいて、
+      //   レポート画面4.2秒のうち約2秒がこれだった。
+      const hasTodayRow = rows.some(function (r) { return String(r.date).slice(0, 10) === today; });
       try {
+        if (!hasTodayRow) throw new Error("今日の行がないので不要");
         if (finalizedToday) throw new Error("finalized");   // 締めた日は触らない
         const f = computeDailyOpsFacts(studentEmail, today);
         const v = (f.operating_score !== null && f.operating_score !== undefined)
@@ -13529,7 +13536,9 @@ function journalTail_(nRows) {
 //   入れ物は Journal の同じ行。新しいシートを作らないので、読み込みは増えない。
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // 目安。あとで人ごとに変えられるようにする前提で、まず全員同じ値から始める。
-const COND_TARGET = { sleepHours: 7, exerciseDaysPerWeek: 3, mealDaysPerWeek: 5 };
+// 食事は「4以上の日数」で数えていたが、3を入れても0点のままで
+// 入れた実感と合わなかった（2026-08-18 Kai指摘）。1〜5の平均で見る。
+const COND_TARGET = { sleepHours: 7, exerciseDaysPerWeek: 3, mealScale: 5 };
 const COND_EXERCISE_SCORE = { none: 0, light: 0.5, solid: 1 };
 
 function saveCondition(studentEmail, body) {
@@ -13566,7 +13575,7 @@ function getCondition(studentEmail) {
   const iEmail = h.indexOf("student_email"), iDate = h.indexOf("date");
   const iSleep = h.indexOf("sleep_hours"), iEx = h.indexOf("exercise"), iMeal = h.indexOf("meal");
   if (iEmail === -1 || iDate === -1) return empty;
-  let sleepSum = 0, sleepDays = 0, exDays = 0, mealDays = 0, days = 0;
+  let sleepSum = 0, sleepDays = 0, exDays = 0, mealSum = 0, mealDays = 0, days = 0;
   let todayRow = null;
   for (let i = 0; i < t.rows.length; i++) {
     const r = t.rows[i];
@@ -13582,7 +13591,7 @@ function getCondition(studentEmail) {
     days++;
     if (isFinite(sleep) && sleep > 0) { sleepSum += sleep; sleepDays++; }
     if (COND_EXERCISE_SCORE[ex] !== undefined) exDays += COND_EXERCISE_SCORE[ex];
-    if (isFinite(meal) && meal >= 4) mealDays++;
+    if (isFinite(meal) && meal > 0) { mealSum += meal; mealDays++; }
     if (d === today) todayRow = { sleep_hours: isFinite(sleep) ? sleep : null, exercise: ex || null,
                                   meal: isFinite(meal) ? meal : null };
   }
@@ -13591,7 +13600,7 @@ function getCondition(studentEmail) {
   const axes = {
     sleep: sleepDays ? pct((sleepSum / sleepDays) / COND_TARGET.sleepHours) : null,
     exercise: pct(exDays / COND_TARGET.exerciseDaysPerWeek),
-    meal: pct(mealDays / COND_TARGET.mealDaysPerWeek)
+    meal: mealDays ? pct((mealSum / mealDays) / COND_TARGET.mealScale) : null
   };
   const got = [axes.sleep, axes.exercise, axes.meal].filter(function (x) { return x !== null; });
   const score = got.length ? Math.round(got.reduce(function (a, b) { return a + b; }, 0) / got.length) : null;
