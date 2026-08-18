@@ -13597,14 +13597,36 @@ function getCondition(studentEmail) {
   }
   if (!days) return empty;
   const pct = function (v) { return Math.max(0, Math.min(100, Math.round(v * 100))); };
+  // ★運動だけ、経過日数に合わせて目安を按分する★（2026-08-18 Kai指摘）
+  //   睡眠と食事は「記録した日の平均」なので、1日入れれば満点が出る。
+  //   運動だけ「7日で3日」の合計で見ていたため、まだ2日目でも分母が3のまま。
+  //   1日しっかり運動しても33%にしかならず、画面に書いてある
+  //   「記録の無い日は数えないので、途中から始めても低く出ません」と食い違っていた。
+  //   記録が何日ぶんあるかで目安を割る（7日そろえば従来どおり3日が目安）。
+  const exTarget = COND_TARGET.exerciseDaysPerWeek * Math.min(1, days / 7);
   const axes = {
     sleep: sleepDays ? pct((sleepSum / sleepDays) / COND_TARGET.sleepHours) : null,
-    exercise: pct(exDays / COND_TARGET.exerciseDaysPerWeek),
+    exercise: exTarget > 0 ? pct(exDays / exTarget) : null,
     meal: mealDays ? pct((mealSum / mealDays) / COND_TARGET.mealScale) : null
   };
   const got = [axes.sleep, axes.exercise, axes.meal].filter(function (x) { return x !== null; });
   const score = got.length ? Math.round(got.reduce(function (a, b) { return a + b; }, 0) / got.length) : null;
-  return { ok: true, data: { days: days, today: todayRow, axes: axes, score: score, target: COND_TARGET } };
+  // ★あと何をすれば100%になるかを、そのまま返す★（2026-08-18 Kai要望）
+  //   仕組みが見えないと「なぜ低いのか」が分からない。
+  const r1 = function (v) { return Math.round(v * 10) / 10; };
+  const hint = {
+    sleep: (axes.sleep === null) ? null
+      : (axes.sleep >= 100 ? "目安どおり"
+        : "あと " + r1(COND_TARGET.sleepHours - sleepSum / sleepDays) + " 時間"),
+    exercise: (axes.exercise === null) ? null
+      : (axes.exercise >= 100 ? "目安どおり"
+        : "あと " + r1(Math.max(0, exTarget - exDays)) + " 日"),
+    meal: (axes.meal === null) ? null
+      : (axes.meal >= 100 ? "目安どおり"
+        : "あと " + r1(COND_TARGET.mealScale - mealSum / mealDays) + " 段階")
+  };
+  return { ok: true, data: { days: days, today: todayRow, axes: axes, score: score,
+                             target: COND_TARGET, hint: hint } };
 }
 
 function getRoadmap(studentEmail) {

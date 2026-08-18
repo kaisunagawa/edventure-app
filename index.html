@@ -5066,17 +5066,26 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
                                  fontVariantNumeric:"tabular-nums"}}>${cond.score}</span>
                   <span style=${{fontSize:11,color:"var(--sub)",fontWeight:700}}>/ 100</span>
                 </div>`}
+              <!-- ★あと何をすれば100%かを添える★（2026-08-18 Kai要望）
+                   点数だけだと「なぜ低いのか」が分からない。 -->
               ${[["sleep","睡眠"],["exercise","運動"],["meal","食事"]].map(([k,lb])=>html`
-                <div key=${k} style=${{display:"grid",gridTemplateColumns:"2.6em 1fr 2.6em",gap:7,
-                                       alignItems:"center",marginBottom:6}}>
-                  <span style=${{fontSize:11,color:"var(--text)",fontWeight:700}}>${lb}</span>
-                  <span style=${{height:5,borderRadius:99,background:"var(--bg)",display:"block",overflow:"hidden"}}>
-                    <span style=${{display:"block",height:"100%",borderRadius:99,background:"var(--accent)",
-                                   width:Math.max(0,Math.min(100,Number(cond.axes[k]||0)))+"%"}}/></span>
-                  <span style=${{fontSize:10.5,color:"var(--sub)",textAlign:"right",fontVariantNumeric:"tabular-nums"}}>
-                    ${cond.axes[k]===null||cond.axes[k]===undefined?"—":cond.axes[k]}</span>
+                <div key=${k} style=${{marginBottom:7}}>
+                  <div style=${{display:"grid",gridTemplateColumns:"2.6em 1fr 2.6em",gap:7,alignItems:"center"}}>
+                    <span style=${{fontSize:11,color:"var(--text)",fontWeight:700}}>${lb}</span>
+                    <span style=${{height:5,borderRadius:99,background:"var(--bg)",display:"block",overflow:"hidden"}}>
+                      <span style=${{display:"block",height:"100%",borderRadius:99,background:"var(--accent)",
+                                     width:Math.max(0,Math.min(100,Number(cond.axes[k]||0)))+"%"}}/></span>
+                    <span style=${{fontSize:10.5,color:"var(--sub)",textAlign:"right",fontVariantNumeric:"tabular-nums"}}>
+                      ${cond.axes[k]===null||cond.axes[k]===undefined?"—":cond.axes[k]}</span>
+                  </div>
+                  ${(cond.hint&&cond.hint[k])&&html`
+                    <div style=${{fontSize:9.5,color:"var(--faint)",marginTop:2,paddingLeft:"3.4em"}}>
+                      ${cond.hint[k]}</div>`}
                 </div>`)}
-              <div style=${{fontSize:10,color:"var(--sub)",marginTop:2}}>${cond.days}日ぶんで計算</div>
+              <div style=${{fontSize:10,color:"var(--sub)",marginTop:2,lineHeight:1.7}}>
+                ${cond.days}日ぶんで計算<br/>
+                目安：睡眠 ${(cond.target&&cond.target.sleepHours)||7}時間・運動 週${(cond.target&&cond.target.exerciseDaysPerWeek)||3}日・食事 5段階
+              </div>
               <!-- ★今日入れた値をそのまま出す★（2026-08-18 Kai指摘）
                    点数だけだと、保存できたのかどうかが分からない。 -->
               ${cond.today&&(cond.today.sleep_hours||cond.today.exercise||cond.today.meal)&&html`
@@ -11287,7 +11296,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260818-115304";
+const APP_BUILD = "20260818-121835";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
