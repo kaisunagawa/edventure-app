@@ -6539,9 +6539,11 @@ function LogScreen({onToast, isActive}) {
     const onVis = () => { if(document.visibilityState === "visible") pull(); };
     document.addEventListener("visibilitychange", onVis);
     window.addEventListener("focus", pull);      // PCはこちらが主
+    window.addEventListener("jiroku:logsaved", pull); // 独り言が裏で書き終わったとき
     const t = setInterval(pull, 60000);
     return ()=>{ alive=false; document.removeEventListener("visibilitychange", onVis);
-                 window.removeEventListener("focus", pull); clearInterval(t); };
+                 window.removeEventListener("focus", pull);
+                 window.removeEventListener("jiroku:logsaved", pull); clearInterval(t); };
   },[date, isActive]);
 
   const save = async ()=>{
@@ -11313,7 +11315,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260818-164640";
+const APP_BUILD = "20260818-204233";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
@@ -12550,74 +12552,77 @@ function FeatureAnnounce({onClose,onGo}){
 }
 
 // 独り言（クイック記録）シート。話す/書くだけで、AIが構造化して即保存する
+// ★話したら、待たせない★（2026-08-18 Kai指摘）
+//   これまでは「送る」を押してから、AIの仕分けとシートへの書き込みが
+//   全部終わるまで画面が止まっていた（実測で15〜21秒）。
+//   手入力の記録はとっくに裏送りにしてあったのに、独り言だけ待たせていた。
+//   ここでは送った瞬間に画面を返し、書き込みはうしろで続ける。
+//   失敗したときだけ、話した文をそのまま戻して出し直せるようにする。
+const QL_FAILED_LS = "ql_failed";
+function runQuickLogInBackground(t, date, onToast){
+  gasPostJson("quickLog", date ? {text:t, date:date} : {text:t}).then(r=>{
+    if(!(r&&r.ok)){
+      try{ localStorage.setItem(QL_FAILED_LS, JSON.stringify({text:t, date:date||""})); }catch(e){}
+      onToast((r&&r.error)||"記録できませんでした。🎙をもう一度押すと、話した内容が残っています");
+      return;
+    }
+    try{ localStorage.removeItem(QL_FAILED_LS); }catch(e){}
+    const s=r.saved||{}, cnt=r.count||1;
+    let msg;
+    if(r.fallback) msg="記録しました（内容はそのまま保存しました）";
+    else if(cnt>1) msg=cnt+"件記録しました";
+    else msg="記録しました："+(s.task||"記録")+(s.focus_level?"（集中"+s.focus_level+"）":"");
+    if(r.xp_gained){ msg+=" +"+r.xp_gained+"XP"; if(r.level_up)msg+=" Lv."+r.level+"！"; }
+    onToast(msg);
+    setTimeout(()=>announceJiroFound(r), 1200);
+    // 記録一覧・ホームを、書き終わった時点で取り直す
+    try{ window.dispatchEvent(new CustomEvent("jiroku:logsaved")); }catch(e){}
+    try{
+      if(localStorage.getItem("cal_linked") && Array.isArray(r.savedAll)){
+        r.savedAll.forEach(rec=>{
+          const tb = String(rec.time_block||""); if(!tb) return;
+          const dateStr = String(rec.date||"").slice(0,10) || formatDateStr(new Date());
+          const [startHM, endHM] = tb.split("-");
+          const stt = new Date(dateStr+"T"+startHM.slice(0,5)+":00"); if(isNaN(stt)) return;
+          const ett = endHM ? new Date(dateStr+"T"+endHM.slice(0,5)+":00") : null;
+          const endDt = (ett && ett>stt) ? ett : new Date(stt.getTime()+3600000);
+          upsertCalendarEvent(dateStr, tb, stt.toISOString(), endDt.toISOString(), rec.task||"記録", null, false, rec.time_classification||"");
+        });
+      }
+    }catch(e){}
+  }).catch(()=>{
+    try{ localStorage.setItem(QL_FAILED_LS, JSON.stringify({text:t, date:date||""})); }catch(e){}
+    onToast("通信が届きませんでした。🎙をもう一度押すと、話した内容が残っています");
+  });
+}
 function QuickLogSheet({onClose,onToast}){
-  const [text,setText]=useState("");
+  // 前回うまく記録できなかった話し言葉が残っていれば、そのまま出し直せる
+  const failed=(()=>{ try{ return JSON.parse(localStorage.getItem(QL_FAILED_LS)||"null"); }catch(e){ return null; } })();
+  const [text,setText]=useState((failed&&failed.text)||"");
   const [saving,setSaving]=useState(false);
   // ★いつのぶんを話すか選べるようにする★（2026-08-18 kyokaさん要望）
   //   その日のうちに入れ損ねると、翌日あきらめることになっていた。
   //   0=今日 / 1=昨日 / 2=一昨日。
-  const [dayBack,setDayBack]=useState(0);
+  const [dayBack,setDayBack]=useState(()=>{
+    const d=(failed&&failed.date)||""; if(!d) return 0;
+    const t=addDays(formatDateStr(new Date()),0);
+    return d===addDays(t,-1)?1:(d===addDays(t,-2)?2:0);
+  });
   const dayOf=(n)=>addDays(formatDateStr(new Date()), -n);
   const inputRef=React.useRef(null);
   useEffect(()=>{ setTimeout(()=>{ try{inputRef.current&&inputRef.current.focus();}catch(e){} },200); },[]);
-  const save=async()=>{
+  const save=()=>{
     const t=text.trim();
     if(!t||saving) return;
-    setSaving(true);
-    let r;
-    try{
-      r=await gasPostJson("quickLog", dayBack>0 ? {text:t, date:dayOf(dayBack)} : {text:t});
-    }catch(e){
-      // 通信エラー等でも「保存中…」で固まらないようにし、入力は消さずに残す
-      setSaving(false);
-      onToast("通信エラーで保存できませんでした。もう一度お試しください");
-      return;
-    }
-    setSaving(false);
-    if(r&&r.ok){
-      const s=r.saved||{};
-      const cnt=r.count||1;
-      let msg;
-      if(r.fallback){
-        // AIで仕分けできなかった場合も、入力はそのまま1件保存されている
-        msg="記録しました（内容はそのまま保存しました）";
-      } else if(cnt>1){
-        msg=`${cnt}件記録しました`;
-      } else {
-        const focusN=s.focus_level?`（集中${s.focus_level}）`:"";
-        msg=`記録しました：${s.task||"記録"}${focusN}`;
-      }
-      if(r.xp_gained){ msg+=` +${r.xp_gained}XP`; if(r.level_up)msg+=` Lv.${r.level}！`; }
-      onToast(msg);
-      // ★独り言でもジローのカードを出す★（2026-08-07）
-      //   これまでは次にホームを開いたときまで出なかった。
-      //   サーバーがまとめて数えるようになったので、その場で返せる。
-      setTimeout(()=>announceJiroFound(r), 1200);
-      // 独り言で作った記録も、フォーム/タイマーと同様にGoogleカレンダーへ書き戻す。
-      // （以前は独り言だけカレンダー書き込みが漏れており、音声・独り言の記録が
-      //  カレンダーに反映されない原因になっていた）。savedAll=保存された各レコード。
-      try{
-        if(localStorage.getItem("cal_linked") && Array.isArray(r.savedAll)){
-          r.savedAll.forEach(rec=>{
-            const tb = String(rec.time_block||""); if(!tb) return;
-            // ★サーバーが決めた日付を使う★（2026-08-05）
-            //   深夜に話した「昨夜のこと」は前の日に記録される。
-            //   ここで今日の日付を使うと、カレンダーだけ別の日に入ってしまう。
-            const dateStr = String(rec.date||"").slice(0,10) || formatDateStr(new Date());
-            const [startHM, endHM] = tb.split("-");
-            const stt = new Date(dateStr+"T"+startHM.slice(0,5)+":00"); if(isNaN(stt)) return;
-            const ett = endHM ? new Date(dateStr+"T"+endHM.slice(0,5)+":00") : null;
-            const endDt = (ett && ett>stt) ? ett : new Date(stt.getTime()+3600000);
-            upsertCalendarEvent(dateStr, tb, stt.toISOString(), endDt.toISOString(), rec.task||"記録", null, false, rec.time_classification||"");
-          });
-        }
-      }catch(e){}
-      onClose();
-    } else {
-      // 失敗時はテキストを消さず、モーダルも閉じないので、そのまま再送信できる
-      onToast((r&&r.error)||"うまく記録できませんでした。入力はそのまま残っています");
-    }
+    // 送った瞬間に閉じる。書き込みは裏で続く（待たせない）
+    const d = dayBack>0 ? dayOf(dayBack) : null;
+    try{ localStorage.removeItem(QL_FAILED_LS); }catch(e){}
+    setText("");
+    onClose();
+    onToast("記録しています…そのまま使って大丈夫です");
+    runQuickLogInBackground(t, d, onToast);
   };
+
   return ReactDOM.createPortal(html`
     <div style=${{position:"fixed",inset:0,height:"100dvh",background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"center",justifyContent:"center",padding:16,zIndex:550}}
       onClick=${e=>{if(e.target===e.currentTarget)onClose();}}>
