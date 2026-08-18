@@ -2765,18 +2765,8 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
   });
   const [condOpen, setCondOpen] = useState(false);
   const [condSaving, setCondSaving] = useState(false);
-  const [condDraft, setCondDraft] = useState({sleep:"", exercise:"", meal:"", bed:"", wake:""});
-  // ★寝た時刻と起きた時刻から睡眠時間を出す★（2026-08-18 Kai要望）
-  //   「7時間」と自分で計算して入れるより、寝た時刻と起きた時刻のほうが思い出しやすい。
-  //   日をまたぐ（23:30→6:30）ので、起床が就寝より前なら24時間足す。
-  const hoursBetween = (bed, wake) => {
-    const p = v => { const m = String(v||"").match(/^(\d{1,2}):(\d{2})$/); return m ? Number(m[1])*60+Number(m[2]) : null; };
-    const b = p(bed), w = p(wake);
-    if (b === null || w === null) return null;
-    const min = (w - b + 1440) % 1440;
-    if (min === 0) return null;
-    return Math.round(min / 6) / 10;   // 0.1時間きざみ
-  };
+  const [condDraft, setCondDraft] = useState({sleep:"", exercise:"", meal:""});
+
   // 画面に出ている今日の値を、下書きの初期値にする
   useEffect(()=>{
     const t = cond && cond.today;
@@ -5143,20 +5133,6 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
                 style=${{width:76,margin:0,textAlign:"center",padding:"9px 6px"}}
                 onInput=${e=>setCondDraft(d=>({...d,sleep:e.target.value}))}/>
               <span style=${{fontSize:11.5,color:"var(--sub)"}}>時間</span>
-            </div>
-            <!-- ★時刻から出せるようにする★（2026-08-18 Kai要望）
-                 何時間寝たかを暗算するより、寝た時刻と起きた時刻のほうが思い出しやすい。 -->
-            <div style=${{display:"flex",alignItems:"center",gap:6,marginBottom:12,paddingLeft:"3.2em",flexWrap:"wrap"}}>
-              <span style=${{fontSize:10.5,color:"var(--sub)"}}>時刻から出す</span>
-              <input class="inp" type="time" value=${condDraft.bed}
-                style=${{width:98,margin:0,textAlign:"center",padding:"7px 4px",fontSize:12}}
-                onInput=${e=>setCondDraft(d=>{const nd={...d,bed:e.target.value};
-                  const h=hoursBetween(nd.bed,nd.wake); if(h!==null) nd.sleep=String(h); return nd;})}/>
-              <span style=${{fontSize:10.5,color:"var(--sub)"}}>→</span>
-              <input class="inp" type="time" value=${condDraft.wake}
-                style=${{width:98,margin:0,textAlign:"center",padding:"7px 4px",fontSize:12}}
-                onInput=${e=>setCondDraft(d=>{const nd={...d,wake:e.target.value};
-                  const h=hoursBetween(nd.bed,nd.wake); if(h!==null) nd.sleep=String(h); return nd;})}/>
             </div>
             <div style=${{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
               <span style=${{fontSize:11.5,color:"var(--text)",fontWeight:700,width:"3.2em",flexShrink:0}}>運動</span>
@@ -11337,7 +11313,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260818-124105";
+const APP_BUILD = "20260818-163425";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
