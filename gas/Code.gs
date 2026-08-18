@@ -5133,11 +5133,55 @@ function logicalToday_(base) {
 //   ★書き換えたら必ず控えにも反映すること★ 忘れると、
 //   同じ時間帯に2件目を入れたときXPが二重に付く。
 var _dlSnapOn = false, _dlSnap = null;
+// ★一括保存の間は「書き込み」も最後に1回だけ★（2026-08-18 Kai「どうしても早く」）
+//   読みは既に1回にまとめてあったが、書きが1件ごとに残っていた。
+//   XPで1回、XpEventsの見出し読みで1回、追記で1回＝1件あたり往復3回。
+//   5件話せば15回。GASは往復1回ごとに時間がかかるので、ここが効く。
+//   ためておいて、まとめ保存が終わるときに1回で流す。
+var _pendWrites = null;
+function pendFlush_() {
+  if (!_pendWrites) return;
+  const pw = _pendWrites; _pendWrites = null;   // 流す前に外す（再入を防ぐ）
+  try {
+    const rows = Object.keys(pw.users || {});
+    if (rows.length && _usersSnap) {
+      const sh = getSheet("Users");
+      rows.forEach(function (k) {
+        const i = Number(k), r = _usersSnap[i];
+        if (r && r.length) sh.getRange(i + 1, 1, 1, r.length).setValues([r]);
+      });
+    }
+  } catch (e) { Logger.log("pendFlush_ users: " + e); }
+  try {
+    if (pw.xp && pw.xp.length) {
+      const sh = getP1Sheet("XpEvents");
+      const hd = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0];
+      const rows = pw.xp.map(function (rec) {
+        return hd.map(function (h) { return rec[h] === undefined ? "" : rec[h]; });
+      });
+      sh.getRange(sh.getLastRow() + 1, 1, rows.length, hd.length).setValues(rows);
+    }
+  } catch (e) {
+    // まとめて流せなかったときだけ、1件ずつの従来のやり方に落とす（XPを落とさない）
+    try { (pw.xp || []).forEach(function (rec) { p1Upsert("XpEvents", "event_id", rec); }); }
+    catch (e2) { Logger.log("pendFlush_ xp: " + e2); }
+  }
+}
+// Users の1マスを書く。まとめ保存の間はためておき、最後に行ごと1回で書く。
+function usersWrite_(sheet, rowIdx, colIdx, value) {
+  usersSnapSet_(rowIdx, colIdx, value);
+  if (_dlSnapOn && _pendWrites && _usersSnap && _usersSnap[rowIdx]) {
+    _pendWrites.users[rowIdx] = 1;
+    return;
+  }
+  sheet.getRange(rowIdx + 1, colIdx + 1).setValue(value);
+}
 function withDailyLogSnapshot_(fn) {
   const already = _dlSnapOn;
-  if (!already) { _dlSnapOn = true; _dlSnap = null; _usersSnap = null; _xpIdsSnap = null; }
+  if (!already) { _dlSnapOn = true; _dlSnap = null; _usersSnap = null; _xpIdsSnap = null; _pendWrites = { users: {}, xp: [] }; }
   try { return fn(); }
-  finally { if (!already) { _dlSnapOn = false; _dlSnap = null; _usersSnap = null; _xpIdsSnap = null; } }
+  finally { if (!already) { try { pendFlush_(); } catch (e) { Logger.log(e); }
+                            _dlSnapOn = false; _dlSnap = null; _usersSnap = null; _xpIdsSnap = null; _pendWrites = null; } }
 }
 function dailyLogValues_(sheet) {
   if (_dlSnapOn && _dlSnap) return _dlSnap;
@@ -5717,6 +5761,12 @@ function xpLedgerAdd_(studentEmail, sourceType, sourceId, amount, reason) {
     amount: Number(amount) || 0, reason: reason || "",
     created_at: new Date().toISOString(), reversed_at: "", reversal_reason: ""
   };
+  // まとめ保存の間はためておき、最後に1回で追記する（見出し読み＋追記の往復を減らす）
+  if (_dlSnapOn && _pendWrites) {
+    _pendWrites.xp.push(rec);
+    if (_xpIdsSnap) _xpIdsSnap[String(sourceId)] = 1;
+    return;
+  }
   try {
     const sh = getP1Sheet("XpEvents");
     const hd = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0];
@@ -5881,15 +5931,13 @@ function addXP(studentEmail, memo, todaysLogCount, logSummary, sourceId) {
     const newLevel = getXpLevel(newXP);
     const levelUp = newLevel > oldLevel;
 
-    usersSheet.getRange(i+1, xpIdx+1).setValue(newXP);
-    usersSnapSet_(i, xpIdx, newXP);   // 次の1件が古いXPから計算しないように
+    usersWrite_(usersSheet, i, xpIdx, newXP);   // 次の1件が古いXPから計算しないように
     // 到達した最高レベルを控えておく（減点の下限に使う）
     try {
       var iPk = headers.indexOf("peak_level");
       if (iPk === -1) { iPk = headers.length; usersSheet.getRange(1, iPk + 1).setValue("peak_level"); }
       if (newLevel > Number(data[i][iPk] || 0)) {
-        usersSheet.getRange(i+1, iPk+1).setValue(newLevel);
-        usersSnapSet_(i, iPk, newLevel);
+        usersWrite_(usersSheet, i, iPk, newLevel);
       }
     } catch (e) {}
     xpLedgerAdd_(studentEmail, "LOG", sourceId, gained, memo && memo.trim() ? "log_with_memo" : "log");
@@ -5897,8 +5945,7 @@ function addXP(studentEmail, memo, todaysLogCount, logSummary, sourceId) {
     // バッジ判定
     const newBadges = checkBadges(studentEmail, currentBadges, newXP, streak, logSummary);
     if (newBadges !== currentBadges) {
-      usersSheet.getRange(i+1, badgesIdx+1).setValue(newBadges);
-      usersSnapSet_(i, badgesIdx, newBadges);
+      usersWrite_(usersSheet, i, badgesIdx, newBadges);
     }
 
     return { xp_gained: gained, total_xp: newXP, level: newLevel, level_up: levelUp, badges: newBadges };
@@ -6781,7 +6828,10 @@ const GOAL_MILESTONES = [10, 25, 50, 100, 200, 365, 500, 1000];
 function incrementGoalBlocksAndNotify(studentEmail, count) {
   if (!count || count <= 0) return;
   const sheet = getSheet("Users");
-  const data = sheet.getDataRange().getValues();
+  // ★まとめ保存の間は控えを使う★（2026-08-18）
+  //   ここが1件ごとに Users を丸ごと読み直し、直に書いていた。
+  //   控えを通さない書き込みは、最後のまとめ書きで消えてしまう。
+  const data = usersValues_(sheet);
   const headers = data[0];
   let colIdx = headers.indexOf("goal_blocks_total");
   if (colIdx === -1) { colIdx = headers.length; sheet.getRange(1, colIdx + 1).setValue("goal_blocks_total"); }
@@ -6791,7 +6841,7 @@ function incrementGoalBlocksAndNotify(studentEmail, count) {
     if (String(data[i][emailIdx]) !== studentEmail) continue;
     const before = Number(data[i][colIdx]) || 0;
     const after = before + count;
-    sheet.getRange(i + 1, colIdx + 1).setValue(after);
+    usersWrite_(sheet, i, colIdx, after);
     const crossed = GOAL_MILESTONES.find(m => before < m && after >= m);
     if (crossed) {
       const lineUserId = data[i][lineIdx];
