@@ -4516,9 +4516,16 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
             </div>
           </div>`
         : html`
-          <div style=${{fontSize:12,color:"var(--sub)",lineHeight:1.75,margin:"6px 0 4px"}}>
-            睡眠・運動・食事を入れると、7日ぶんの傾向がここに出ます。<br/>
-            記録の無い日は数えないので、途中から始めても大丈夫です。
+          <!-- ★何も無いときも枠を見せる★（2026-08-18 Kai指摘）
+               文字だけだと、何が出るのかが分からない。 -->
+          <div style=${{display:"flex",alignItems:"center",gap:14}}>
+            <span style=${{opacity:0.55,flexShrink:0}}><${ConditionRadar} axes=${{}} size=${132}/></span>
+            <div style=${{flex:1,minWidth:0,fontSize:12,color:"var(--sub)",lineHeight:1.8}}>
+              睡眠・運動・食事を入れると、<br/>7日ぶんの傾向がここに出ます。
+              <div style=${{fontSize:11,marginTop:8,lineHeight:1.7}}>
+                記録の無い日は数えないので、<br/>途中から始めても低く出ません。
+              </div>
+            </div>
           </div>`}
       ${condOpen
         ? html`
@@ -11267,7 +11274,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260818-104053";
+const APP_BUILD = "20260818-112855";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 

@@ -10389,10 +10389,20 @@ function upsertJournalRow(studentEmail, targetDate, fields) {
   try {
     const sheet = getJournalSheet();
     let headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
-    ["auto_summary", "intent", "intent_done", "actions", "actions_checked", "intent_hours"].forEach(col => {
+    // ★渡された項目はそのまま扱う★（2026-08-18）
+    //   これまでは決め打ちの6列しか作らず、書き込みも1つずつ手書きだった。
+    //   そのため sleep_hours のような新しい項目を渡しても、
+    //   列が無いので黙って捨てられ、保存したはずの値がどこにも残らなかった。
+    //   （コンディションを入れてもチャートが出ない原因）
+    const wantCols = ["auto_summary", "intent", "intent_done", "actions", "actions_checked", "intent_hours"]
+      .concat(Object.keys(fields || {}));
+    let added = false;
+    wantCols.forEach(col => {
+      if (col === "diary" || col === "updated_at") return;   // 元からある列
       if (headers.indexOf(col) === -1) {
         sheet.getRange(1, headers.length + 1).setValue(col);
         headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+        added = true;
       }
     });
     const diaryIdx = headers.indexOf("diary");
@@ -10411,27 +10421,26 @@ function upsertJournalRow(studentEmail, targetDate, fields) {
         ? Utilities.formatDate(data[i][0], "Asia/Tokyo", "yyyy-MM-dd")
         : String(data[i][0]);
       if (String(data[i][1]) === studentEmail && rowDate === targetDate) {
-        if (fields.diary !== undefined) sheet.getRange(i + 1, diaryIdx + 1).setValue(fields.diary);
-        if (fields.auto_summary !== undefined) sheet.getRange(i + 1, summaryIdx + 1).setValue(fields.auto_summary);
-        if (fields.intent !== undefined) sheet.getRange(i + 1, intentIdx + 1).setValue(fields.intent);
-        if (fields.intent_done !== undefined) sheet.getRange(i + 1, intentDoneIdx + 1).setValue(fields.intent_done);
-        if (fields.actions !== undefined) sheet.getRange(i + 1, actionsIdx + 1).setValue(fields.actions);
-        if (fields.actions_checked !== undefined) sheet.getRange(i + 1, checkedIdx + 1).setValue(fields.actions_checked);
-        if (fields.intent_hours !== undefined) sheet.getRange(i + 1, intentHoursIdx + 1).setValue(fields.intent_hours);
-        sheet.getRange(i + 1, updatedIdx + 1).setValue(now);
+        // ★1セルずつ書かない★ 書き込み1回ごとにシートへの往復が起きる。
+        //   行をまるごと1回で書く（項目が増えても往復は1回のまま）。
+        const rowU = data[i].slice();
+        while (rowU.length < headers.length) rowU.push("");
+        Object.keys(fields).forEach(function (k) {
+          const ci = headers.indexOf(k);
+          if (ci !== -1 && fields[k] !== undefined) rowU[ci] = fields[k];
+        });
+        if (updatedIdx !== -1) rowU[updatedIdx] = now;
+        sheet.getRange(i + 1, 1, 1, rowU.length).setValues([rowU]);
         return;
       }
     }
     const rowArr = new Array(headers.length).fill("");
     rowArr[1] = studentEmail;
-    if (fields.diary !== undefined) rowArr[diaryIdx] = fields.diary;
-    if (fields.auto_summary !== undefined) rowArr[summaryIdx] = fields.auto_summary;
-    if (fields.intent !== undefined) rowArr[intentIdx] = fields.intent;
-    if (fields.intent_done !== undefined) rowArr[intentDoneIdx] = fields.intent_done;
-    if (fields.actions !== undefined) rowArr[actionsIdx] = fields.actions;
-    if (fields.actions_checked !== undefined) rowArr[checkedIdx] = fields.actions_checked;
-    if (fields.intent_hours !== undefined) rowArr[intentHoursIdx] = fields.intent_hours;
-    rowArr[updatedIdx] = now;
+    Object.keys(fields).forEach(function (k) {
+      const ci = headers.indexOf(k);
+      if (ci !== -1 && fields[k] !== undefined) rowArr[ci] = fields[k];
+    });
+    if (updatedIdx !== -1) rowArr[updatedIdx] = now;
     const newRow = sheet.getLastRow() + 1;
     sheet.appendRow(rowArr);
     sheet.getRange(newRow, 1).setNumberFormat("@").setValue(targetDate);
