@@ -798,7 +798,7 @@ setInterval(flushTaskQueue, 60000);
 // 保存系の操作だけを預かる（読み取りはやり直せばよいので預からない）。
 const PENDING_KEY = "jiroku_pending_ops";
 const RETRYABLE_ACTIONS = {
-  saveLog:1, saveLogMulti:1, quickLog:1, saveSettings:1, saveTodayActions:1,
+  saveLog:1, saveLogMulti:1, quickLog:1, parseTasks:1, saveSettings:1, saveTodayActions:1,
   saveGoal:1, saveWeeklyGoal:1, archiveGoalItem:1, saveWeeklyReflection:1,
   saveIntent:1, submitSurvey:1, deleteLog:1
 };
@@ -2754,6 +2754,31 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
   // 宣言モーダルで“ついでに”入力できる今日のタスク（任意・保存時に今日のタスクへ追加）
   // {text, min}（minは想定時間・分、任意。タスクの横に時間として表示・タイマー連携）
   const [intentTasks, setIntentTasks] = useState([{text:"",min:""}]);
+  // ★話すだけで今日のタスクを作る★（2026-08-17 Kai要望）
+  //   朝、やることを口で言うだけで一覧になるように。
+  //   ただし勝手に保存はしない。候補を出して、直してから保存させる。
+  const [talkOpen, setTalkOpen] = useState(false);
+  const [talkText, setTalkText] = useState("");
+  const [talkBusy, setTalkBusy] = useState(false);
+  const makeTasksFromTalk = async () => {
+    const t = talkText.trim();
+    if (!t || talkBusy) return;
+    setTalkBusy(true);
+    let r;
+    try { r = await gasPostJson("parseTasks", { text: t }); }
+    catch(e){ setTalkBusy(false); onToast&&onToast("通信できませんでした。もう一度お試しください"); return; }
+    setTalkBusy(false);
+    if (!(r && r.ok && Array.isArray(r.tasks) && r.tasks.length)) {
+      onToast&&onToast((r&&r.error)||"うまく分けられませんでした。話した内容はそのまま残っています");
+      return;   // 入力は消さない
+    }
+    // すでに書いてあるぶんは残し、話したぶんを足す
+    const kept = intentTasks.filter(x=>String(x&&x.text||"").trim());
+    const add = r.tasks.map(x=>({ text:String(x.title||""), min: x.minutes>0 ? String(x.minutes) : "" }));
+    setIntentTasks([...kept, ...add, {text:"",min:""}]);
+    setTalkText(""); setTalkOpen(false);
+    onToast&&onToast(r.fallback ? `${add.length}件に分けました（そのままの言葉で入れています）` : `${add.length}件のタスクにしました`);
+  };
   const [intentEditMode, setIntentEditMode] = useState(false); // 既存フォーカスの編集で開いたか
   // ★開いてすぐ聞く★（2026-08-03 Kai指摘）
   //   以前はサーバーから今日のデータが返ってくるのを待ってから出していたので、
@@ -2803,6 +2828,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
       try{ localStorage.setItem("jiroku_task_estimates_"+todayKey, JSON.stringify(est)); }catch(e){}
     }
     setIntentTasks([{text:"",min:""}]);
+    setTalkOpen(false); setTalkText("");
   };
   // 既存の「今日のフォーカス」を編集するためにモーダルを開く（現在値をプリフィル）
   const openEditIntent = () => {
@@ -5030,7 +5056,37 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
             <button onClick=${()=>setIntentHours(v=>Math.min(12,Math.round((v+0.5)*10)/10))}
               style=${{width:44,height:44,borderRadius:"50%",border:"1.5px solid var(--border)",background:"transparent",color:"var(--text)",fontSize:20,fontWeight:700,cursor:"pointer"}}>＋</button>
           </div>
-          <label class="form-lbl" style=${{fontSize:11}}>今日のタスクも追加（任意）</label>
+          <div style=${{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,marginBottom:6}}>
+            <label class="form-lbl" style=${{fontSize:11,margin:0}}>今日のタスクも追加（任意）</label>
+            <button onClick=${()=>setTalkOpen(v=>!v)}
+              style=${{flexShrink:0,display:"inline-flex",alignItems:"center",gap:6,height:30,
+                       background:talkOpen?"var(--accent-l)":"linear-gradient(135deg, var(--hero1) 0%, var(--hero2) 100%)",
+                       border:"none",borderRadius:15,padding:"0 12px 0 10px",cursor:"pointer",fontFamily:"inherit"}}>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke=${talkOpen?"var(--accent)":"#fff"}
+                   stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/>
+                <path d="M19 10v1a7 7 0 0 1-14 0v-1"/><line x1="12" y1="19" x2="12" y2="22"/></svg>
+              <span style=${{fontSize:11.5,fontWeight:800,color:talkOpen?"var(--accent)":"#fff",whiteSpace:"nowrap",lineHeight:1}}>話すだけ</span>
+            </button>
+          </div>
+          ${talkOpen&&html`
+            <div style=${{background:"var(--bg)",border:"1px solid var(--border)",borderRadius:12,
+                          padding:"10px 11px",marginBottom:10}}>
+              <div style=${{fontSize:11,color:"var(--sub)",lineHeight:1.7,marginBottom:7}}>
+                今日やることを、思いつくまま話してください。<br/>
+                キーボードのマイクを押すと声で入力できます。
+              </div>
+              <textarea class="inp" rows="3" value=${talkText} disabled=${talkBusy}
+                placeholder="例：午前は提案書を1時間、そのあと新規に架電。夕方ジムに行く。"
+                style=${{margin:0,resize:"vertical",lineHeight:1.7}}
+                onInput=${e=>setTalkText(e.target.value)}/>
+              <button onClick=${makeTasksFromTalk} disabled=${!talkText.trim()||talkBusy}
+                style=${{width:"100%",marginTop:8,padding:"10px",borderRadius:10,border:"none",
+                         background:"var(--accent)",color:"#fff",fontSize:12.5,fontWeight:700,
+                         cursor:talkText.trim()&&!talkBusy?"pointer":"default",
+                         opacity:talkText.trim()&&!talkBusy?1:0.5,fontFamily:"inherit"}}>
+                ${talkBusy?"分けています…":"タスクにする"}</button>
+            </div>`}
           <div style=${{display:"flex",flexDirection:"column",gap:8,marginBottom:6}}>
             ${intentTasks.map((t,i)=>html`
               <div key=${i} style=${{display:"flex",gap:8,alignItems:"center"}}>
@@ -10997,7 +11053,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260817-192930";
+const APP_BUILD = "20260818-095802";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 

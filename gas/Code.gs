@@ -1795,6 +1795,7 @@ function doGet(e) {
       case "saveDayPlan":  result = saveDayPlan(studentEmail, e.parameter); break;
       case "saveWeeklyAvailable": result = saveWeeklyAvailable(studentEmail, e.parameter); break;
       case "quickLog":     result = quickLog(studentEmail, e.parameter); break;
+      case "parseTasks":   result = parseTasks(studentEmail, e.parameter); break;
       case "saveLogMulti": result = saveLogMulti(studentEmail, e.parameter); break;
       case "coachGetStudents":      result = coachGetStudents(e.parameter.coachEmail); break;
       case "adminTagCohortByJoinDate": result = adminTagCohortByJoinDate(e.parameter.coachEmail, e.parameter.date, e.parameter.cohort); break;
@@ -2023,6 +2024,7 @@ function doPost(e) {
       case "saveDayPlan":  return jsonResponse(saveDayPlan(studentEmail, body));
       case "saveWeeklyAvailable": return jsonResponse(saveWeeklyAvailable(studentEmail, body));
       case "quickLog":     return jsonResponse(quickLog(studentEmail, body));
+      case "parseTasks":   return jsonResponse(parseTasks(studentEmail, body));
       case "saveLogMulti": return jsonResponse(saveLogMulti(studentEmail, body));
       case "sendMessage":  return jsonResponse(sendMessage(studentEmail, body));
       case "saveSettings": return jsonResponse(saveSettings(studentEmail, body));
@@ -4716,6 +4718,79 @@ ${text}
           合計: Date.now() - _t0, 件数: saved.length })
   };
 }
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// 朝、話した内容から「今日のタスク」を作る（2026-08-17 Kai要望）
+//   フォーカスを決めるときに、やることを口で言うだけで一覧になるように。
+//   ここでは保存まではしない。候補を返すだけにして、
+//   画面で確かめて直してから保存させる（勝手にタスクが増えないように）。
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+function parseTasks(studentEmail, body) {
+  const text = String(body.text || "").trim();
+  if (!text) return { ok: false, error: "今日やることを話すか、書いてください" };
+  const apiKey = PropertiesService.getScriptProperties().getProperty("CLAUDE_API_KEY");
+  if (!apiKey) return { ok: false, error: "CLAUDE_API_KEY未設定" };
+
+  // 目標が分かれば「どれが目標に効くか」を判断できるので渡す
+  let goalsText = "";
+  try {
+    const u = getFilteredRows("Users", "student_email", studentEmail)[0];
+    if (u) goalsText = effectiveGoalsText(studentEmail, u);
+  } catch (e) {}
+
+  const prompt = `ユーザーが「今日やること」を話し言葉で並べました。これをタスクの一覧に整理してください。
+
+【話した内容】
+${text}
+
+【この人の目標】${goalsText || "未設定"}
+
+【作り方】
+- 話に出てきたやることを、漏れなく1件ずつに分ける。勝手に足さない、勝手に減らさない
+- title は短く、動詞で終わる形にする（例「提案書の構成をつくる」）。20文字以内
+- 所要時間が話に出てきたら minutes に分で入れる（「30分」→30、「1時間」→60）。出てこなければ 0
+- 「〜と〜」のように1文に2つ入っている場合は2件に分ける
+- 挨拶・感想・独り言など、やることでないものは入れない
+- 多くても12件まで
+
+【出力】JSONのみ。前後に説明を書かない。
+{"tasks":[{"title":"...","minutes":0}]}`;
+
+  // 呼び出し方は独り言（quickLog）と同じにそろえる。回数上限も同じ考え方で守る。
+  let out = null;
+  if (aiCapExceeded("parseTasks", studentEmail, 20)) {
+    Logger.log("parseTasks: 回数上限のためAIをスキップ " + studentEmail);
+  } else try {
+    const res = UrlFetchApp.fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
+      payload: JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: 1200,
+                                messages: [{ role: "user", content: prompt }] }),
+      muteHttpExceptions: true
+    });
+    const result = JSON.parse(res.getContentText());
+    logAiUsage(result, "話してタスク化");
+    if (result && result.content && result.content[0]) out = parseAiJson(result.content[0].text);
+  } catch (e) {
+    Logger.log("parseTasks AI例外: " + e);
+  }
+  if (!out || !Array.isArray(out.tasks)) {
+    // ★AIが失敗しても手ぶらで返さない★
+    //   話した内容を行で割って、そのまま候補にする。
+    //   「うまくいかなかったので最初から入力し直し」を避ける。
+    const rough = text.split(/[\n、。]+/).map(function (t) { return t.trim(); })
+      .filter(function (t) { return t.length > 1 && t.length <= 40; }).slice(0, 12);
+    if (!rough.length) return { ok: false, error: "うまく分けられませんでした。もう一度お願いします" };
+    return { ok: true, tasks: rough.map(function (t) { return { title: t, minutes: 0 }; }), fallback: true };
+  }
+  const tasks = out.tasks.map(function (t) {
+    return { title: String((t && t.title) || "").trim().slice(0, 60),
+             minutes: Math.max(0, Math.min(600, Number((t && t.minutes) || 0) || 0)) };
+  }).filter(function (t) { return t.title.length > 0; }).slice(0, 12);
+  if (!tasks.length) return { ok: false, error: "やることが見つかりませんでした" };
+  return { ok: true, tasks: tasks };
+}
+
 
 // サーバー(Kai権限)から、記録をKaiのGoogleカレンダーへ直接書き込む。
 // 全ての記録経路(フォーム/タイマー/独り言)はsaveLog/saveLogMultiを通るので、ここで書けば
