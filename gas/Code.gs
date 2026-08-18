@@ -13869,6 +13869,23 @@ function rowToObject(row, headers) {
 // 有効中は1シート1回だけ読む。書き込みを伴う処理では絶対に有効にしないこと
 // （書いた直後の読み直しが古いままになるため）。
 var _sheetReadCacheOn = false, _sheetReadCache = {};
+// ★生の値も1回だけ読む★（2026-08-18 実測 getReportList 4.3秒）
+//   これまで「1回の呼び出しの間だけ覚えておく」のは
+//   オブジェクトに変換した結果だけだった。そのため
+//   getFilteredRows / p1ListMine_ は、キャッシュが効いている場面に限って
+//   「全行を変換してから絞る」という逆の動きをしていた（下のコメント参照）。
+//   生の値を覚えておけば、読み込みは1回のまま、変換は必要な行だけで済む。
+function sheetValuesCached_(sheet) {
+  var key = null;
+  if (_sheetReadCacheOn && sheet) {
+    try { key = "vals::" + sheet.getName(); } catch (e) { key = null; }
+    if (key && _sheetReadCache[key]) return _sheetReadCache[key];
+  }
+  const data = sheet.getDataRange().getValues();
+  if (key) _sheetReadCache[key] = data;
+  return data;
+}
+
 function sheetToObjects(sheet) {
   var key = null;
   if (_sheetReadCacheOn && sheet) {
@@ -13887,19 +13904,18 @@ function sheetToObjects(sheet) {
 // sheetToObjects()でシート全体を毎回フル変換すると、行数（全生徒の履歴）が
 // 増えるほど遅くなるため、1人分のデータしか使わない関数はこちらを使う
 function getFilteredRows(sheetName, filterColumn, filterValue) {
-  // 読取キャッシュ有効中は、キャッシュ済みの全行からフィルタ（シート再読込を省く）
-  if (_sheetReadCacheOn) {
-    const all = sheetToObjects(getSheet(sheetName));
-    return all.filter(function (r) { return String(r[filterColumn]) === String(filterValue); });
-  }
+  // ★キャッシュ中も「絞ってから変換」にそろえる★（2026-08-18）
+  //   以前はキャッシュ中だけ全行を変換してから絞っていた。
+  //   レポート画面やホームの中は必ずキャッシュ中なので、
+  //   いちばん効いてほしい場面で、いちばん重い動きをしていた。
   const sheet = getSheet(sheetName);
-  const data = sheet.getDataRange().getValues();
-  if (data.length < 2) return [];
+  const data = sheetValuesCached_(sheet);
+  if (!data || data.length < 2) return [];
   const headers = data[0];
   const colIdx = headers.indexOf(filterColumn);
   const rows = [];
   for (let i = 1; i < data.length; i++) {
-    if (String(data[i][colIdx]) !== filterValue) continue;
+    if (String(data[i][colIdx]) !== String(filterValue)) continue;
     rows.push(rowToObject(data[i], headers));
   }
   return rows;
@@ -14266,11 +14282,8 @@ function p1List(sheetName, studentEmail) {
 function p1ListMine_(sheetName, studentEmail) {
   if (!studentEmail) return p1List(sheetName, null);
   const sheet = getP1Sheet(sheetName);
-  if (_sheetReadCacheOn) {
-    return sheetToObjects(sheet).filter(function (r) { return r.student_email === studentEmail; });
-  }
-  const data = sheet.getDataRange().getValues();
-  if (data.length < 2) return [];
+  const data = sheetValuesCached_(sheet);
+  if (!data || data.length < 2) return [];
   const headers = data[0];
   const iEm = headers.indexOf("student_email");
   if (iEm === -1) return sheetToObjects(sheet).filter(function (r) { return r.student_email === studentEmail; });
