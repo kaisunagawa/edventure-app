@@ -8436,19 +8436,6 @@ function ReportScreen() {
             <div style=${{marginBottom:8}}></div>
           </div>`
     }
-    <!-- ★その日のレポートから、そのままストーリーズを作る★（2026-08-20 Kai要望）
-         一覧に置いていたが、1日の区切りは0時ちょうどなので、0時を回ると
-         「今日」は0件になり作れなかった。見ているレポートの日付で作れる場所へ移す。 -->
-    <div class="card" style=${{margin:"8px 16px 12px",display:"flex",alignItems:"center",justifyContent:"space-between",gap:12}}>
-      <div>
-        <div style=${{fontSize:13,fontWeight:700,color:"var(--text)"}}>📱 この日をストーリーズにシェア</div>
-        <div style=${{fontSize:11.5,color:"var(--sub)",marginTop:2,lineHeight:1.5}}>時間の使い方を1枚にして保存できます</div>
-      </div>
-      <button onClick=${()=>makeStory(date)} disabled=${storyBusy}
-        style=${{flexShrink:0,background:"var(--accent)",color:"#fff",border:"none",borderRadius:10,padding:"10px 14px",fontSize:12.5,fontWeight:700,cursor:"pointer",fontFamily:"inherit",opacity:storyBusy?0.6:1,display:"flex",alignItems:"center",gap:6}}>
-        ${storyBusy?html`<div class="spin" style=${{borderColor:"rgba(255,255,255,.3)",borderTopColor:"#fff",width:12,height:12,borderWidth:2}}/>作成中…`:"ストーリーズを作る"}
-      </button>
-    </div>
     ${storyModal}${storyMsgBox}
     ${workReport!==null&&html`
       <div style=${{position:"fixed",inset:0,height:"100dvh",background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"center",justifyContent:"center",padding:16,zIndex:500,overscrollBehavior:"contain"}}
@@ -8711,6 +8698,21 @@ function ReportScreen() {
     }
 
     ${currentView==="diary"&&html`<${JournalSection} date=${date} logs=${logs}/>`}
+
+    <!-- ★その日のレポートから、そのままストーリーズを作る★（2026-08-20 Kai要望）
+         一覧に置いていたが、1日の区切りは0時ちょうどなので、0時を回ると
+         「今日」は0件になり作れなかった。見ているレポートの日付で作れる場所へ移す。 -->
+    <div class="card" style=${{margin:"8px 16px 12px",display:"flex",alignItems:"center",justifyContent:"space-between",gap:12}}>
+      <div>
+        <div style=${{fontSize:13,fontWeight:700,color:"var(--text)"}}>📱 この日をストーリーズにシェア</div>
+        <div style=${{fontSize:11.5,color:"var(--sub)",marginTop:2,lineHeight:1.5}}>時間の使い方を1枚にして保存できます</div>
+      </div>
+      <button onClick=${()=>makeStory(date)} disabled=${storyBusy}
+        style=${{flexShrink:0,background:"var(--accent)",color:"#fff",border:"none",borderRadius:10,padding:"10px 14px",fontSize:12.5,fontWeight:700,cursor:"pointer",fontFamily:"inherit",opacity:storyBusy?0.6:1,display:"flex",alignItems:"center",gap:6}}>
+        ${storyBusy?html`<div class="spin" style=${{borderColor:"rgba(255,255,255,.3)",borderTopColor:"#fff",width:12,height:12,borderWidth:2}}/>作成中…`:"ストーリーズを作る"}
+      </button>
+    </div>
+    ${storyModal}${storyMsgBox}
   </div>`;
 }
 
@@ -11820,7 +11822,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260820-000806";
+const APP_BUILD = "20260820-001216";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
