@@ -626,6 +626,8 @@ async function gasPostJson(action, body = {}) {
       body: JSON.stringify({ action, studentEmail: CURRENT_USER.email, token: getSessionToken(), ...body })
     });
     const j = await r.json();
+    // 書き込みは印を進める。自分で進めた印に自分が反応しないよう、時刻を控える
+    if (action !== "syncTag") __selfWriteAt = Date.now();
     // セッション切れで弾かれた保存操作は、捨てずに預かっておく。
     // 再ログイン後に自動でやり直す（記録が消えるのが一番困るため）
     if (j && j.ok === false && (j.error === "AUTH_REQUIRED" || j.error === "FORBIDDEN")) {
@@ -924,6 +926,60 @@ function noteAuthMode(mode){
   if ((AUTH_RANK[m]||0) >= (AUTH_RANK[prev]||0)) { try{ localStorage.setItem(AUTH_MODE_KEY, m); }catch{} return m; }
   return prev;  // 降格は受け付けない
 }
+// ★パソコンと携帯を、ほぼ同時にそろえる★（2026-08-19 Kai要望）
+//   これまでは記録もタスクも「1分ごとに丸ごと取り直す」だったので、
+//   片方で入れたものがもう片方に出るまで最大1分かかっていた。
+//   間隔を縮めると、そのぶん重い取得を何度も走らせることになる。
+//   そこでサーバーには「最後に何か書いた時刻」だけを置き、
+//   端末は数秒ごとにその印だけを見に行く（シートを読まないので軽い）。
+//   印が変わった時だけ、本体を取りに行く。
+const SYNC_POLL_ACTIVE_MS = 5000;    // 画面を見ている間
+const SYNC_POLL_IDLE_MS   = 20000;   // しばらく触っていない間
+const SYNC_ACTIVE_FOR_MS  = 3 * 60 * 1000;
+let __syncTag = null, __syncTimer = null, __syncBusy = false;
+let __homeCleanup = null;   // ホームの取り直しを外すための控え
+let __selfWriteAt = 0;   // この端末が最後に書き込んだ時刻
+let __lastTouchAt = Date.now();
+["pointerdown","keydown"].forEach(ev =>
+  window.addEventListener(ev, ()=>{ __lastTouchAt = Date.now(); }, {passive:true}));
+async function pollSyncTag(){
+  if (__syncBusy) return;
+  if (document.visibilityState !== "visible") return;
+  if (!getSessionToken()) return;
+  __syncBusy = true;
+  try {
+    const r = await gasApi("syncTag");
+    if (!r || !r.ok) return;
+    const t = String(r.tag || "");
+    if (!t) return;                       // 印がまだ無い（サーバー再起動直後など）
+    if (__syncTag === null) { __syncTag = t; return; }   // 最初の1回は基準にするだけ
+    if (t !== __syncTag) {
+      __syncTag = t;
+      // ★自分で書いた直後は取り直さない★
+      //   印は自分の書き込みでも進む。そのまま反応すると、保存のたびに
+      //   自分でホームを取り直すことになり（実測8秒）かえって重くなる。
+      //   この端末が書いた直後の変化は、基準を合わせるだけにする。
+      //   取りこぼしても1分ごとの保険で追いつく。
+      if (Date.now() - __selfWriteAt < 15000) return;
+      window.dispatchEvent(new CustomEvent("jiroku:remotechange"));
+    }
+  } catch(e){ /* 通信できない時は次の回に任せる */ }
+  finally { __syncBusy = false; }
+}
+function scheduleSyncPoll(){
+  clearTimeout(__syncTimer);
+  const active = (Date.now() - __lastTouchAt) < SYNC_ACTIVE_FOR_MS;
+  const wait = document.visibilityState === "visible"
+    ? (active ? SYNC_POLL_ACTIVE_MS : SYNC_POLL_IDLE_MS)
+    : SYNC_POLL_IDLE_MS * 3;
+  __syncTimer = setTimeout(()=>{ pollSyncTag().finally(scheduleSyncPoll); }, wait);
+}
+document.addEventListener("visibilitychange", ()=>{
+  if (document.visibilityState === "visible") { __lastTouchAt = Date.now(); pollSyncTag().finally(scheduleSyncPoll); }
+});
+window.addEventListener("focus", ()=>{ __lastTouchAt = Date.now(); });
+scheduleSyncPoll();
+
 function getSessionToken() {
   try { return localStorage.getItem(SESSION_KEY) || ""; } catch { return ""; }
 }
@@ -3160,14 +3216,20 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
 
     // 取得を始めた時点の世代。返ってくるまでの間にタスクを足していたら、
     // その一覧はもう古い（applyTasksFromServer が取り直す）
-    const homeGen = taskGen();
-    gasApi("getHomeData").then(r=>{
-      if(r && r.ok && r.data){
-        applyHome(r.data, homeGen);
-        if(!r.data.smp)     fetchSmp();
-        if(!r.data.roadmap) fetchRoadmap();
-      } else { legacyFetch(); fetchSmp(); fetchRoadmap(); }
-    }).catch(()=>{ legacyFetch(); fetchSmp(); fetchRoadmap(); });
+    const pullHome = ()=>{
+      const homeGen = taskGen();
+      return gasApi("getHomeData").then(r=>{
+        if(r && r.ok && r.data){
+          applyHome(r.data, homeGen);
+          if(!r.data.smp)     fetchSmp();
+          if(!r.data.roadmap) fetchRoadmap();
+        } else { legacyFetch(); fetchSmp(); fetchRoadmap(); }
+      }).catch(()=>{ legacyFetch(); fetchSmp(); fetchRoadmap(); });
+    };
+    pullHome();
+    // もう一方の端末で何か書かれたら、その場でホームも取り直す
+    window.addEventListener("jiroku:remotechange", pullHome);
+    __homeCleanup = ()=> window.removeEventListener("jiroku:remotechange", pullHome);
 
     // カレンダー連携済みなら本人権限で直接取得（GAS経由はスクリプト所有者しか読めないためのフォールバック）
     if(localStorage.getItem("cal_linked")){
@@ -3208,6 +3270,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
     if(saved !== today){ localStorage.removeItem("today_actions"); localStorage.setItem("today_actions_date", today); setChecked({}); }
 
     // （今日のアクション同期・今日いちばんやりたいことの同期は、上のapplyHome/統合APIに集約済み）
+    return ()=>{ if(__homeCleanup) __homeCleanup(); __homeCleanup = null; };
   },[isActive]);
 
   const goalsArr = Array.isArray(goalData) ? goalData : (goalData?.goal ? [goalData] : []);
@@ -3584,8 +3647,10 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
     //   ウィンドウを切り替えただけでは発火しないため、PCだけ古いままになる。
     //   focus でも取りに行く。
     window.addEventListener("focus", refetch);
-    const timer = setInterval(refetch, 60000);   // 画面を開きっぱなしでも1分ごとに追いつく
+    window.addEventListener("jiroku:remotechange", refetch); // もう一方の端末の変更を数秒で受け取る
+    const timer = setInterval(refetch, 60000);   // 印を取りこぼしても1分で追いつく（保険）
     return () => { window.removeEventListener("jiroku:taskflushed", refetch);
+                   window.removeEventListener("jiroku:remotechange", refetch);
                    document.removeEventListener("visibilitychange", onVis);
                    window.removeEventListener("focus", refetch);
                    clearInterval(timer); };
@@ -6606,10 +6671,12 @@ function LogScreen({onToast, isActive}) {
     document.addEventListener("visibilitychange", onVis);
     window.addEventListener("focus", pull);      // PCはこちらが主
     window.addEventListener("jiroku:logsaved", pull); // 独り言が裏で書き終わったとき
+    window.addEventListener("jiroku:remotechange", pull); // もう一方の端末で何か書かれたとき
     const t = setInterval(pull, 60000);
     return ()=>{ alive=false; document.removeEventListener("visibilitychange", onVis);
                  window.removeEventListener("focus", pull);
-                 window.removeEventListener("jiroku:logsaved", pull); clearInterval(t); };
+                 window.removeEventListener("jiroku:logsaved", pull);
+                 window.removeEventListener("jiroku:remotechange", pull); clearInterval(t); };
   },[date, isActive]);
 
   const save = async ()=>{
@@ -11381,7 +11448,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260819-120941";
+const APP_BUILD = "20260819-122624";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 

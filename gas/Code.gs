@@ -2002,6 +2002,7 @@ function doGet(e) {
         CacheService.getScriptCache().remove(reportCacheKey_(studentEmail));
         CacheService.getScriptCache().remove(roadmapCacheKey_(studentEmail));
         CacheService.getScriptCache().remove("community_v2_" + studentEmail);
+        bumpSyncTag_(studentEmail);   // もう一方の端末が数秒で気づけるように
       }
     } catch (eCache) { /* 捨てられなくても応答は返す */ }
     return jsonResponse(result, callback);
@@ -2094,6 +2095,11 @@ function doPost(e) {
         CacheService.getScriptCache().remove(reportCacheKey_(studentEmail));
         CacheService.getScriptCache().remove(roadmapCacheKey_(studentEmail));
         CacheService.getScriptCache().remove("community_v2_" + studentEmail);
+        // ★更新の印を進める★（2026-08-19 Kai要望「パソコンと携帯をほぼ同時に」）
+        //   何かを書いたことだけを、ごく軽い印として残す。
+        //   もう一方の端末はこの印だけを見に来て、変わった時だけ本体を取りに行く。
+        //   シートを一切読まないので、見に来る回数が増えても重くならない。
+        bumpSyncTag_(studentEmail);
       }
     } catch (eC) { /* 捨てられなくても処理は続ける */ }
     switch (action) {
@@ -2136,6 +2142,7 @@ function doPost(e) {
       case "getSprints":  return jsonResponse(getSprints(studentEmail, body));
       case "saveSprint":  return jsonResponse(saveSprint(studentEmail, body));
       case "migrateTasksToSheet": return jsonResponse(migrateTasksToSheet(studentEmail, body));
+      case "syncTag":     return jsonResponse(getSyncTag(studentEmail));
       case "getTasks":    return jsonResponse(getTasks(studentEmail, body));
       case "saveTask":    return jsonResponse(saveTask(studentEmail, body));
       case "saveTaskMutations": return jsonResponse(saveTaskMutations(studentEmail, body));
@@ -2440,6 +2447,26 @@ function invalidateStatusCache(studentEmail) {
     try { CacheService.getScriptCache().remove(reportCacheKey_(studentEmail)); } catch (e) {}
     try { CacheService.getScriptCache().remove(roadmapCacheKey_(studentEmail)); } catch (e) {}
   }
+}
+
+// ★端末どうしの同期を速くするための「印」★（2026-08-19）
+//   これまでは1分ごとに本体（記録・タスク）を丸ごと取り直していたため、
+//   パソコンで入れたものが携帯に出るまで最大1分かかっていた。
+//   短くすると、そのぶん重い取得を何度も走らせることになる。
+//   そこで「最後に何かを書いた時刻」だけを覚えておく。
+//   端末はこの印を数秒ごとに見に来て、変わった時だけ本体を取りに行く。
+//   印はメモリ上のキャッシュだけで済み、シートを読まない。
+function syncTagKey_(studentEmail) {
+  return "synctag_" + sha256Hex(String(studentEmail)).slice(0, 32);
+}
+function bumpSyncTag_(studentEmail) {
+  if (!studentEmail) return;
+  try { CacheService.getScriptCache().put(syncTagKey_(studentEmail), String(Date.now()), 21600); } catch (e) {}
+}
+function getSyncTag(studentEmail) {
+  let t = "";
+  try { t = CacheService.getScriptCache().get(syncTagKey_(studentEmail)) || ""; } catch (e) {}
+  return { ok: true, tag: String(t) };
 }
 
 // 起動データ（getHomeData）を短時間だけ持ち回すための鍵
