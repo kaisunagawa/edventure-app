@@ -7733,18 +7733,30 @@ function SecondBrainScreen({isActive}){
 //   Instagramの寸法ちょうどで描いて、保存できるようにする。
 //   外部の部品は使わない（読み込みが増えると起動が遅くなるため）。
 //
-// ★白地にした★（2026-08-19 Kai指摘「似た色がいっぱい混ざって最高に見づらい」）
-//   最初は背景をJIROKUの青緑にしていたが、分類の色（青・水色）と同系統で
-//   溶けて見分けがつかなかった。白地なら6色がそのまま立つ。
-//   グラフもドーナツをやめて帯1本にする。中央に数字を置くと
-//   「9」と「時間56分」が離れて読めなかった（実際にそうなった）。
+// ★色は1つの系統でそろえる★（2026-08-19 Kai指摘）
+//   はじめはアプリと同じ分類色（青・紫・緑・橙・水色・灰）を使ったが、
+//   出どころの違う色が6つ並ぶだけで、絵として散らかって見えた。
+//   落ち着いたアースグリーンの濃淡でひと続きにし、
+//   人間関係だけ暖色を差して単調にならないようにする。
+//   ロゴ・見出し・ジローの囲みも同じ系統に寄せて、地続きに見せる。
 const STORY_W = 1080, STORY_H = 1920;
 // Instagramは上下250pxにUI（アイコン・返信バー）が乗るので、中身は 250〜1670 に収める
 const STORY_TOP = 250, STORY_BOTTOM = 1670;
+const STORY_PAPER = "#F6F3EA";   // 生成りの地
+const STORY_PAPER2 = "#EAE4D4";  // ひとつ深い地（囲み・帯の下地）
+const STORY_INK = "#2C3A33";     // 文字（黒でなく深い緑寄り）
+const STORY_SUB = "#7C8A80";     // 添え字
+const STORY_ACCENT = "#33604F";  // 主色（深い森の緑）
+const STORY_LINE = "#DCD5C3";    // 罫線
 const STORY_CLASS_COLOR = {
-  GOAL_DIRECT: "#2563EB", ASSET_BUILD: "#7C3AED", RECOVERY: "#16A34A",
-  RELATIONSHIP: "#EA580C", RECOVERY_RELATIONSHIP: "#16A34A",
-  OPERATIONS: "#0891B2", UNPLANNED_LEAKAGE: "#94A3B8", UNSET: "#CBD5E1",
+  GOAL_DIRECT:           "#33604F",  // 深い森   いちばん大事なものを、いちばん濃く
+  OPERATIONS:            "#5E8C77",  // 青みの緑
+  ASSET_BUILD:           "#8CAE8C",  // 若葉
+  RECOVERY:              "#BFCCA4",  // 苔
+  RECOVERY_RELATIONSHIP: "#BFCCA4",
+  RELATIONSHIP:          "#D2A063",  // 土の暖色（ここだけ差し色）
+  UNPLANNED_LEAKAGE:     "#B4AA9C",  // 枯れ色
+  UNSET:                 "#CFC8BA",
 };
 function storyHM(m){
   const h = Math.floor(m/60), mm = m%60;
@@ -7772,35 +7784,44 @@ function storyLoadImage(src){
     im.src = src;
   });
 }
-// ★柄を選べるようにする★（2026-08-19 Kai要望「レパートリーがあった方がいい」）
-//   毎日同じ絵だと、続けて出したときに飽きる。
-//   1=内訳（きちんと伝わる） 2=主役（いちばん使ったことを大きく）
-//   3=ジロー（キャラクター中心・数字は少なめ）
-const STORY_VARIANTS = [
-  { id:1, name:"内訳" }, { id:2, name:"主役" }, { id:3, name:"ジロー" },
-];
-async function drawStoryCard(cv, d, variant){
-  if (variant === 2) return drawStoryHero(cv, d);
-  if (variant === 3) return drawStoryJiro(cv, d);
-  return drawStoryBreakdown(cv, d);
+// ★ジローくんは、その日の中身を見て喋る★（2026-08-19 Kai要望）
+//   図鑑の決めゼリフのままだと、数字と関係のないことを言って浮く。
+//   いちばん多かった分類と記録した長さから、一言を選ぶ。
+function storyJiroLine(rows, totalMin){
+  const shown = rows.filter(r=>r.m>0);
+  const top = shown[0];
+  const h = totalMin / 60;
+  const goal = (rows.find(r=>r.k==="GOAL_DIRECT")||{}).m || 0;
+  const leak = (rows.find(r=>r.k==="UNPLANNED_LEAKAGE")||{}).m || 0;
+  // ★1行は14文字まで★ 長いと画像の中で切れる（実際に切れた）
+  if (goal > 0 && goal / totalMin >= 0.4) return "目標にまっすぐな一日。";
+  if (top && top.k === "GOAL_DIRECT")   return "今日の主役は、目標だった。";
+  if (top && top.k === "ASSET_BUILD")   return "今日の仕込みが、先で効く。";
+  if (top && top.k === "RECOVERY")      return "休めた日も、ちゃんと前進。";
+  if (top && top.k === "RELATIONSHIP")  return "人と過ごした時間が長い日。";
+  if (top && top.k === "OPERATIONS" && h >= 8) return "回すべきものを、回した日。";
+  if (leak > 0 && leak / totalMin >= 0.3) return "流れた時間も、次に活かせる。";
+  if (h >= 10) return "よく動いた一日。おつかれ。";
+  if (h >= 6)  return "積み上げた時間は、必ず残る。";
+  return "書いた分だけ、今日が見える。";
 }
-async function drawStoryBreakdown(cv, d){
+async function drawStoryCard(cv, d){
   const ctx = cv.getContext("2d");
   cv.width = STORY_W; cv.height = STORY_H;
   const F = "'DM Sans','Hiragino Sans','Noto Sans JP',sans-serif";
-  const INK = "#0F172A", SUB = "#64748B", TEAL = "#0891B2", LINE = "#E2E8F0";
+  const INK = STORY_INK, SUB = STORY_SUB, AC = STORY_ACCENT, LINE = STORY_LINE;
 
-  ctx.fillStyle = "#FFFFFF"; ctx.fillRect(0, 0, STORY_W, STORY_H);
-  const gTop = ctx.createLinearGradient(0, 0, 0, 460);
-  gTop.addColorStop(0, "#ECFEFF"); gTop.addColorStop(1, "#FFFFFF");
-  ctx.fillStyle = gTop; ctx.fillRect(0, 0, STORY_W, 460);
+  ctx.fillStyle = STORY_PAPER; ctx.fillRect(0, 0, STORY_W, STORY_H);
+  const gTop = ctx.createLinearGradient(0, 0, 0, 520);
+  gTop.addColorStop(0, "rgba(51,96,79,0.10)"); gTop.addColorStop(1, "rgba(51,96,79,0)");
+  ctx.fillStyle = gTop; ctx.fillRect(0, 0, STORY_W, 520);
   ctx.textBaseline = "alphabetic";
 
-  // ── ロゴと日付 ──
+  // ── ロゴと日付（ロゴも主色にそろえる）──
   const lx = 118, ly = 300;
-  ctx.strokeStyle = "rgba(8,145,178,0.26)"; ctx.lineWidth = 5;
+  ctx.strokeStyle = "rgba(51,96,79,0.24)"; ctx.lineWidth = 5;
   ctx.beginPath(); ctx.arc(lx, ly, 28, 0, Math.PI*2); ctx.stroke();
-  ctx.strokeStyle = TEAL; ctx.lineWidth = 5; ctx.lineCap = "round";
+  ctx.strokeStyle = AC; ctx.lineWidth = 5; ctx.lineCap = "round";
   ctx.beginPath(); ctx.arc(lx, ly, 28, -Math.PI/2, Math.PI, false); ctx.stroke();
   ctx.lineWidth = 4;
   ctx.beginPath(); ctx.moveTo(lx, ly); ctx.lineTo(lx, ly-16); ctx.stroke();
@@ -7810,14 +7831,14 @@ async function drawStoryBreakdown(cv, d){
   ctx.textAlign = "right"; ctx.fillStyle = SUB; ctx.font = "700 30px " + F;
   ctx.fillText(d.dateLabel, 984, ly + 11);
 
-  // ── 合計時間（1行で大きく）＋ 右に件数とスコア ──
+  // ── 合計時間 ＋ 右にスコア ──
   ctx.textAlign = "left"; ctx.fillStyle = SUB; ctx.font = "700 28px " + F;
   ctx.fillText("今日、記録した時間", 96, 402);
   ctx.fillStyle = INK; ctx.font = "800 104px " + F;
   ctx.fillText(storyHM(d.totalMin), 92, 500);
   ctx.textAlign = "right";
   if (d.scoreText) {
-    ctx.fillStyle = TEAL; ctx.font = "800 60px " + F;
+    ctx.fillStyle = AC; ctx.font = "800 60px " + F;
     ctx.fillText(d.scoreText, 984, 494);
     ctx.fillStyle = SUB; ctx.font = "700 26px " + F;
     ctx.fillText(d.scoreLabel || "", 984, 532);
@@ -7828,34 +7849,32 @@ async function drawStoryBreakdown(cv, d){
   // ── 左：ドーナツ ──
   const cx = 318, cy = 846, R = 178, SW = 52;
   ctx.lineCap = "butt";
-  ctx.strokeStyle = "#F1F5F9"; ctx.lineWidth = SW;
+  ctx.strokeStyle = STORY_PAPER2; ctx.lineWidth = SW;
   ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI*2); ctx.stroke();
   const shown = d.rows.filter(r=>r.m>0);
   let a0 = -Math.PI/2;
   shown.forEach(function(r){
     const a1 = a0 + (r.m/d.totalMin)*Math.PI*2;
-    ctx.strokeStyle = STORY_CLASS_COLOR[r.k] || "#CBD5E1";
+    ctx.strokeStyle = STORY_CLASS_COLOR[r.k] || STORY_CLASS_COLOR.UNSET;
     ctx.beginPath(); ctx.arc(cx, cy, R, a0, a1); ctx.stroke();
     a0 = a1;
   });
-  // 真ん中はいちばん多かったものの割合（数字が離れて読めないのを避ける）
   const top = shown[0];
   if (top) {
     ctx.textAlign = "center";
-    ctx.fillStyle = STORY_CLASS_COLOR[top.k] || TEAL; ctx.font = "800 82px " + F;
+    ctx.fillStyle = STORY_CLASS_COLOR[top.k] || AC; ctx.font = "800 82px " + F;
     ctx.fillText(Math.round(top.m/d.totalMin*100) + "%", cx, cy + 8);
     ctx.fillStyle = SUB; ctx.font = "700 27px " + F;
     ctx.fillText(storyFit(ctx, top.label, 250), cx, cy + 52);
   }
 
   // ── 右：内訳を全部並べる ──
-  //   「こんなにちゃんとやってる」が一目で伝わるよう、6分類とも出す。
   const rx = 552, rw = 984 - rx;
   const rowH = shown.length > 5 ? 70 : 82;
   const topM = shown[0] ? shown[0].m : 1;
   let y = cy - ((shown.length - 1) * rowH) / 2 - 10;
   shown.slice(0, 6).forEach(function(r){
-    const col = STORY_CLASS_COLOR[r.k] || "#CBD5E1";
+    const col = STORY_CLASS_COLOR[r.k] || STORY_CLASS_COLOR.UNSET;
     ctx.textAlign = "left";
     ctx.fillStyle = INK; ctx.font = "800 31px " + F;
     ctx.fillText(storyFit(ctx, r.label, 230), rx, y);
@@ -7864,130 +7883,35 @@ async function drawStoryBreakdown(cv, d){
     ctx.fillText(storyHM(r.m), 916, y);
     ctx.fillStyle = SUB; ctx.font = "700 24px " + F;
     ctx.fillText(Math.round(r.m/d.totalMin*100) + "%", 984, y);
-    // ★割合の帯★ 数字だけだと差が伝わらない。長さで一目で分かるようにする
     const bh2 = 8, byy = y + 14;
-    storyRoundRect(ctx, rx, byy, rw, bh2, 4); ctx.fillStyle = "#F1F5F9"; ctx.fill();
+    storyRoundRect(ctx, rx, byy, rw, bh2, 4); ctx.fillStyle = STORY_PAPER2; ctx.fill();
     storyRoundRect(ctx, rx, byy, Math.max(10, rw * (r.m / topM)), bh2, 4);
     ctx.fillStyle = col; ctx.fill();
     y += rowH;
   });
 
-  ctx.strokeStyle = LINE; ctx.lineWidth = 2;
-  ctx.beginPath(); ctx.moveTo(96, 1150); ctx.lineTo(984, 1150); ctx.stroke();
-
   // ── 下：ジローくん ──
-  if (d.jiroImg) ctx.drawImage(d.jiroImg, 96, 1214, 240, 240);
-  ctx.textAlign = "left"; ctx.fillStyle = TEAL; ctx.font = "800 28px " + F;
-  ctx.fillText(d.jiroName || "ジローくん", 366, 1300);
-  ctx.fillStyle = INK; ctx.font = "800 36px " + F;
-  ctx.fillText(storyFit(ctx, d.jiroLine1, 610), 366, 1358);
+  //   ★囲みの色は地とそろえる★（2026-08-19 Kai指摘）
+  //     別の色で囲むと、そこだけ貼り付けたように浮いて見えた。
+  //     地をひとつ深くしただけの囲みにして、同じ紙の上に置く。
+  const cardY = 1178, cardH = 300;
+  storyRoundRect(ctx, 96, cardY, 888, cardH, 36);
+  ctx.fillStyle = STORY_PAPER2; ctx.fill();
+  ctx.strokeStyle = LINE; ctx.lineWidth = 2; ctx.stroke();
+  if (d.jiroImg) ctx.drawImage(d.jiroImg, 130, cardY + 30, 240, 240);
+  ctx.textAlign = "left"; ctx.fillStyle = AC; ctx.font = "800 28px " + F;
+  ctx.fillText(d.jiroName || "ジローくん", 400, cardY + 108);
+  ctx.fillStyle = INK; ctx.font = "800 34px " + F;
+  ctx.fillText(storyFit(ctx, d.jiroLine1, 556), 400, cardY + 166);
   if (d.jiroLine2) {
     ctx.fillStyle = SUB; ctx.font = "700 28px " + F;
-    ctx.fillText(storyFit(ctx, d.jiroLine2, 610), 366, 1408);
+    ctx.fillText(storyFit(ctx, d.jiroLine2, 550), 400, cardY + 216);
   }
 
   // ── 足元 ──
   ctx.textAlign = "left"; ctx.fillStyle = SUB; ctx.font = "700 28px " + F;
   ctx.fillText(d.footLeft || "", 96, 1616);
-  ctx.textAlign = "right"; ctx.fillStyle = TEAL; ctx.font = "800 30px " + F;
-  ctx.fillText("jiroku.jp", 984, 1616);
-  return cv;
-}
-
-// 型2「主役」──いちばん時間を使った分類を、その色一色で大きく見せる。
-//   ストーリーズは一瞬しか見られない。数字1つに絞ると強い。
-async function drawStoryHero(cv, d){
-  const ctx = cv.getContext("2d");
-  cv.width = STORY_W; cv.height = STORY_H;
-  const F = "'DM Sans','Hiragino Sans','Noto Sans JP',sans-serif";
-  const top = d.rows.filter(r=>r.m>0)[0] || { k:"UNSET", label:"記録", m:d.totalMin };
-  const base = STORY_CLASS_COLOR[top.k] || "#0891B2";
-  ctx.fillStyle = base; ctx.fillRect(0, 0, STORY_W, STORY_H);
-  // 下側をわずかに暗くして、白文字を読みやすくする
-  const g = ctx.createLinearGradient(0, 0, 0, STORY_H);
-  g.addColorStop(0, "rgba(255,255,255,0.10)"); g.addColorStop(1, "rgba(0,0,0,0.22)");
-  ctx.fillStyle = g; ctx.fillRect(0, 0, STORY_W, STORY_H);
-
-  ctx.textBaseline = "alphabetic"; ctx.textAlign = "left";
-  ctx.fillStyle = "rgba(255,255,255,0.86)"; ctx.font = "800 40px " + F;
-  ctx.fillText("JIROKU", 96, 320);
-  ctx.textAlign = "right"; ctx.font = "700 34px " + F;
-  ctx.fillText(d.dateLabel, 984, 320);
-
-  ctx.textAlign = "left";
-  ctx.fillStyle = "rgba(255,255,255,0.82)"; ctx.font = "700 40px " + F;
-  ctx.fillText("今日いちばん使ったのは", 96, 560);
-  ctx.fillStyle = "#fff"; ctx.font = "800 104px " + F;
-  ctx.fillText(storyFit(ctx, top.label, 890), 92, 690);
-  ctx.font = "800 168px " + F;
-  ctx.fillText(storyHM(top.m), 92, 872);
-  ctx.fillStyle = "rgba(255,255,255,0.8)"; ctx.font = "700 38px " + F;
-  ctx.fillText("1日の記録 " + storyHM(d.totalMin) + " のうち " + Math.round(top.m/d.totalMin*100) + "%", 96, 942);
-
-  // 帯（内訳は色だけで伝える）
-  const bx = 96, bw = 888, by = 1020, bh = 26;
-  storyRoundRect(ctx, bx, by, bw, bh, 13); ctx.fillStyle = "rgba(255,255,255,0.28)"; ctx.fill();
-  ctx.save(); storyRoundRect(ctx, bx, by, bw, bh, 13); ctx.clip();
-  let px = bx;
-  d.rows.filter(r=>r.m>0).forEach(function(r){
-    const w = bw * (r.m / d.totalMin);
-    ctx.fillStyle = (r.k === top.k) ? "#FFFFFF" : "rgba(255,255,255,0.42)";
-    ctx.fillRect(px, by, Math.ceil(w), bh); px += w;
-  });
-  ctx.restore();
-
-  if (d.jiroImg) ctx.drawImage(d.jiroImg, 700, 1250, 300, 300);
-  ctx.textAlign = "left"; ctx.fillStyle = "#fff"; ctx.font = "800 40px " + F;
-  ctx.fillText(storyFit(ctx, d.jiroLine1, 580), 96, 1400);
-  ctx.fillStyle = "rgba(255,255,255,0.78)"; ctx.font = "700 32px " + F;
-  ctx.fillText(d.jiroName || "", 96, 1456);
-
-  ctx.fillStyle = "rgba(255,255,255,0.78)"; ctx.font = "700 32px " + F;
-  ctx.fillText(d.footLeft || "", 96, 1616);
-  ctx.textAlign = "right"; ctx.fillStyle = "#fff"; ctx.font = "800 34px " + F;
-  ctx.fillText("jiroku.jp", 984, 1616);
-  return cv;
-}
-
-// 型3「ジロー」──キャラクターを主役にして、数字は最小限。
-//   人に見せたときにいちばん反応が返ってくるのは、たぶんこれ。
-async function drawStoryJiro(cv, d){
-  const ctx = cv.getContext("2d");
-  cv.width = STORY_W; cv.height = STORY_H;
-  const F = "'DM Sans','Hiragino Sans','Noto Sans JP',sans-serif";
-  const INK = "#0F172A", SUB = "#64748B", TEAL = "#0891B2";
-  ctx.fillStyle = "#F0FDFF"; ctx.fillRect(0, 0, STORY_W, STORY_H);
-  // 背景に大きな円をひとつ置いて、のっぺりさせない
-  ctx.fillStyle = "rgba(8,145,178,0.08)";
-  ctx.beginPath(); ctx.arc(STORY_W/2, 860, 400, 0, Math.PI*2); ctx.fill();
-
-  ctx.textBaseline = "alphabetic"; ctx.textAlign = "left";
-  ctx.fillStyle = INK; ctx.font = "800 42px " + F;
-  ctx.fillText("JIROKU", 96, 316);
-  ctx.textAlign = "right"; ctx.fillStyle = SUB; ctx.font = "700 34px " + F;
-  ctx.fillText(d.dateLabel, 984, 316);
-
-  if (d.jiroImg) ctx.drawImage(d.jiroImg, (STORY_W-460)/2, 560, 460, 460);
-  ctx.textAlign = "center";
-  ctx.fillStyle = TEAL; ctx.font = "800 38px " + F;
-  ctx.fillText(d.jiroName || "ジローくん", STORY_W/2, 1090);
-  ctx.fillStyle = INK; ctx.font = "800 52px " + F;
-  ctx.fillText(storyFit(ctx, d.jiroLine1, 900), STORY_W/2, 1170);
-
-  // 数字は2つだけ
-  const top = d.rows.filter(r=>r.m>0)[0];
-  ctx.fillStyle = SUB; ctx.font = "700 34px " + F;
-  ctx.fillText("今日の記録", STORY_W/2, 1310);
-  ctx.fillStyle = INK; ctx.font = "800 108px " + F;
-  ctx.fillText(storyHM(d.totalMin), STORY_W/2, 1414);
-  if (top) {
-    ctx.fillStyle = STORY_CLASS_COLOR[top.k] || TEAL; ctx.font = "800 40px " + F;
-    ctx.fillText(top.label + " " + storyHM(top.m), STORY_W/2, 1480);
-  }
-
-  ctx.textAlign = "left"; ctx.fillStyle = SUB; ctx.font = "700 32px " + F;
-  ctx.fillText(d.footLeft || "", 96, 1616);
-  ctx.textAlign = "right"; ctx.fillStyle = TEAL; ctx.font = "800 34px " + F;
+  ctx.textAlign = "right"; ctx.fillStyle = AC; ctx.font = "800 30px " + F;
   ctx.fillText("jiroku.jp", 984, 1616);
   return cv;
 }
@@ -8020,9 +7944,8 @@ function ReportScreen() {
   const [storyUrl, setStoryUrl]=useState(null);
   const [storyBusy, setStoryBusy]=useState(false);
   const [storyMsg, setStoryMsg]=useState("");
-  const [storyVariant, setStoryVariant]=useState(1);
   const storyCanvasRef=React.useRef(null);
-  const makeStory = async (variant) => {
+  const makeStory = async () => {
     if (storyBusy) return;
     setStoryMsg(""); setStoryBusy(true);
     try {
@@ -8063,7 +7986,7 @@ function ReportScreen() {
         dateLabel: (dt.getMonth()+1) + "月" + dt.getDate() + "日（" + wd + "）",
         rows, totalMin: total,
         jiroImg, jiroName: jiro ? jiro.name : "",
-        jiroLine1: jiro && jiro.line ? String(jiro.line).replace(/[「」]/g,"") : "今日もおつかれさま。",
+        jiroLine1: storyJiroLine(rows, total),
         jiroLine2: top ? (top.label + "に " + storyHM(top.m)) : "",
         scoreText: (todayRow && todayRow.score !== undefined && todayRow.score !== null)
                      ? String(todayRow.score) : String(list.length),
@@ -8072,7 +7995,7 @@ function ReportScreen() {
         footLeft: (todayRow && todayRow.score !== undefined && todayRow.score !== null)
                     ? ("記録 " + list.length + "件・" + rows.filter(r=>r.m>0).length + "分類")
                     : ("記録 " + list.length + "件"),
-      }, variant || storyVariant);
+      });
       setStoryUrl(cv.toDataURL("image/png"));
     } catch(e){ console.error("[JIROKU] ストーリーズの作成に失敗:", e); setStoryMsg("うまく作れませんでした"); }
     setStoryBusy(false);
@@ -8217,17 +8140,6 @@ function ReportScreen() {
         <img src=${storyUrl} alt="今日の時間"
           style=${{width:"auto",height:"70dvh",maxWidth:"86vw",borderRadius:14,
                    boxShadow:"0 18px 50px rgba(0,0,0,0.45)",objectFit:"contain"}}/>
-        <!-- 柄を選ぶ。押すたびに描き直す（毎日同じ絵だと飽きるため） -->
-        <div style=${{display:"flex",gap:8}}>
-          ${STORY_VARIANTS.map(v=>html`
-            <button key=${v.id} disabled=${storyBusy}
-              onClick=${()=>{ setStoryVariant(v.id); makeStory(v.id); }}
-              style=${{padding:"8px 18px",borderRadius:999,fontSize:12.5,fontWeight:700,cursor:"pointer",
-                       fontFamily:"inherit",border:"1px solid rgba(255,255,255,0.35)",
-                       background: storyVariant===v.id ? "#fff" : "transparent",
-                       color: storyVariant===v.id ? "var(--accent)" : "#fff",
-                       opacity: storyBusy ? 0.6 : 1}}>${v.name}</button>`)}
-        </div>
         <div style=${{fontSize:11.5,color:"rgba(255,255,255,0.8)",textAlign:"center",lineHeight:1.6}}>
           iPhoneは画像を長押しして「写真に保存」でも保存できます</div>
         <div style=${{display:"flex",gap:10}}>
@@ -11858,7 +11770,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260819-234012";
+const APP_BUILD = "20260819-235414";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
