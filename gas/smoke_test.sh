@@ -573,6 +573,20 @@ sys.exit(0 if (tg==1 and dt==1) else 1)
     ng "URLクエリにトークンを載せる処理が ${n}箇所 復活している"
   fi
 
+  # ★キャッシュ名を書き写していないか★（2026-08-19 Kai報告「反映されない」）
+  #   新しい版を先にキャッシュへ入れてから読み込み直す作りだが、
+  #   その入れ先の名前を index.html に直接書いていたため、sw.js 側だけ
+  #   名前を変えた時に「書く場所」と「読む場所」が別物になり、
+  #   何度開き直しても古い本体が出続けた（jiroku-v13… と jiroku-v16…）。
+  #   名前を覚えさせない（caches.keys() から探す）のが正解なので、
+  #   直書きが復活したら止める。
+  n=$(grep -hc 'caches\.open("jiroku-' ../index.html ../coach/index.html 2>/dev/null | awk '{s+=$1} END{print s+0}')
+  if [ "${n:-0}" -eq 0 ]; then
+    ok "キャッシュ名の直書き 0箇所（sw.js と食い違わない）"
+  else
+    ng "キャッシュ名を直接書いている箇所が ${n}件ある（sw.js の名前を変えた時にズレる）"
+  fi
+
   # GAS_URLへのGETが復活していないか（GETだとトークンの置き場所がクエリしか無い）
   g=$(grep -hc "await fetch(url)\|fetch(url)\.then" ../index.html ../coach/index.html | awk '{s+=$1} END{print s}')
   if [ "${g:-0}" -eq 0 ]; then

@@ -11448,7 +11448,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260819-123532";
+const APP_BUILD = "20260819-125554";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
@@ -13264,12 +13264,20 @@ if('serviceWorker' in navigator){
     //   Service Workerはキャッシュ優先なので、ただ location.reload() すると
     //   また古い方が出てくる。新しい版だと分かった時点でこちらから取りに行き、
     //   Service Workerが読む場所へ入れてから読み込み直す。
-    //   （Cache APIは画面側からも使える。sw.js と同じ名前・同じキーにすること）
+    // ★入れ先の名前を書き写さない★（2026-08-19 Kai報告「反映されない」）
+    //   以前はここに sw.js のキャッシュ名を直接書いていた。
+    //   sw.js 側だけ名前を変えた結果、書き込む先と読む先が別物になり、
+    //   何度開き直しても古い本体が出続けていた（jiroku-v13… と jiroku-v16…）。
+    //   名前を覚えるのをやめて、jiroku- で始まるキャッシュ全部へ入れる。
+    //   これなら sw.js の名前が変わっても、二度とズレない。
     try {
       const res = await fetch("index.html?v=" + encodeURIComponent(latest), { cache: "reload" });
       if (res.ok) {
-        const c = await caches.open("jiroku-v13-swr-fix");
-        await c.put(location.pathname.indexOf("/coach") !== -1 ? "app-shell-coach" : "app-shell", res.clone());
+        const shellKey = location.pathname.indexOf("/coach") !== -1 ? "app-shell-coach" : "app-shell";
+        const names = (await caches.keys()).filter(k => k.indexOf("jiroku-") === 0);
+        await Promise.all(names.map(async (n) => {
+          try { const c = await caches.open(n); await c.put(shellKey, res.clone()); } catch (e) {}
+        }));
       }
     } catch (e) { /* 入れられなくても、次の起動では新しい方が出る */ }
     pendingReload = true; safeReload();
