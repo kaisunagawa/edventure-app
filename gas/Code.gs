@@ -2350,7 +2350,15 @@ function getUser(studentEmail) {
     serverCalendar: (studentEmail === adminEmail() && !!user.google_calendar_id),
     // Phase 1: 自己経営OS の段階公開。この人に新機能を出すかどうか
     goalsV1: hasFeature(user, P1_FEATURE_KEY),
-    taskMigratedAt: String(user.task_migrated_at || "")
+    taskMigratedAt: String(user.task_migrated_at || ""),
+    // ★もう使い始めている人か★（2026-08-18 Kai報告）
+    //   チュートリアルと自己分析12問の既読は端末ごとに持っていたため、
+    //   既存の人がパソコンでログインすると、はじめましての扱いで
+    //   12問と目標設定をやり直させられていた。
+    //   アカウント側の事実（XP・連続日数・最後に記録した日）で判定する。
+    started: (Number(user.xp || 0) > 0
+              || Number(user.streak || 0) > 0
+              || String(user.last_log_date || "").trim() !== "")
   } };
 }
 

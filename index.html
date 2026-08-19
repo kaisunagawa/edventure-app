@@ -11448,7 +11448,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260819-122624";
+const APP_BUILD = "20260819-123532";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
@@ -12918,6 +12918,29 @@ function App() {
   // 初回オンボーディング（自己分析12問）は、チュートリアル未実施の新規ユーザーにだけ出す。
   // 既存ユーザー（tutorial_seenあり）には出さず、通常運用を邪魔しない
   const [showOnboarding,setShowOnboarding]=useState(!localStorage.getItem("tutorial_seen") && !localStorage.getItem("onboarding_done"));
+  // ★端末を変えただけの人に、はじめましての扱いをしない★（2026-08-18 Kai報告）
+  //   既読の印は端末ごとに持っているので、あつこさんがパソコンでログインしたら
+  //   チュートリアル・自己分析12問・目標設定をもう一度やらされていた。
+  //   印が無いときだけサーバーに聞き、もう使い始めている人なら全部飛ばす。
+  //   聞けなかったときは今までどおり出す（新しい人を素通りさせないため）。
+  const [newcomerChecked,setNewcomerChecked]=useState(()=>!!localStorage.getItem("tutorial_seen"));
+  useEffect(()=>{
+    if(newcomerChecked) return;
+    let alive=true;
+    const done=()=>{ if(alive) setNewcomerChecked(true); };
+    gasApi("getUser").then(r=>{
+      if(!alive) return;
+      if(r&&r.ok&&r.data&&r.data.started){
+        try{
+          localStorage.setItem("tutorial_seen","1");
+          localStorage.setItem("onboarding_done","1");
+          localStorage.setItem("announce_seen",ANNOUNCE_ID);
+        }catch(e){}
+        setShowTutorial(false); setShowOnboarding(false); setShowAnnounce(false);
+      }
+      done();
+    }).catch(done);
+  },[]);
   // 新機能のお知らせ（アプリを開いた時に1回だけ表示）。IDを変えれば次の告知を出せる。
   // チュートリアル中の新規ユーザーには出さない（既存ユーザーへの告知が目的のため）
   // チュートリアル中は下でreturnするので出ない。それ以外の全員に未読なら表示する
@@ -13028,6 +13051,8 @@ function App() {
 
   if(!user) return html`<${LoginScreen} onLogin=${setUser}/>`;
   if(needsReauth) return html`<${ReauthGate}/>`;
+  // 判定が済むまでは、はじめましての画面を出さない（一瞬でも出すと不安にさせる）
+  if(!newcomerChecked) return html`<div class="login-wrap"><${LoginWaiting}/></div>`;
   if(showOnboarding) return html`<${OnboardingQuiz} onDone=${()=>setShowOnboarding(false)}/>`;
   if(showTutorial) return html`<${TutorialOverlay} onDone=${dismissTutorial}/>`;
   // ★3か月目標が空の人は、先に1つ決めてもらう★
