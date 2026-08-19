@@ -5212,16 +5212,25 @@ var _pendWrites = null;
 function pendFlush_() {
   if (!_pendWrites) return;
   const pw = _pendWrites; _pendWrites = null;   // 流す前に外す（再入を防ぐ）
-  try {
-    const rows = Object.keys(pw.users || {});
-    if (rows.length && _usersSnap) {
-      const sh = getSheet("Users");
-      rows.forEach(function (k) {
-        const i = Number(k), r = _usersSnap[i];
-        if (r && r.length) sh.getRange(i + 1, 1, 1, r.length).setValues([r]);
-      });
-    }
-  } catch (e) { Logger.log("pendFlush_ users: " + e); }
+  const rows = Object.keys(pw.users || {});
+  if (rows.length && _usersSnap) {
+    const sh = getSheet("Users");
+    rows.forEach(function (k) {
+      const i = Number(k), r = _usersSnap[i];
+      if (!r || !r.length) return;
+      try {
+        sh.getRange(i + 1, 1, 1, r.length).setValues([r]);
+      } catch (e) {
+        // ★まとめ書きが落ちても、XPを黙って捨てない★（2026-08-19）
+        //   1回で書けなかったときは、1マスずつ書き直す。遅くなるが失わない。
+        //   台帳側には逃げ道を入れたのに、こちらは入れ忘れていた。
+        Logger.log("pendFlush_ users まとめ書き失敗、1マスずつ書き直します: " + e);
+        for (var c = 0; c < r.length; c++) {
+          try { sh.getRange(i + 1, c + 1).setValue(r[c]); } catch (e2) {}
+        }
+      }
+    });
+  }
   try {
     if (pw.xp && pw.xp.length) {
       const sh = getP1Sheet("XpEvents");

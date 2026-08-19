@@ -7727,6 +7727,129 @@ function SecondBrainScreen({isActive}){
   </div>`;
 }
 
+// ── ストーリーズ用の画像（1080×1920）──────────────────
+// ★今日の時間の使い方を、そのまま人に見せられる形にする★（2026-08-19 Kai要望）
+//   画面のスクリーンショットではストーリーズの比率に合わず、余白だらけになる。
+//   Instagramの寸法ちょうどで描いて、保存できるようにする。
+//   外部の部品は使わない（読み込みが増えると起動が遅くなるため）。
+const STORY_W = 1080, STORY_H = 1920;
+// 画面の色変数は canvas では使えないので、ここだけ実際の色を持つ
+const STORY_CLASS_COLOR = {
+  GOAL_DIRECT: "#3B82F6", ASSET_BUILD: "#8B5CF6", RECOVERY: "#22C55E",
+  RELATIONSHIP: "#F59E0B", RECOVERY_RELATIONSHIP: "#22C55E",
+  // 背景がJIROKUの青緑なので、日常業務は同化しないよう明るい水色にする
+  OPERATIONS: "#22D3EE", UNPLANNED_LEAKAGE: "#64748B", UNSET: "#94A3B8",
+};
+function storyHM(m){
+  const h = Math.floor(m/60), mm = m%60;
+  return h>0 ? (mm ? h+"時間"+mm+"分" : h+"時間") : mm+"分";
+}
+// 幅に収まるように、末尾を「…」で詰める
+function storyFit(ctx, text, maxW){
+  let t = String(text||"");
+  if (ctx.measureText(t).width <= maxW) return t;
+  while (t.length > 1 && ctx.measureText(t+"…").width > maxW) t = t.slice(0, -1);
+  return t + "…";
+}
+function drawStoryCard(cv, d){
+  const ctx = cv.getContext("2d");
+  cv.width = STORY_W; cv.height = STORY_H;
+  const F = "'DM Sans','Hiragino Sans','Noto Sans JP',sans-serif";
+
+  // 背景（JIROKUの色）
+  const g = ctx.createLinearGradient(0, 0, STORY_W, STORY_H);
+  g.addColorStop(0, "#0BA5CC"); g.addColorStop(1, "#0B5563");
+  ctx.fillStyle = g; ctx.fillRect(0, 0, STORY_W, STORY_H);
+
+  // ── 見出し：ロゴ＋JIROKU ──
+  // ★上下250pxはInstagramのUIで隠れる★（2026-08-19）
+  //   上はアイコンと名前、下は返信バーが乗る。中身は 250〜1670 に収める。
+  const lx = 96, ly = 290;
+  ctx.strokeStyle = "rgba(255,255,255,0.45)"; ctx.lineWidth = 6;
+  ctx.beginPath(); ctx.arc(lx, ly, 34, 0, Math.PI*2); ctx.stroke();
+  ctx.strokeStyle = "#fff"; ctx.lineWidth = 6; ctx.lineCap = "round";
+  ctx.beginPath(); ctx.arc(lx, ly, 34, -Math.PI/2, Math.PI, false); ctx.stroke();
+  ctx.lineWidth = 5;
+  ctx.beginPath(); ctx.moveTo(lx, ly); ctx.lineTo(lx, ly-19); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(lx, ly); ctx.lineTo(lx+13, ly+9); ctx.stroke();
+  ctx.fillStyle = "#fff"; ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
+  ctx.font = "800 46px " + F;
+  ctx.fillText("JIROKU", lx + 58, ly + 16);
+
+  // ── 日付 ──
+  ctx.font = "800 76px " + F;
+  ctx.fillText(d.dateLabel, 96, 400);
+  ctx.font = "700 30px " + F;
+  ctx.fillStyle = "rgba(255,255,255,0.72)";
+  ctx.fillText(d.subLabel, 96, 446);
+
+  // ── ドーナツ ──
+  const cx = STORY_W/2, cy = 690, R = 180, SW = 60;
+  ctx.lineCap = "butt";
+  ctx.strokeStyle = "rgba(255,255,255,0.16)"; ctx.lineWidth = SW;
+  ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI*2); ctx.stroke();
+  let a0 = -Math.PI/2;
+  d.rows.filter(r=>r.m>0).forEach(function(r){
+    const frac = d.totalMin>0 ? r.m/d.totalMin : 0;
+    const a1 = a0 + frac*Math.PI*2;
+    ctx.strokeStyle = STORY_CLASS_COLOR[r.k] || "#94A3B8";
+    ctx.beginPath(); ctx.arc(cx, cy, R, a0, a1); ctx.stroke();
+    a0 = a1;
+  });
+  // 真ん中：合計
+  ctx.textAlign = "center"; ctx.fillStyle = "#fff";
+  const hh = Math.floor(d.totalMin/60), mm2 = d.totalMin%60;
+  ctx.font = "800 110px " + F;
+  ctx.fillText(hh > 0 ? String(hh) : String(mm2), cx, cy + 12);
+  ctx.font = "700 34px " + F;
+  ctx.fillStyle = "rgba(255,255,255,0.8)";
+  ctx.fillText(hh > 0 ? (mm2 ? "時間" + mm2 + "分 記録" : "時間 記録") : "分 記録", cx, cy + 62);
+
+  // ── 内訳 ──
+  ctx.textAlign = "left";
+  let y = 940;
+  const shown = d.rows.filter(r=>r.m>0).slice(0, 6);
+  shown.forEach(function(r){
+    ctx.fillStyle = STORY_CLASS_COLOR[r.k] || "#94A3B8";
+    ctx.beginPath(); ctx.arc(126, y - 12, 15, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = "#fff"; ctx.font = "700 38px " + F;
+    ctx.fillText(storyFit(ctx, r.label, 470), 168, y);
+    ctx.textAlign = "right";
+    ctx.font = "800 38px " + F;
+    ctx.fillText(storyHM(r.m), 900, y);
+    ctx.fillStyle = "rgba(255,255,255,0.62)"; ctx.font = "700 30px " + F;
+    ctx.fillText(Math.round(r.m/d.totalMin*100) + "%", 984, y);
+    ctx.textAlign = "left";
+    y += 68;
+  });
+
+  // ── 今日やったこと ──
+  if (d.tasks && d.tasks.length) {
+    y += 24;
+    ctx.strokeStyle = "rgba(255,255,255,0.22)"; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(96, y - 44); ctx.lineTo(984, y - 44); ctx.stroke();
+    ctx.fillStyle = "rgba(255,255,255,0.72)"; ctx.font = "800 30px " + F;
+    ctx.fillText("今日やったこと", 96, y);
+    y += 58;
+    ctx.font = "700 36px " + F; ctx.fillStyle = "#fff";
+    d.tasks.slice(0, 3).forEach(function(t){
+      ctx.fillText("・" + storyFit(ctx, t, 830), 96, y);
+      y += 56;
+    });
+  }
+
+  // ── 足元 ──
+  if (d.score !== null && d.score !== undefined) {
+    ctx.textAlign = "left"; ctx.fillStyle = "rgba(255,255,255,0.9)";
+    ctx.font = "800 40px " + F;
+    ctx.fillText("今日のスコア " + d.score + " / 100", 96, 1616);
+  }
+  ctx.textAlign = "right"; ctx.fillStyle = "rgba(255,255,255,0.6)";
+  ctx.font = "700 30px " + F;
+  ctx.fillText("jiroku.jp", 984, 1616);
+  return cv;
+}
+
 function ReportScreen() {
   const todayStr=logicalTodayStr();   // 深夜0〜4時は前の日の続きとして扱う
   const [date, setDate]=useState(null); // null = list view
@@ -7751,6 +7874,63 @@ function ReportScreen() {
   // 取れなければ従来レポートを出す
   const [ops, setOps]=useState(null);
   const [workReportCopied, setWorkReportCopied]=useState(false);
+  // ★ストーリーズ用の画像★（2026-08-19 Kai要望）
+  const [storyUrl, setStoryUrl]=useState(null);
+  const [storyBusy, setStoryBusy]=useState(false);
+  const [storyMsg, setStoryMsg]=useState("");
+  const storyCanvasRef=React.useRef(null);
+  const makeStory = async () => {
+    if (storyBusy) return;
+    setStoryMsg(""); setStoryBusy(true);
+    try {
+      const day = logicalTodayStr();
+      // その日の記録を取り直す（一覧画面には持っていないため）
+      let list = [];
+      try {
+        const r = await gasApi("getLogs", { date: day });
+        if (r && r.ok && Array.isArray(r.data)) list = r.data;
+      } catch(e){}
+      // 分類ごとに分を足す。重なりは見ない（記録どおりに出す）
+      const by = {};
+      let total = 0;
+      list.forEach(l => {
+        const m = blockMinutes(l.time_block) || 0;
+        if (m <= 0) return;
+        const k = String(l.time_classification || "").trim() || "UNSET";
+        by[k] = (by[k] || 0) + m;
+        total += m;
+      });
+      const rows = TIME_CLASS_OPTS.map(([k,label])=>({k,label,m:by[k]||0}))
+        .concat(Object.keys(by).filter(k=>!TIME_CLASS_OPTS.some(([o])=>o===k))
+          .map(k=>({k, label: k==="UNSET" ? "未分類" : (TIME_CLASS_LABEL[k]||k), m:by[k]})))
+        .sort((a,b)=>b.m-a.m);
+      // 記録が無い日に、押しても何も起きないのが一番困る。理由を出す
+      if (total === 0) {
+        setStoryMsg(list.length ? "時間帯のない記録だけなので、まだ図にできません" : "今日はまだ記録がありません");
+        setStoryBusy(false); return;
+      }
+      // 長い時間を使ったものから、やったことを拾う
+      const tasks = sortLogsByTime(list)
+        .slice().sort((a,b)=>(blockMinutes(b.time_block)||0)-(blockMinutes(a.time_block)||0))
+        .map(l=>String(l.task||"").trim()).filter(Boolean)
+        .filter((t,i,arr)=>arr.indexOf(t)===i);
+      const dt = new Date(day + "T12:00:00");
+      const wd = ["日","月","火","水","木","金","土"][dt.getDay()];
+      const todayRow = (reportList||[]).find(r=>String(r.date).slice(0,10)===day);
+      // 文字が確実に出るよう、フォントの読み込みを待ってから描く
+      try { if (document.fonts && document.fonts.ready) await document.fonts.ready; } catch(e){}
+      const cv = storyCanvasRef.current || document.createElement("canvas");
+      storyCanvasRef.current = cv;
+      drawStoryCard(cv, {
+        dateLabel: (dt.getMonth()+1) + "月" + dt.getDate() + "日（" + wd + "）",
+        subLabel: "記録 " + list.length + "件",
+        rows, totalMin: total, tasks,
+        score: todayRow && todayRow.score !== undefined ? todayRow.score : null,
+      });
+      setStoryUrl(cv.toDataURL("image/png"));
+    } catch(e){ console.error("[JIROKU] ストーリーズ画像の作成に失敗:", e); }
+    setStoryBusy(false);
+  };
   const [workReportExcluded, setWorkReportExcluded]=useState(0);  // プライベートとして外した件数
   const generateWorkReport = async () => {
     setWorkReportLoading(true); setWorkReportError(""); setWorkReportCopied(false); setWorkReportExcluded(0);
@@ -7872,7 +8052,40 @@ function ReportScreen() {
   };
 
   // ── 一覧表示 ──
+  // ★できた画像を見せて、保存させる★
+  //   iPhoneは download 属性が効かないことがあるので、画像そのものも出す。
+  //   長押しで「写真に保存」できるようにしておく（これが一番確実）。
+  const storyMsgBox = storyMsg && ReactDOM.createPortal(html`
+    <div onClick=${()=>setStoryMsg("")}
+      style=${{position:"fixed",left:"50%",bottom:96,transform:"translateX(-50%)",zIndex:610,
+               background:"var(--card)",border:"1px solid var(--border)",borderRadius:12,
+               boxShadow:"0 10px 30px rgba(0,0,0,0.25)",padding:"12px 18px",fontSize:13,
+               color:"var(--text)",cursor:"pointer",maxWidth:"86vw",textAlign:"center"}}>${storyMsg}</div>`,
+    document.body);
+
+  const storyModal = storyUrl && ReactDOM.createPortal(html`
+    <div style=${{position:"fixed",inset:0,height:"100dvh",background:"rgba(0,0,0,0.72)",display:"flex",
+                  alignItems:"center",justifyContent:"center",padding:16,zIndex:600}}
+      onClick=${e=>{ if(e.target===e.currentTarget) setStoryUrl(null); }}>
+      <div style=${{display:"flex",flexDirection:"column",alignItems:"center",gap:12,maxHeight:"92dvh"}}>
+        <img src=${storyUrl} alt="今日の時間"
+          style=${{width:"auto",height:"70dvh",maxWidth:"86vw",borderRadius:14,
+                   boxShadow:"0 18px 50px rgba(0,0,0,0.45)",objectFit:"contain"}}/>
+        <div style=${{fontSize:11.5,color:"rgba(255,255,255,0.8)",textAlign:"center",lineHeight:1.6}}>
+          iPhoneは画像を長押しして「写真に保存」でも保存できます</div>
+        <div style=${{display:"flex",gap:10}}>
+          <a href=${storyUrl} download=${"jiroku-" + logicalTodayStr() + ".png"}
+            style=${{background:"#fff",color:"var(--accent)",borderRadius:11,padding:"12px 22px",
+                     fontSize:13.5,fontWeight:800,textDecoration:"none"}}>画像を保存</a>
+          <button onClick=${()=>setStoryUrl(null)}
+            style=${{background:"rgba(255,255,255,0.16)",color:"#fff",border:"none",borderRadius:11,
+                     padding:"12px 22px",fontSize:13.5,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>閉じる</button>
+        </div>
+      </div>
+    </div>`, document.body);
+
   if(!date) return html`<div>
+    ${storyModal}${storyMsgBox}
     <div class="ph"><div class="ph-title">レポート</div></div>
     ${listLoading
       ? html`<div style=${{display:"flex",justifyContent:"center",padding:40}}><div class="spin" style=${{borderColor:"var(--border)",borderTopColor:"var(--accent)",width:24,height:24,borderWidth:2}}/></div>`
@@ -7882,6 +8095,19 @@ function ReportScreen() {
             <div class="empty-body">記録を入力すると<br/>毎晩22時にAIがレポートを生成します</div>
           </div>`
         : html`<div>
+            <!-- ★ストーリーズ用の画像★（2026-08-19 Kai要望）
+                 画面のスクリーンショットではストーリーズの比率に合わず余白だらけになる。
+                 Instagramの寸法ちょうど（1080×1920）で描いて保存できるようにする。 -->
+            <div class="card" style=${{marginBottom:8,display:"flex",alignItems:"center",justifyContent:"space-between",gap:12}}>
+              <div>
+                <div style=${{fontSize:13,fontWeight:700,color:"var(--text)"}}>📱 今日の時間をシェア</div>
+                <div style=${{fontSize:11.5,color:"var(--sub)",marginTop:2,lineHeight:1.5}}>ストーリーズの大きさで画像を作って保存できます</div>
+              </div>
+              <button onClick=${makeStory} disabled=${storyBusy}
+                style=${{flexShrink:0,background:"var(--accent)",color:"#fff",border:"none",borderRadius:10,padding:"10px 14px",fontSize:12.5,fontWeight:700,cursor:"pointer",fontFamily:"inherit",opacity:storyBusy?0.6:1,display:"flex",alignItems:"center",gap:6}}>
+                ${storyBusy?html`<div class="spin" style=${{borderColor:"rgba(255,255,255,.3)",borderTopColor:"#fff",width:12,height:12,borderWidth:2}}/>作成中…`:"画像を作る"}
+              </button>
+            </div>
             <!-- 業務報告書：就業終わりに今日の記録から上司向けの報告文を生成 -->
             <div class="card" style=${{marginBottom:8,display:"flex",alignItems:"center",justifyContent:"space-between",gap:12}}>
               <div>
@@ -11475,7 +11701,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260819-131953";
+const APP_BUILD = "20260819-232229";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
