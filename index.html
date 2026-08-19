@@ -3987,7 +3987,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
               <!-- 2つとも1行に収める。折り返すと縦に伸びて間延びする -->
               <div style=${{display:"flex",alignItems:"center",gap:6,flexWrap:"nowrap",marginTop:8}}>
                 ${game.streak>0&&html`<span style=${{fontSize:10.5,background:"rgba(255,255,255,0.2)",color:"#fff",padding:"3px 9px",borderRadius:20,fontWeight:700,whiteSpace:"nowrap"}}>🔥 ${game.streak}日連続</span>`}
-                ${game.streakFreeze>0&&html`<span title="連続記録フリーズ: 記録できない日があっても自動で連続記録を守ります" style=${{fontSize:10.5,background:"rgba(255,255,255,0.2)",color:"#fff",padding:"3px 9px",borderRadius:20,fontWeight:700,whiteSpace:"nowrap"}}>🧊 ×${game.streakFreeze}</span>`}
+                ${game.streakFreeze>0&&html`<span title="連続記録フリーズ: 記録できない日があっても自動で連続記録を守ります（持っている数だけ、続けて休んでも守れます）" style=${{fontSize:10.5,background:"rgba(255,255,255,0.2)",color:"#fff",padding:"3px 9px",borderRadius:20,fontWeight:700,whiteSpace:"nowrap"}}>🧊 ×${game.streakFreeze}</span>`}
               </div>`}
           </div>
 
@@ -8988,7 +8988,7 @@ const FAQ_CATEGORIES = [
     { q:"ホーム画面のジローくんを変えたい",
       a:"ホーム画面の絵をタップするたびに、階級のジローくん → 会えた子…と順番に切り替わります（回せるのは直近5体まで）。いま誰が出ているかは絵のすぐ下に名前で出ます。\n図鑑の詳しいカードにある「ホーム画面に出す」を押すと、その子に固定できます。古い子でも選べます。\n何も選んでいないときは、①新しく会えた子がその日だけ出る ②3日に1日は、会えた子が順ぐりに遊びに来る ③それ以外は階級のジローくん、の順で決まります。誰が来るかは日付で決まるので、同じ日は何度開いても同じ子です。" },
     { q:"1日休んだら連続記録は消えちゃう？（🧊フリーズ）",
-      a:"7日連続で記録するごとに「フリーズ🧊」が1個貯まります（最大2個）。\n記録できない日があっても、フリーズを持っていれば自動で1個使われて、連続記録とXPがそのまま守られます。使われた時は通知でお知らせします。\n今どれだけ持っているかは、ホーム画面の🔥連続日数の横（🧊×1など）と、みんなの頑張りの「連続記録ランキング」で確認できます。" },
+      a:"7日連続で記録するごとに「フリーズ🧊」が1個貯まります（最大2個）。\n記録できない日があっても、フリーズを持っていれば自動で使われて、連続記録とXPがそのまま守られます。休んだ日数ぶんだけ使われるので、2個持っていれば2日続けて休んでも大丈夫です。使われた時は通知でお知らせします。\n今どれだけ持っているかは、ホーム画面の🔥連続日数の横（🧊×1など）と、みんなの頑張りの「連続記録ランキング」で確認できます。" },
     { q:"「ステータス」って何？",
       a:"記録・メモ・集中度・目標への取り組み・継続性の5項目、それぞれ0〜20点・合計100点で日々の頑張りを表す指標です。\n筋肉と同じで、続けるほど伸び、サボる期間が続くと落ちていきます。半減期は21日なので、1日サボった程度では大きく減りませんが、休み続けるとじわじわ下がります。" },
   ]},
@@ -11381,7 +11381,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260819-112339";
+const APP_BUILD = "20260819-120941";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 

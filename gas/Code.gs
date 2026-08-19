@@ -5861,7 +5861,8 @@ function recomputeStreak_(studentEmail, dryRun) {
     else {
       const gap = daysBetween(prev, d);
       if (gap === 1) streak += 1;
-      else if (gap === 2 && freeze > 0) { freeze -= 1; streak += 1; }
+      // ★フリーズは重ねて使える★ 休んだ日数ぶん持っていれば、その数だけ使う
+      else if (gap >= 2 && freeze >= gap - 1) { freeze -= (gap - 1); streak += 1; }
       else streak = 1;
     }
     if (streak > 0 && streak % 7 === 0 && freeze < 2) freeze += 1;
@@ -5871,7 +5872,7 @@ function recomputeStreak_(studentEmail, dryRun) {
   if (prev) {
     const gapToToday = daysBetween(prev, today);
     if (gapToToday <= 1) { finalStreak = streak; finalLast = prev; }
-    else if (gapToToday === 2 && freeze > 0) { finalStreak = streak; finalFreeze = freeze - 1; finalLast = yesterday; }
+    else if (gapToToday >= 2 && freeze >= gapToToday - 1) { finalStreak = streak; finalFreeze = freeze - (gapToToday - 1); finalLast = yesterday; }
     else { finalStreak = 0; finalLast = prev; }
   }
   const sheet = getSheet("Users");
@@ -9371,13 +9372,17 @@ function updateStreak(studentEmail) {
       //   夜の処理が落ちた日は誰も守られず、翌日みんなの連続記録が黙って切れていた。
       //   実際、45日continuedしていたKaiがフリーズを2個持ったまま1に戻っていた。
       //   毎日の判定側でも同じルールを持たせて、夜の処理の成否に依存させない。
-      //   ルールは検算用の recomputeStreak_ と同じ（間が1日だけ＝gap===2）。
+      //   ★フリーズは重ねて使える★（2026-08-19 Kaiの判断）
+      //     以前は1日ぶんしか橋渡ししなかった。2個貯まるのに1個しか使えないのでは
+      //     貯める意味が薄い。休んだ日数ぶんだけ持っていれば、その数だけ使う。
+      //     （夜のレポート側は元から1晩1個ずつ使っており、そちらと揃う）
       const gapU = lastLogDate
         ? Math.round((new Date(today + "T00:00:00+09:00") - new Date(lastLogDate + "T00:00:00+09:00")) / 86400000)
         : 0;
-      if (gapU === 2 && freezesU > 0 && currentStreak > 0) {
+      const needU = gapU - 1;   // 休んだ日数
+      if (gapU >= 2 && needU > 0 && freezesU >= needU && currentStreak > 0) {
         newStreak = currentStreak + 1;
-        usedFreeze = true;
+        usedFreeze = needU;
       } else {
         newStreak = 1; // リセット
       }
@@ -9386,8 +9391,8 @@ function updateStreak(studentEmail) {
     sheet.getRange(i + 1, streakIdx + 1).setValue(newStreak);
     sheet.getRange(i + 1, lastLogDateIdx + 1).setValue(today);
     if (usedFreeze) {
-      sheet.getRange(i + 1, freezeIdxU + 1).setValue(freezesU - 1);
-      Logger.log(studentEmail + ": フリーズ1つで連続記録を継続（" + currentStreak + "→" + newStreak + "）");
+      sheet.getRange(i + 1, freezeIdxU + 1).setValue(freezesU - Number(usedFreeze));
+      Logger.log(studentEmail + ": フリーズ" + usedFreeze + "つで連続記録を継続（" + currentStreak + "→" + newStreak + "）");
     }
 
     // ── コミュニティのシェア欄を賑やかに＆偏りなく ──
@@ -11458,8 +11463,9 @@ function adminRepairStreaksFreeze(email, confirm) {
       else {
         const gap = daysBetween(prev, d);
         if (gap === 1) streak += 1;
-        else if (gap === 2 && freeze > 0) { freeze -= 1; streak += 1; } // 1日の欠けをフリーズで橋渡し
-        else streak = 1; // 2日以上の欠け、またはフリーズなしの欠け → リセット
+        // ★フリーズは重ねて使える★ 休んだ日数ぶん持っていれば、その数だけ使う
+        else if (gap >= 2 && freeze >= gap - 1) { freeze -= (gap - 1); streak += 1; }
+        else streak = 1; // 足りない欠け → リセット
       }
       if (streak > 0 && streak % 7 === 0 && freeze < 2) freeze += 1; // 7日ごとに獲得
       prev = d;
@@ -11469,7 +11475,7 @@ function adminRepairStreaksFreeze(email, confirm) {
     const gapToToday = daysBetween(prev, today);
     let finalStreak, finalFreeze, finalLastLog;
     if (gapToToday <= 1) { finalStreak = streak; finalFreeze = freeze; finalLastLog = prev; }
-    else if (gapToToday === 2 && freeze > 0) { finalStreak = streak; finalFreeze = freeze - 1; finalLastLog = yesterday; }
+    else if (gapToToday >= 2 && freeze >= gapToToday - 1) { finalStreak = streak; finalFreeze = freeze - (gapToToday - 1); finalLastLog = yesterday; }
     else { finalStreak = 0; finalFreeze = freeze; finalLastLog = prev; }
 
     const curStreak = Number(data[i][streakIdx] || 0);
