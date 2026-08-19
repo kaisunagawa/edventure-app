@@ -225,6 +225,8 @@ function doGet(e) {
         return jsonResponse({ ok: true, email: emSD, 記録日数: dsSD.length,
           最初: dsSD[0] || "", 最後: dsSD[dsSD.length - 1] || "",
           いまの連続記録: uSD.streak, いまのフリーズ: uSD.streak_freeze,
+          休みの曜日: String(uSD.rest_days || "") ?
+            String(uSD.rest_days).split(",").map(function(n){ return "日月火水木金土"[Number(String(n).trim())]; }).join("・") : "なし",
           last_log_date: String(uSD.last_log_date || ""),
           途切れ: gapsSD, 直近30日: dsSD.slice(-30) });
       }
@@ -5897,6 +5899,26 @@ function xpReverseForSource_(studentEmail, sourceId, reason) {
 //   単純に「連続した日数」を数えると、フリーズで橋渡しした日が切れ目に見え、
 //   本来続いているストリークを短く壊してしまう。
 //   計算方法は adminRepairStreaksFreeze と同じにそろえている。
+// ★休みの日はフリーズを使わない★（2026-08-20 Kai指摘）
+//   夜のレポート側（applyXPDecay）は、設定した休みの曜日に記録が無くても
+//   減点もリセットもフリーズ消費もしない。ところが、あとから計算し直す側は
+//   その設定を見ておらず、休みの日にもフリーズを1つ請求していた。
+//   実際、Kaiは土曜と日曜の2日が空いたが日曜は休みに設定してあり、
+//   本来なら土曜のぶん1つで足りたのに、2つとも失われた。
+//   間に挟まる休みの日を数えず、必要なフリーズの数だけを返す。
+function freezesNeededBetween_(fromDate, toDate, restDays) {
+  const rest = String(restDays || "").trim();
+  const restSet = {};
+  if (rest) rest.split(",").forEach(function (x) { restSet[Number(String(x).trim())] = 1; });
+  let need = 0;
+  const from = new Date(fromDate + "T00:00:00"), to = new Date(toDate + "T00:00:00");
+  for (let t = from.getTime() + 86400000; t < to.getTime(); t += 86400000) {
+    const dd = new Date(t);
+    if (!restSet[dd.getDay()]) need += 1;   // 休みの曜日は数えない
+  }
+  return need;
+}
+
 function recomputeStreak_(studentEmail, dryRun) {
   const set = {};
   sheetToObjects(getSheet("DailyLog")).forEach(function (l) {
@@ -5911,14 +5933,16 @@ function recomputeStreak_(studentEmail, dryRun) {
     return Math.round((new Date(b + "T00:00:00") - new Date(a + "T00:00:00")) / 86400000); };
   const today = formatDate(new Date());
   const yesterday = formatDate(new Date(Date.now() - 86400000));
+  // 休みに設定した曜日は、記録が無くてもフリーズを使わない
+  const restCfg = String((getFilteredRows("Users", "student_email", studentEmail)[0] || {}).rest_days || "");
   let streak = 0, freeze = 0, prev = null;
   dates.forEach(function (d) {
     if (prev === null) streak = 1;
     else {
       const gap = daysBetween(prev, d);
-      if (gap === 1) streak += 1;
-      // ★フリーズは重ねて使える★ 休んだ日数ぶん持っていれば、その数だけ使う
-      else if (gap >= 2 && freeze >= gap - 1) { freeze -= (gap - 1); streak += 1; }
+      const need = freezesNeededBetween_(prev, d, restCfg);   // 休みの日は数えない
+      if (gap === 1 || need === 0) streak += 1;               // 続き、または休みだけの空き
+      else if (freeze >= need) { freeze -= need; streak += 1; }
       else streak = 1;
     }
     if (streak > 0 && streak % 7 === 0 && freeze < 2) freeze += 1;
@@ -5927,8 +5951,9 @@ function recomputeStreak_(studentEmail, dryRun) {
   let finalStreak = 0, finalFreeze = freeze, finalLast = prev || "";
   if (prev) {
     const gapToToday = daysBetween(prev, today);
-    if (gapToToday <= 1) { finalStreak = streak; finalLast = prev; }
-    else if (gapToToday >= 2 && freeze >= gapToToday - 1) { finalStreak = streak; finalFreeze = freeze - (gapToToday - 1); finalLast = yesterday; }
+    const needToday = freezesNeededBetween_(prev, today, restCfg);
+    if (gapToToday <= 1 || needToday === 0) { finalStreak = streak; finalLast = prev; }
+    else if (freeze >= needToday) { finalStreak = streak; finalFreeze = freeze - needToday; finalLast = yesterday; }
     else { finalStreak = 0; finalLast = prev; }
   }
   const sheet = getSheet("Users");
@@ -9435,8 +9460,12 @@ function updateStreak(studentEmail) {
       const gapU = lastLogDate
         ? Math.round((new Date(today + "T00:00:00+09:00") - new Date(lastLogDate + "T00:00:00+09:00")) / 86400000)
         : 0;
-      const needU = gapU - 1;   // 休んだ日数
-      if (gapU >= 2 && needU > 0 && freezesU >= needU && currentStreak > 0) {
+      // 休みに設定した曜日は数えない（夜のレポート側と同じ扱い）
+      const restU = String(data[i][headers.indexOf("rest_days")] || "");
+      const needU = lastLogDate ? freezesNeededBetween_(lastLogDate, today, restU) : 0;
+      if (gapU >= 2 && needU === 0 && currentStreak > 0) {
+        newStreak = currentStreak + 1;   // 空いたのが休みの日だけなら、そのまま続く
+      } else if (gapU >= 2 && needU > 0 && freezesU >= needU && currentStreak > 0) {
         newStreak = currentStreak + 1;
         usedFreeze = needU;
       } else {
@@ -11513,14 +11542,16 @@ function adminRepairStreaksFreeze(email, confirm) {
     const dates = Array.from(set).sort();
 
     // フリーズ経済をシミュレート
+    // 休みに設定した曜日は、記録が無くてもフリーズを使わない
+    const restCfgR = String(data[i][headers.indexOf("rest_days")] || "");
     let streak = 0, freeze = 0, prev = null;
     for (const d of dates) {
       if (prev === null) { streak = 1; }
       else {
         const gap = daysBetween(prev, d);
-        if (gap === 1) streak += 1;
-        // ★フリーズは重ねて使える★ 休んだ日数ぶん持っていれば、その数だけ使う
-        else if (gap >= 2 && freeze >= gap - 1) { freeze -= (gap - 1); streak += 1; }
+        const need = freezesNeededBetween_(prev, d, restCfgR);
+        if (gap === 1 || need === 0) streak += 1;
+        else if (freeze >= need) { freeze -= need; streak += 1; }
         else streak = 1; // 足りない欠け → リセット
       }
       if (streak > 0 && streak % 7 === 0 && freeze < 2) freeze += 1; // 7日ごとに獲得
@@ -11529,9 +11560,10 @@ function adminRepairStreaksFreeze(email, confirm) {
 
     // 今日時点でストリークが生きているか判定
     const gapToToday = daysBetween(prev, today);
+    const needToday = freezesNeededBetween_(prev, today, restCfgR);
     let finalStreak, finalFreeze, finalLastLog;
-    if (gapToToday <= 1) { finalStreak = streak; finalFreeze = freeze; finalLastLog = prev; }
-    else if (gapToToday >= 2 && freeze >= gapToToday - 1) { finalStreak = streak; finalFreeze = freeze - (gapToToday - 1); finalLastLog = yesterday; }
+    if (gapToToday <= 1 || needToday === 0) { finalStreak = streak; finalFreeze = freeze; finalLastLog = prev; }
+    else if (freeze >= needToday) { finalStreak = streak; finalFreeze = freeze - needToday; finalLastLog = yesterday; }
     else { finalStreak = 0; finalFreeze = freeze; finalLastLog = prev; }
 
     const curStreak = Number(data[i][streakIdx] || 0);
