@@ -7781,6 +7781,33 @@ function storyRoundRect(ctx, x, y, w, h, r){
   ctx.lineTo(x, y+r); ctx.quadraticCurveTo(x, y, x+r, y);
   ctx.closePath();
 }
+// ★アプリの内訳とそっくり同じにする★（2026-08-20 Kai指摘
+//   「それぞれの項目に絵文字がない」「記録の内訳と時間の内訳で見た目が全然違う」）
+//   記録画面の「今日の時間の内訳」と同じ形にする。丸いアイコン、
+//   分類色の時間、下の帯まで同じ。ここはアプリのマークアップの写しなので、
+//   片方を変えたらもう片方も必ず直すこと。
+const STORY_ICON_SVG = {
+  GOAL_DIRECT:  '<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="3.5"/><circle cx="12" cy="12" r="1" fill="COL" stroke="none"/>',
+  ASSET_BUILD:  '<path d="M4 19h16"/><path d="M7 19v-6M12 19V8M17 19v-9"/>',
+  RECOVERY:     '<path d="M12 20s-7-4.4-7-9a4 4 0 017-2.6A4 4 0 0119 11c0 4.6-7 9-7 9z"/>',
+  RECOVERY_RELATIONSHIP: '<path d="M12 20s-7-4.4-7-9a4 4 0 017-2.6A4 4 0 0119 11c0 4.6-7 9-7 9z"/>',
+  RELATIONSHIP: '<circle cx="9" cy="9" r="3"/><path d="M3 19c0-3 2.7-4.6 6-4.6s6 1.6 6 4.6"/><path d="M16 7.5a3 3 0 010 5.4M17.5 19c0-2-.8-3.4-2-4.3"/>',
+  OPERATIONS:   '<rect x="3" y="7" width="18" height="13" rx="2"/><path d="M9 7V5.5A1.5 1.5 0 0110.5 4h3A1.5 1.5 0 0115 5.5V7"/>',
+  UNPLANNED_LEAKAGE: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/><path d="M10 15l4 3M14 15l-4 3"/>',
+};
+function storyIconUrl(key, color, px){
+  const inner = (STORY_ICON_SVG[key] || STORY_ICON_SVG.OPERATIONS).replace(/COL/g, color);
+  const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="'+px+'" height="'+px+'" viewBox="0 0 24 24" '
+            + 'fill="none" stroke="'+color+'" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
+            + inner + '</svg>';
+  return "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg);
+}
+// #RRGGBB を、指定した濃さの半透明にする（アプリの color-mix と同じ見え方にする）
+function storyAlpha(hex, a){
+  const h = String(hex).replace("#","");
+  const r = parseInt(h.slice(0,2),16), g = parseInt(h.slice(2,4),16), b = parseInt(h.slice(4,6),16);
+  return "rgba(" + r + "," + g + "," + b + "," + a + ")";
+}
 function storyLoadImage(src){
   return new Promise(function(res){
     const im = new Image();
@@ -7851,57 +7878,65 @@ async function drawStoryCard(cv, d){
   ctx.strokeStyle = LINE; ctx.lineWidth = 2;
   ctx.beginPath(); ctx.moveTo(96, 578); ctx.lineTo(984, 578); ctx.stroke();
 
-  // ── 左：ドーナツ ──
-  const cx = 318, cy = 846, R = 178, SW = 52;
-  ctx.lineCap = "butt";
-  ctx.strokeStyle = STORY_TRACK; ctx.lineWidth = SW;
-  ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI*2); ctx.stroke();
+  // ── 左：ドーナツ（記録画面と同じ作り。R:SW の比も合わせる）──
   const shown = d.rows.filter(r=>r.m>0);
+  const cx = 236, cy = 880, R = 126, SW = 36;
+  ctx.lineCap = "butt";
+  ctx.strokeStyle = LINE; ctx.lineWidth = SW;   // 下地は --border（アプリと同じ）
+  ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI*2); ctx.stroke();
   let a0 = -Math.PI/2;
   shown.forEach(function(r){
     const a1 = a0 + (r.m/d.totalMin)*Math.PI*2;
-    ctx.strokeStyle = STORY_CLASS_COLOR[r.k] || STORY_CLASS_COLOR.UNSET;
+    ctx.strokeStyle = STORY_CLASS_COLOR[r.k] || "#64748B";
     ctx.beginPath(); ctx.arc(cx, cy, R, a0, a1); ctx.stroke();
     a0 = a1;
   });
-  const top = shown[0];
-  if (top) {
-    ctx.textAlign = "center";
-    ctx.fillStyle = STORY_CLASS_COLOR[top.k] || AC; ctx.font = "800 82px " + F;
-    ctx.fillText(Math.round(top.m/d.totalMin*100) + "%", cx, cy + 8);
-    ctx.fillStyle = SUB; ctx.font = "700 27px " + F;
-    ctx.fillText(storyFit(ctx, top.label, 250), cx, cy + 52);
-  }
+  // 真ん中は「合計 / 時間 / (割合)」。アプリの内訳と同じ並び
+  ctx.textAlign = "center";
+  ctx.fillStyle = SUB; ctx.font = "700 26px " + F;
+  ctx.fillText("合計", cx, cy - 26);
+  ctx.fillStyle = INK; ctx.font = "800 44px " + F;
+  ctx.fillText(storyHM(d.totalMin), cx, cy + 18);
+  ctx.fillStyle = SUB; ctx.font = "700 25px " + F;
+  ctx.fillText("(" + (d.coverPct !== undefined ? d.coverPct : 100) + "%)", cx, cy + 54);
 
-  // ── 右：内訳を全部並べる ──
-  const rx = 552, rw = 984 - rx;
-  const rowH = shown.length > 5 ? 70 : 82;
-  const topM = shown[0] ? shown[0].m : 1;
-  let y = cy - ((shown.length - 1) * rowH) / 2 - 10;
-  shown.slice(0, 6).forEach(function(r){
-    const col = STORY_CLASS_COLOR[r.k] || STORY_CLASS_COLOR.UNSET;
-    ctx.textAlign = "left";
-    ctx.fillStyle = INK; ctx.font = "800 31px " + F;
-    ctx.fillText(storyFit(ctx, r.label, 230), rx, y);
-    ctx.textAlign = "right";
-    ctx.fillStyle = INK; ctx.font = "800 31px " + F;
-    ctx.fillText(storyHM(r.m), 916, y);
-    ctx.fillStyle = SUB; ctx.font = "700 24px " + F;
-    ctx.fillText(Math.round(r.m/d.totalMin*100) + "%", 984, y);
-    const bh2 = 8, byy = y + 14;
-    storyRoundRect(ctx, rx, byy, rw, bh2, 4); ctx.fillStyle = STORY_TRACK; ctx.fill();
-    storyRoundRect(ctx, rx, byy, Math.max(10, rw * (r.m / topM)), bh2, 4);
+  // ── 右：内訳（丸いアイコン・分類色の時間・下の帯。すべてアプリと同じ）──
+  const lx0 = 404, lw = 984 - lx0;
+  const rowH = 96;
+  let ry = cy - ((shown.length - 1) * rowH) / 2;
+  for (var ii = 0; ii < shown.length && ii < 6; ii++) {
+    const r = shown[ii];
+    const col = STORY_CLASS_COLOR[r.k] || "#64748B";
+    const pct = Math.round(r.m / d.totalMin * 100);
+    // 丸いアイコン（背景26%・枠55%・中は分類色）
+    const icx = lx0 + 28, icy = ry - 6, ir = 28;
+    ctx.beginPath(); ctx.arc(icx, icy, ir, 0, Math.PI*2);
+    ctx.fillStyle = storyAlpha(col, 0.26); ctx.fill();
+    ctx.strokeStyle = storyAlpha(col, 0.55); ctx.lineWidth = 2; ctx.stroke();
+    const im = d.icons && d.icons[r.k];
+    if (im) ctx.drawImage(im, icx - 17, icy - 17, 34, 34);
+    // 分類名 → 時間（分類色） → 割合
+    ctx.textAlign = "left"; ctx.fillStyle = INK; ctx.font = "700 32px " + F;
+    ctx.fillText(storyFit(ctx, r.label, 250), lx0 + 70, ry + 6);
+    ctx.textAlign = "right"; ctx.fillStyle = col; ctx.font = "800 31px " + F;
+    ctx.fillText(storyHM(r.m), 902, ry + 6);
+    ctx.fillStyle = SUB; ctx.font = "700 27px " + F;
+    ctx.fillText(pct + "%", 984, ry + 6);
+    // 下の帯（下地は --border、伸びるぶんは分類色）
+    const tx = lx0 + 70, tw = 984 - tx, th = 11, tyy = ry + 26;
+    storyRoundRect(ctx, tx, tyy, tw, th, 6); ctx.fillStyle = LINE; ctx.fill();
+    storyRoundRect(ctx, tx, tyy, Math.max(8, tw * pct / 100), th, 6);
     ctx.fillStyle = col; ctx.fill();
-    y += rowH;
-  });
+    ry += rowH;
+  }
 
   // ── 下：ジローくん ──
   //   ★吹き出しにする★（2026-08-20 Kai指摘「コメントっぽくない。喋ってるように」）
   //     四角い囲みに絵と文を並べただけでは、ジローの言葉に見えない。
   //     ジローは紙の上に立たせ、その口元から吹き出しを出す。
-  const jy = 1186, jSize = 254;
+  const jy = 1246, jSize = 234;
   if (d.jiroImg) ctx.drawImage(d.jiroImg, 96, jy + 16, jSize, jSize);
-  const bx2 = 376, bw2 = 984 - bx2, by2 = jy + 22, bh3 = 214;
+  const bx2 = 362, bw2 = 984 - bx2, by2 = jy + 14, bh3 = 200;
   const ty = by2 + 86;
   ctx.fillStyle = STORY_CARD; ctx.strokeStyle = LINE; ctx.lineWidth = 2;
   // 本体としっぽをひと筆で描く（継ぎ目が出ないように）
@@ -8014,6 +8049,11 @@ function ReportScreen() {
       const seed = Number(day.replace(/-/g,"")) % (HIDDEN_JIRO.length || 1);
       const jiro = HIDDEN_JIRO[seed] || null;
       const jiroImg = jiro && jiro.art ? await storyLoadImage(jiro.art) : null;
+      // 分類のアイコンを先に用意する（アプリの内訳と同じ絵を使う）
+      const icons = {};
+      await Promise.all(rows.filter(r=>r.m>0).slice(0,6).map(async function(r){
+        icons[r.k] = await storyLoadImage(storyIconUrl(r.k, STORY_CLASS_COLOR[r.k] || "#64748B", 34));
+      }));
       const top = rows.filter(r=>r.m>0)[0];
       try { if (document.fonts && document.fonts.ready) await document.fonts.ready; } catch(e){}
       const cv = storyCanvasRef.current || document.createElement("canvas");
@@ -8021,7 +8061,8 @@ function ReportScreen() {
       await drawStoryCard(cv, {
         dateLabel: (dt.getMonth()+1) + "月" + dt.getDate() + "日（" + wd + "）",
         headLabel: (day === logicalTodayStr()) ? "今日、記録した時間" : "この日に記録した時間",
-        rows, totalMin: total,
+        rows, totalMin: total, icons,
+        coverPct: Math.round(rows.filter(r=>r.m>0 && r.k!=="UNSET").reduce((a2,r)=>a2+r.m,0) / total * 100),
         jiroImg, jiroName: jiro ? jiro.name : "",
         jiroLine1: storyJiroLine(rows, total),
         jiroLine2: top ? (top.label + "に " + storyHM(top.m)) : "",
@@ -11822,7 +11863,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260820-001216";
+const APP_BUILD = "20260820-001721";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
