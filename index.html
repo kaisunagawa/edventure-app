@@ -6970,15 +6970,19 @@ function LogScreen({onToast, isActive}) {
           .map(k=>({k,label:TIME_CLASS_LABEL[k]||k,m:byCls[k]})))
         .sort((a,b)=>b.m-a.m);
 
-      // ドーナツ
+      // ★24時間の時計にする★（2026-08-20 Kai要望「ストーリーズと同じように」）
+      //   割合だけの円だと「いつ」が消える。1周を24時間にして、
+      //   記録した時間帯をそのままの位置に置く。0時が上、時計回り。
       const R=42, SW=12, CIRC=2*Math.PI*R;
-      let acc=0;
-      const segs = rows.filter(r=>r.m>0).map(r=>{
-        const frac = total>0 ? r.m/total : 0;
-        const seg = { k:r.k, dash:CIRC*frac, offset:-CIRC*acc };
-        acc += frac; return seg;
-      });
-      const restFrac = Math.max(0, 1-acc);
+      const segs = logs.map(l=>{
+        const sp = blockSpan(l.time_block);
+        if(!sp) return null;
+        const st = Math.max(0, sp.start), en = Math.min(1440, sp.end);
+        if(!(en > st)) return null;
+        return { k: String(l.time_classification||"") || "UNSET",
+                 dash: CIRC*((en-st)/1440), offset: -CIRC*(st/1440) };
+      }).filter(Boolean);
+      const restFrac = total>0 ? Math.max(0, 1 - classifiedMin/total) : 1;
 
       return html`
       <!-- 寸法は他のカード(.card)と同じにする。ここだけ全幅だと横がそろわない（2026-08-05 Kai指摘） -->
@@ -7008,6 +7012,13 @@ function LogScreen({onToast, isActive}) {
                     stroke=${TIME_CLASS_COLOR[sg.k]||"#64748B"} stroke-width=${SW}
                     stroke-dasharray=${sg.dash+" "+(CIRC-sg.dash)} stroke-dashoffset=${sg.offset}/>`)}
               </svg>
+              <!-- 何時のあたりかが分かるよう、0/6/12/18 だけ小さく置く -->
+              ${[[0,"0",{top:1,left:"50%",transform:"translateX(-50%)"}],
+                 [6,"6",{right:2,top:"50%",transform:"translateY(-50%)"}],
+                 [12,"12",{bottom:1,left:"50%",transform:"translateX(-50%)"}],
+                 [18,"18",{left:1,top:"50%",transform:"translateY(-50%)"}]].map(([h,lb,pos])=>html`
+                <div key=${h} style=${{position:"absolute",fontSize:8,color:"var(--faint)",
+                                       lineHeight:1,pointerEvents:"none",...pos}}>${lb}</div>`)}
               <div style=${{position:"absolute",inset:0,display:"flex",flexDirection:"column",
                             alignItems:"center",justifyContent:"center",pointerEvents:"none"}}>
                 <div style=${{fontSize:10,color:"var(--sub)",marginBottom:1}}>合計</div>
@@ -7892,28 +7903,45 @@ async function drawStoryCard(cv, d){
   ctx.fillStyle = STORY_CARD; ctx.fill();
   ctx.strokeStyle = LINE; ctx.lineWidth = 2; ctx.stroke();
 
-  const cx = 268, cy = boxY + boxH/2, R = 150, SW = 44;
+  // ★24時間の時計にする★（2026-08-20 Kai要望
+  //   「何時から何時までが分かるように」「世の中のドーナツ型の時間管理表を参考に」）
+  //   割合だけの円だと「いつ」が消える。1周を24時間にして、記録した時間帯を
+  //   そのままの位置に置く。0時が上、時計回り。
+  const cx = 256, cy = boxY + boxH/2, R = 124, SW = 38;
+  const ang = function (min) { return (min / 1440) * Math.PI * 2 - Math.PI / 2; };
   ctx.lineCap = "butt";
   ctx.strokeStyle = STORY_TRACK; ctx.lineWidth = SW;
   ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI*2); ctx.stroke();
-  let a0 = -Math.PI/2;
-  shown.forEach(function(r){
-    const a1 = a0 + (r.m/d.totalMin)*Math.PI*2;
-    ctx.strokeStyle = STORY_CLASS_COLOR[r.k] || "#64748B";
-    ctx.beginPath(); ctx.arc(cx, cy, R, a0, a1); ctx.stroke();
-    a0 = a1;
+  (d.segments || []).forEach(function (sg) {
+    if (!(sg.end > sg.start)) return;
+    ctx.strokeStyle = STORY_CLASS_COLOR[sg.k] || STORY_CLASS_COLOR.UNSET;
+    ctx.beginPath(); ctx.arc(cx, cy, R, ang(sg.start), ang(sg.end)); ctx.stroke();
   });
+  // 3時間ごとの目盛りと数字（何時のあたりかが分かるように）
+  ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  for (var hh = 0; hh < 24; hh += 3) {
+    const th2 = ang(hh * 60);
+    const r1 = R + SW/2 + 5, r2 = R + SW/2 + 14;
+    ctx.strokeStyle = LINE; ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(cx + Math.cos(th2)*r1, cy + Math.sin(th2)*r1);
+    ctx.lineTo(cx + Math.cos(th2)*r2, cy + Math.sin(th2)*r2);
+    ctx.stroke();
+    ctx.fillStyle = SUB; ctx.font = "700 20px " + F;
+    ctx.fillText(String(hh), cx + Math.cos(th2)*(R + SW/2 + 29), cy + Math.sin(th2)*(R + SW/2 + 29));
+  }
+  ctx.textBaseline = "alphabetic";
   // 真ん中は「合計 / 時間 / (割合)」。記録画面の内訳と同じ並び
   ctx.textAlign = "center";
-  ctx.fillStyle = SUB; ctx.font = "700 27px " + F;
-  ctx.fillText("合計", cx, cy - 30);
-  ctx.fillStyle = INK; ctx.font = "800 48px " + F;
-  ctx.fillText(storyHM(d.totalMin), cx, cy + 20);
-  ctx.fillStyle = SUB; ctx.font = "700 25px " + F;
-  ctx.fillText("(" + (d.coverPct !== undefined ? d.coverPct : 100) + "%)", cx, cy + 58);
+  ctx.fillStyle = SUB; ctx.font = "700 23px " + F;
+  ctx.fillText("合計", cx, cy - 26);
+  ctx.fillStyle = INK; ctx.font = "800 38px " + F;
+  ctx.fillText(storyHM(d.totalMin), cx, cy + 14);
+  ctx.fillStyle = SUB; ctx.font = "700 22px " + F;
+  ctx.fillText("(" + (d.coverPct !== undefined ? d.coverPct : 100) + "%)", cx, cy + 46);
 
   // 内訳（丸いアイコン・分類色の時間・下の帯。すべて記録画面と同じ）
-  const lx0 = 442, lRight = 952;
+  const lx0 = 452, lRight = 952;
   const rowH = shown.length > 5 ? 104 : 118;
   let ry = cy - ((shown.length - 1) * rowH) / 2;
   for (var ii = 0; ii < shown.length && ii < 6; ii++) {
@@ -8012,6 +8040,7 @@ function ReportScreen() {
   const [storyMsg, setStoryMsg]=useState("");
   const [storyFile, setStoryFile]=useState("jiroku.png");
   const storyCanvasRef=React.useRef(null);
+  const storyFileObjRef=React.useRef(null);
   // ★どの日ぶんでも作れるようにする★（2026-08-20 Kai報告
   //   「日付超えちゃって作れなくなった」）
   //   1日の区切りは0時ちょうどなので、0時を回った瞬間に今日は0件になる。
@@ -8071,6 +8100,13 @@ function ReportScreen() {
         dateLabel: (dt.getMonth()+1) + "月" + dt.getDate() + "日（" + wd + "）",
         headLabel: (day === logicalTodayStr()) ? "今日、記録した時間" : "この日に記録した時間",
         rows, totalMin: total, icons,
+        // 記録した時間帯そのもの（24時間の時計に置くために使う）
+        segments: list.map(function(l){
+          const sp = blockSpan(l.time_block);
+          if (!sp) return null;
+          return { start: Math.max(0, sp.start), end: Math.min(1440, sp.end),
+                   k: String(l.time_classification || "").trim() || "UNSET" };
+        }).filter(Boolean).filter(function(x){ return x.end > x.start; }),
         scoreHead: (todayRow && todayRow.score !== undefined && todayRow.score !== null)
                      ? "その日のスコア" : "この日の記録",
         coverPct: Math.round(rows.filter(r=>r.m>0 && r.k!=="UNSET").reduce((a2,r)=>a2+r.m,0) / total * 100),
@@ -8086,7 +8122,21 @@ function ReportScreen() {
                     ? ("記録 " + list.length + "件・" + rows.filter(r=>r.m>0).length + "分類")
                     : ("記録 " + list.length + "件"),
       });
-      setStoryFile("jiroku-" + day + ".png");
+      const fname = "jiroku-" + day + ".png";
+      setStoryFile(fname);
+      // ★写真に保存できるようにする★（2026-08-20 Kai報告
+      //   「画像保存ボタンを押してもダウンロードできない」）
+      //   iPhoneでは a[download] が効かない。共有シートに渡せば
+      //   「画像を保存」で写真フォルダに入り、そのままInstagramへも送れる。
+      //   押した瞬間に渡せるよう、作った時点で File にしておく。
+      try {
+        await new Promise(function(res){
+          cv.toBlob(function(b){
+            storyFileObjRef.current = b ? new File([b], fname, { type: "image/png" }) : null;
+            res();
+          }, "image/png");
+        });
+      } catch(e){ storyFileObjRef.current = null; }
       setStoryUrl(cv.toDataURL("image/png"));
     } catch(e){ console.error("[JIROKU] ストーリーズの作成に失敗:", e); setStoryMsg("うまく作れませんでした"); }
     setStoryBusy(false);
@@ -8226,6 +8276,22 @@ function ReportScreen() {
   // ★できた画像を見せて、保存させる★
   //   iPhoneは download 属性が効かないことがあるので、画像そのものも出す。
   //   長押しで「写真に保存」できるようにしておく（これが一番確実）。
+  // 共有シートが使えれば写真に保存できる。使えない環境ではダウンロードに落とす
+  const shareStory = () => {
+    const f = storyFileObjRef.current;
+    try {
+      if (f && navigator.canShare && navigator.canShare({ files: [f] })) {
+        navigator.share({ files: [f] }).catch(function(){});
+        return;
+      }
+    } catch(e){}
+    try {
+      const a2 = document.createElement("a");
+      a2.href = storyUrl; a2.download = storyFile;
+      document.body.appendChild(a2); a2.click(); a2.remove();
+    } catch(e){ setStoryMsg("保存できませんでした。画像を長押しして保存してください"); }
+  };
+
   const storyMsgBox = storyMsg && ReactDOM.createPortal(html`
     <div onClick=${()=>setStoryMsg("")}
       style=${{position:"fixed",left:"50%",bottom:96,transform:"translateX(-50%)",zIndex:610,
@@ -8243,11 +8309,12 @@ function ReportScreen() {
           style=${{width:"auto",height:"70dvh",maxWidth:"86vw",borderRadius:14,
                    boxShadow:"0 18px 50px rgba(0,0,0,0.45)",objectFit:"contain"}}/>
         <div style=${{fontSize:11.5,color:"rgba(255,255,255,0.8)",textAlign:"center",lineHeight:1.6}}>
-          iPhoneは画像を長押しして「写真に保存」でも保存できます</div>
+          押すと共有メニューが出ます。「画像を保存」で写真に入り、Instagramへも送れます<br/>
+          出ないときは、画像を長押しして「写真に保存」</div>
         <div style=${{display:"flex",gap:10}}>
-          <a href=${storyUrl} download=${storyFile}
-            style=${{background:"#fff",color:"var(--accent)",borderRadius:11,padding:"12px 22px",
-                     fontSize:13.5,fontWeight:800,textDecoration:"none"}}>画像を保存</a>
+          <button onClick=${shareStory}
+            style=${{background:"#fff",color:"var(--accent)",border:"none",borderRadius:11,padding:"12px 22px",
+                     fontSize:13.5,fontWeight:800,cursor:"pointer",fontFamily:"inherit"}}>写真に保存・シェア</button>
           <button onClick=${()=>setStoryUrl(null)}
             style=${{background:"rgba(255,255,255,0.16)",color:"#fff",border:"none",borderRadius:11,
                      padding:"12px 22px",fontSize:13.5,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>閉じる</button>
@@ -11877,7 +11944,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260820-002704";
+const APP_BUILD = "20260820-003412";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
