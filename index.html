@@ -8005,13 +8005,14 @@ async function drawStoryCard(cv, d){
   ctx.closePath();
   ctx.fill(); ctx.stroke();
 
-  ctx.textAlign = "left"; ctx.fillStyle = AC; ctx.font = "800 26px " + F;
-  ctx.fillText(d.jiroName || "ジローくん", bx2 + 40, by2 + 58);
-  ctx.fillStyle = INK; ctx.font = "800 34px " + F;
-  ctx.fillText(storyFit(ctx, d.jiroLine1, bw2 - 80), bx2 + 40, by2 + 116);
+  // ★名前は出さない★（2026-08-20 Kaiの判断）
+  //   「サイエンティストジロー」のような名前が入ると、絵より名前を
+  //   読ませることになる。誰が言っているかより、何を言っているか。
+  ctx.textAlign = "left"; ctx.fillStyle = INK; ctx.font = "800 36px " + F;
+  ctx.fillText(storyFit(ctx, d.jiroLine1, bw2 - 80), bx2 + 40, by2 + 88);
   if (d.jiroLine2) {
-    ctx.fillStyle = SUB; ctx.font = "700 27px " + F;
-    ctx.fillText(storyFit(ctx, d.jiroLine2, bw2 - 80), bx2 + 40, by2 + 166);
+    ctx.fillStyle = SUB; ctx.font = "700 28px " + F;
+    ctx.fillText(storyFit(ctx, d.jiroLine2, bw2 - 80), bx2 + 40, by2 + 140);
   }
 
   // ── 足元 ──
@@ -11956,7 +11957,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260820-003616";
+const APP_BUILD = "20260820-004026";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
