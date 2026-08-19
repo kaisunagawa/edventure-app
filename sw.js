@@ -18,7 +18,7 @@
 //   すぐ clients.claim() する。保存画面が無くなるので、次に開いたときは
 //   必ずネットワークから取り直す。端末で何も操作しなくても入れ替わる。
 //   ★中身を変えたのに「古いまま」の報告が出たら、ここを1つ進めること★
-const CACHE = "jiroku-v18-story-2026-08-20";
+const CACHE = "jiroku-v19-story-2026-08-20";
 
 // タイマー終了などをバックグラウンドでも通知するためのFirebase Cloud Messaging。
 // 別ファイル（firebase-messaging-sw.js）として登録すると、同じスコープ('/')の
@@ -78,6 +78,14 @@ self.addEventListener('activate', e => {
     caches.keys()
       .then(keys => Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k))))
       .then(() => self.clients.claim())
+      // ★開いている画面をこちらから開き直す★（2026-08-20 Kai報告
+      //   「まだ変わってないよ」）
+      //   名前を進めて保存を捨てても、いま開いている画面はもう古いHTMLを
+      //   受け取ったあとなので、そのままでは変わらない。結局「もう1回開いて」と
+      //   お願いすることになっていた。保存を捨てた直後にこちらから開き直す。
+      //   ここを通るのは版を出したときだけなので、普段の操作は邪魔しない。
+      .then(() => self.clients.matchAll({ type: 'window' }))
+      .then(list => list.forEach(c => { try { c.navigate(c.url); } catch (err) {} }))
   );
 });
 
