@@ -7746,22 +7746,25 @@ const STORY_TOP = 250, STORY_BOTTOM = 1670;
 //   一度アースグリーンに振ったが、アプリ・カレンダー・記録画面と
 //   色が食い違うと、同じサービスの絵に見えない。
 //   ここは :root と TIME_CLASS_COLOR と同じ色にそろえる約束。片方だけ変えないこと。
-const STORY_PAPER = "#F8F8FA";   // --bg
-const STORY_CARD  = "#FFFFFF";   // --card
-const STORY_INK   = "#1F2937";   // --text
-const STORY_SUB   = "#9CA3AF";   // --sub
-const STORY_ACCENT= "#0891B2";   // --accent（JIROKUの色）
-const STORY_LINE  = "#E5E7EB";   // --border
-const STORY_TRACK = "#EEF1F4";   // 帯の下地
+// ★暗いテーマを使う★（2026-08-20 Kaiの判断「ダークモードのUIの方がかっこいい」）
+//   値はアプリの暗いテーマ（:root の dark 側）と同じ。
+//   日常業務は暗いときだけ水色（--cyan）になるので、そこも合わせる。
+const STORY_PAPER = "#101417";   // --bg
+const STORY_CARD  = "#1A2025";   // --card
+const STORY_INK   = "#E8ECEF";   // --text
+const STORY_SUB   = "#7E8A94";   // --sub
+const STORY_ACCENT= "#22B8D4";   // --accent（暗いときのJIROKUの色）
+const STORY_LINE  = "#2B333A";   // --border
+const STORY_TRACK = "#2B333A";   // 帯の下地（--border と同じ）
 const STORY_CLASS_COLOR = {
   GOAL_DIRECT:           "#3B82F6",  // 目標に直結   青
   ASSET_BUILD:           "#8B5CF6",  // 将来への投資 紫
   RECOVERY:              "#22C55E",  // 回復         緑
   RELATIONSHIP:          "#F59E0B",  // 人間関係     橙
   RECOVERY_RELATIONSHIP: "#22C55E",
-  OPERATIONS:            "#0891B2",  // 日常業務     JIROKUの色
-  UNPLANNED_LEAKAGE:     "#64748B",  // 計画外の時間 灰
-  UNSET:                 "#CBD5E1",
+  OPERATIONS:            "#22D3EE",  // 日常業務     暗いときの水色
+  UNPLANNED_LEAKAGE:     "#94A3B8",  // 計画外の時間 灰（暗い地で沈まないよう明るめ）
+  UNSET:                 "#64748B",
 };
 function storyHM(m){
   const h = Math.floor(m/60), mm = m%60;
@@ -7845,13 +7848,13 @@ async function drawStoryCard(cv, d){
 
   ctx.fillStyle = STORY_PAPER; ctx.fillRect(0, 0, STORY_W, STORY_H);
   const gTop = ctx.createLinearGradient(0, 0, 0, 520);
-  gTop.addColorStop(0, "rgba(8,145,178,0.10)"); gTop.addColorStop(1, "rgba(8,145,178,0)");
+  gTop.addColorStop(0, "rgba(34,184,212,0.14)"); gTop.addColorStop(1, "rgba(34,184,212,0)");
   ctx.fillStyle = gTop; ctx.fillRect(0, 0, STORY_W, 520);
   ctx.textBaseline = "alphabetic";
 
   // ── ロゴと日付（ロゴも主色にそろえる）──
   const lx = 118, ly = 300;
-  ctx.strokeStyle = "rgba(8,145,178,0.24)"; ctx.lineWidth = 5;
+  ctx.strokeStyle = "rgba(34,184,212,0.30)"; ctx.lineWidth = 5;
   ctx.beginPath(); ctx.arc(lx, ly, 28, 0, Math.PI*2); ctx.stroke();
   ctx.strokeStyle = AC; ctx.lineWidth = 5; ctx.lineCap = "round";
   ctx.beginPath(); ctx.arc(lx, ly, 28, -Math.PI/2, Math.PI, false); ctx.stroke();
@@ -7863,26 +7866,35 @@ async function drawStoryCard(cv, d){
   ctx.textAlign = "right"; ctx.fillStyle = SUB; ctx.font = "700 30px " + F;
   ctx.fillText(d.dateLabel, 984, ly + 11);
 
-  // ── 合計時間 ＋ 右にスコア ──
-  ctx.textAlign = "left"; ctx.fillStyle = SUB; ctx.font = "700 28px " + F;
-  ctx.fillText(d.headLabel || "今日、記録した時間", 96, 402);
-  ctx.fillStyle = INK; ctx.font = "800 104px " + F;
-  ctx.fillText(storyHM(d.totalMin), 92, 500);
-  ctx.textAlign = "right";
+  // ── 見出しの下：スコアを主役に、記録した時間は添える ──
+  //   ★大きさを入れ替えた★（2026-08-20 Kai指摘
+  //     「記録した時間はそこまで大きくしなくていい」
+  //     「なんならその日のスコアの方がまだ大事」）
+  ctx.textAlign = "left"; ctx.fillStyle = SUB; ctx.font = "700 27px " + F;
+  ctx.fillText(d.scoreHead || "その日のスコア", 96, 386);
   if (d.scoreText) {
-    ctx.fillStyle = AC; ctx.font = "800 60px " + F;
-    ctx.fillText(d.scoreText, 984, 494);
-    ctx.fillStyle = SUB; ctx.font = "700 26px " + F;
-    ctx.fillText(d.scoreLabel || "", 984, 532);
+    ctx.fillStyle = AC; ctx.font = "800 96px " + F;
+    ctx.fillText(d.scoreText, 92, 478);
+    const w = ctx.measureText(d.scoreText).width;
+    ctx.fillStyle = SUB; ctx.font = "700 30px " + F;
+    ctx.fillText(d.scoreSuffix || "/ 100", 104 + w, 478);
   }
-  ctx.strokeStyle = LINE; ctx.lineWidth = 2;
-  ctx.beginPath(); ctx.moveTo(96, 578); ctx.lineTo(984, 578); ctx.stroke();
+  ctx.textAlign = "right";
+  ctx.fillStyle = SUB; ctx.font = "700 26px " + F;
+  ctx.fillText(d.headLabel || "この日に記録した時間", 984, 420);
+  ctx.fillStyle = INK; ctx.font = "800 44px " + F;
+  ctx.fillText(storyHM(d.totalMin), 984, 474);
 
-  // ── 左：ドーナツ（記録画面と同じ作り。R:SW の比も合わせる）──
+  // ── 主役：ドーナツと内訳（アプリのカードと同じ、白い面に載せる）──
   const shown = d.rows.filter(r=>r.m>0);
-  const cx = 236, cy = 880, R = 126, SW = 36;
+  const boxY = 528, boxH = 700;
+  storyRoundRect(ctx, 64, boxY, 952, boxH, 40);
+  ctx.fillStyle = STORY_CARD; ctx.fill();
+  ctx.strokeStyle = LINE; ctx.lineWidth = 2; ctx.stroke();
+
+  const cx = 268, cy = boxY + boxH/2, R = 150, SW = 44;
   ctx.lineCap = "butt";
-  ctx.strokeStyle = LINE; ctx.lineWidth = SW;   // 下地は --border（アプリと同じ）
+  ctx.strokeStyle = STORY_TRACK; ctx.lineWidth = SW;
   ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI*2); ctx.stroke();
   let a0 = -Math.PI/2;
   shown.forEach(function(r){
@@ -7891,40 +7903,37 @@ async function drawStoryCard(cv, d){
     ctx.beginPath(); ctx.arc(cx, cy, R, a0, a1); ctx.stroke();
     a0 = a1;
   });
-  // 真ん中は「合計 / 時間 / (割合)」。アプリの内訳と同じ並び
+  // 真ん中は「合計 / 時間 / (割合)」。記録画面の内訳と同じ並び
   ctx.textAlign = "center";
-  ctx.fillStyle = SUB; ctx.font = "700 26px " + F;
-  ctx.fillText("合計", cx, cy - 26);
-  ctx.fillStyle = INK; ctx.font = "800 44px " + F;
-  ctx.fillText(storyHM(d.totalMin), cx, cy + 18);
+  ctx.fillStyle = SUB; ctx.font = "700 27px " + F;
+  ctx.fillText("合計", cx, cy - 30);
+  ctx.fillStyle = INK; ctx.font = "800 48px " + F;
+  ctx.fillText(storyHM(d.totalMin), cx, cy + 20);
   ctx.fillStyle = SUB; ctx.font = "700 25px " + F;
-  ctx.fillText("(" + (d.coverPct !== undefined ? d.coverPct : 100) + "%)", cx, cy + 54);
+  ctx.fillText("(" + (d.coverPct !== undefined ? d.coverPct : 100) + "%)", cx, cy + 58);
 
-  // ── 右：内訳（丸いアイコン・分類色の時間・下の帯。すべてアプリと同じ）──
-  const lx0 = 404, lw = 984 - lx0;
-  const rowH = 96;
+  // 内訳（丸いアイコン・分類色の時間・下の帯。すべて記録画面と同じ）
+  const lx0 = 442, lRight = 952;
+  const rowH = shown.length > 5 ? 104 : 118;
   let ry = cy - ((shown.length - 1) * rowH) / 2;
   for (var ii = 0; ii < shown.length && ii < 6; ii++) {
     const r = shown[ii];
     const col = STORY_CLASS_COLOR[r.k] || "#64748B";
     const pct = Math.round(r.m / d.totalMin * 100);
-    // 丸いアイコン（背景26%・枠55%・中は分類色）
-    const icx = lx0 + 28, icy = ry - 6, ir = 28;
+    const icx = lx0 + 30, icy = ry - 6, ir = 30;
     ctx.beginPath(); ctx.arc(icx, icy, ir, 0, Math.PI*2);
     ctx.fillStyle = storyAlpha(col, 0.26); ctx.fill();
     ctx.strokeStyle = storyAlpha(col, 0.55); ctx.lineWidth = 2; ctx.stroke();
     const im = d.icons && d.icons[r.k];
-    if (im) ctx.drawImage(im, icx - 17, icy - 17, 34, 34);
-    // 分類名 → 時間（分類色） → 割合
-    ctx.textAlign = "left"; ctx.fillStyle = INK; ctx.font = "700 32px " + F;
-    ctx.fillText(storyFit(ctx, r.label, 250), lx0 + 70, ry + 6);
-    ctx.textAlign = "right"; ctx.fillStyle = col; ctx.font = "800 31px " + F;
-    ctx.fillText(storyHM(r.m), 902, ry + 6);
+    if (im) ctx.drawImage(im, icx - 18, icy - 18, 36, 36);
+    ctx.textAlign = "left"; ctx.fillStyle = INK; ctx.font = "700 33px " + F;
+    ctx.fillText(storyFit(ctx, r.label, 240), lx0 + 76, ry + 6);
+    ctx.textAlign = "right"; ctx.fillStyle = col; ctx.font = "800 32px " + F;
+    ctx.fillText(storyHM(r.m), lRight - 78, ry + 6);
     ctx.fillStyle = SUB; ctx.font = "700 27px " + F;
-    ctx.fillText(pct + "%", 984, ry + 6);
-    // 下の帯（下地は --border、伸びるぶんは分類色）
-    const tx = lx0 + 70, tw = 984 - tx, th = 11, tyy = ry + 26;
-    storyRoundRect(ctx, tx, tyy, tw, th, 6); ctx.fillStyle = LINE; ctx.fill();
+    ctx.fillText(pct + "%", lRight, ry + 6);
+    const tx = lx0 + 76, tw = lRight - tx, th = 11, tyy = ry + 28;
+    storyRoundRect(ctx, tx, tyy, tw, th, 6); ctx.fillStyle = STORY_TRACK; ctx.fill();
     storyRoundRect(ctx, tx, tyy, Math.max(8, tw * pct / 100), th, 6);
     ctx.fillStyle = col; ctx.fill();
     ry += rowH;
@@ -7934,9 +7943,9 @@ async function drawStoryCard(cv, d){
   //   ★吹き出しにする★（2026-08-20 Kai指摘「コメントっぽくない。喋ってるように」）
   //     四角い囲みに絵と文を並べただけでは、ジローの言葉に見えない。
   //     ジローは紙の上に立たせ、その口元から吹き出しを出す。
-  const jy = 1246, jSize = 234;
+  const jy = 1284, jSize = 226;
   if (d.jiroImg) ctx.drawImage(d.jiroImg, 96, jy + 16, jSize, jSize);
-  const bx2 = 362, bw2 = 984 - bx2, by2 = jy + 14, bh3 = 200;
+  const bx2 = 356, bw2 = 984 - bx2, by2 = jy + 12, bh3 = 196;
   const ty = by2 + 86;
   ctx.fillStyle = STORY_CARD; ctx.strokeStyle = LINE; ctx.lineWidth = 2;
   // 本体としっぽをひと筆で描く（継ぎ目が出ないように）
@@ -8062,14 +8071,17 @@ function ReportScreen() {
         dateLabel: (dt.getMonth()+1) + "月" + dt.getDate() + "日（" + wd + "）",
         headLabel: (day === logicalTodayStr()) ? "今日、記録した時間" : "この日に記録した時間",
         rows, totalMin: total, icons,
+        scoreHead: (todayRow && todayRow.score !== undefined && todayRow.score !== null)
+                     ? "その日のスコア" : "この日の記録",
         coverPct: Math.round(rows.filter(r=>r.m>0 && r.k!=="UNSET").reduce((a2,r)=>a2+r.m,0) / total * 100),
         jiroImg, jiroName: jiro ? jiro.name : "",
         jiroLine1: storyJiroLine(rows, total),
         jiroLine2: top ? (top.label + "に " + storyHM(top.m)) : "",
         scoreText: (todayRow && todayRow.score !== undefined && todayRow.score !== null)
                      ? String(todayRow.score) : String(list.length),
-        scoreLabel: (todayRow && todayRow.score !== undefined && todayRow.score !== null)
-                     ? "その日のスコア" : "記録した数",
+        // スコアがまだ出ていない日は、記録した数を主役にする
+        scoreSuffix: (todayRow && todayRow.score !== undefined && todayRow.score !== null)
+                     ? "/ 100" : "件の記録",
         footLeft: (todayRow && todayRow.score !== undefined && todayRow.score !== null)
                     ? ("記録 " + list.length + "件・" + rows.filter(r=>r.m>0).length + "分類")
                     : ("記録 " + list.length + "件"),
@@ -11865,7 +11877,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260820-002353";
+const APP_BUILD = "20260820-002704";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
