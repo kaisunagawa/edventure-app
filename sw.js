@@ -18,7 +18,7 @@
 //   すぐ clients.claim() する。保存画面が無くなるので、次に開いたときは
 //   必ずネットワークから取り直す。端末で何も操作しなくても入れ替わる。
 //   ★中身を変えたのに「古いまま」の報告が出たら、ここを1つ進めること★
-const CACHE = "jiroku-v24-clock-2026-08-20";
+const CACHE = "jiroku-v25-line-2026-08-20";
 
 // タイマー終了などをバックグラウンドでも通知するためのFirebase Cloud Messaging。
 // 別ファイル（firebase-messaging-sw.js）として登録すると、同じスコープ('/')の

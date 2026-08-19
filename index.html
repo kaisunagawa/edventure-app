@@ -7826,22 +7826,26 @@ function storyLoadImage(src){
 //   図鑑の決めゼリフのままだと、数字と関係のないことを言って浮く。
 //   いちばん多かった分類と記録した長さから、一言を選ぶ。
 function storyJiroLine(rows, totalMin){
-  const shown = rows.filter(r=>r.m>0);
-  const top = shown[0];
+  const at = function (k) { const r = rows.find(function(x){ return x.k === k; }); return r ? r.m : 0; };
+  const p = function (k) { return totalMin > 0 ? at(k) / totalMin : 0; };
+  const kinds = rows.filter(function(r){ return r.m > 0; }).length;
   const h = totalMin / 60;
-  const goal = (rows.find(r=>r.k==="GOAL_DIRECT")||{}).m || 0;
-  const leak = (rows.find(r=>r.k==="UNPLANNED_LEAKAGE")||{}).m || 0;
-  // ★1行は14文字まで★ 長いと画像の中で切れる（実際に切れた）
-  if (goal > 0 && goal / totalMin >= 0.4) return "目標にまっすぐな一日。";
-  if (top && top.k === "GOAL_DIRECT")   return "今日の主役は、目標だった。";
-  if (top && top.k === "ASSET_BUILD")   return "今日の仕込みが、先で効く。";
-  if (top && top.k === "RECOVERY")      return "休めた日も、ちゃんと前進。";
-  if (top && top.k === "RELATIONSHIP")  return "人と過ごした時間が長い日。";
-  if (top && top.k === "OPERATIONS" && h >= 8) return "回すべきものを、回した日。";
-  if (leak > 0 && leak / totalMin >= 0.3) return "流れた時間も、次に活かせる。";
-  if (h >= 10) return "よく動いた一日。おつかれ。";
-  if (h >= 6)  return "積み上げた時間は、必ず残る。";
-  return "書いた分だけ、今日が見える。";
+  // ★言い当てるが、中身は言わない★（2026-08-20 Kai指摘
+  //   「コメントが薄っぺらい。もう少し核心を突いて」
+  //   「ストーリーズに上げるから、具体的な内容は入れないで」）
+  //   何をしたかには触れず、その日の“形”だけを指す。
+  //   1行は16文字まで（画像の吹き出しに収まる幅）。
+  if (p("UNPLANNED_LEAKAGE") >= 0.25) return "決めない時間ほど、消えていく。";
+  if (p("GOAL_DIRECT") >= 0.40)       return "時間は、決めた方へ流れる。";
+  if (p("ASSET_BUILD") >= 0.25)       return "今日の分は、今日出ない。";
+  if (p("RELATIONSHIP") >= 0.25)      return "人に使った時間は、後で効く。";
+  if (p("RECOVERY") >= 0.30)          return "休むのも、配分のうち。";
+  if (p("OPERATIONS") >= 0.50)        return "回した日。積むのは明日。";
+  if (at("GOAL_DIRECT") === 0 && totalMin > 0) return "今日は、回すための一日。";
+  if (h >= 12)                        return "長さより、どこに置いたか。";
+  if (h > 0 && h <= 4)                return "短くても、置き場所は選べる。";
+  if (kinds >= 5)                     return "散らばった日こそ、見えてくる。";
+  return "使った時間だけが、事実。";
 }
 async function drawStoryCard(cv, d){
   const ctx = cv.getContext("2d");
@@ -11957,7 +11961,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260820-004026";
+const APP_BUILD = "20260820-071644";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
