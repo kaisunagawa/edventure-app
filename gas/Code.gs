@@ -201,6 +201,33 @@ function doGet(e) {
           failureReason: em2 + " " + r.before + "->" + r.after + " freeze " + r.freeze_before + "->" + r.freeze_after });
         return jsonResponse({ ok: true, result: r });
       }
+      // ★連続記録の中身を読むだけで見る★（2026-08-19）
+      //   「45だったのに切れた」を数字で確かめるために、記録した日と
+      //   その間隔を並べる。書き換えは一切しない。
+      case "adminStreakDates": {
+        if (!verifyAdmin(e.parameter.coachEmail)) return jsonResponse({ ok: false, error: "not admin" });
+        const emSD = String(e.parameter.email || "").trim();
+        if (!emSD) return jsonResponse({ ok: false, error: "no email" });
+        const setSD = {};
+        getFilteredRows("DailyLog", "student_email", emSD).forEach(function (l) {
+          if (String(l.deleted_at || "").trim()) return;
+          const d = l.date instanceof Date ? Utilities.formatDate(l.date, "Asia/Tokyo", "yyyy-MM-dd")
+                                           : String(l.date).slice(0, 10);
+          if (d) setSD[d] = (setSD[d] || 0) + 1;
+        });
+        const dsSD = Object.keys(setSD).sort();
+        const gapsSD = [];
+        for (let q = 1; q < dsSD.length; q++) {
+          const g = Math.round((new Date(dsSD[q] + "T00:00:00") - new Date(dsSD[q - 1] + "T00:00:00")) / 86400000);
+          if (g > 1) gapsSD.push({ from: dsSD[q - 1], to: dsSD[q], 空き日数: g - 1 });
+        }
+        const uSD = getFilteredRows("Users", "student_email", emSD)[0] || {};
+        return jsonResponse({ ok: true, email: emSD, 記録日数: dsSD.length,
+          最初: dsSD[0] || "", 最後: dsSD[dsSD.length - 1] || "",
+          いまの連続記録: uSD.streak, いまのフリーズ: uSD.streak_freeze,
+          last_log_date: String(uSD.last_log_date || ""),
+          途切れ: gapsSD, 直近30日: dsSD.slice(-30) });
+      }
       // 利用者1人の状態を読むだけの点検（ログイン・LINE連携・機能フラグ）
       case "adminUserDiag": {
         if (!verifyAdmin(e.parameter.coachEmail)) return jsonResponse({ ok: false, error: "not admin" });
@@ -17303,7 +17330,7 @@ const ADMIN_SECRET_ALLOWLIST = {
   // 一斉送信（Kaiの明示的な要望により残す）
   adminBroadcastLine:1, adminBroadcastLinePending:1, adminSendStudentCampaign:1,
   // セットアップ・保守
-  adminSetupTriggers:1, adminInstallTrigger:1, adminSetupPhase1:1, adminSetupAuth:1, adminPhase4DryRun:1, adminLegacyBackfill:1, adminWritePathStats:1, adminIssueTestSession:1, adminDropTestSessions:1, adminOpsSelfTest:1, adminActualMinutesAudit:1, adminXpCorrection:1, adminStreakRecalc:1, adminGrantFeature:1, adminUserDiag:1, adminReportScoreDryRun:1, adminReportGenTest:1, adminScoreConsistency:1, adminFinalizeOps:1, adminUnfinalizeOps:1, adminSmpDump:1, adminSmpWarmAll:1, adminLevelAudit:1, adminXpRestore:1, adminCleanupPlusLogs:1, adminClassAudit:1, adminRecolorCalendar:1, adminFixTokenVersion:1, adminPurgeChallenges:1, adminJiroBackfill:1, adminJiroReset:1, adminScoreDist:1, adminStripeSyncStatus:1, adminCommunityTiming:1, adminOpsScoreAudit:1, adminListTriggers:1, adminHomeTiming:1, adminScreenTiming:1, adminReportTiming:1, adminSaveLogTimings:1, adminQuickLogTimings:1, adminScoreTrace:1, adminJiroSignals:1, adminLogTimes:1, adminJiroFound:1, adminReportGenFailures:1,
+  adminSetupTriggers:1, adminInstallTrigger:1, adminSetupPhase1:1, adminSetupAuth:1, adminPhase4DryRun:1, adminLegacyBackfill:1, adminWritePathStats:1, adminIssueTestSession:1, adminDropTestSessions:1, adminOpsSelfTest:1, adminActualMinutesAudit:1, adminXpCorrection:1, adminStreakRecalc:1, adminGrantFeature:1, adminUserDiag:1, adminReportScoreDryRun:1, adminReportGenTest:1, adminScoreConsistency:1, adminFinalizeOps:1, adminUnfinalizeOps:1, adminSmpDump:1, adminSmpWarmAll:1, adminLevelAudit:1, adminXpRestore:1, adminCleanupPlusLogs:1, adminClassAudit:1, adminRecolorCalendar:1, adminFixTokenVersion:1, adminPurgeChallenges:1, adminJiroBackfill:1, adminJiroReset:1, adminScoreDist:1, adminStripeSyncStatus:1, adminCommunityTiming:1, adminOpsScoreAudit:1, adminListTriggers:1, adminHomeTiming:1, adminScreenTiming:1, adminReportTiming:1, adminSaveLogTimings:1, adminQuickLogTimings:1, adminScoreTrace:1, adminJiroSignals:1, adminLogTimes:1, adminStreakDates:1, adminJiroFound:1, adminReportGenFailures:1,
   igStatus:1, igAuthUrl:1, igFetchNow:1, igDisconnect:1, igResetMetrics:1, igConfigure:1, adminAiUsage:1, adminPropsCheck:1, adminBackfillReports:1, adminDeleteTrigger:1, adminStudioLimit:1, adminOnboardingAudit:1, adminStats:1,
   authSetMode:1, authSetEnforce:1, authRoleApply:1, authRoleDryRun:1, authRevokeAll:1,
   authCleanupTestData:1, adminPurgeTestUsers:1, adminMigrateTasks:1, authBreakerReset:1, rotateSessionSecret:1,
