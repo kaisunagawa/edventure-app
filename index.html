@@ -11256,7 +11256,25 @@ function SettingsScreen({onToast,onLogout,onGoalSaved,profile,onProfileSaved,onC
       <${FAQSection}/>
 
       <!-- ログアウト -->
-      <button class="btn-g" onClick=${onLogout} style=${{marginBottom:32}}>ログアウト</button>
+      <button class="btn-g" onClick=${onLogout} style=${{marginBottom:14}}>ログアウト</button>
+
+      <!-- ★いま動いている版★（2026-08-19 Kai報告「反映されてない」）
+           端末ごとに古い版が残ることがある。どの版が動いているかが
+           見えないと、毎回「本当に新しいのか」を推測で追うことになる。
+           押すと、その場で最新を取りに行って入れ替える。 -->
+      <div style=${{textAlign:"center",marginBottom:32}}>
+        <button onClick=${async()=>{
+                  try{
+                    const names=(await caches.keys()).filter(k=>k.indexOf("jiroku-")===0);
+                    await Promise.all(names.map(n=>caches.delete(n)));
+                  }catch(e){}
+                  location.reload(true);
+                }}
+          style=${{background:"none",border:"none",color:"var(--sub)",fontSize:11,
+                   cursor:"pointer",fontFamily:"inherit",textDecoration:"underline",padding:"4px 8px"}}>
+          版 ${APP_BUILD}（押すと最新に入れ替え）
+        </button>
+      </div>
     </div>
   </div>`;
 }
@@ -11457,7 +11475,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260819-131605";
+const APP_BUILD = "20260819-131953";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
