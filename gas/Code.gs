@@ -4604,6 +4604,12 @@ function quickLogNoteTiming_(ms) {
 }
 
 function quickLog(studentEmail, body) {
+  // ★1回のリクエストの中では、同じシートを1回しか読まない★（2026-08-19）
+  //   独り言の経路だけ、この持ち回りを通っていなかった。
+  //   DailyLog も Users も、下ごしらえと保存で2回ずつ読んでいた。
+  return withSheetCache_(function () { return quickLogInner_(studentEmail, body); });
+}
+function quickLogInner_(studentEmail, body) {
   const _t0 = Date.now();
   // 自己経営力は計算に時間がかかるので取っておいている。書き換えたら
   // 古い結果に当たらないよう世代を進める（2026-08-05）。
@@ -4636,7 +4642,9 @@ function quickLog(studentEmail, body) {
   }
   const isPastDay = targetDay !== today;
 
-  const user = sheetToObjects(getSheet("Users")).find(u => u.student_email === studentEmail);
+  // 全員ぶんをオブジェクト化せず、値の控えから自分の行だけ取り出す
+  // （XPの計算も同じ控えを使うので、Users を読むのは1回で済む）
+  const user = getFilteredRows("Users", "student_email", studentEmail)[0];
   const goalsText = user ? effectiveGoalsText(user.student_email, user) : "";
 
   // 今日すでに記録済みの「最後の終了時刻」を出す。「これまで/さっきから」と話した時に、
@@ -5247,7 +5255,11 @@ function withDailyLogSnapshot_(fn) {
 }
 function dailyLogValues_(sheet) {
   if (_dlSnapOn && _dlSnap) return _dlSnap;
-  const v = sheet.getDataRange().getValues();
+  // ★同じリクエストの中で二度読みしない★（2026-08-19 実測 話して11秒）
+  //   下ごしらえで getFilteredRows("DailyLog") が全部読み、
+  //   保存でここがもう一度全部読んでいた。1回の読みが3秒前後なので、
+  //   そのまま3秒の無駄になっていた。読んだ中身を共有する。
+  const v = sheetValuesCached_(sheet);
   if (_dlSnapOn) _dlSnap = v;
   return v;
 }
@@ -5258,7 +5270,7 @@ function dailyLogValues_(sheet) {
 var _usersSnap = null, _xpIdsSnap = null;
 function usersValues_(sheet) {
   if (_dlSnapOn && _usersSnap) return _usersSnap;
-  const v = sheet.getDataRange().getValues();
+  const v = sheetValuesCached_(sheet);   // 下ごしらえで読んだものを使い回す
   if (_dlSnapOn) _usersSnap = v;
   return v;
 }

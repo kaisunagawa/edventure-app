@@ -3229,7 +3229,16 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
     pullHome();
     // もう一方の端末で何か書かれたら、その場でホームも取り直す
     window.addEventListener("jiroku:remotechange", pullHome);
-    __homeCleanup = ()=> window.removeEventListener("jiroku:remotechange", pullHome);
+    // ★話して記録した直後も、ホームを取り直す★（2026-08-19 Kai報告
+    //   「携帯で声で記録したけど反映されない」）
+    //   裏送りにしたとき、書き終わった合図を記録画面にだけ繋いでいた。
+    //   マイクのボタンはホームにあるので、ホームで話した人には
+    //   いつまでも出てこなかった。入口のある画面が聞いていないと意味がない。
+    window.addEventListener("jiroku:logsaved", pullHome);
+    __homeCleanup = ()=>{
+      window.removeEventListener("jiroku:remotechange", pullHome);
+      window.removeEventListener("jiroku:logsaved", pullHome);
+    };
 
     // カレンダー連携済みなら本人権限で直接取得（GAS経由はスクリプト所有者しか読めないためのフォールバック）
     if(localStorage.getItem("cal_linked")){
@@ -11448,7 +11457,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260819-125857";
+const APP_BUILD = "20260819-131605";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
