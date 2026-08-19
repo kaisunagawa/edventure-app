@@ -81,5 +81,21 @@ PY
 )
 [ -z "$QS" ] && { echo "署名の生成に失敗しました" >&2; exit 1; }
 
-curl -sL --max-time 240 "https://script.google.com/macros/s/$DEP/exec?$QS"
-echo
+RES=$(curl -sL --max-time 240 "https://script.google.com/macros/s/$DEP/exec?$QS")
+echo "$RES"
+
+# ★「やったつもり」を防ぐ★（2026-08-19）
+#   adminRepairStreaksFreeze は dry ではなく confirm=yes を見る作りだった。
+#   dry=0 を付けても黙って無視され、dryRun:true と返っていたのに
+#   読み飛ばして「実行できた」と report してしまった。
+#   下見のつもりが無いのに下見で終わっていたら、はっきり言う。
+case " $* " in
+  *" dry=0 "*|*" confirm=yes "*|*" apply=1 "*)
+    case "$RES" in
+      *'"dryRun":true'*|*'"dry_run":true'*)
+        echo "" >&2
+        echo "⚠️  下見のまま終わっています（dryRun:true）。書き込まれていません。" >&2
+        echo "   このコマンドが見ている合言葉を確認してください（dry / confirm=yes / apply）。" >&2
+        exit 3 ;;
+    esac ;;
+esac

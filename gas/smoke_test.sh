@@ -587,6 +587,24 @@ sys.exit(0 if (tg==1 and dt==1) else 1)
     ng "キャッシュ名を直接書いている箇所が ${n}件ある（sw.js の名前を変えた時にズレる）"
   fi
 
+  # ★合図を出しているのに、誰も聞いていない箇所が無いか★（2026-08-19 Kai報告
+  #   「携帯で声で記録したけど反映されない」）
+  #   保存を裏送りにしたとき、書き終わった合図（jiroku:logsaved）を
+  #   記録画面にだけ繋いでいた。マイクのボタンはホームにあるので、
+  #   ホームで話した人にはいつまでも出てこなかった。
+  #   出しているのに聞いていない合図は、黙って何も起きないので気づけない。
+  miss=""
+  for ev in $(grep -oh 'CustomEvent("jiroku:[a-z]*"' ../index.html ../coach/index.html 2>/dev/null \
+              | sed 's/.*jiroku:/jiroku:/; s/"//' | sort -u); do
+    n=$(grep -hc "addEventListener(\"$ev\"" ../index.html ../coach/index.html 2>/dev/null | awk '{s+=$1} END{print s+0}')
+    [ "${n:-0}" -eq 0 ] && miss="$miss $ev"
+  done
+  if [ -z "$miss" ]; then
+    ok "出している合図は全部、受け取り手がいる"
+  else
+    ng "合図を出しているのに誰も聞いていない:$miss"
+  fi
+
   # GAS_URLへのGETが復活していないか（GETだとトークンの置き場所がクエリしか無い）
   g=$(grep -hc "await fetch(url)\|fetch(url)\.then" ../index.html ../coach/index.html | awk '{s+=$1} END{print s}')
   if [ "${g:-0}" -eq 0 ]; then
