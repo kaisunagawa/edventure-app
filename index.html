@@ -653,8 +653,36 @@ function setTaskVersion(id, v){
   const m = taskVersions(); m[id] = v;
   try { localStorage.setItem(TASK_VER_KEY, JSON.stringify(m)); } catch {}
 }
+// ★端末で作った時刻を控える★（2026-08-18 Kai報告「話して足したタスクが後から消えた」）
+//   「サーバーの一覧に無い＝消されたもの」と見なしていたが、
+//   まだ届いていないだけの場合がある。作った時刻を覚えておき、
+//   出来たてのタスクは消さずに残して、作り直しを送る。
+const TASK_BORN_KEY = "jiroku_task_born";
+function loadTaskBirths(){ try { return JSON.parse(localStorage.getItem(TASK_BORN_KEY)||"{}")||{}; } catch { return {}; } }
+function clearTaskBorn(id){
+  if(!id) return;
+  try { const m = loadTaskBirths(); delete m[id]; localStorage.setItem(TASK_BORN_KEY, JSON.stringify(m)); } catch(e){}
+}
+function markTaskBorn(id){
+  if(!id) return;
+  try {
+    const m = loadTaskBirths(); m[id] = Date.now();
+    // 1日より古い控えは捨てる（際限なく増やさない）
+    const lim = Date.now() - 86400000;
+    Object.keys(m).forEach(k=>{ if(Number(m[k]||0) < lim) delete m[k]; });
+    localStorage.setItem(TASK_BORN_KEY, JSON.stringify(m));
+  } catch(e){}
+}
+// ★取ってきた一覧が古くないかを見分ける★
+//   取得を始めたあとにタスクを足していたら、その一覧はもう古い。
+//   古い一覧をそのまま画面にすると、足したばかりのタスクが消える。
+window.__taskGen = window.__taskGen || 0;
+function taskGen(){ return window.__taskGen; }
+function bumpTaskGen(){ window.__taskGen++; }
 function enqueueTaskMutation(op, taskId, changes, baseValues){
   if (!taskId) return;
+  if (op === "CREATE") markTaskBorn(taskId);
+  bumpTaskGen();
   const q = loadTaskQueue();
   const m = { mid: "m_"+Date.now()+"_"+Math.random().toString(36).slice(2,8),
               // いつ積んだか。送信待ちが古いまま居座っても、他端末との同期を
@@ -736,7 +764,11 @@ async function flushTaskQueue(){
         x.base_value = res.base_value;
         return true;
       }
-      if (res.result === "DELETED_REJECTED") return false;   // 恒久エラー。再試行しても無駄
+      if (res.result === "DELETED_REJECTED") {
+        // 別の端末で消されたもの。作り直しの対象からも外す（消したものを復活させない）
+        clearTaskBorn(x.task_id);
+        return false;   // 恒久エラー。再試行しても無駄
+      }
       // ★直しようのないものは、すぐ諦める★
       //   例: サーバーにそのタスクが無い（別端末で消された等）。
       //   これを再試行し続けると「保存中…」が延々と消えない（実際にそうなった）。
@@ -752,6 +784,10 @@ async function flushTaskQueue(){
       return true;
     });
     saveTaskQueue(q2);
+    // ★送信が通ったら世代を進める★
+    //   これより前に始まった取得は「送信前の一覧」を持って帰ってくる。
+    //   その古い一覧を画面にすると、足したばかりのタスクが消える。
+    bumpTaskGen();
     window.dispatchEvent(new CustomEvent("jiroku:taskflushed"));
   } finally { __taskQueueFlushing = false; }
 }
@@ -2945,7 +2981,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
 
     // ホームに必要なデータの適用処理（統合API・従来APIのどちらから来ても同じ形で受ける）
     const todayStr = logicalTodayStr();   // 深夜0〜4時は前の日の続きとして扱う
-    const applyHome = (d)=>{
+    const applyHome = (d, genAtFetch)=>{
       if(d.report){ setReport(d.report); localStorage.setItem("cache_report", JSON.stringify(d.report)); }
       if(d.game){
         setGame(d.game);
@@ -2987,7 +3023,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
       // ★Tasksシートを正とした反映（Phase 3）★
       //   下の Journal.actions 同期より後に走らせる（あとに適用した方が勝つため、
       //   Tasksシートの内容が最終的な画面になる）。
-      setTimeout(()=>{ Promise.resolve(applyTasksFromServer(d.tasks)).catch(e=>{ console.error("[JIROKU] タスク同期の取得に失敗:", e); }); }, 0);
+      setTimeout(()=>{ Promise.resolve(applyTasksFromServer(d.tasks, genAtFetch)).catch(e=>{ console.error("[JIROKU] タスク同期の取得に失敗:", e); }); }, 0);
       // 今日のアクションの端末間同期
       if(d.todayActions){
         // ★タスク一覧はサーバーと突き合わせて1つにまとめる★
@@ -3122,9 +3158,12 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
     });
     };
 
+    // 取得を始めた時点の世代。返ってくるまでの間にタスクを足していたら、
+    // その一覧はもう古い（applyTasksFromServer が取り直す）
+    const homeGen = taskGen();
     gasApi("getHomeData").then(r=>{
       if(r && r.ok && r.data){
-        applyHome(r.data);
+        applyHome(r.data, homeGen);
         if(!r.data.smp)     fetchSmp();
         if(!r.data.roadmap) fetchRoadmap();
       } else { legacyFetch(); fetchSmp(); fetchRoadmap(); }
@@ -3394,16 +3433,26 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
   //   食い違いが残り続けた。今後はTasksシートが正。
   //   ただし、この端末で既に操作を始めていたら適用しない。
   //   読み込みが遅れて届いたとき、いま入力した内容を消してしまうため。
-  const applyTasksFromServer = async (preloaded) => {
+  const applyTasksFromServer = async (preloaded, genAtFetch) => {
     // ★守る範囲を絞る★（以前は「何か操作したら以後すべて適用しない」だった）
     //   ・編集モーダルや詳細を開いている間 → 適用しない（入力中の値を消さないため）
     //   ・送信待ち／競合のタスク → そのタスクだけ適用しない
     //   ・それ以外 → サーバーの値へ更新する（古い端末が永久に残らないように）
     if (editMode || detailTask) return;
     // getHomeData に相乗りしてきた分があれば、もう一度取りに行かない（2026-08-05 起動高速化）
+    // ★古い一覧は当てない★（2026-08-18 Kai報告「話して足したタスクが後から消えた」）
+    //   ホームの取得は実測で8秒かかる。その最中に話してタスクを足すと、
+    //   返ってくるのは「まだ無かった頃」の一覧になる。
+    //   それを画面にすると、足したばかりのタスクがそのまま消えていた。
+    //   取得を始めてから足していたら、この結果は捨てて取り直す。
+    if (Array.isArray(preloaded) && genAtFetch !== undefined && genAtFetch !== taskGen()) {
+      return applyTasksFromServer();   // 新しく取り直す
+    }
+    const genStart = taskGen();
     const r = Array.isArray(preloaded) ? { ok: true, data: preloaded }
                                        : await gasApi("getTasks", { includeDone: "1" });
     if (!r || !r.ok || !Array.isArray(r.data)) return;
+    if (!Array.isArray(preloaded) && genStart !== taskGen()) return;   // 待っている間に足された
     setTasksLoaded(true);        // 応答が返った＝読み込みは終わっている（0件でも同じ）
     if (editMode || detailTask) return;   // 通信中に開いたら適用しない
     const hold = {};   // 送信待ち・競合中のタスクは端末の値を保つ
@@ -3428,8 +3477,25 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
     rows.forEach(t => setTaskVersion(t.task_id, t.version));
     // 送信待ちのタスクは端末の姿を保つ（サーバーにまだ届いていない変更を消さない）
     const heldLocal = (customActions||[]).filter(t => hold[t.id] && !rows.some(x => x.task_id === t.id));
+    // ★出来たてのタスクは、サーバーの一覧に無くても消さない★
+    //   送信が落ちた・取りこぼした・古い一覧が返ってきた、のどれであっても
+    //   黙って消えるのが一番困る。10分だけ猶予を持たせ、作り直しを送る。
+    const births = loadTaskBirths();
+    const NEWBORN_MS = 10 * 60 * 1000;
+    const newborn = (customActions||[]).filter(t =>
+      !hold[t.id] && !deleting[t.id] && !rows.some(x => x.task_id === t.id) &&
+      births[t.id] && (Date.now() - Number(births[t.id])) < NEWBORN_MS);
+    newborn.forEach(t => {
+      console.warn("[JIROKU] サーバーに届いていないタスクを送り直します:", t.title);
+      enqueueTaskMutation("CREATE", t.id, {
+        title: t.title, date: todayKey,
+        importance_level: taskImportance[t.id] || "", due_at: taskDue[t.id] || "",
+        estimated_minutes: taskEstimates[t.id] !== undefined ? taskEstimates[t.id] : "",
+        memo: taskNotes[t.id] || "" });
+    });
+    const keepLocal = heldLocal.concat(newborn.filter(t => !heldLocal.some(x => x.id === t.id)));
     const list = rows.map(t => ({ id: t.task_id, title: t.title })).concat(
-      heldLocal.map(t => ({ id: t.id, title: t.title })));
+      keepLocal.map(t => ({ id: t.id, title: t.title })));
     const imp = {}, due = {}, est = {}, memo = {}, stt = {}, chk = {}, ctx = {}, cry = {}, why = {}, ord = {};
     rows.forEach(t => {
       if (t.priority_label) why[t.task_id] = t.manual_order ? "自分で上に置いた" : t.priority_label;
@@ -3471,7 +3537,7 @@ function HomeScreen({goalData, onGoalSaved, profile, isActive, showInCommunity, 
       stt[t.task_id] = sttOf(t.status);
       if (t.status === "DONE") chk[t.task_id] = true;
     });
-    heldLocal.forEach(t => {
+    keepLocal.forEach(t => {
       if (taskContext[t.id]) ctx[t.id] = taskContext[t.id];
       if (taskImportance[t.id]) imp[t.id] = taskImportance[t.id];
       if (taskDue[t.id]) due[t.id] = taskDue[t.id];
@@ -11315,7 +11381,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260818-204233";
+const APP_BUILD = "20260819-112339";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
