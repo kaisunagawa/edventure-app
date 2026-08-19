@@ -7838,7 +7838,7 @@ async function drawStoryCard(cv, d){
 
   // ── 合計時間 ＋ 右にスコア ──
   ctx.textAlign = "left"; ctx.fillStyle = SUB; ctx.font = "700 28px " + F;
-  ctx.fillText("今日、記録した時間", 96, 402);
+  ctx.fillText(d.headLabel || "今日、記録した時間", 96, 402);
   ctx.fillStyle = INK; ctx.font = "800 104px " + F;
   ctx.fillText(storyHM(d.totalMin), 92, 500);
   ctx.textAlign = "right";
@@ -7966,12 +7966,17 @@ function ReportScreen() {
   const [storyUrl, setStoryUrl]=useState(null);
   const [storyBusy, setStoryBusy]=useState(false);
   const [storyMsg, setStoryMsg]=useState("");
+  const [storyFile, setStoryFile]=useState("jiroku.png");
   const storyCanvasRef=React.useRef(null);
-  const makeStory = async () => {
+  // ★どの日ぶんでも作れるようにする★（2026-08-20 Kai報告
+  //   「日付超えちゃって作れなくなった」）
+  //   1日の区切りは0時ちょうどなので、0時を回った瞬間に今日は0件になる。
+  //   夜に振り返って出したい人のほうが多いので、日を選べるようにする。
+  const makeStory = async (dayArg) => {
     if (storyBusy) return;
     setStoryMsg(""); setStoryBusy(true);
     try {
-      const day = logicalTodayStr();
+      const day = dayArg || logicalTodayStr();
       // ★端末に残っている今日の記録を先に使う★（2026-08-20 Kai「作成をもっと速く」）
       //   毎回サーバーへ取りに行くと、そこだけで数秒待つ。
       //   記録画面が同じ日の一覧を端末に持っているので、あればそれで描く。
@@ -8015,6 +8020,7 @@ function ReportScreen() {
       storyCanvasRef.current = cv;
       await drawStoryCard(cv, {
         dateLabel: (dt.getMonth()+1) + "月" + dt.getDate() + "日（" + wd + "）",
+        headLabel: (day === logicalTodayStr()) ? "今日、記録した時間" : "この日に記録した時間",
         rows, totalMin: total,
         jiroImg, jiroName: jiro ? jiro.name : "",
         jiroLine1: storyJiroLine(rows, total),
@@ -8022,11 +8028,12 @@ function ReportScreen() {
         scoreText: (todayRow && todayRow.score !== undefined && todayRow.score !== null)
                      ? String(todayRow.score) : String(list.length),
         scoreLabel: (todayRow && todayRow.score !== undefined && todayRow.score !== null)
-                     ? "今日のスコア" : "記録した数",
+                     ? "その日のスコア" : "記録した数",
         footLeft: (todayRow && todayRow.score !== undefined && todayRow.score !== null)
                     ? ("記録 " + list.length + "件・" + rows.filter(r=>r.m>0).length + "分類")
                     : ("記録 " + list.length + "件"),
       });
+      setStoryFile("jiroku-" + day + ".png");
       setStoryUrl(cv.toDataURL("image/png"));
     } catch(e){ console.error("[JIROKU] ストーリーズの作成に失敗:", e); setStoryMsg("うまく作れませんでした"); }
     setStoryBusy(false);
@@ -8185,7 +8192,7 @@ function ReportScreen() {
         <div style=${{fontSize:11.5,color:"rgba(255,255,255,0.8)",textAlign:"center",lineHeight:1.6}}>
           iPhoneは画像を長押しして「写真に保存」でも保存できます</div>
         <div style=${{display:"flex",gap:10}}>
-          <a href=${storyUrl} download=${"jiroku-" + logicalTodayStr() + ".png"}
+          <a href=${storyUrl} download=${storyFile}
             style=${{background:"#fff",color:"var(--accent)",borderRadius:11,padding:"12px 22px",
                      fontSize:13.5,fontWeight:800,textDecoration:"none"}}>画像を保存</a>
           <button onClick=${()=>setStoryUrl(null)}
@@ -8206,19 +8213,6 @@ function ReportScreen() {
             <div class="empty-body">記録を入力すると<br/>毎晩22時にAIがレポートを生成します</div>
           </div>`
         : html`<div>
-            <!-- ★ストーリーズ用の画像★（2026-08-19 Kai要望）
-                 画面のスクリーンショットではストーリーズの比率に合わず余白だらけになる。
-                 Instagramの寸法ちょうど（1080×1920）で描いて保存できるようにする。 -->
-            <div class="card" style=${{marginBottom:8,display:"flex",alignItems:"center",justifyContent:"space-between",gap:12}}>
-              <div>
-                <div style=${{fontSize:13,fontWeight:700,color:"var(--text)"}}>📱 今日の成果をストーリーズにシェア</div>
-                <div style=${{fontSize:11.5,color:"var(--sub)",marginTop:2,lineHeight:1.5}}>柄を選んで、そのまま保存できます</div>
-              </div>
-              <button onClick=${makeStory} disabled=${storyBusy}
-                style=${{flexShrink:0,background:"var(--accent)",color:"#fff",border:"none",borderRadius:10,padding:"10px 14px",fontSize:12.5,fontWeight:700,cursor:"pointer",fontFamily:"inherit",opacity:storyBusy?0.6:1,display:"flex",alignItems:"center",gap:6}}>
-                ${storyBusy?html`<div class="spin" style=${{borderColor:"rgba(255,255,255,.3)",borderTopColor:"#fff",width:12,height:12,borderWidth:2}}/>作成中…`:"ストーリーズを作る"}
-              </button>
-            </div>
             <!-- 業務報告書：就業終わりに今日の記録から上司向けの報告文を生成 -->
             <div class="card" style=${{marginBottom:8,display:"flex",alignItems:"center",justifyContent:"space-between",gap:12}}>
               <div>
@@ -8442,6 +8436,20 @@ function ReportScreen() {
             <div style=${{marginBottom:8}}></div>
           </div>`
     }
+    <!-- ★その日のレポートから、そのままストーリーズを作る★（2026-08-20 Kai要望）
+         一覧に置いていたが、1日の区切りは0時ちょうどなので、0時を回ると
+         「今日」は0件になり作れなかった。見ているレポートの日付で作れる場所へ移す。 -->
+    <div class="card" style=${{margin:"8px 16px 12px",display:"flex",alignItems:"center",justifyContent:"space-between",gap:12}}>
+      <div>
+        <div style=${{fontSize:13,fontWeight:700,color:"var(--text)"}}>📱 この日をストーリーズにシェア</div>
+        <div style=${{fontSize:11.5,color:"var(--sub)",marginTop:2,lineHeight:1.5}}>時間の使い方を1枚にして保存できます</div>
+      </div>
+      <button onClick=${()=>makeStory(date)} disabled=${storyBusy}
+        style=${{flexShrink:0,background:"var(--accent)",color:"#fff",border:"none",borderRadius:10,padding:"10px 14px",fontSize:12.5,fontWeight:700,cursor:"pointer",fontFamily:"inherit",opacity:storyBusy?0.6:1,display:"flex",alignItems:"center",gap:6}}>
+        ${storyBusy?html`<div class="spin" style=${{borderColor:"rgba(255,255,255,.3)",borderTopColor:"#fff",width:12,height:12,borderWidth:2}}/>作成中…`:"ストーリーズを作る"}
+      </button>
+    </div>
+    ${storyModal}${storyMsgBox}
     ${workReport!==null&&html`
       <div style=${{position:"fixed",inset:0,height:"100dvh",background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"center",justifyContent:"center",padding:16,zIndex:500,overscrollBehavior:"contain"}}
         onClick=${e=>{if(e.target===e.currentTarget)setWorkReport(null);}}>
@@ -11812,7 +11820,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260820-000405";
+const APP_BUILD = "20260820-000806";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
