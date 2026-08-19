@@ -631,14 +631,28 @@ if [ "$MODE" = "live" ] || [ "$MODE" = "all" ]; then
   # デプロイが止まる（2026-08-01、実際にそうなった）。
   # まず1本叩いて現在の姿勢を調べ、全部が同じ姿勢かを確かめる。
   # ★どちらの姿勢でも「例外で落ちている」は必ず不合格★
-  probe=$(call "&action=getUser&studentEmail=${ADMIN}")
-  if echo "$probe" | grep -q "AUTH_REQUIRED"; then
-    ENFORCED=1; echo "  （読み取りは認証必須。トークン無しは拒否されるのが正常）"
-  else
-    ENFORCED=0
+  # ★この1本の結果に全部を賭けない★（2026-08-19）
+  #   叩きすぎでGoogleのHTMLが返ると「認証は不要」と誤判定し、
+  #   正しく拒否された読み取り5本がまとめて「異常」に化けた（実際に起きた）。
+  #   JSONが返るまで数回試し、それでも判定できなければ、
+  #   決めつけずに不合格として止める。
+  ENFORCED=""
+  for _try in 1 2 3; do
+    probe=$(call "&action=getUser&studentEmail=${ADMIN}")
+    if echo "$probe" | grep -q "AUTH_REQUIRED"; then
+      ENFORCED=1; echo "  （読み取りは認証必須。トークン無しは拒否されるのが正常）"; break
+    elif echo "$probe" | grep -q '"ok":'; then
+      ENFORCED=0; break
+    fi
+    sleep 5
+  done
+  if [ -z "$ENFORCED" ]; then
+    ng "認証の姿勢を判定できませんでした（JSONが返らない。時間を置いて再実行してください）"
+    ENFORCED=skip
   fi
 
   for ac in getUser getLogs getReportList getHomeData getGoalTree; do
+    [ "$ENFORCED" = "skip" ] && break
     r=$(call "&action=${ac}&studentEmail=${ADMIN}")
     if [ -z "$r" ]; then ng "${ac} 応答が空（判定できない）"; continue; fi
     if echo "$r" | grep -qi "ReferenceError\|TypeError\|is not defined\|is not a function"; then
