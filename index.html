@@ -7931,35 +7931,20 @@ async function drawStoryCard(cv, d){
 
   // ── 主役：ドーナツと内訳（アプリのカードと同じ、白い面に載せる）──
   const shown = d.rows.filter(r=>r.m>0);
-  const boxY = 528, boxH = 700;
+  const boxY = 528, boxH = 646;
   storyRoundRect(ctx, 64, boxY, 952, boxH, 40);
   ctx.fillStyle = STORY_CARD; ctx.fill();
   ctx.strokeStyle = LINE; ctx.lineWidth = 2; ctx.stroke();
 
-  // ★活動していた時間帯だけを1周にする★（2026-08-20 Kai要望
-  //   「何時から何時までが分かるように」「24時間じゃなくて活動時間だけでいい」）
-  //   1周を24時間にすると、寝ている時間の空白が半分近くを占めて何も見えない。
-  //   最初の記録から最後の記録までを1周に伸ばす。間の空きはそのまま隙間で出る。
-  const cx = 256, cy = boxY + boxH/2, R = 124, SW = 38;
+  // ★1周を24時間に固定する★（2026-08-20 Kaiの判断）
+  //   活動時間だけを1周に伸ばしていたが、日によって1周の意味が変わるため、
+  //   昨日と今日を並べても同じ角度が同じ長さを指さない。毎日出すものなので、
+  //   ものさしを固定するほうが読み違えない。0時が上、時計回り。
+  //   記録していない時間は薄い色のまま残るので、詰まり方もそのまま見える。
+  const cx = 252, cy = boxY + boxH/2, R = 124, SW = 30;
   const segsAll = d.segments || [];
-  let winS = 0, winE = 1440;
-  if (segsAll.length) {
-    winS = Math.floor(Math.min.apply(null, segsAll.map(function(x){ return x.start; })) / 60) * 60;
-    winE = Math.ceil(Math.max.apply(null, segsAll.map(function(x){ return x.end; })) / 60) * 60;
-    // ★短くても12時間ぶんは取る★（2026-08-20 Kaiの判断「せめて12時間かな」）
-    //   記録が数時間しかない日に、その数時間を1周に伸ばすと
-    //   1日のうちのどのあたりだったのかが分からなくなる。
-    if (winE - winS < 720) {
-      const pad = (720 - (winE - winS)) / 2;
-      winS = Math.floor((winS - pad) / 60) * 60;
-      winE = winS + 720;
-    }
-    if (winS < 0) { winE -= winS; winS = 0; }
-    if (winE > 1440) { winS -= (winE - 1440); winE = 1440; }
-    if (winS < 0) winS = 0;
-  }
-  const winLen = Math.max(60, winE - winS);
-  const ang = function (min) { return ((min - winS) / winLen) * Math.PI * 2 - Math.PI / 2; };
+  const winS = 0, winE = 1440, winLen = 1440;
+  const ang = function (min) { return (min / 1440) * Math.PI * 2 - Math.PI / 2; };
   ctx.lineCap = "butt";
   ctx.strokeStyle = STORY_TRACK; ctx.lineWidth = SW;
   ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI*2); ctx.stroke();
@@ -7968,10 +7953,12 @@ async function drawStoryCard(cv, d){
     ctx.strokeStyle = STORY_CLASS_COLOR[sg.k] || STORY_CLASS_COLOR.UNSET;
     ctx.beginPath(); ctx.arc(cx, cy, R, ang(sg.start), ang(sg.end)); ctx.stroke();
   });
-  // 目盛りと数字（活動時間の幅に合わせて、2〜3時間おきに出す）
+  // ※輪の中に時刻を書くのはやめた（外の目盛りと役割が重なり、
+  //   細い時間帯では読めずに散らかるだけだった。2026-08-20 実物で確認）
+  // 目盛りと数字（3時間おき）
   ctx.textAlign = "center"; ctx.textBaseline = "middle";
-  const stepH = (winLen / 60) <= 8 ? 1 : ((winLen / 60) <= 14 ? 2 : 3);
-  for (var hh = winS / 60; hh < winE / 60; hh += stepH) {
+  const stepH = 3;
+  for (var hh = 0; hh < 24; hh += stepH) {
     const th2 = ang(hh * 60);
     const r1 = R + SW/2 + 5, r2 = R + SW/2 + 14;
     ctx.strokeStyle = LINE; ctx.lineWidth = 3;
@@ -7985,17 +7972,17 @@ async function drawStoryCard(cv, d){
   ctx.textBaseline = "alphabetic";
   // 真ん中は「合計 / 時間 / (割合)」。記録画面の内訳と同じ並び
   ctx.textAlign = "center";
-  ctx.fillStyle = SUB; ctx.font = "700 23px " + F;
-  ctx.fillText("合計", cx, cy - 26);
-  ctx.fillStyle = INK; ctx.font = "800 38px " + F;
-  ctx.fillText(storyHM(d.totalMin), cx, cy + 14);
-  // 「何時から何時まで」を、そのまま文字でも出す
   ctx.fillStyle = SUB; ctx.font = "700 22px " + F;
-  ctx.fillText((winS/60 % 24) + ":00 → " + (winE/60 % 24) + ":00", cx, cy + 46);
+  ctx.fillText("記録した時間", cx, cy - 24);
+  ctx.fillStyle = INK; ctx.font = "800 40px " + F;
+  ctx.fillText(storyHM(d.totalMin), cx, cy + 18);
+  // ※「何時から何時まで」は輪そのものが示すので、文字では出さない
+  ctx.fillStyle = SUB; ctx.font = "700 21px " + F;
+  ctx.fillText("1周＝24時間", cx, cy + 50);
 
   // 内訳（丸いアイコン・分類色の時間・下の帯。すべて記録画面と同じ）
   const lx0 = 452, lRight = 952;
-  const rowH = shown.length > 5 ? 104 : 118;
+  const rowH = shown.length > 5 ? 96 : 110;
   let ry = cy - ((shown.length - 1) * rowH) / 2;
   for (var ii = 0; ii < shown.length && ii < 6; ii++) {
     const r = shown[ii];
@@ -8020,13 +8007,41 @@ async function drawStoryCard(cv, d){
     ry += rowH;
   }
 
+  // ── 24時間のタイムライン ──
+  //   ★「いつ」と「どれくらい」を分ける★（2026-08-20 Kaiが見せてくれた参考例）
+  //     1つの輪に両方やらせると、寝ている時間が大きいほど
+  //     起きている時間の中身が読めなくなる。
+  //     割合は輪が、時間の並びはこの帯が受け持つ。
+  const tlX = 96, tlW = 888, tlY = boxY + boxH + 40, tlH = 44;
+  ctx.textAlign = "left"; ctx.fillStyle = SUB; ctx.font = "700 24px " + F;
+  ctx.fillText("今日のタイムライン", tlX, tlY - 14);
+  ctx.textAlign = "right";
+  ctx.fillText("0:00 − 24:00", tlX + tlW, tlY - 14);
+  storyRoundRect(ctx, tlX, tlY, tlW, tlH, 10); ctx.fillStyle = STORY_TRACK; ctx.fill();
+  ctx.save(); storyRoundRect(ctx, tlX, tlY, tlW, tlH, 10); ctx.clip();
+  (d.segments || []).forEach(function (sg) {
+    if (!(sg.end > sg.start)) return;
+    const x1 = tlX + tlW * (sg.start / 1440), x2 = tlX + tlW * (sg.end / 1440);
+    ctx.fillStyle = STORY_CLASS_COLOR[sg.k] || STORY_CLASS_COLOR.UNSET;
+    ctx.fillRect(x1, tlY, Math.max(3, x2 - x1), tlH);
+  });
+  ctx.restore();
+  // 時刻の目盛り
+  ctx.textAlign = "center"; ctx.fillStyle = SUB; ctx.font = "700 21px " + F;
+  [0, 4, 8, 12, 16, 20, 24].forEach(function (hh3) {
+    const x = tlX + tlW * (hh3 / 24);
+    ctx.strokeStyle = LINE; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(x, tlY + tlH + 4); ctx.lineTo(x, tlY + tlH + 12); ctx.stroke();
+    ctx.fillText(hh3 + ":00", Math.min(tlX + tlW - 24, Math.max(tlX + 24, x)), tlY + tlH + 38);
+  });
+
   // ── 下：ジローくん ──
   //   ★吹き出しにする★（2026-08-20 Kai指摘「コメントっぽくない。喋ってるように」）
   //     四角い囲みに絵と文を並べただけでは、ジローの言葉に見えない。
   //     ジローは紙の上に立たせ、その口元から吹き出しを出す。
-  const jy = 1284, jSize = 226;
+  const jy = 1340, jSize = 200;
   if (d.jiroImg) ctx.drawImage(d.jiroImg, 96, jy + 16, jSize, jSize);
-  const bx2 = 356, bw2 = 984 - bx2, by2 = jy + 12, bh3 = 196;
+  const bx2 = 330, bw2 = 984 - bx2, by2 = jy + 8, bh3 = 176;
   const ty = by2 + 86;
   ctx.fillStyle = STORY_CARD; ctx.strokeStyle = LINE; ctx.lineWidth = 2;
   // 本体としっぽをひと筆で描く（継ぎ目が出ないように）
@@ -8175,6 +8190,14 @@ function ReportScreen() {
         headLabel: (day === logicalTodayStr()) ? "今日、記録した時間" : "この日に記録した時間",
         rows, totalMin: total, icons,
         // 記録した時間帯そのもの（24時間の時計に置くために使う）
+        spanLabel: (function(){
+          const ss = list.map(function(l){ const sp=blockSpan(l.time_block); return sp?sp:null; }).filter(Boolean);
+          if(!ss.length) return "24時間";
+          const a2 = Math.min.apply(null, ss.map(function(x){return x.start;}));
+          const b2 = Math.max.apply(null, ss.map(function(x){return x.end;}));
+          const f2 = function(m){ return Math.floor(m/60)%24 + ":" + String(m%60).padStart(2,"0"); };
+          return f2(a2) + " → " + f2(b2);
+        })(),
         segments: list.map(function(l){
           const sp = blockSpan(l.time_block);
           if (!sp) return null;
@@ -12027,7 +12050,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260820-163323";
+const APP_BUILD = "20260820-171359";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
