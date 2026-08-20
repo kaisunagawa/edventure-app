@@ -8069,10 +8069,19 @@ async function drawStoryCard(cv, d){
 function SyncStatusLine(){
   const [, setTick] = useState(0);
   useEffect(()=>{ const t=setInterval(()=>setTick(x=>x+1), 2000); return ()=>clearInterval(t); },[]);
+  // ★ふつうの言葉で出す★（2026-08-20 UI点検）
+  //   切り分けのために作った行だが、38人全員の設定画面に
+  //   「印a3f9c1／確認8回」のような開発用の文字が出ていた。
+  //   ふだんは「動いています」だけ。困ったときに要る細かい数字は、
+  //   長押ししたときだけ出す。
   const s = window.__syncLast;
-  if(!s) return html`<div style=${{fontSize:10.5,color:"var(--faint)",marginTop:4}}>同期：まだ確認できていません</div>`;
-  return html`<div style=${{fontSize:10.5,color:"var(--faint)",marginTop:4,lineHeight:1.6}}>
-    同期 ${s.at} 印${s.tag}／確認${s.n}回・取り直し${s.fired||0}回${s.self?("・自分の書き込み"+s.self+"回"):""}</div>`;
+  if(!s) return html`<div style=${{fontSize:10.5,color:"var(--faint)",marginTop:4}}>
+    パソコンと携帯の同期：まだ確認できていません</div>`;
+  const detail = "確認" + s.n + "回・取り直し" + (s.fired||0) + "回・印" + s.tag;
+  return html`<div title=${detail}
+    onClick=${()=>{ try{ alert("パソコンと携帯の同期\n\n最後に確認: " + s.at + "\n" + detail); }catch(e){} }}
+    style=${{fontSize:10.5,color:"var(--faint)",marginTop:4,lineHeight:1.6,cursor:"pointer"}}>
+    パソコンと携帯の同期：動いています（${s.at} に確認）</div>`;
 }
 
 function ReportScreen() {
@@ -9540,7 +9549,7 @@ const FAQ_CATEGORIES = [
     { q:"記録し忘れた日を後から入れたい",
       a:"記録タブの日付の「‹」で過去の日に戻ると、追加・編集ができます。\nAIコーチはちゃんとその記録も見てくれます（ただしXPは付きません）。" },
     { q:"話すだけで記録できるって本当？",
-      a:"できます。記録タブの右上にある「🎙 話すだけ」を押して、キーボードのマイクからこう言うだけです。\n\n「8時から9時まで朝ごはんを食べてた」\n「10時から2時間カフェで資料づくり」\n\n時間もまとめて言えば、そのとおりに入ります。1日分を続けて話しても大丈夫で、AIが時間ごとの記録に分けて保存します。\n夜にまとめて振り返る方は、こちらのほうが早く終わります。\n\n【前の日のぶんも話せます】画面の上で「今日／昨日／一昨日」を選べます。その日に入れ損ねても、あとから思い出して話せば入ります。\n\n【待たされません】送ると画面はすぐ閉じます。書き込みは裏で続くので、そのまま他の操作をして大丈夫です。記録は書き終わった時点で画面に出ます。" },
+      a:"できます。入口は2つです。どの画面からでも押せる右下のマイクのボタンか、記録タブの「記録を入力」の右にある「🎙 話すだけ」です。押したら、キーボードのマイクからこう言うだけです。\n\n「8時から9時まで朝ごはんを食べてた」\n「10時から2時間カフェで資料づくり」\n\n時間もまとめて言えば、そのとおりに入ります。1日分を続けて話しても大丈夫で、AIが時間ごとの記録に分けて保存します。\n夜にまとめて振り返る方は、こちらのほうが早く終わります。\n\n【前の日のぶんも話せます】画面の上で「今日／昨日／一昨日」を選べます。その日に入れ損ねても、あとから思い出して話せば入ります。\n\n【待たされません】送ると画面はすぐ閉じます。書き込みは裏で続くので、そのまま他の操作をして大丈夫です。記録は書き終わった時点で画面に出ます。" },
     { q:"今日やることを、話すだけでタスクにできる？",
       a:"できます。今日のタスクの「＋」から「話すだけ」を選ぶか、朝の「今日のフォーカス」を決める画面から使えます。\n\n「午前は資料づくり、昼から打ち合わせ2件、夕方にジム」\n\nのように続けて話すと、AIが1つずつのタスクに分けて並べます。時間の目安も一緒に言えば、そのまま入ります。" },
     { q:"睡眠・運動・食事も記録できる？（コンディション）",
@@ -12018,7 +12027,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260820-162830";
+const APP_BUILD = "20260820-163323";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
@@ -13049,7 +13058,7 @@ const TUTORIAL_STEPS = [
   { mock:TutorialMiniWelcome, title:"JIROKUへようこそ", body:"時間の使い方を記録して、AIコーチと一緒に振り返るアプリです。記録は1件30秒。まずは基本だけご案内します。" },
   { mock:TutorialMiniLog, title:"記録タブで、その時間を残す", body:"時間帯を選んで「何をしたか」「どれくらいできたか」、そしてメモを書きます。メモがいちばん大事です。うまくいったか・感じたこと・次どうするかを一言でいいので残してください。振り返って気づくことが、習慣化の一番のポイントです。" },
   { mock:TutorialMiniClass, title:"その時間を6つに分ける", body:"「目標に直結／将来への投資／日常業務／回復／人間関係／計画外の時間」から選びます。選ぶだけで、レポートが「何に時間を使っていたか」を出してくれます。迷ったら直感で大丈夫。あとから変えられます。" },
-  { mock:TutorialMiniMulti, title:"入力をラクにする3つの方法", body:"①まとめて記録：同じ内容が続いた時間帯を一括で保存\n②独り言：画面右下のボタンから、話すだけ・書くだけで記録\n③タイマー：集中時間を計ると、終了時にそのまま記録になります" },
+  { mock:TutorialMiniMulti, title:"入力をラクにする3つの方法", body:"①まとめて記録：同じ内容が続いた時間帯を一括で保存\n②話すだけ：画面右下のマイクから、話すだけ・書くだけで記録\n③タイマー：集中時間を計ると、終了時にそのまま記録になります" },
   { mock:TutorialMiniCalendar, title:"カレンダー連携で自動入力", body:"設定でGoogleカレンダーとつなぐと、予定がそのまま記録の候補になります。選んで保存するだけになり、書き込んだ記録は分類ごとに色分けされてカレンダーにも戻ります。" },
   { mock:TutorialMiniGoals, title:"目標とつなげる", body:"ホームの「目標ロードマップ」で、3か月目標 → 2週間目標 → 今週の目標をつなげます。日々の記録がどの目標に効いているかが見えるようになり、AIもそこを踏まえて声をかけます。" },
   { mock:TutorialMiniReport, title:"毎晩、AIがレポートを届けます", body:"その日の記録をもとに、AIが点数とフィードバックを作ります。点数は記録の量・メモの深さ・集中度・目標との関係・継続の5つから決まります。「気づき」タブには、あなたの傾向をまとめたものが溜まっていきます。" },
@@ -13381,7 +13390,10 @@ function QuickLogBusyChip(){
   if(!on) return null;
   return ReactDOM.createPortal(html`
     <div style=${{position:"fixed",left:"50%",transform:"translateX(-50%)",
-                  bottom:"calc(var(--nav-h) + var(--safe-bottom) + 84px)",zIndex:540,
+                  // ★マイクの吹き出し雲より上に置く★（2026-08-20 UI点検）
+                  //   ボタンは +16〜+72、雲は +72〜+136 を使う。
+                  //   +84 だと雲と重なっていた。
+                  bottom:"calc(var(--nav-h) + var(--safe-bottom) + 150px)",zIndex:540,
                   background:"var(--card)",border:"1px solid var(--border)",borderRadius:999,
                   boxShadow:"0 8px 24px rgba(0,0,0,0.18)",padding:"9px 16px",
                   display:"flex",alignItems:"center",gap:8,fontSize:12.5,
@@ -13468,8 +13480,8 @@ function QuickLogSheet({onClose,onToast}){
           onInput=${e=>setText(e.target.value)} style=${{minHeight:110,marginBottom:14,fontSize:15}}/>
         <!-- ★押せない状態にしない★ 音声入力が画面の状態へ入る前でも押せるようにする。
              中で入力欄の値を見て、本当に空のときだけ知らせる -->
-        <button class="btn" disabled=${saving} style=${{opacity:1}} onClick=${save}>
-          ${saving?"記録中…":(dayBack===0?"これを記録する":["","昨日","一昨日"][dayBack]+"のぶんとして記録する")}
+        <button class="btn" onClick=${save}>
+          ${dayBack===0?"これを記録する":["","昨日","一昨日"][dayBack]+"のぶんとして記録する"}
         </button>
         <button onClick=${onClose}
           style=${{display:"block",width:"100%",marginTop:8,background:"none",border:"none",color:"var(--sub)",fontSize:13,cursor:"pointer",fontFamily:"inherit",padding:8}}>閉じる</button>
@@ -13775,7 +13787,7 @@ function App() {
             </svg>
             <span class="t">${QUICK_HINTS[hintIdx]}</span>
           </div>`}
-        <button onClick=${()=>setShowQuick(true)} title="独り言で記録"
+        <button onClick=${()=>setShowQuick(true)} title="話すだけで記録"
           style=${{width:56,height:56,borderRadius:"50%",background:"linear-gradient(135deg, var(--hero1) 0%, var(--hero2) 100%)",border:"none",boxShadow:"0 6px 18px rgba(8,145,178,0.4)",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>
           <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/><path d="M19 10v1a7 7 0 0 1-14 0v-1"/><line x1="12" y1="19" x2="12" y2="22"/></svg>
         </button>
