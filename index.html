@@ -952,6 +952,13 @@ async function pollSyncTag(){
     if (!r || !r.ok) return;
     const t = String(r.tag || "");
     if (!t) return;                       // 印がまだ無い（サーバー再起動直後など）
+    // ★動いているかを画面で見られるようにする★（2026-08-20 Kai報告
+    //   「パソコンと携帯が反映されてない」）
+    //   合図が届いているのか、届いても画面が変わらないのか、
+    //   端末の中で何が起きているか推測でしか追えなかった。設定の下に出す。
+    window.__syncLast = { at: new Date().toTimeString().slice(0,8), tag: t.slice(-6),
+                          n: (window.__syncLast ? window.__syncLast.n : 0) + 1,
+                          fired: (window.__syncLast ? window.__syncLast.fired : 0) };
     if (__syncTag === null) { __syncTag = t; return; }   // 最初の1回は基準にするだけ
     if (t !== __syncTag) {
       __syncTag = t;
@@ -960,7 +967,8 @@ async function pollSyncTag(){
       //   自分でホームを取り直すことになり（実測8秒）かえって重くなる。
       //   この端末が書いた直後の変化は、基準を合わせるだけにする。
       //   取りこぼしても1分ごとの保険で追いつく。
-      if (Date.now() - __selfWriteAt < 15000) return;
+      if (Date.now() - __selfWriteAt < 15000) { window.__syncLast.self = (window.__syncLast.self||0)+1; return; }
+      window.__syncLast.fired = (window.__syncLast.fired || 0) + 1;
       window.dispatchEvent(new CustomEvent("jiroku:remotechange"));
     }
   } catch(e){ /* 通信できない時は次の回に任せる */ }
@@ -8027,6 +8035,17 @@ async function drawStoryCard(cv, d){
   return cv;
 }
 
+// 同期が動いているかを、そのまま出すだけの1行。
+// 「反映されない」を推測で追わないために置いている。
+function SyncStatusLine(){
+  const [, setTick] = useState(0);
+  useEffect(()=>{ const t=setInterval(()=>setTick(x=>x+1), 2000); return ()=>clearInterval(t); },[]);
+  const s = window.__syncLast;
+  if(!s) return html`<div style=${{fontSize:10.5,color:"var(--faint)",marginTop:4}}>同期：まだ確認できていません</div>`;
+  return html`<div style=${{fontSize:10.5,color:"var(--faint)",marginTop:4,lineHeight:1.6}}>
+    同期 ${s.at} 印${s.tag}／確認${s.n}回・取り直し${s.fired||0}回${s.self?("・自分の書き込み"+s.self+"回"):""}</div>`;
+}
+
 function ReportScreen() {
   const todayStr=logicalTodayStr();   // 深夜0〜4時は前の日の続きとして扱う
   const [date, setDate]=useState(null); // null = list view
@@ -11760,6 +11779,7 @@ function SettingsScreen({onToast,onLogout,onGoalSaved,profile,onProfileSaved,onC
                    cursor:"pointer",fontFamily:"inherit",textDecoration:"underline",padding:"4px 8px"}}>
           版 ${APP_BUILD}（押すと最新に入れ替え）
         </button>
+        <${SyncStatusLine}/>
       </div>
     </div>
   </div>`;
@@ -11961,7 +11981,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260820-071644";
+const APP_BUILD = "20260820-125657";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
