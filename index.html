@@ -12003,7 +12003,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260820-162038";
+const APP_BUILD = "20260820-162447";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
@@ -13305,8 +13305,20 @@ function FeatureAnnounce({onClose,onGo}){
 //   ここでは送った瞬間に画面を返し、書き込みはうしろで続ける。
 //   失敗したときだけ、話した文をそのまま戻して出し直せるようにする。
 const QL_FAILED_LS = "ql_failed";
+// ★書き込み中だと画面で分かるようにする★（2026-08-20 Kai報告
+//   「記録するボタンを押した後でも、ちゃんと反映されていない」）
+//   送った瞬間に画面を閉じる形にしたので、書き終わるまでの数秒間、
+//   利用者から見ると何も起きていないのと同じだった。
+function setQuickLogBusy(on){
+  try{
+    window.__qlBusy = !!on;
+    window.dispatchEvent(new CustomEvent("jiroku:qlbusy",{detail:{on:!!on}}));
+  }catch(e){}
+}
 function runQuickLogInBackground(t, date, onToast){
+  setQuickLogBusy(true);
   gasPostJson("quickLog", date ? {text:t, date:date} : {text:t}).then(r=>{
+    setQuickLogBusy(false);
     if(!(r&&r.ok)){
       try{ localStorage.setItem(QL_FAILED_LS, JSON.stringify({text:t, date:date||""})); }catch(e){}
       onToast((r&&r.error)||"記録できませんでした。🎙をもう一度押すと、話した内容が残っています");
@@ -13337,10 +13349,34 @@ function runQuickLogInBackground(t, date, onToast){
       }
     }catch(e){}
   }).catch(()=>{
+    setQuickLogBusy(false);
     try{ localStorage.setItem(QL_FAILED_LS, JSON.stringify({text:t, date:date||""})); }catch(e){}
     onToast("通信が届きませんでした。🎙をもう一度押すと、話した内容が残っています");
   });
 }
+// 話した内容を書いている最中であることを、画面に出し続ける帯。
+// 送った瞬間に閉じる作りなので、これが無いと何も起きていないように見える。
+function QuickLogBusyChip(){
+  const [on,setOn]=useState(!!window.__qlBusy);
+  useEffect(()=>{
+    const h=(e)=>setOn(!!(e&&e.detail&&e.detail.on));
+    window.addEventListener("jiroku:qlbusy",h);
+    return ()=>window.removeEventListener("jiroku:qlbusy",h);
+  },[]);
+  if(!on) return null;
+  return ReactDOM.createPortal(html`
+    <div style=${{position:"fixed",left:"50%",transform:"translateX(-50%)",
+                  bottom:"calc(var(--nav-h) + var(--safe-bottom) + 84px)",zIndex:540,
+                  background:"var(--card)",border:"1px solid var(--border)",borderRadius:999,
+                  boxShadow:"0 8px 24px rgba(0,0,0,0.18)",padding:"9px 16px",
+                  display:"flex",alignItems:"center",gap:8,fontSize:12.5,
+                  fontWeight:700,color:"var(--text)",whiteSpace:"nowrap"}}>
+      <div class="spin" style=${{borderColor:"var(--border)",borderTopColor:"var(--accent)",
+                                 width:13,height:13,borderWidth:2}}/>
+      話した内容を記録しています…
+    </div>`, document.body);
+}
+
 function QuickLogSheet({onClose,onToast}){
   // 前回うまく記録できなかった話し言葉が残っていれば、そのまま出し直せる
   const failed=(()=>{ try{ return JSON.parse(localStorage.getItem(QL_FAILED_LS)||"null"); }catch(e){ return null; } })();
@@ -13358,14 +13394,26 @@ function QuickLogSheet({onClose,onToast}){
   const inputRef=React.useRef(null);
   useEffect(()=>{ setTimeout(()=>{ try{inputRef.current&&inputRef.current.focus();}catch(e){} },200); },[]);
   const save=()=>{
-    const t=text.trim();
-    if(!t||saving) return;
+    if(saving) return;
+    // ★入力欄から直に読む★（2026-08-20 Kai報告
+    //   「記録するボタンを押しても押していないことになっている」）
+    //   音声入力は、確定するまで画面の状態（text）へ入らないことがある。
+    //   話し終わってすぐ押すと text が空のままで、何も起きずに戻っていた。
+    //   利用者から見ると「押していないことになる」。入力欄の値を優先して見る。
+    let raw = text;
+    try{ if(inputRef.current && inputRef.current.value) raw = inputRef.current.value; }catch(e){}
+    const t=String(raw||"").trim();
+    if(!t){
+      // ★黙って戻らない★ 何も起きないのが、いちばん困る
+      onToast("まだ何も入っていません。マイクで話してから押してください");
+      try{ inputRef.current && inputRef.current.focus(); }catch(e){}
+      return;
+    }
     // 送った瞬間に閉じる。書き込みは裏で続く（待たせない）
     const d = dayBack>0 ? dayOf(dayBack) : null;
     try{ localStorage.removeItem(QL_FAILED_LS); }catch(e){}
     setText("");
     onClose();
-    onToast("記録しています…そのまま使って大丈夫です");
     runQuickLogInBackground(t, d, onToast);
   };
 
@@ -13403,7 +13451,9 @@ function QuickLogSheet({onClose,onToast}){
         </div>
         <textarea ref=${inputRef} class="txa" placeholder="例：8時に起きて朝ごはん、10時から友達とカフェで勉強、昼は移動して13時に打ち合わせ…と1日を丸ごと話してもOK" value=${text}
           onInput=${e=>setText(e.target.value)} style=${{minHeight:110,marginBottom:14,fontSize:15}}/>
-        <button class="btn" disabled=${!text.trim()||saving} style=${{opacity:text.trim()?1:0.5}} onClick=${save}>
+        <!-- ★押せない状態にしない★ 音声入力が画面の状態へ入る前でも押せるようにする。
+             中で入力欄の値を見て、本当に空のときだけ知らせる -->
+        <button class="btn" disabled=${saving} style=${{opacity:1}} onClick=${save}>
           ${saving?"記録中…":(dayBack===0?"これを記録する":["","昨日","一昨日"][dayBack]+"のぶんとして記録する")}
         </button>
         <button onClick=${onClose}
@@ -13716,6 +13766,7 @@ function App() {
         </button>
       </div>
       `}
+      <${QuickLogBusyChip}/>
       ${showQuick&&html`<${QuickLogSheet} onClose=${()=>setShowQuick(false)} onToast=${setToast}/>`}
       <nav class="nav">
         ${TABS.map(t=>html`
