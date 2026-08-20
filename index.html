@@ -11981,7 +11981,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260820-140350";
+const APP_BUILD = "20260820-141731";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
@@ -12126,8 +12126,16 @@ function LoginScreen({onLogin}) {
     const onVisible=()=>{ if(document.visibilityState==="visible" && alive) mount(); };
     document.addEventListener("visibilitychange", onVisible);
     window.addEventListener("pageshow", onVisible);
+    // ★失敗したら合言葉を取り直す★（2026-08-20 Kai報告
+    //   「ログインを押すとまた同じ画面に戻るループ」）
+    //   合言葉が切れて失敗したとき、ボタンは切れた合言葉を握ったままだった。
+    //   もう一度押しても同じものを送るので、何度押しても同じ結果になる。
+    //   失敗した事実をきっかけに、必ず新しい合言葉で張り直す。
+    const onFail=()=>{ if(alive) mount(); };
+    window.addEventListener("jiroku:loginfail", onFail);
 
     return ()=>{
+      window.removeEventListener("jiroku:loginfail", onFail);
       alive=false;
       if(timer) clearTimeout(timer);
       document.removeEventListener("visibilitychange", onVisible);
@@ -12263,6 +12271,8 @@ function LoginScreen({onLogin}) {
       if(!getSessionToken()){
         setLoading(false);
         try{ localStorage.setItem("auth_last_error","NO_TOKEN_AFTER_LOGIN"); }catch{}
+        // 押し直しても同じ結果にならないよう、合言葉を新しくしてから促す
+        try{ window.dispatchEvent(new CustomEvent("jiroku:loginfail")); }catch{}
         setError("ログインを確認できませんでした。もう一度「Googleでログイン」を押してください");
         return;
       }
