@@ -11995,7 +11995,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260820-160349";
+const APP_BUILD = "20260820-160819";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
@@ -12103,10 +12103,19 @@ function LoginScreen({onLogin}) {
       };
       tick();
     });
+    // ★張り直しが重なったら、古いほうを捨てる★（2026-08-20 監査ログで確認）
+    //   合言葉の張り直しは、開いた時・3分ごと・画面に戻った時・失敗した時の
+    //   4か所から呼ばれる。重なると、先に始まった古い取得があとから終わって
+    //   新しい合言葉を上書きし、ボタンが切れた合言葉を握ることがある。
+    //   実際、監査ログに CHALLENGE_NOT_FOUND と SUCCESS が交互に出ていた。
+    //   番号を振って、最後に始まったものだけを採用する。
+    let mountSeq = 0;
     const mount=async()=>{
+      const my = ++mountSeq;
       const el=document.getElementById("gsi-btn-app");
       if(!el) return;
       if(!(await waitGis())) { if(alive) setGsiReady(false); return; }
+      if(!alive || my !== mountSeq) return;   // 新しい張り直しが始まっていた
       let ch=null;
       try{
         const u=new URL(GAS_URL); u.searchParams.set("action","authChallenge");
@@ -12114,6 +12123,7 @@ function LoginScreen({onLogin}) {
         if(j&&j.ok&&j.challenge_id) ch=j;
       }catch{}
       if(!alive||!ch) { if(alive) setGsiReady(false); return; }
+      if(my !== mountSeq) return;             // 取っている間に、もっと新しいものが始まった
       try{
         google.accounts.id.initialize({
           client_id: GOOGLE_CLIENT_ID,
