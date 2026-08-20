@@ -627,7 +627,7 @@ async function gasPostJson(action, body = {}) {
     });
     const j = await r.json();
     // 書き込みは印を進める。自分で進めた印に自分が反応しないよう、時刻を控える
-    if (action !== "syncTag") __selfWriteAt = Date.now();
+    if (action !== "syncTag") { __selfWriteAt = Date.now(); resetSyncPace(); }
     // セッション切れで弾かれた保存操作は、捨てずに預かっておく。
     // 再ログイン後に自動でやり直す（記録が消えるのが一番困るため）
     if (j && j.ok === false && (j.error === "AUTH_REQUIRED" || j.error === "FORBIDDEN")) {
@@ -941,7 +941,7 @@ let __homeCleanup = null;   // ホームの取り直しを外すための控え
 let __selfWriteAt = 0;   // この端末が最後に書き込んだ時刻
 let __lastTouchAt = Date.now();
 ["pointerdown","keydown"].forEach(ev =>
-  window.addEventListener(ev, ()=>{ __lastTouchAt = Date.now(); }, {passive:true}));
+  window.addEventListener(ev, ()=>{ __lastTouchAt = Date.now(); resetSyncPace(); }, {passive:true}));
 async function pollSyncTag(){
   if (__syncBusy) return;
   if (document.visibilityState !== "visible") return;
@@ -960,6 +960,8 @@ async function pollSyncTag(){
                           n: (window.__syncLast ? window.__syncLast.n : 0) + 1,
                           fired: (window.__syncLast ? window.__syncLast.fired : 0) };
     if (__syncTag === null) { __syncTag = t; return; }   // 最初の1回は基準にするだけ
+    if (t === __syncTag) { __syncQuiet++; }   // 変わらない回が続くほど、間を空ける
+    else { resetSyncPace(); }
     if (t !== __syncTag) {
       __syncTag = t;
       // ★自分で書いた直後は取り直さない★
@@ -974,16 +976,29 @@ async function pollSyncTag(){
   } catch(e){ /* 通信できない時は次の回に任せる */ }
   finally { __syncBusy = false; }
 }
+// ★変わらない間は、だんだん間を空ける★（2026-08-20 全体点検）
+//   5秒ごとに見に行くのは、書いた直後だけ意味がある。
+//   何も変わらない時間まで同じ間隔で叩くと、1人あたり1分12回になり、
+//   何人か同時に開くとGASの1日の実行時間に効いてくる。
+//   変化が無いほど間を空け、何かあったら5秒に戻す。
+//   （触った・画面に戻った・自分が書いた・印が変わった、のどれか）
+let __syncQuiet = 0;
+function resetSyncPace(){ __syncQuiet = 0; }
 function scheduleSyncPoll(){
   clearTimeout(__syncTimer);
-  const active = (Date.now() - __lastTouchAt) < SYNC_ACTIVE_FOR_MS;
-  const wait = document.visibilityState === "visible"
-    ? (active ? SYNC_POLL_ACTIVE_MS : SYNC_POLL_IDLE_MS)
-    : SYNC_POLL_IDLE_MS * 3;
+  let wait;
+  if (document.visibilityState !== "visible") {
+    wait = 60000;                                  // 見ていない間は1分
+  } else if ((Date.now() - __lastTouchAt) >= SYNC_ACTIVE_FOR_MS) {
+    wait = SYNC_POLL_IDLE_MS;                      // 開いているが触っていない
+  } else if (__syncQuiet < 6)  { wait = SYNC_POLL_ACTIVE_MS; }   // 5秒
+  else if (__syncQuiet < 12) { wait = 15000; }
+  else if (__syncQuiet < 20) { wait = 30000; }
+  else                       { wait = 60000; }
   __syncTimer = setTimeout(()=>{ pollSyncTag().finally(scheduleSyncPoll); }, wait);
 }
 document.addEventListener("visibilitychange", ()=>{
-  if (document.visibilityState === "visible") { __lastTouchAt = Date.now(); pollSyncTag().finally(scheduleSyncPoll); }
+  if (document.visibilityState === "visible") { __lastTouchAt = Date.now(); resetSyncPace(); pollSyncTag().finally(scheduleSyncPoll); }
 });
 window.addEventListener("focus", ()=>{ __lastTouchAt = Date.now(); });
 scheduleSyncPoll();
@@ -12003,7 +12018,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260820-162447";
+const APP_BUILD = "20260820-162830";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 

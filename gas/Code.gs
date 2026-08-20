@@ -5220,6 +5220,21 @@ function pendFlush_() {
     rows.forEach(function (k) {
       const i = Number(k), r = _usersSnap[i];
       if (!r || !r.length) return;
+      // ★変えた列だけを書く★（2026-08-20 全体点検）
+      //   行を丸ごと上書きすると、同じ瞬間に別の処理がその行を書いていた場合、
+      //   それを消してしまう（読んだのは処理の最初なので、その後の変更を知らない）。
+      //   触った列だけを書けば、他の列は誰が書いても残る。
+      //   まとめ書きの目的は「1件ごとの往復をやめる」ことなので、
+      //   1回のまとめで数マス書くぶんには元の狙いを損なわない。
+      const cols = Object.keys(pw.userCols && pw.userCols[k] ? pw.userCols[k] : {});
+      if (cols.length && cols.length <= 8) {
+        var wrote = true;
+        cols.forEach(function (c) {
+          try { sh.getRange(i + 1, Number(c) + 1).setValue(r[Number(c)]); }
+          catch (e) { wrote = false; Logger.log("pendFlush_ 列書き失敗: " + e); }
+        });
+        if (wrote) return;
+      }
       try {
         sh.getRange(i + 1, 1, 1, r.length).setValues([r]);
       } catch (e) {
@@ -5253,13 +5268,16 @@ function usersWrite_(sheet, rowIdx, colIdx, value) {
   usersSnapSet_(rowIdx, colIdx, value);
   if (_dlSnapOn && _pendWrites && _usersSnap && _usersSnap[rowIdx]) {
     _pendWrites.users[rowIdx] = 1;
+    if (!_pendWrites.userCols) _pendWrites.userCols = {};
+    if (!_pendWrites.userCols[rowIdx]) _pendWrites.userCols[rowIdx] = {};
+    _pendWrites.userCols[rowIdx][colIdx] = 1;   // 触った列だけ控える
     return;
   }
   sheet.getRange(rowIdx + 1, colIdx + 1).setValue(value);
 }
 function withDailyLogSnapshot_(fn) {
   const already = _dlSnapOn;
-  if (!already) { _dlSnapOn = true; _dlSnap = null; _usersSnap = null; _xpIdsSnap = null; _pendWrites = { users: {}, xp: [] }; }
+  if (!already) { _dlSnapOn = true; _dlSnap = null; _usersSnap = null; _xpIdsSnap = null; _pendWrites = { users: {}, userCols: {}, xp: [] }; }
   try { return fn(); }
   finally { if (!already) { try { pendFlush_(); } catch (e) { Logger.log(e); }
                             _dlSnapOn = false; _dlSnap = null; _usersSnap = null; _xpIdsSnap = null; _pendWrites = null; } }
