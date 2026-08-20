@@ -7929,147 +7929,102 @@ async function drawStoryCard(cv, d){
   ctx.fillStyle = INK; ctx.font = "800 44px " + F;
   ctx.fillText(storyHM(d.totalMin), 984, 474);
 
-  // ── 主役：ドーナツと内訳（アプリのカードと同じ、白い面に載せる）──
+  // ── 主役：24時間のドーナツ ──
+  //   ★ドーナツを大きく、その下にタイムラインと項目★（2026-08-20 Kaiの判断）
+  //     横に並べると輪が小さくなり、いちばん見たいものが小さかった。
+  //     上下に積んで、輪に幅いっぱいを使う。
   const shown = d.rows.filter(r=>r.m>0);
-  const boxY = 528, boxH = 646;
-  storyRoundRect(ctx, 64, boxY, 952, boxH, 40);
-  ctx.fillStyle = STORY_CARD; ctx.fill();
-  ctx.strokeStyle = LINE; ctx.lineWidth = 2; ctx.stroke();
-
-  // ★1周を24時間に固定する★（2026-08-20 Kaiの判断）
-  //   活動時間だけを1周に伸ばしていたが、日によって1周の意味が変わるため、
-  //   昨日と今日を並べても同じ角度が同じ長さを指さない。毎日出すものなので、
-  //   ものさしを固定するほうが読み違えない。0時が上、時計回り。
-  //   記録していない時間は薄い色のまま残るので、詰まり方もそのまま見える。
-  const cx = 252, cy = boxY + boxH/2, R = 124, SW = 30;
-  const segsAll = d.segments || [];
-  const winS = 0, winE = 1440, winLen = 1440;
-  const ang = function (min) { return (min / 1440) * Math.PI * 2 - Math.PI / 2; };
+  const cx = STORY_W / 2, cy = 826, R = 236, SW = 54;
   ctx.lineCap = "butt";
   ctx.strokeStyle = STORY_TRACK; ctx.lineWidth = SW;
   ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI*2); ctx.stroke();
+  const ang = function (min) { return (min / 1440) * Math.PI * 2 - Math.PI / 2; };
   (d.segments || []).forEach(function (sg) {
     if (!(sg.end > sg.start)) return;
     ctx.strokeStyle = STORY_CLASS_COLOR[sg.k] || STORY_CLASS_COLOR.UNSET;
     ctx.beginPath(); ctx.arc(cx, cy, R, ang(sg.start), ang(sg.end)); ctx.stroke();
   });
-  // ※輪の中に時刻を書くのはやめた（外の目盛りと役割が重なり、
-  //   細い時間帯では読めずに散らかるだけだった。2026-08-20 実物で確認）
-  // 目盛りと数字（3時間おき）
+  // 3時間ごとの目盛りと数字
   ctx.textAlign = "center"; ctx.textBaseline = "middle";
-  const stepH = 3;
-  for (var hh = 0; hh < 24; hh += stepH) {
+  for (var hh = 0; hh < 24; hh += 3) {
     const th2 = ang(hh * 60);
-    const r1 = R + SW/2 + 5, r2 = R + SW/2 + 14;
+    const r1 = R + SW/2 + 6, r2 = R + SW/2 + 16;
     ctx.strokeStyle = LINE; ctx.lineWidth = 3;
     ctx.beginPath();
     ctx.moveTo(cx + Math.cos(th2)*r1, cy + Math.sin(th2)*r1);
     ctx.lineTo(cx + Math.cos(th2)*r2, cy + Math.sin(th2)*r2);
     ctx.stroke();
-    ctx.fillStyle = SUB; ctx.font = "700 20px " + F;
-    ctx.fillText(String(hh % 24), cx + Math.cos(th2)*(R + SW/2 + 29), cy + Math.sin(th2)*(R + SW/2 + 29));
+    ctx.fillStyle = SUB; ctx.font = "700 24px " + F;
+    ctx.fillText(String(hh), cx + Math.cos(th2)*(R + SW/2 + 36), cy + Math.sin(th2)*(R + SW/2 + 36));
   }
   ctx.textBaseline = "alphabetic";
-  // 真ん中は「合計 / 時間 / (割合)」。記録画面の内訳と同じ並び
+  // 真ん中
   ctx.textAlign = "center";
-  ctx.fillStyle = SUB; ctx.font = "700 22px " + F;
-  ctx.fillText("記録した時間", cx, cy - 24);
-  ctx.fillStyle = INK; ctx.font = "800 40px " + F;
-  ctx.fillText(storyHM(d.totalMin), cx, cy + 18);
-  // ※「何時から何時まで」は輪そのものが示すので、文字では出さない
-  ctx.fillStyle = SUB; ctx.font = "700 21px " + F;
-  ctx.fillText("1周＝24時間", cx, cy + 50);
-
-  // 内訳（丸いアイコン・分類色の時間・下の帯。すべて記録画面と同じ）
-  const lx0 = 452, lRight = 952;
-  const rowH = shown.length > 5 ? 96 : 110;
-  let ry = cy - ((shown.length - 1) * rowH) / 2;
-  for (var ii = 0; ii < shown.length && ii < 6; ii++) {
-    const r = shown[ii];
-    const col = STORY_CLASS_COLOR[r.k] || "#64748B";
-    const pct = Math.round(r.m / d.totalMin * 100);
-    const icx = lx0 + 30, icy = ry - 6, ir = 30;
-    ctx.beginPath(); ctx.arc(icx, icy, ir, 0, Math.PI*2);
-    ctx.fillStyle = storyAlpha(col, 0.26); ctx.fill();
-    ctx.strokeStyle = storyAlpha(col, 0.55); ctx.lineWidth = 2; ctx.stroke();
-    const im = d.icons && d.icons[r.k];
-    if (im) ctx.drawImage(im, icx - 18, icy - 18, 36, 36);
-    ctx.textAlign = "left"; ctx.fillStyle = INK; ctx.font = "700 33px " + F;
-    ctx.fillText(storyFit(ctx, r.label, 240), lx0 + 76, ry + 6);
-    ctx.textAlign = "right"; ctx.fillStyle = col; ctx.font = "800 32px " + F;
-    ctx.fillText(storyHM(r.m), lRight - 78, ry + 6);
-    ctx.fillStyle = SUB; ctx.font = "700 27px " + F;
-    ctx.fillText(pct + "%", lRight, ry + 6);
-    const tx = lx0 + 76, tw = lRight - tx, th = 11, tyy = ry + 28;
-    storyRoundRect(ctx, tx, tyy, tw, th, 6); ctx.fillStyle = STORY_TRACK; ctx.fill();
-    storyRoundRect(ctx, tx, tyy, Math.max(8, tw * pct / 100), th, 6);
-    ctx.fillStyle = col; ctx.fill();
-    ry += rowH;
-  }
+  ctx.fillStyle = SUB; ctx.font = "700 26px " + F;
+  ctx.fillText("記録した時間", cx, cy - 42);
+  ctx.fillStyle = INK; ctx.font = "800 64px " + F;
+  ctx.fillText(storyHM(d.totalMin), cx, cy + 22);
+  ctx.fillStyle = SUB; ctx.font = "700 24px " + F;
+  ctx.fillText("1周＝24時間", cx, cy + 62);
 
   // ── 24時間のタイムライン ──
-  //   ★「いつ」と「どれくらい」を分ける★（2026-08-20 Kaiが見せてくれた参考例）
-  //     1つの輪に両方やらせると、寝ている時間が大きいほど
-  //     起きている時間の中身が読めなくなる。
-  //     割合は輪が、時間の並びはこの帯が受け持つ。
-  const tlX = 96, tlW = 888, tlY = boxY + boxH + 40, tlH = 44;
-  ctx.textAlign = "left"; ctx.fillStyle = SUB; ctx.font = "700 24px " + F;
-  ctx.fillText("今日のタイムライン", tlX, tlY - 14);
-  ctx.textAlign = "right";
-  ctx.fillText("0:00 − 24:00", tlX + tlW, tlY - 14);
-  storyRoundRect(ctx, tlX, tlY, tlW, tlH, 10); ctx.fillStyle = STORY_TRACK; ctx.fill();
-  ctx.save(); storyRoundRect(ctx, tlX, tlY, tlW, tlH, 10); ctx.clip();
-  (d.segments || []).forEach(function (sg) {
-    if (!(sg.end > sg.start)) return;
-    const x1 = tlX + tlW * (sg.start / 1440), x2 = tlX + tlW * (sg.end / 1440);
-    ctx.fillStyle = STORY_CLASS_COLOR[sg.k] || STORY_CLASS_COLOR.UNSET;
-    ctx.fillRect(x1, tlY, Math.max(3, x2 - x1), tlH);
+  //   ★細かいブロックに分けて、上に時間帯の絵文字★（2026-08-20 Kai指摘
+  //     「タイムラインの絵文字とかデザインとか見やすいよね」）
+  //     1本の帯より、30分ごとのブロックのほうが「どのくらいの長さか」を
+  //     数えられる。朝・昼・夕・夜の絵文字が、時間の見当をつける助けになる。
+  const tlX = 96, tlW = 888, tlY = 1200, tlH = 36;
+  // 時間帯の絵文字（0時・6時・12時・18時・24時）
+  ctx.textAlign = "center"; ctx.textBaseline = "alphabetic";
+  ctx.font = "26px " + F;
+  [[0,"🌙"],[6,"🌅"],[12,"☀️"],[18,"🌇"],[24,"🌙"]].forEach(function(p2){
+    const x = tlX + tlW * (p2[0] / 24);
+    ctx.fillText(p2[1], Math.min(tlX + tlW - 16, Math.max(tlX + 16, x)), tlY - 16);
   });
-  ctx.restore();
-  // 時刻の目盛り
-  ctx.textAlign = "center"; ctx.fillStyle = SUB; ctx.font = "700 21px " + F;
+  // 30分ごとのブロック（48個）。記録が無いところは下地の色のまま
+  const SLOT = 48, gap = 4;
+  const slotW = (tlW - gap * (SLOT - 1)) / SLOT;
+  for (var q = 0; q < SLOT; q++) {
+    const s0 = q * 30, e0 = s0 + 30;
+    let col = null, best = 0;
+    (d.segments || []).forEach(function (sg) {
+      const ov = Math.min(e0, sg.end) - Math.max(s0, sg.start);
+      if (ov > best) { best = ov; col = STORY_CLASS_COLOR[sg.k] || STORY_CLASS_COLOR.UNSET; }
+    });
+    storyRoundRect(ctx, tlX + q * (slotW + gap), tlY, slotW, tlH, 4);
+    ctx.fillStyle = col || STORY_TRACK;
+    ctx.fill();
+  }
+  ctx.textAlign = "center"; ctx.fillStyle = SUB; ctx.font = "700 19px " + F;
   [0, 4, 8, 12, 16, 20, 24].forEach(function (hh3) {
     const x = tlX + tlW * (hh3 / 24);
-    ctx.strokeStyle = LINE; ctx.lineWidth = 2;
-    ctx.beginPath(); ctx.moveTo(x, tlY + tlH + 4); ctx.lineTo(x, tlY + tlH + 12); ctx.stroke();
-    ctx.fillText(hh3 + ":00", Math.min(tlX + tlW - 24, Math.max(tlX + 24, x)), tlY + tlH + 38);
+    ctx.fillText(hh3 + ":00", Math.min(tlX + tlW - 22, Math.max(tlX + 22, x)), tlY + tlH + 28);
   });
 
-  // ── 下：ジローくん ──
-  //   ★吹き出しにする★（2026-08-20 Kai指摘「コメントっぽくない。喋ってるように」）
-  //     四角い囲みに絵と文を並べただけでは、ジローの言葉に見えない。
-  //     ジローは紙の上に立たせ、その口元から吹き出しを出す。
-  const jy = 1340, jSize = 200;
-  if (d.jiroImg) ctx.drawImage(d.jiroImg, 96, jy + 16, jSize, jSize);
-  const bx2 = 330, bw2 = 984 - bx2, by2 = jy + 8, bh3 = 176;
-  const ty = by2 + 86;
-  ctx.fillStyle = STORY_CARD; ctx.strokeStyle = LINE; ctx.lineWidth = 2;
-  // 本体としっぽをひと筆で描く（継ぎ目が出ないように）
-  ctx.beginPath();
-  ctx.moveTo(bx2 + 28, by2);
-  ctx.lineTo(bx2 + bw2 - 28, by2);
-  ctx.quadraticCurveTo(bx2 + bw2, by2, bx2 + bw2, by2 + 28);
-  ctx.lineTo(bx2 + bw2, by2 + bh3 - 28);
-  ctx.quadraticCurveTo(bx2 + bw2, by2 + bh3, bx2 + bw2 - 28, by2 + bh3);
-  ctx.lineTo(bx2 + 28, by2 + bh3);
-  ctx.quadraticCurveTo(bx2, by2 + bh3, bx2, by2 + bh3 - 28);
-  ctx.lineTo(bx2, ty + 20);
-  ctx.lineTo(bx2 - 26, ty);          // しっぽの先（ジローの口元へ）
-  ctx.lineTo(bx2, ty - 20);
-  ctx.lineTo(bx2, by2 + 28);
-  ctx.quadraticCurveTo(bx2, by2, bx2 + 28, by2);
-  ctx.closePath();
-  ctx.fill(); ctx.stroke();
+  // ── 項目（小さめに、2列で並べる）──
+  const colW = 444, cx0 = 96;
+  let iy = 1330;
+  shown.slice(0, 6).forEach(function (r, idx) {
+    const col = STORY_CLASS_COLOR[r.k] || "#64748B";
+    const pct = Math.round(r.m / d.totalMin * 100);
+    const bx3 = cx0 + (idx % 2) * colW;
+    const by3 = iy + Math.floor(idx / 2) * 86;
+    ctx.beginPath(); ctx.arc(bx3 + 13, by3 - 8, 13, 0, Math.PI*2);
+    ctx.fillStyle = col; ctx.fill();
+    ctx.textAlign = "left"; ctx.fillStyle = INK; ctx.font = "700 27px " + F;
+    ctx.fillText(storyFit(ctx, r.label, 190), bx3 + 36, by3);
+    ctx.textAlign = "right"; ctx.fillStyle = col; ctx.font = "800 27px " + F;
+    ctx.fillText(storyHM(r.m), bx3 + colW - 66, by3);
+    ctx.fillStyle = SUB; ctx.font = "700 22px " + F;
+    ctx.fillText(pct + "%", bx3 + colW - 14, by3);
+    const tx = bx3 + 36, tw = colW - 50, th = 7;
+    storyRoundRect(ctx, tx, by3 + 14, tw, th, 4); ctx.fillStyle = STORY_TRACK; ctx.fill();
+    storyRoundRect(ctx, tx, by3 + 14, Math.max(6, tw * pct / 100), th, 4);
+    ctx.fillStyle = col; ctx.fill();
+  });
 
-  // ★名前は出さない★（2026-08-20 Kaiの判断）
-  //   「サイエンティストジロー」のような名前が入ると、絵より名前を
-  //   読ませることになる。誰が言っているかより、何を言っているか。
-  ctx.textAlign = "left"; ctx.fillStyle = INK; ctx.font = "800 36px " + F;
-  ctx.fillText(storyFit(ctx, d.jiroLine1, bw2 - 80), bx2 + 40, by2 + 88);
-  if (d.jiroLine2) {
-    ctx.fillStyle = SUB; ctx.font = "700 28px " + F;
-    ctx.fillText(storyFit(ctx, d.jiroLine2, bw2 - 80), bx2 + 40, by2 + 140);
-  }
+  // ※ジローくんの一言は出さない（2026-08-20 Kaiの判断
+  //   「各種情報はもっと小さくして、コメントもなくてもいい」）
+  //   輪とタイムラインと項目で埋まるので、足すと窮屈になる。
 
   // ── 足元 ──
   ctx.textAlign = "left"; ctx.fillStyle = SUB; ctx.font = "700 28px " + F;
@@ -12050,7 +12005,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260820-171359";
+const APP_BUILD = "20260820-171724";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
