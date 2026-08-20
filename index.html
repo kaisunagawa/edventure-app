@@ -11981,7 +11981,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260820-125657";
+const APP_BUILD = "20260820-140350";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
@@ -12200,7 +12200,6 @@ function LoginScreen({onLogin}) {
     // （直列にすると2つのGAS呼び出しで合計6〜8秒かかり、待ち時間が長すぎた）
     const raw=String(res.state||"");
     const sep=raw.indexOf("~");
-    const strictNow = (AUTH_RANK[rememberedAuthMode()]||0) >= 1;
     const sessionPromise = (sep>0)
       ? fetch(GAS_URL,{ method:"POST", headers:{"Content-Type":"text/plain"},
           body: JSON.stringify({ action:"login", idToken:res.credential,
@@ -12252,9 +12251,26 @@ function LoginScreen({onLogin}) {
       if(getSessionToken() && pendingOpCount()>0){
         try{ await flushPendingOps(); }catch{}
       }
-      // 認証段階が SESSION_OPTIONAL 以上なら、セッションを取れていない状態で
-      // 従来のメール方式のまま中へ入れてはいけない
-      if(strictNow && !getSessionToken()){
+      // ★セッションが無いなら、絶対に先へ進めない★（2026-08-20 Kai報告
+      //   「はじめましての画面から登録に失敗しましたと出る」）
+      //   監査ログに registerUser DENY NO_TOKEN が並んでいた。
+      //   セッションを取れていないのに getUser を呼ぶと当然 DENY になり、
+      //   アプリはそれを「そんな利用者はいない」と読んで新規登録へ送っていた。
+      //   2026-08-01 と同じ事故。前回は strictNow を条件に付けて塞いだつもりが、
+      //   この端末での認証段階を覚えていないと LEGACY 扱いになり、
+      //   条件がすり抜けていた。本番はセッション必須なので、
+      //   端末が何を覚えていようと、トークンが無い時点で先へは進めない。
+      if(!getSessionToken()){
+        setLoading(false);
+        try{ localStorage.setItem("auth_last_error","NO_TOKEN_AFTER_LOGIN"); }catch{}
+        setError("ログインを確認できませんでした。もう一度「Googleでログイン」を押してください");
+        return;
+      }
+      // ★認証で断られたものを「新規の人」と読まない★
+      //   行が無いのか、認証が通っていないのかは別の話。
+      const authDenied = r && r.ok === false &&
+        ["AUTH_REQUIRED","SESSION_INVALID","SESSION_EXPIRED","FORBIDDEN"].indexOf(String(r.error||"")) !== -1;
+      if(authDenied){
         setLoading(false);
         setError("ログインを確認できませんでした。もう一度お試しください");
         return;
@@ -12305,7 +12321,17 @@ function LoginScreen({onLogin}) {
         if(validGoals.length) localStorage.setItem("jiroku_goals",JSON.stringify(validGoals));
         localStorage.setItem("edventure_user",JSON.stringify(u));
         setPendingUser(u); setStep("line");
-      } else { setError("登録に失敗しました"); }
+      } else {
+        // ★理由を隠さない★（2026-08-20 Kai報告）
+        //   サーバーは理由を返しているのに「登録に失敗しました」で潰していた。
+        //   招待されていないのか、ログインが切れているのかで、やることが違う。
+        const em = String((r && r.error) || "");
+        if (["AUTH_REQUIRED","SESSION_INVALID","SESSION_EXPIRED","NO_TOKEN"].indexOf(em) !== -1) {
+          setError("ログインが切れています。最初の画面からログインし直してください");
+        } else {
+          setError(em || "登録に失敗しました");
+        }
+      }
     }catch{ setError("接続エラーが発生しました"); }
     setLoading(false);
   };

@@ -605,6 +605,18 @@ sys.exit(0 if (tg==1 and dt==1) else 1)
     ng "合図を出しているのに誰も聞いていない:$miss"
   fi
 
+  # ★セッションが無いのに新規登録へ送っていないか★（2026-08-20 Kai報告
+  #   「はじめましての画面から登録に失敗しましたと出る」）
+  #   セッションを取れていないまま getUser を呼ぶと当然 DENY になり、
+  #   それを「そんな利用者はいない」と読んで新規登録へ送っていた。
+  #   2026-08-01 にも同じ事故を起こしている。ログイン直後に
+  #   「トークンが無ければ止める」判定が消えたら、デプロイ前に止める。
+  if grep -q 'if(!getSessionToken()){' ../index.html; then
+    ok "ログイン直後にトークン無しを止めている"
+  else
+    ng "ログイン直後のトークン確認が無い（既存の人に「はじめまして」を出す事故になる）"
+  fi
+
   # GAS_URLへのGETが復活していないか（GETだとトークンの置き場所がクエリしか無い）
   g=$(grep -hc "await fetch(url)\|fetch(url)\.then" ../index.html ../coach/index.html | awk '{s+=$1} END{print s}')
   if [ "${g:-0}" -eq 0 ]; then
