@@ -988,6 +988,20 @@ document.addEventListener("visibilitychange", ()=>{
 window.addEventListener("focus", ()=>{ __lastTouchAt = Date.now(); });
 scheduleSyncPoll();
 
+// ★ログインが通らない理由を、一か所で言い換える★（2026-08-20）
+//   同じ理由を2か所で別々に文章にしていたため、あとから書いた側が
+//   本当の理由を「ログインを確認できませんでした」で塗りつぶしていた。
+function loginFailMessage(code){
+  const em = String(code || "");
+  if (em.indexOf("NOT_INVITED") !== -1)
+    return "このGoogleアカウントは登録されていません。別のアカウントで試すか、管理者へご連絡ください";
+  if (em === "" || em === "UNKNOWN" || em.indexOf("CHALLENGE") !== -1)
+    return "ログインの有効期限が切れました。もう一度ボタンを押してください";
+  if (em === "NETWORK") return "通信できませんでした。電波の良いところでもう一度お試しください";
+  if (em === "NO_STATE") return "ログインをやり直してください（画面を開き直すと直ります）";
+  return "ログインできませんでした（" + em + "）。もう一度お試しください";
+}
+
 function getSessionToken() {
   try { return localStorage.getItem(SESSION_KEY) || ""; } catch { return ""; }
 }
@@ -11981,7 +11995,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260820-142003";
+const APP_BUILD = "20260820-160349";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
@@ -12070,14 +12084,9 @@ function LoginScreen({onLogin}) {
     //   何度押しても直らない。同じ文言で促すのは嘘になる。
     const on=(ev)=>{
       setLoading(false);
-      const em = String((ev && ev.detail && ev.detail.error) || "");
-      if (em.indexOf("NOT_INVITED") !== -1) {
-        setError("このGoogleアカウントは登録されていません。別のアカウントで試すか、管理者へご連絡ください");
-      } else if (em === "" || em === "UNKNOWN" || em.indexOf("CHALLENGE") !== -1) {
-        setError("ログインの有効期限が切れました。もう一度ボタンを押してください");
-      } else {
-        setError("ログインできませんでした（" + em + "）。もう一度お試しください");
-      }
+      let em = String((ev && ev.detail && ev.detail.error) || "");
+      if (!em) { try{ em = localStorage.getItem("auth_last_error") || ""; }catch{} }
+      setError(loginFailMessage(em));
     };
     window.addEventListener("jiroku:loginfail",on);
     return ()=>window.removeEventListener("jiroku:loginfail",on);
@@ -12283,10 +12292,14 @@ function LoginScreen({onLogin}) {
       //   端末が何を覚えていようと、トークンが無い時点で先へは進めない。
       if(!getSessionToken()){
         setLoading(false);
-        try{ localStorage.setItem("auth_last_error","NO_TOKEN_AFTER_LOGIN"); }catch{}
+        // ★理由を塗りつぶさない★（2026-08-20 Kai「ログインを確認できませんでした、と出る」）
+        //   直前に本当の理由（AUTH_NOT_INVITED 等）を出していたのに、
+        //   ここで一律の文言に上書きしていた。何が悪いのか分からなくなる。
+        let why = "";
+        try{ why = localStorage.getItem("auth_last_error") || ""; }catch{}
         // 押し直しても同じ結果にならないよう、合言葉を新しくしてから促す
-        try{ window.dispatchEvent(new CustomEvent("jiroku:loginfail")); }catch{}
-        setError("ログインを確認できませんでした。もう一度「Googleでログイン」を押してください");
+        try{ window.dispatchEvent(new CustomEvent("jiroku:loginfail",{detail:{error:why}})); }catch{}
+        setError(loginFailMessage(why));
         return;
       }
       // ★認証で断られたものを「新規の人」と読まない★
