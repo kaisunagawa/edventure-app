@@ -5214,6 +5214,34 @@ var _pendWrites = null;
 function pendFlush_() {
   if (!_pendWrites) return;
   const pw = _pendWrites; _pendWrites = null;   // 流す前に外す（再入を防ぐ）
+  // ★記録の行は、最後に1回でまとめて書く★（2026-08-20 実測 17件で44秒）
+  //   1件ごとに書くと、行番号の問い合わせ・書式・本体・追加項目で
+  //   往復が5回ずつ発生していた。17件なら85回。
+  try {
+    if (pw.dlRows && pw.dlRows.length) {
+      const sh = getSheet("DailyLog");
+      const w = pw.dlWidth || pw.dlRows[0].length;
+      const rows = pw.dlRows.map(function (r) {
+        const c = r.slice(0, w);
+        while (c.length < w) c.push("");
+        return c;
+      });
+      const start = pw.dlNextRow - rows.length;
+      if (pw.dlTbCol !== undefined && pw.dlTbCol !== -1) {
+        sh.getRange(start, pw.dlTbCol + 1, rows.length, 1).setNumberFormat("@");
+      }
+      sh.getRange(start, 1, rows.length, w).setValues(rows);
+    }
+  } catch (e) {
+    Logger.log("pendFlush_ 記録行の書き込みに失敗: " + e);
+    // ★書けなかったら1行ずつ書き直す★ 記録を落とさない
+    try {
+      const sh2 = getSheet("DailyLog");
+      (pw.dlRows || []).forEach(function (r, k) {
+        sh2.getRange((pw.dlNextRow - pw.dlRows.length) + k, 1, 1, r.length).setValues([r]);
+      });
+    } catch (e2) { Logger.log("pendFlush_ 1行ずつも失敗: " + e2); }
+  }
   const rows = Object.keys(pw.users || {});
   if (rows.length && _usersSnap) {
     const sh = getSheet("Users");
@@ -5277,7 +5305,7 @@ function usersWrite_(sheet, rowIdx, colIdx, value) {
 }
 function withDailyLogSnapshot_(fn) {
   const already = _dlSnapOn;
-  if (!already) { _dlSnapOn = true; _dlSnap = null; _usersSnap = null; _xpIdsSnap = null; _pendWrites = { users: {}, userCols: {}, xp: [] }; }
+  if (!already) { _dlSnapOn = true; _dlSnap = null; _usersSnap = null; _xpIdsSnap = null; _pendWrites = { users: {}, userCols: {}, xp: [], dlRows: [] }; }
   try { return fn(); }
   finally { if (!already) { try { pendFlush_(); } catch (e) { Logger.log(e); }
                             _dlSnapOn = false; _dlSnap = null; _usersSnap = null; _xpIdsSnap = null; _pendWrites = null; } }
@@ -5465,7 +5493,12 @@ function saveLog(studentEmail, body, opts) {
   //   話すだけで5件入れると、この往復がそのまま待ち時間になっていた。
   //   行の中身を先に全部組み立てて、1回で書く。
   const logId = "log_" + Date.now() + "_" + Math.floor(Math.random() * 1000);
-  const newRow = sheet.getLastRow() + 1;
+  // ★行番号を数えるだけにする★（2026-08-20 実測 17件で44秒）
+  //   1件ごとに getLastRow() を呼ぶと、そのたびシートへ問い合わせが飛ぶ。
+  //   まとめ保存の間は、最初に1回だけ聞いて、あとは数えて進める。
+  const batching = !!(_dlSnapOn && _pendWrites);
+  if (batching && !_pendWrites.dlNextRow) _pendWrites.dlNextRow = sheet.getLastRow() + 1;
+  const newRow = batching ? _pendWrites.dlNextRow : (sheet.getLastRow() + 1);
   const width = Math.max(headers.length, 9);
   let awardedIdxPre = headers.indexOf("xp_awarded");
   if (awardedIdxPre === -1) {
@@ -5483,8 +5516,11 @@ function saveLog(studentEmail, body, opts) {
   rowN[awardedIdxPre] = (isPast || !newFocusPre) ? "FALSE" : "TRUE";
   // 時間帯は「09:00-10:00」を日付と誤解されないよう文字列書式にする
   const tbCol = headers.indexOf("time_block");
-  if (tbCol !== -1) sheet.getRange(newRow, tbCol + 1).setNumberFormat("@");
-  sheet.getRange(newRow, 1, 1, rowN.length).setValues([rowN]);
+  if (!batching) {
+    // 時間帯は「09:00-10:00」を日付と誤解されないよう文字列書式にする
+    if (tbCol !== -1) sheet.getRange(newRow, tbCol + 1).setNumberFormat("@");
+    sheet.getRange(newRow, 1, 1, rowN.length).setValues([rowN]);
+  }
   // 控えにも同じ行を足す（次の1件が、この行を「もうある」と見られるように）
   dailyLogSnapAppend_(headers, {
     log_id: logId, student_email: studentEmail, date: targetDate,
@@ -5493,8 +5529,15 @@ function saveLog(studentEmail, body, opts) {
     goal_related: body.goal_related || "false",
     xp_awarded: (isPast || !String(body.focus_level || "").trim()) ? "FALSE" : "TRUE"
   });
-  const jdNew = writeP1LogFields(sheet, newRow, studentEmail, targetDate, String(body.time_block), body,
-                                 { headers: headers, rowVals: rowN });
+  const p1Known = { headers: headers, rowVals: rowN, collect: batching };
+  const jdNew = writeP1LogFields(sheet, newRow, studentEmail, targetDate, String(body.time_block), body, p1Known);
+  if (batching) {
+    // 追加項目まで入った完成形を、最後にまとめて書くために積む
+    _pendWrites.dlRows.push(p1Known.rowOut || rowN);
+    _pendWrites.dlNextRow = newRow + 1;
+    _pendWrites.dlTbCol = tbCol;
+    _pendWrites.dlWidth = Math.max(_pendWrites.dlWidth || 0, (p1Known.rowOut || rowN).length);
+  }
   // 新しい記録なので、時間帯などの判定もここで1回だけ行う
   if (!isPast) {
     jdNew.records = (jdNew.records || 0) + 1;
@@ -15880,7 +15923,11 @@ function writeP1LogFields(sheet, rowNum, studentEmail, targetDate, timeBlock, bo
       }
     }
     // まとめて1回で書き戻す
-    if (dirty) sheet.getRange(rowNum, 1, 1, lastCol).setValues([rowVals]);
+    // ★まとめ書きのときは、ここで書かない★（2026-08-20 実測 17件で44秒）
+    //   1件ごとに行を書くと、そのたびシートへの往復が起きる。
+    //   まとめ保存では、組み上がった行を呼び出し側へ返し、最後に1回で書く。
+    if (known && known.collect) { known.rowOut = rowVals; }
+    else if (dirty) sheet.getRange(rowNum, 1, 1, lastCol).setValues([rowVals]);
     // 紐づいたタスクの実績時間を作り直す（同じ行を更新しても二重に増えない：
     // 足し算ではなく、DailyLog を読み直して合計を出し直しているため）
     if (body.link_task_id !== undefined && String(body.link_task_id || "").trim()) {
