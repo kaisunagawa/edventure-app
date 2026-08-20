@@ -11981,7 +11981,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260820-141731";
+const APP_BUILD = "20260820-142003";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
@@ -12063,9 +12063,21 @@ function LoginScreen({onLogin}) {
   const [gsiReady,setGsiReady]=useState(false);
   // ログインに失敗したら、理由を出して合言葉を取り直す
   useEffect(()=>{
-    const on=()=>{
+    // ★理由ごとに、やることを書く★（2026-08-20 Kai報告「サインインができない」）
+    //   監査ログには login FAIL AUTH_NOT_INVITED と出ていたのに、
+    //   画面はどんな理由でも「有効期限が切れました」と言っていた。
+    //   期限切れなら押し直せば直るが、登録されていないアカウントは
+    //   何度押しても直らない。同じ文言で促すのは嘘になる。
+    const on=(ev)=>{
       setLoading(false);
-      setError("ログインの有効期限が切れました。もう一度ボタンを押してください");
+      const em = String((ev && ev.detail && ev.detail.error) || "");
+      if (em.indexOf("NOT_INVITED") !== -1) {
+        setError("このGoogleアカウントは登録されていません。別のアカウントで試すか、管理者へご連絡ください");
+      } else if (em === "" || em === "UNKNOWN" || em.indexOf("CHALLENGE") !== -1) {
+        setError("ログインの有効期限が切れました。もう一度ボタンを押してください");
+      } else {
+        setError("ログインできませんでした（" + em + "）。もう一度お試しください");
+      }
     };
     window.addEventListener("jiroku:loginfail",on);
     return ()=>window.removeEventListener("jiroku:loginfail",on);
@@ -12217,11 +12229,12 @@ function LoginScreen({onLogin}) {
           .then(j=>{
             if(j&&j.ok&&j.token) setSessionToken(j.token);
             else {
-              try{ localStorage.setItem("auth_last_error", String((j&&j.error)||"UNKNOWN")); }catch{}
+              const emsg = String((j&&j.error)||"UNKNOWN");
+              try{ localStorage.setItem("auth_last_error", emsg); }catch{}
               // ★合言葉が切れていた場合は、そのまま伝えて取り直させる★
               //   「ログインできませんでした」だけだと、何をすればいいか分からない。
               //   もう一度押せば直る、と分かれば利用者は詰まらない。
-              try{ window.dispatchEvent(new CustomEvent("jiroku:loginfail")); }catch{}
+              try{ window.dispatchEvent(new CustomEvent("jiroku:loginfail",{detail:{error:emsg}})); }catch{}
             }
           })
           .catch(()=>{ try{ localStorage.setItem("auth_last_error","NETWORK"); }catch{} })
