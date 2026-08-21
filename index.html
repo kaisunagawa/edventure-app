@@ -7982,21 +7982,21 @@ async function drawStoryCard(cv, d){
   //   見出しの行を同じ高さに、数字も同じ高さに置く。
   // 左右を同じ形にそろえる。輪に乗らない高さで止める
   ctx.textAlign = "left"; ctx.fillStyle = SUB; ctx.font = "700 24px " + F;
-  ctx.fillText(d.scoreHead || "その日のスコア", 96, 250);
+  ctx.fillText(d.scoreHead || "その日のスコア", 96, 262);
   // ★スコアの数字を大きく★（2026-08-21 Kai要望）
   //   下の行（記録した時間）と足の高さはそろえたままにする。
   if (d.scoreText) {
-    ctx.fillStyle = AC; ctx.font = "800 176px " + F;   // ★2倍★（2026-08-21 Kai要望）
-    ctx.fillText(d.scoreText, 92, 400);
+    ctx.fillStyle = AC; ctx.font = "800 130px " + F;   // （2026-08-21 Kai要望 88→176→130）
+    ctx.fillText(d.scoreText, 92, 384);
     const w = ctx.measureText(d.scoreText).width;
     ctx.fillStyle = SUB; ctx.font = "700 30px " + F;
-    ctx.fillText(d.scoreSuffix || "/ 100", 112 + w, 400);
+    ctx.fillText(d.scoreSuffix || "/ 100", 112 + w, 384);
   }
   ctx.textAlign = "right";
   ctx.fillStyle = SUB; ctx.font = "700 24px " + F;
   ctx.fillText(d.headLabel || "記録した時間", 984, 296);
-  ctx.fillStyle = INK; ctx.font = "800 31px " + F;   // ★半分★（2026-08-21 Kai要望）
-  ctx.fillText(storyHM(d.totalMin), 984, 344);
+  ctx.fillStyle = INK; ctx.font = "800 45px " + F;   // （2026-08-21 Kai要望 62→31→45）
+  ctx.fillText(storyHM(d.totalMin), 984, 352);
 
   // ── 主役：24時間のドーナツ ──
   //   ★ドーナツを大きく、その下にタイムラインと項目★（2026-08-20 Kaiの判断）
@@ -12281,7 +12281,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260821-142852";
+const APP_BUILD = "20260821-143201";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
