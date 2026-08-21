@@ -8054,7 +8054,7 @@ async function drawStoryCard(cv, d){
   ctx.fillStyle = SUB; ctx.font = "700 24px " + F;
   ctx.fillText(d.headLabel || "記録した時間", 984, 262);   // ★左と同じ高さ★（2026-08-21 Kai要望）
   ctx.fillStyle = INK; ctx.font = "800 45px " + F;   // （2026-08-21 Kai要望 62→31→45）
-  ctx.fillText(storyHM(d.totalMin), 984, 384);
+  ctx.fillText(storyHM(d.totalMin), 984, 312);   // 見出しのすぐ下に置く（2026-08-21 Kai指摘）
 
   // ── 主役：24時間のドーナツ ──
   //   ★ドーナツを大きく、その下にタイムラインと項目★（2026-08-20 Kaiの判断）
@@ -12339,7 +12339,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260821-144828";
+const APP_BUILD = "20260821-145820";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
