@@ -7767,6 +7767,29 @@ function SecondBrainScreen({isActive}){
   </div>`;
 }
 
+// ジローくんの一言（ストーリーズの吹き出し）。
+// ★記録の中身はぜったいに入れない★ 人に見せる画像なので、
+//   何をしていたかが伝わる言葉は置かない。日付で選ぶので1日1つ。
+const STORY_QUOTES = [
+  "時間は、使った分だけ生き方になる。",
+  "積み上げた1日は、裏切らない。",
+  "整える人が、いちばん遠くへ行く。",
+  "見えた時間は、変えられる時間。",
+  "続ける人の1日は、静かに効いてくる。",
+  "完ぺきよりも、今日を1つ。",
+  "休むのも、進むうちに入る。",
+  "小さくても、前は前。",
+  "今日の自分が、明日の土台。",
+  "書いた分だけ、前が見える。",
+  "急がなくていい。止まらなければいい。",
+  "選んだ時間が、その人をつくる。"
+];
+function storyQuoteOf(day) {
+  const k = String(day || "").replace(/[^0-9]/g, "");
+  let n = 0; for (var i = 0; i < k.length; i++) n = (n * 31 + (k.charCodeAt(i) - 48)) % 100000;
+  return STORY_QUOTES[n % STORY_QUOTES.length];
+}
+
 // ── ストーリーズ用の画像（1080×1920）──────────────────
 // ★今日の時間の使い方を、そのまま人に見せられる形にする★（2026-08-19 Kai要望）
 //   画面のスクリーンショットではストーリーズの比率に合わず、余白だらけになる。
@@ -7937,7 +7960,7 @@ async function drawStoryCard(cv, d){
   ctx.textBaseline = "alphabetic";
 
   // ── ロゴと日付（ロゴも主色にそろえる）──
-  const lx = 118, ly = 300;
+  const lx = 118, ly = 176;   // ロゴと日付は上の端へ（2026-08-21 Kai要望・3回目）
   ctx.strokeStyle = "rgba(34,184,212,0.30)"; ctx.lineWidth = 5;
   ctx.beginPath(); ctx.arc(lx, ly, 28, 0, Math.PI*2); ctx.stroke();
   ctx.strokeStyle = AC; ctx.lineWidth = 5; ctx.lineCap = "round";
@@ -7959,19 +7982,21 @@ async function drawStoryCard(cv, d){
   //   見出しの行を同じ高さに、数字も同じ高さに置く。
   // 左右を同じ形にそろえる。輪に乗らない高さで止める
   ctx.textAlign = "left"; ctx.fillStyle = SUB; ctx.font = "700 24px " + F;
-  ctx.fillText(d.scoreHead || "その日のスコア", 96, 392);
+  ctx.fillText(d.scoreHead || "その日のスコア", 96, 296);
+  // ★スコアの数字を大きく★（2026-08-21 Kai要望）
+  //   下の行（記録した時間）と足の高さはそろえたままにする。
   if (d.scoreText) {
-    ctx.fillStyle = AC; ctx.font = "800 62px " + F;
-    ctx.fillText(d.scoreText, 94, 456);
+    ctx.fillStyle = AC; ctx.font = "800 88px " + F;
+    ctx.fillText(d.scoreText, 92, 372);
     const w = ctx.measureText(d.scoreText).width;
-    ctx.fillStyle = SUB; ctx.font = "700 24px " + F;
-    ctx.fillText(d.scoreSuffix || "/ 100", 106 + w, 456);
+    ctx.fillStyle = SUB; ctx.font = "700 26px " + F;
+    ctx.fillText(d.scoreSuffix || "/ 100", 108 + w, 372);
   }
   ctx.textAlign = "right";
   ctx.fillStyle = SUB; ctx.font = "700 24px " + F;
-  ctx.fillText(d.headLabel || "記録した時間", 984, 392);
+  ctx.fillText(d.headLabel || "記録した時間", 984, 296);
   ctx.fillStyle = INK; ctx.font = "800 62px " + F;
-  ctx.fillText(storyHM(d.totalMin), 984, 456);
+  ctx.fillText(storyHM(d.totalMin), 984, 372);
 
   // ── 主役：24時間のドーナツ ──
   //   ★ドーナツを大きく、その下にタイムラインと項目★（2026-08-20 Kaiの判断）
@@ -7983,7 +8008,7 @@ async function drawStoryCard(cv, d){
   //   外径264・帯186 → 内径は171。中の文字はここに収める。
   // ★帯は細めに、穴は詰めたまま★（2026-08-21 Kai指摘）
   //   外径246・帯150 → 内径171。穴の大きさは変えず、帯だけ細くする。
-  const cx = STORY_W / 2, cy = 826, R = 304;
+  const cx = STORY_W / 2, cy = 762, R = 322;
   // ★24時間の円（穴なし）＋外周に時刻★（2026-08-21 Kaiの参考図どおり）
   //   1周＝24時間。記録した時間帯をそのままの位置に置き、
   //   区切りの時刻を円の外に書く。0時が上、時計回り。
@@ -8027,7 +8052,7 @@ async function drawStoryCard(cv, d){
     if (!w2) return;
     const span = ang(sg.end) - ang(sg.start);
     const rText = R * 0.66;
-    if (span * rText < 96) return;          // 2行ぶん入らない扇には書かない
+    if (span * rText < 84) return;          // 2行ぶん入らない扇には書かない
     const mid = (ang(sg.start) + ang(sg.end)) / 2;
     const room = Math.min(span * rText * 0.88, R * 0.7);
     const tx2 = cx + Math.cos(mid) * rText, ty2 = cy + Math.sin(mid) * rText;
@@ -8085,7 +8110,7 @@ async function drawStoryCard(cv, d){
   //     「タイムラインの絵文字とかデザインとか見やすいよね」）
   //     1本の帯より、30分ごとのブロックのほうが「どのくらいの長さか」を
   //     数えられる。朝・昼・夕・夜の絵文字が、時間の見当をつける助けになる。
-  const tlX = 96, tlW = 888, tlY = 1216, tlH = 34;
+  const tlX = 96, tlW = 888, tlY = 1176, tlH = 34;
   // 時間帯の絵文字（0時・6時・12時・18時・24時）
   ctx.textAlign = "center"; ctx.textBaseline = "alphabetic";
   ctx.font = "26px " + F;
@@ -8128,13 +8153,18 @@ async function drawStoryCard(cv, d){
   });
 
   // ── 項目（小さめに、2列で並べる）──
+  // ★時刻の目盛りとのあいだを空ける★（2026-08-21 Kai指摘「ごちゃごちゃ」）
+  //   目盛りの足は tlY+tlH+28 = 1222。そこから 112px 空ける（2026-08-21 「もっと」）。
   const colW = 444, cx0 = 96;
-  let iy = 1336;
+  const many = shown.length >= 6;          // 6つあると3段になる
+  const step = many ? 72 : 80;
+  let iy = many ? 1352 : 1360;
+  const listBottom = iy + (Math.ceil(Math.min(shown.length, 6) / 2) - 1) * step + 21;
   shown.slice(0, 6).forEach(function (r, idx) {
     const col = STORY_CLASS_COLOR[r.k] || "#64748B";
     const pct = Math.round(r.m / d.totalMin * 100);
     const bx3 = cx0 + (idx % 2) * colW;
-    const by3 = iy + Math.floor(idx / 2) * 80;
+    const by3 = iy + Math.floor(idx / 2) * step;
     ctx.save();
     ctx.shadowColor = storyAlpha(col, 0.30); ctx.shadowBlur = 7;
     ctx.beginPath(); ctx.arc(bx3 + 13, by3 - 8, 13, 0, Math.PI*2);
@@ -8166,19 +8196,66 @@ async function drawStoryCard(cv, d){
 
   // ── 隅にジローくん ──（2026-08-20 Kai要望「隅に小さくでもいた方が可愛い」）
   //   主役は輪とタイムライン。ジローは邪魔をしない大きさで、足元に添える。
+  // ── 右下にジローくん、その左に吹き出し ──
+  //   ★2026-08-21 Kai要望「白い吹き出しで名言」「ジローの左のスペースに」★
+  //   名言は日付で決める。記録の中身はぜったいに出さない（人に見せる画像なので）。
+  const jw = 304;
+  const jx = 1080 - 64 - jw;
+  const jy = 1576;   // 下のギリギリまで（2026-08-21 Kai要望）
   if (d.jiroImg) {
     ctx.save();
-    ctx.shadowColor = "rgba(0,0,0,0.6)"; ctx.shadowBlur = 18; ctx.shadowOffsetY = 8;
-    // 右下の空きへ。足元の jiroku.jp と重ならない位置に置く
-    ctx.drawImage(d.jiroImg, 596, 1420, 214, 214);
+    ctx.shadowColor = "rgba(0,0,0,0.6)"; ctx.shadowBlur = 12; ctx.shadowOffsetY = 5;
+    ctx.drawImage(d.jiroImg, jx, jy, jw, jw);
     ctx.restore();
+  }
+  if (d.quote) {
+    // ★白ベタは目立ちすぎ・大きすぎ★（2026-08-21 Kai指摘）
+    //   半透明の白にして、幅もジローくんの左に収まるぶんだけにする。
+    const bw = 554, bx5 = jx - 18 - bw;
+    const by5 = 1676, bh = 94;
+    storyRoundRect(ctx, bx5, by5, bw, bh, 22);
+    ctx.fillStyle = "rgba(255,255,255,0.13)"; ctx.fill();
+    ctx.lineWidth = 1.5; ctx.strokeStyle = "rgba(255,255,255,0.22)"; ctx.stroke();
+    // しっぽ（ジローくんの方を向く）
+    ctx.beginPath();
+    ctx.moveTo(bx5 + bw, by5 + 38);
+    ctx.lineTo(bx5 + bw + 20, by5 + 51);
+    ctx.lineTo(bx5 + bw, by5 + 64);
+    ctx.closePath(); ctx.fillStyle = "rgba(255,255,255,0.13)"; ctx.fill();
+    // 中の文字（長ければ2行に折る）
+    ctx.textAlign = "center"; ctx.fillStyle = "rgba(255,255,255,0.94)";
+    let qf = 25; ctx.font = "700 " + qf + "px " + F;
+    const inner = bw - 44;
+    const q = d.quote;
+    if (ctx.measureText(q).width <= inner) {
+      ctx.fillText(q, bx5 + bw / 2, by5 + 58);
+    } else {
+      // ★2行の長さがそろう場所で折る★（2026-08-21 Kai指摘「改行も違和感なく」）
+      //   句読点のうしろを少しだけ優先しつつ、左右の幅の差がいちばん小さい所で切る。
+      let cut = Math.floor(q.length / 2), best = Infinity;
+      for (var k3 = 2; k3 < q.length - 1; k3++) {
+        if ("、。".indexOf(q[k3]) !== -1) continue;      // 行あたまに句読点を残さない
+        const diff = Math.abs(ctx.measureText(q.slice(0, k3)).width
+                            - ctx.measureText(q.slice(k3)).width)
+                   - ("、。 　".indexOf(q[k3 - 1]) !== -1 ? 260 : 0);
+        if (diff < best) { best = diff; cut = k3; }
+      }
+      const l1 = q.slice(0, cut), l2 = q.slice(cut);
+      qf = 23; ctx.font = "700 " + qf + "px " + F;
+      while (qf > 16 && (ctx.measureText(l1).width > inner || ctx.measureText(l2).width > inner)) {
+        qf -= 1; ctx.font = "700 " + qf + "px " + F;
+      }
+      ctx.fillText(l1, bx5 + bw / 2, by5 + 41);
+      ctx.fillText(l2, bx5 + bw / 2, by5 + 41 + qf + 7);
+    }
   }
 
   // ── 足元 ──
-  ctx.textAlign = "left"; ctx.fillStyle = SUB; ctx.font = "700 28px " + F;
-  ctx.fillText(d.footLeft || "", 96, 1616);
-  ctx.textAlign = "right"; ctx.fillStyle = AC; ctx.font = "800 30px " + F;
-  ctx.fillText("jiroku.jp", 984, 1616);
+  ctx.textAlign = "left"; ctx.fillStyle = AC; ctx.font = "800 32px " + F;
+  ctx.fillText("jiroku.jp", 96, 1602);
+  const wj = ctx.measureText("jiroku.jp").width;
+  ctx.fillStyle = SUB; ctx.font = "700 25px " + F;
+  ctx.fillText(d.footLeft || "", 96 + wj + 22, 1602);
   return cv;
 }
 
@@ -8321,6 +8398,7 @@ function ReportScreen() {
                      ? "その日のスコア" : "この日の記録",
         coverPct: Math.round(rows.filter(r=>r.m>0 && r.k!=="UNSET").reduce((a2,r)=>a2+r.m,0) / total * 100),
         jiroImg, jiroName: jiro ? jiro.name : "",
+        quote: storyQuoteOf(day),
         jiroLine1: storyJiroLine(rows, total),
         jiroLine2: top ? (top.label + "に " + storyHM(top.m)) : "",
         scoreText: (todayRow && todayRow.score !== undefined && todayRow.score !== null)
@@ -12163,7 +12241,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260821-134754";
+const APP_BUILD = "20260821-141827";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
