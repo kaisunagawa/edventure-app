@@ -8292,10 +8292,10 @@ async function drawStoryCard(cv, d){
 
   // ── 足元 ──
   ctx.textAlign = "left"; ctx.fillStyle = AC; ctx.font = "800 32px " + F;
-  ctx.fillText("jiroku.jp", 96, 1602);
+  ctx.fillText("jiroku.jp", 76, 1868);   // ★左下のいちばん端★（2026-08-21 Kai要望）
   const wj = ctx.measureText("jiroku.jp").width;
   ctx.fillStyle = SUB; ctx.font = "700 25px " + F;
-  ctx.fillText(d.footLeft || "", 96 + wj + 22, 1602);
+  ctx.fillText(d.footLeft || "", 76 + wj + 20, 1868);
   return cv;
 }
 
@@ -12281,7 +12281,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260821-143201";
+const APP_BUILD = "20260821-143249";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
