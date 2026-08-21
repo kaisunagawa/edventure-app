@@ -851,6 +851,8 @@ const RETRYABLE_ACTIONS = {
 function handleSessionInvalid(j, action, body) {
   if (!j || j.ok !== false || j.error !== "SESSION_INVALID") return false;
   try { stashPendingOp(action, body || {}); } catch {}
+  // 定期的に見に行くのを、その場で止める（次の1回も行かせない）
+  try { clearTimeout(__syncTimer); } catch {}
   try { localStorage.removeItem(SESSION_KEY); } catch {}
   // 画面へ再ログインを促す。ReauthGate がこのフラグを見る
   try { localStorage.setItem("jiroku_reauth_needed", "1"); } catch {}
@@ -946,6 +948,11 @@ async function pollSyncTag(){
   if (__syncBusy) return;
   if (document.visibilityState !== "visible") return;
   if (!getSessionToken()) return;
+  // ★失効したまま叩き続けない★（2026-08-21 監査ログで発見）
+  //   セッションが失効した端末が syncTag を1分ごとに投げ続けていた。
+  //   通るはずのない呼び出しで、GASの実行時間と監査ログを食う。
+  //   再ログインが必要な印が立っている間は、そもそも行かない。
+  try { if (localStorage.getItem("jiroku_reauth_needed") === "1") return; } catch {}
   __syncBusy = true;
   try {
     const r = await gasApi("syncTag");
@@ -986,6 +993,8 @@ let __syncQuiet = 0;
 function resetSyncPace(){ __syncQuiet = 0; }
 function scheduleSyncPoll(){
   clearTimeout(__syncTimer);
+  // 再ログイン待ちのあいだは、間隔を組み直さない（無駄打ちを止める）
+  try { if (localStorage.getItem("jiroku_reauth_needed") === "1") return; } catch {}
   let wait;
   if (document.visibilityState !== "visible") {
     wait = 60000;                                  // 見ていない間は1分
@@ -1001,6 +1010,11 @@ document.addEventListener("visibilitychange", ()=>{
   if (document.visibilityState === "visible") { __lastTouchAt = Date.now(); resetSyncPace(); pollSyncTag().finally(scheduleSyncPoll); }
 });
 window.addEventListener("focus", ()=>{ __lastTouchAt = Date.now(); });
+// ★止めたら、戻す道も必ず作る★
+//   再ログイン待ちの間は組み直さない作りにしたので、
+//   セッションを取り直した瞬間に、こちらから動かし直す。
+//   これを忘れると「ログインできたのに同期だけ止まったまま」になる。
+window.addEventListener("jiroku:authed", ()=>{ resetSyncPace(); scheduleSyncPoll(); });
 scheduleSyncPoll();
 
 // ★ログインが通らない理由を、一か所で言い換える★（2026-08-20）
@@ -12339,7 +12353,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260821-151047";
+const APP_BUILD = "20260821-152603";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 

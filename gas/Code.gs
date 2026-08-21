@@ -93,6 +93,7 @@ function jsonResponse(data, callback) {
 // GET ハンドラー
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 function doGet(e) {
+  resetPerRequestState_();
   const action = e.parameter.action;
   let studentEmail = e.parameter.studentEmail;
   const callback = e.parameter.callback;
@@ -2017,6 +2018,7 @@ function doGet(e) {
 // POST ハンドラー
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 function doPost(e) {
+  resetPerRequestState_();
   try {
     const body = JSON.parse(e.postData.contents);
 
@@ -9685,16 +9687,25 @@ function nightlyReport() {
       jobs.push({ user: u, date: today, backfill: false });
     }
   });
-  for (let back = 1; back <= 2; back++) {
+  // ★穴埋めは5日前まで見る★（2026-08-21 修正）
+  //   2日前までしか見ていなかったため、2晩続けて夜間処理が止まると
+  //   その分が誰にも拾われずに残った。実際 8/16・8/17 の3件が
+  //   5日たっても欠けたままで、朝の運営レポートに出ていたのに直らなかった。
+  //   ★作り直し（記録が増えたので採点し直し）は今までどおり2日前まで★
+  //   ここまで広げると、古い記録を直しただけで作り直しが走り、AI費用が増えるため。
+  const BACKFILL_DAYS = 5, REGEN_DAYS = 2;
+  for (let back = 1; back <= BACKFILL_DAYS; back++) {
     const d = new Date(today + "T00:00:00+09:00"); d.setDate(d.getDate() - back);
     const bd = formatDate(d);
     users.forEach(u => {
       const dset = logDatesByEmail.get(u.student_email);
-      if (dset && dset.has(bd) && needsReport(u.student_email, bd)) {
-        // 既にレポートがある＝「欠落の穴埋め」ではなく「記録が増えたので採点し直し」。
-        // 作り直しではLINE通知を送らない（同じ日のレポートが二度届くのを防ぐ）
-        jobs.push({ user: u, date: bd, backfill: true, regenerate: haveReport.has(u.student_email + "|" + bd) });
-      }
+      if (!dset || !dset.has(bd) || !needsReport(u.student_email, bd)) return;
+      const already = haveReport.has(u.student_email + "|" + bd);
+      // 3日以上前で「既にある」＝作り直しなので、対象にしない
+      if (already && back > REGEN_DAYS) return;
+      // 既にレポートがある＝「欠落の穴埋め」ではなく「記録が増えたので採点し直し」。
+      // 作り直しではLINE通知を送らない（同じ日のレポートが二度届くのを防ぐ）
+      jobs.push({ user: u, date: bd, backfill: true, regenerate: already });
     });
   }
 
@@ -17523,6 +17534,39 @@ function computeOpsSignature(canonical) {
 // 1回のリクエストの中で「もう検証済みの署名」を覚えておく入れ物。
 // GASは実行ごとにスクリプトを読み直すので、リクエストをまたいで残らない。
 var _opsSigVerifiedThisRequest = "";
+// ★リクエストごとに必ず消す★（2026-08-21 テストで発覚）
+//   GASは同じインスタンスを使い回すため、これを消さないと
+//   前のリクエストで通した署名が、次のリクエストでもそのまま通る。
+//   nonceを使い捨てにしている意味が消え、署名の使い回し（リプレイ）が
+//   成立していた。入口（doGet/doPost）の先頭で必ず呼ぶこと。
+function resetPerRequestState_() {
+  _opsSigVerifiedThisRequest = "";
+}
+// 使用済みnonceの置き場。運用コマンドは1日に数回なので、
+// プロパティ1つにまとめて持つ。期限切れはそのつど捨てる。
+const OPS_NONCE_PROP = "OPS_USED_NONCES";
+function opsNonceLoad_() {
+  try { return JSON.parse(PropertiesService.getScriptProperties().getProperty(OPS_NONCE_PROP) || "{}") || {}; }
+  catch (e) { return {}; }
+}
+function opsNonceUsed_(nk) {
+  const m = opsNonceLoad_();
+  const cutoff = Math.floor(Date.now() / 1000) - OPS_SIG_WINDOW_SEC * 2;
+  return !!(m[nk] && Number(m[nk]) > cutoff);
+}
+function opsNonceMarkUsed_(nk, nowSec) {
+  const lock = LockService.getScriptLock();
+  try { lock.waitLock(5000); } catch (e) { /* 取れなくても記録は試みる */ }
+  try {
+    const m = opsNonceLoad_();
+    const cutoff = nowSec - OPS_SIG_WINDOW_SEC * 2;
+    Object.keys(m).forEach(function (k) { if (Number(m[k]) <= cutoff) delete m[k]; });
+    m[nk] = nowSec;
+    PropertiesService.getScriptProperties().setProperty(OPS_NONCE_PROP, JSON.stringify(m));
+  } catch (e) { Logger.log("nonce保存に失敗: " + e); }
+  finally { try { lock.releaseLock(); } catch (e) {} }
+}
+
 function verifyOpsSignature(params) {
   const sig = String(params.sig || "");
   const ts = Number(params.ts || 0);
@@ -17541,16 +17585,20 @@ function verifyOpsSignature(params) {
   //   同一リクエスト内かどうかは、同じ署名文字列かどうかで判定する。
   if (_opsSigVerifiedThisRequest === sig) return { ok: true, cached: true };
 
-  const cache = CacheService.getScriptCache();
-  const nk = "opsn_" + sha256Hex(nonce).slice(0, 24);
-  if (cache.get(nk)) return { ok: false, reason: "NONCE_REUSED" };
+  // ★使用済みnonceは、消えない場所に置く★（2026-08-21 修正）
+  //   CacheService に置いていたが、2回目の呼び出しで読めておらず、
+  //   同じ署名の使い回し（リプレイ）が実際に通っていた（テストで再現）。
+  //   キャッシュは「消えてもよいもの」を置く場所で、
+  //   一度きりの証明を預ける場所ではない。プロパティへ移す。
+  const nk = sha256Hex(nonce).slice(0, 24);
+  if (opsNonceUsed_(nk)) return { ok: false, reason: "NONCE_REUSED" };
 
   const expected = computeOpsSignature(canonicalizeParams(params));
   if (!expected) return { ok: false, reason: "SECRET_NOT_SET" };
   if (!safeEquals(sig, expected)) return { ok: false, reason: "SIG_MISMATCH" };
 
   // 検証を通ったnonceだけを使用済みにする（総当たりで枠を潰されないように）
-  cache.put(nk, "1", OPS_SIG_WINDOW_SEC * 2);
+  opsNonceMarkUsed_(nk, now);
   _opsSigVerifiedThisRequest = sig;   // 同一リクエスト内の2回目のために覚えておく
   return { ok: true };
 }
