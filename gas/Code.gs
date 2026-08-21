@@ -4894,7 +4894,12 @@ ${text}
     // まとめて数えたジローの結果（会えた子・あと1回の子）もその場で返す
     jiro_gained: jiroGainedAll, jiro_soon: jiroSoonAll,
     ms: quickLogNoteTiming_({ 下ごしらえ: (typeof _tPrep !== "undefined" ? _tPrep - _t0 : null),
-          AI解析: (typeof _tAi0 !== "undefined" ? _tSave0 - _tAi0 : null),
+          // ★AI解析はずっと null だった★（2026-08-21 修正）
+          //   _tAi0 は別の関数の変数で、ここからは見えない。
+          //   その結果「合計 − 下ごしらえ − 保存」の数秒が、
+          //   どこで消えているのか分からないままだった。
+          //   下ごしらえが終わってから保存を始めるまでが、AIを待っている時間。
+          AI解析: _tSave0 - _tPrep,
           保存: Date.now() - _tSave0,
           合計: Date.now() - _t0, 件数: saved.length })
   };

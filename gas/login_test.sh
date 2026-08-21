@@ -17,9 +17,20 @@ ng(){ printf "  \033[31m✗\033[0m %s\n" "$1"; fail=$((fail+1)); }
 #   実際にこの検査の初回で、8件すべてが嘘の失敗になった。
 und(){ printf "  \033[33m?\033[0m %s（判定できず）\n" "$1"; skip=$((skip+1)); }
 isjson(){ case "$1" in *'"ok"'*) return 0;; *) return 1;; esac }
-post(){ local body="$1" r=""
+# ★POSTの答えは「転送先」にある★（2026-08-21 原因判明）
+#   GASのPOSTは 302 を返し、本当の答えは Location の echo URL にある。
+#   curl -L に任せると、こちらが付けた Content-Type ごと転送先へ運んでしまい、
+#   GoogleがHTMLのページを返す。これをずっと「判定できず」と数えていた。
+#   ★POSTは転送を追わせず、Location を自分で素のGETで取りにいく★
+post(){ local body="$1" loc="" r=""
   for i in 1 2 3 4 5; do
-    r=$(curl -sL -m 90 -X POST -H "Content-Type: text/plain" -d "$body" "$U")
+    loc=$(curl -s -m 90 -o /dev/null -D - -X POST -H "Content-Type: text/plain" \
+            -d "$body" "$U" | sed -n 's/^[Ll]ocation: //p' | tr -d '\r')
+    if [ -n "$loc" ]; then
+      r=$(curl -s -m 90 "$loc")           # ← 余計なヘッダを付けないのが肝心
+    else
+      r=$(curl -s -m 90 -X POST -H "Content-Type: text/plain" -d "$body" "$U")
+    fi
     case "$r" in *'"ok"'*) echo "$r"; return 0;; esac
     sleep 20
   done
