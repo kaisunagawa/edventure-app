@@ -8095,7 +8095,7 @@ async function drawStoryCard(cv, d){
   for (var hm = 0; hm < 24; hm += 3) {
     const t2 = ang(hm * 60);
     ctx.fillStyle = SUB; ctx.font = "700 26px " + F;
-    ctx.fillText(String(hm), cx + Math.cos(t2)*(R + 40), cy + Math.sin(t2)*(R + 40));
+    ctx.fillText(String(hm), cx + Math.cos(t2)*(R + 36), cy + Math.sin(t2)*(R + 36));
   }
   ctx.textBaseline = "alphabetic";
 
@@ -8111,12 +8111,45 @@ async function drawStoryCard(cv, d){
   //     1本の帯より、30分ごとのブロックのほうが「どのくらいの長さか」を
   //     数えられる。朝・昼・夕・夜の絵文字が、時間の見当をつける助けになる。
   const tlX = 96, tlW = 888, tlY = 1176, tlH = 34;
-  // 時間帯の絵文字（0時・6時・12時・18時・24時）
-  ctx.textAlign = "center"; ctx.textBaseline = "alphabetic";
-  ctx.font = "26px " + F;
-  [[0,"🌙"],[6,"🌅"],[12,"☀️"],[18,"🌇"],[24,"🌙"]].forEach(function(p2){
-    const x = tlX + tlW * (p2[0] / 24);
-    ctx.fillText(p2[1], Math.min(tlX + tlW - 16, Math.max(tlX + 16, x)), tlY - 16);
+  // ★時間帯の印は絵文字をやめて、同じ線で描いた形にそろえる★
+  //   （2026-08-21 Kai指摘「朝〜夜のロゴは統一感がない」）
+  //   🌙と🌅と☀️は絵の作りがばらばらで、並べると浮いていた。
+  //   同じ色・同じ太さの線で、月／半分の太陽／太陽／半分の太陽／月を描く。
+  [[0,"moon"],[6,"half"],[12,"sun"],[18,"half"],[24,"moon"]].forEach(function(p2){
+    const x = Math.min(tlX + tlW - 16, Math.max(tlX + 16, tlX + tlW * (p2[0] / 24)));
+    const y = tlY - 22, r2 = 14;
+    ctx.save();
+    ctx.strokeStyle = SUB; ctx.fillStyle = SUB; ctx.lineWidth = 2.4; ctx.lineCap = "round";
+    if (p2[1] === "moon") {
+      // 三日月（外の弧と内の弧で、欠けた形をそのまま描く）
+      //   ★消しゴム（destination-out）は使わない★ 下地まで消えて黒く抜ける。
+      ctx.beginPath();
+      ctx.arc(x, y, r2, Math.PI*0.30, Math.PI*1.70, false);
+      ctx.arc(x + r2*0.72, y, r2*0.98, Math.PI*1.40, Math.PI*0.60, true);
+      ctx.closePath(); ctx.fill();
+    } else if (p2[1] === "sun") {
+      ctx.beginPath(); ctx.arc(x, y, r2*0.58, 0, Math.PI*2); ctx.fill();
+      for (var t4 = 0; t4 < 8; t4++) {
+        const a4 = t4 * Math.PI / 4;
+        ctx.beginPath();
+        ctx.moveTo(x + Math.cos(a4)*(r2*0.86), y + Math.sin(a4)*(r2*0.86));
+        ctx.lineTo(x + Math.cos(a4)*(r2*1.28), y + Math.sin(a4)*(r2*1.28));
+        ctx.stroke();
+      }
+    } else {
+      // 地平線の上に半分の太陽（朝と夕方）。太陽と同じ作りにそろえる。
+      const hy = y + r2*0.52;
+      ctx.beginPath(); ctx.arc(x, hy, r2*0.66, Math.PI, 0); ctx.fill();
+      for (var t5 = 1; t5 <= 3; t5++) {
+        const a5 = Math.PI + t5 * Math.PI / 4;
+        ctx.beginPath();
+        ctx.moveTo(x + Math.cos(a5)*(r2*0.94), hy + Math.sin(a5)*(r2*0.94));
+        ctx.lineTo(x + Math.cos(a5)*(r2*1.30), hy + Math.sin(a5)*(r2*1.30));
+        ctx.stroke();
+      }
+      ctx.beginPath(); ctx.moveTo(x - r2*1.30, hy); ctx.lineTo(x + r2*1.30, hy); ctx.stroke();
+    }
+    ctx.restore();
   });
   // 30分ごとのブロック（48個）。記録が無いところは下地の色のまま
   const SLOT = 48, gap = 4;
@@ -8155,7 +8188,8 @@ async function drawStoryCard(cv, d){
   // ── 項目（小さめに、2列で並べる）──
   // ★時刻の目盛りとのあいだを空ける★（2026-08-21 Kai指摘「ごちゃごちゃ」）
   //   目盛りの足は tlY+tlH+28 = 1222。そこから 112px 空ける（2026-08-21 「もっと」）。
-  const colW = 444, cx0 = 96;
+  // ★左右のあいだを空ける★（2026-08-21 Kai要望）
+  const gut = 56, colW = (888 - gut) / 2, cx0 = 96;
   const many = shown.length >= 6;          // 6つあると3段になる
   const step = many ? 72 : 80;
   let iy = many ? 1352 : 1360;
@@ -8163,25 +8197,25 @@ async function drawStoryCard(cv, d){
   shown.slice(0, 6).forEach(function (r, idx) {
     const col = STORY_CLASS_COLOR[r.k] || "#64748B";
     const pct = Math.round(r.m / d.totalMin * 100);
-    const bx3 = cx0 + (idx % 2) * colW;
+    const bx3 = cx0 + (idx % 2) * (colW + gut);
     const by3 = iy + Math.floor(idx / 2) * step;
     ctx.save();
     ctx.shadowColor = storyAlpha(col, 0.30); ctx.shadowBlur = 7;
-    ctx.beginPath(); ctx.arc(bx3 + 13, by3 - 8, 13, 0, Math.PI*2);
+    ctx.beginPath(); ctx.arc(bx3 + 10, by3 - 8, 10, 0, Math.PI*2);
     ctx.fillStyle = col; ctx.fill();
     ctx.restore();
     // 玉の上に小さな光
-    const gDot = ctx.createRadialGradient(bx3 + 9, by3 - 13, 1, bx3 + 13, by3 - 8, 13);
+    const gDot = ctx.createRadialGradient(bx3 + 7, by3 - 12, 1, bx3 + 10, by3 - 8, 10);
     gDot.addColorStop(0, "rgba(255,255,255,0.28)"); gDot.addColorStop(1, "rgba(255,255,255,0)");
-    ctx.beginPath(); ctx.arc(bx3 + 13, by3 - 8, 13, 0, Math.PI*2);
+    ctx.beginPath(); ctx.arc(bx3 + 10, by3 - 8, 10, 0, Math.PI*2);
     ctx.fillStyle = gDot; ctx.fill();
     ctx.textAlign = "left"; ctx.fillStyle = INK; ctx.font = "700 27px " + F;
-    ctx.fillText(storyFit(ctx, r.label, 190), bx3 + 36, by3);
+    ctx.fillText(storyFit(ctx, r.label, 186), bx3 + 30, by3);
     ctx.textAlign = "right"; ctx.fillStyle = col; ctx.font = "800 27px " + F;
     ctx.fillText(storyHM(r.m), bx3 + colW - 66, by3);
     ctx.fillStyle = SUB; ctx.font = "700 22px " + F;
     ctx.fillText(pct + "%", bx3 + colW - 14, by3);
-    const tx = bx3 + 36, tw = colW - 50, th = 7;
+    const tx = bx3 + 30, tw = colW - 44, th = 7;
     storyRoundRect(ctx, tx, by3 + 14, tw, th, 4); ctx.fillStyle = STORY_TRACK; ctx.fill();
     ctx.save();
     ctx.shadowColor = storyAlpha(col, 0.26); ctx.shadowBlur = 5;
@@ -8201,12 +8235,18 @@ async function drawStoryCard(cv, d){
   //   名言は日付で決める。記録の中身はぜったいに出さない（人に見せる画像なので）。
   const jw = 304;
   const jx = 1080 - 64 - jw;
-  const jy = 1576;   // 下のギリギリまで（2026-08-21 Kai要望）
+  const jy = 1552;   // 下のギリギリまで（名前を書くぶん少し上げる）
   if (d.jiroImg) {
     ctx.save();
     ctx.shadowColor = "rgba(0,0,0,0.6)"; ctx.shadowBlur = 12; ctx.shadowOffsetY = 5;
     ctx.drawImage(d.jiroImg, jx, jy, jw, jw);
     ctx.restore();
+    // ★キャラの下に名前を薄く★（2026-08-21 Kai要望「ホーム画面みたいに」）
+    if (d.jiroName) {
+      ctx.textAlign = "center"; ctx.fillStyle = "rgba(255,255,255,0.42)";
+      ctx.font = "800 24px " + F;
+      ctx.fillText(storyFit(ctx, d.jiroName, jw + 40), jx + jw / 2, jy + jw + 14);
+    }
   }
   if (d.quote) {
     // ★白ベタは目立ちすぎ・大きすぎ★（2026-08-21 Kai指摘）
@@ -12241,7 +12281,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260821-141827";
+const APP_BUILD = "20260821-142350";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
