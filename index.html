@@ -12353,7 +12353,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260821-152603";
+const APP_BUILD = "20260825-163440";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
@@ -12467,8 +12467,24 @@ function LoginScreen({onLogin}) {
     //   新しい合言葉を上書きし、ボタンが切れた合言葉を握ることがある。
     //   実際、監査ログに CHALLENGE_NOT_FOUND と SUCCESS が交互に出ていた。
     //   番号を振って、最後に始まったものだけを採用する。
-    let mountSeq = 0;
-    const mount=async()=>{
+    // ★取り直しの連鎖を1本だけにする★（2026-08-25 監査ログで確認）
+    //   mount は「開いた時・3分ごと・画面に戻った時・失敗した時」の4か所から呼ばれ、
+    //   最後に timer を上書きするだけで、前の setTimeout を止めていなかった。
+    //   呼ばれるたびに3分ごとの連鎖が1本増え、実際に AuthChallenges へ
+    //   5秒間に3件（07:26:34 / 36 / 39）が発行されていた。
+    //   さらに google.accounts.id.initialize を短い間に何度も呼ぶことになり、
+    //   ボタンがどの合言葉を握っているかが不確かになる。
+    //   ・入る前に前の連鎖を必ず止める
+    //   ・合言葉は5分もつので、90秒以内の取り直しは意味が無い。飛ばす
+    let mountSeq = 0, lastMountAt = 0;
+    const mount=async(force)=>{
+      try { clearTimeout(timer); } catch {}
+      const nowMs = Date.now();
+      if (!force && lastMountAt && nowMs - lastMountAt < 90000) {
+        timer = setTimeout(()=>mount(true), 90000 - (nowMs - lastMountAt));
+        return;
+      }
+      lastMountAt = nowMs;
       const my = ++mountSeq;
       const el=document.getElementById("gsi-btn-app");
       if(!el) return;
@@ -12499,7 +12515,7 @@ function LoginScreen({onLogin}) {
         if(alive){
           setGsiReady(true);
           // challengeは5分で切れる。開いたまま放置されても使えるよう張り直す
-          timer=setTimeout(mount, 3*60*1000);
+          timer=setTimeout(()=>mount(true), 3*60*1000);
         }
       }catch{ if(alive) setGsiReady(false); }
     };
@@ -12520,7 +12536,8 @@ function LoginScreen({onLogin}) {
     //   合言葉が切れて失敗したとき、ボタンは切れた合言葉を握ったままだった。
     //   もう一度押しても同じものを送るので、何度押しても同じ結果になる。
     //   失敗した事実をきっかけに、必ず新しい合言葉で張り直す。
-    const onFail=()=>{ if(alive) mount(); };
+    // 失敗した直後は「切れた合言葉を握ったまま」なので、間引かずに必ず取り直す
+    const onFail=()=>{ if(alive) mount(true); };
     window.addEventListener("jiroku:loginfail", onFail);
 
     return ()=>{

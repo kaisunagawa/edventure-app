@@ -1758,7 +1758,21 @@ function doGet(e) {
         // これがゼロになったら旧方式を廃止する、という判断に使う
         var _legacy = _rows.filter(function (r) { return String(r.failure_reason || "").indexOf("LEGACY") !== -1; });
         var _signed = _rows.filter(function (r) { return String(r.failure_reason || "") === "via_signature"; });
-        result = { ok: true, total: _rows.length, recent: _rows.slice(-12),
+        // ★見たいものが埋もれる★（2026-08-25 ログイン不具合の調査中に判明）
+        //   末尾12件しか返せず、失効した端末の syncTag の連打で
+        //   肝心のログイン失敗が押し出されて見えなかった。
+        //   action / result / 理由 で絞れるようにし、件数も指定できるようにする。
+        var _q = String(e.parameter.filter || "").toLowerCase();
+        var _n = Math.min(Math.max(Number(e.parameter.n || 12), 1), 200);
+        var _view = _rows;
+        if (_q) {
+          _view = _rows.filter(function (r) {
+            return (String(r.action || "") + " " + String(r.result || "") + " " +
+                    String(r.failure_reason || "") + " " + String(r.event_type || ""))
+                   .toLowerCase().indexOf(_q) !== -1; });
+        }
+        result = { ok: true, total: _rows.length, matched: _view.length,
+                   recent: _view.slice(-_n),
                    legacyCount: _legacy.length,
                    legacyLast: _legacy.length ? String(_legacy[_legacy.length - 1].timestamp) : "",
                    signedCount: _signed.length };
@@ -5263,10 +5277,26 @@ function pendFlush_() {
       //   1回のまとめで数マス書くぶんには元の狙いを損なわない。
       const cols = Object.keys(pw.userCols && pw.userCols[k] ? pw.userCols[k] : {});
       if (cols.length && cols.length <= 8) {
+        // ★1マスずつ書かない★（2026-08-25 実測。話して1件の保存に4.6秒、3件で17.9秒）
+        //   「触った列だけを書く」のは正しいが、setValue を列の数だけ呼ぶと
+        //   往復もその数だけ起きる。XPと連続日数を更新すると1人あたり5〜6マスで、
+        //   それだけで3秒前後を使っていた。
+        //   触った列を「隣り合う塊」にまとめ、塊ごとに1回で書く。
+        //   隣り合っていない列は別の塊になるので、間の列は今までどおり触らない
+        //   （行ごと上書きして他の処理の書き込みを消す、という事故は起きない）。
+        const nums = cols.map(Number).sort(function (a, b) { return a - b; });
+        const runs = [];
+        nums.forEach(function (c) {
+          const last = runs[runs.length - 1];
+          if (last && c === last[last.length - 1] + 1) last.push(c);
+          else runs.push([c]);
+        });
         var wrote = true;
-        cols.forEach(function (c) {
-          try { sh.getRange(i + 1, Number(c) + 1).setValue(r[Number(c)]); }
-          catch (e) { wrote = false; Logger.log("pendFlush_ 列書き失敗: " + e); }
+        runs.forEach(function (run) {
+          try {
+            const vals = run.map(function (c) { return r[c]; });
+            sh.getRange(i + 1, run[0] + 1, 1, run.length).setValues([vals]);
+          } catch (e) { wrote = false; Logger.log("pendFlush_ 列書き失敗: " + e); }
         });
         if (wrote) return;
       }
