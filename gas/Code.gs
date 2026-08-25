@@ -777,10 +777,13 @@ function doGet(e) {
         if (!verifyAdmin(e.parameter.coachEmail)) return jsonResponse({ ok: false, error: "not admin" });
         const emS = String(e.parameter.email || "").trim() || adminEmail();
         const outS = {};
+        const readS = {};
         const runS = function (name, fn) {
           const t = Date.now();
+          sheetReadStatsReset_();
           try { fn(); } catch (e2) { outS[name + "(失敗)"] = String(e2).slice(0, 50); }
           outS[name] = Date.now() - t;
+          readS[name] = sheetReadStatsGet_();
         };
         runS("getReportHome",  function () { getReportHome(emS); });
         runS("getReportList",  function () { getReportList(emS); });
@@ -790,7 +793,7 @@ function doGet(e) {
         runS("getTasks",       function () { getTasks(emS, { includeDone: "1" }); });
         runS("getAchievements",function () { getAchievements(emS); });
         runS("getCalendar",    function () { getCalendar(emS, {}); });
-        return jsonResponse({ ok: true, ms: outS });
+        return jsonResponse({ ok: true, ms: outS, reads: readS });
       }
       // みんなの頑張りが何秒かかっているかを測る（読むだけ・書き込みなし）
       //   bash gas/ops.sh adminCommunityTiming
@@ -2031,6 +2034,15 @@ function doGet(e) {
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // POST ハンドラー
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// 読むだけと分かっている操作。ここに並べたものだけ、リクエスト全体で
+// シートの読み取りを使い回す。書き込みを伴うものは絶対に入れないこと
+// （書いた直後の読み直しが、書く前の内容を見てしまう）。
+const READONLY_ACTIONS = {
+  getUser: 1, getLogs: 1, getTasks: 1, getAchievements: 1, getCalendar: 1,
+  getReportList: 1, getReportHome: 1, getGoalTree: 1, getSprints: 1,
+  getHomeData: 1, getRoadmap: 1, getCondition: 1, getSettings: 1,
+  getWeeklyGoals: 1, getGoalEntries: 1, getDiary: 1, getRanking: 1
+};
 function doPost(e) {
   resetPerRequestState_();
   try {
@@ -2091,6 +2103,14 @@ function doPost(e) {
     // アプリからのPOST
     const action = body.action;
     let studentEmail = body.studentEmail;
+    // ★読むだけの操作は、リクエストの最初から同じシートを使い回す★（2026-08-25 実測）
+    //   本人確認（verifySession）は Users を丸ごと読む。そのすぐあとで
+    //   getTasks や getGoalTree などが同じ Users をもう一度読んでいた。
+    //   シート1枚の読み取りが実測400〜500msなので、そのまま毎回の待ち時間になる。
+    //   （読み取り回数は bash gas/ops.sh adminScreenTiming の reads で確認できる）
+    //   ★書き込む操作には広げない★ 書いたあとに読み直す処理が、
+    //   書く前の内容を見てしまう。読むだけと分かっているものだけを並べる。
+    if (READONLY_ACTIONS[String(action || "")]) { _sheetReadCacheOn = true; _sheetReadCache = {}; }
     // ★doGetと同じ。無効なトークンを従来経路へ落とさない★
     var _stp = strictTokenCheck(action, body.token);
     if (!_stp.ok) return jsonResponse(_stp);
@@ -14346,21 +14366,47 @@ function sheetValuesCached_(sheet) {
   var key = null;
   if (_sheetReadCacheOn && sheet) {
     try { key = "vals::" + sheet.getName(); } catch (e) { key = null; }
-    if (key && _sheetReadCache[key]) return _sheetReadCache[key];
+    if (key && _sheetReadCache[key]) { _sheetReadStats.hit++; return _sheetReadCache[key]; }
   }
+  // ★何回シートを読んだかを数える★（2026-08-25）
+  //   速さの話をいつも「時間」で見ていたが、GASの実行時間はその時の
+  //   混み具合で前後するため、直したのか偶然かの区別がつかなかった。
+  //   シートの読み取り回数は混み具合に左右されないので、
+  //   直った／直っていないをそのまま確かめられる。
+  _sheetReadStats.raw++;
+  var _nm = key; if (!_nm) { try { _nm = sheet.getName(); } catch (e) { _nm = "?"; } }
+  _sheetReadStats.by[_nm] = (_sheetReadStats.by[_nm] || 0) + 1;
   const data = sheet.getDataRange().getValues();
   if (key) _sheetReadCache[key] = data;
   return data;
 }
+// 読み取り回数の数え取り。計測コマンドから挟んで使う
+var _sheetReadStats = { raw: 0, hit: 0, by: {} };
+function sheetReadStatsReset_() { _sheetReadStats = { raw: 0, hit: 0, by: {} }; }
+function sheetReadStatsGet_() {
+  const by = _sheetReadStats.by;
+  const top = Object.keys(by).sort(function (x, y) { return by[y] - by[x]; }).slice(0, 8);
+  const o = {};
+  top.forEach(function (k) { o[String(k).replace("vals::", "")] = by[k]; });
+  return { 読んだ回数: _sheetReadStats.raw, 使い回した回数: _sheetReadStats.hit, 内訳: o };
+}
 
+// ★「値」と「オブジェクト」で同じシートを2回読まない★（2026-08-25 実測）
+//   sheetValuesCached_ は "vals::名前"、こちらは "名前" と、別のキーで
+//   覚えていた。そのうえ、ここは自分で getDataRange().getValues() を
+//   呼び直していたので、同じシートを両方の形で使う画面では
+//   シートの読み取りが丸ごと2回起きていた。
+//   （p1List はこちら、p1ListMine_ は値のほう、を使っている）
+//   生の読み取りは sheetValuesCached_ に一本化し、
+//   オブジェクトに直したものだけをここで覚える。
 function sheetToObjects(sheet) {
   var key = null;
   if (_sheetReadCacheOn && sheet) {
     try { key = sheet.getName(); } catch (e) { key = null; }
-    if (key && _sheetReadCache[key]) return _sheetReadCache[key];
+    if (key && _sheetReadCache[key]) { _sheetReadStats.hit++; return _sheetReadCache[key]; }
   }
-  const data = sheet.getDataRange().getValues();
-  if (data.length < 2) { if (key) _sheetReadCache[key] = []; return []; }
+  const data = sheetValuesCached_(sheet);
+  if (!data || data.length < 2) { if (key) _sheetReadCache[key] = []; return []; }
   const headers = data[0];
   const out = data.slice(1).map(row => rowToObject(row, headers));
   if (key) _sheetReadCache[key] = out;
@@ -17469,7 +17515,20 @@ function strictTokenCheck(action, token) {
   if (PUBLIC_ACTIONS[String(action || "")]) return { ok: true };
   if (!enforceFlag("STRICTTOKEN")) return { ok: true };  // スイッチOFFの間は従来どおり
 
-  const v = verifySession(token, false);   // 失効を即座に反映するためキャッシュを使わない
+  // ★取り消しを即座に効かせる操作だけ、キャッシュを使わない★（2026-08-25 実測）
+  //   ここは何を呼んでも必ず false（キャッシュ不使用）だった。
+  //   キャッシュを使わない検証は Sessions と Users を丸ごと読み直すので、
+  //   シート2枚ぶんの読み取りが「毎リクエスト」に乗っていた。
+  //   しかもこの直後の authorizeAction が同じ検証をもう一度している
+  //   （そちらは最初から policy.noCache を見て正しく振り分けていた）。
+  //   判断の基準を authorizeAction とそろえる。
+  //   一斉送信・削除・個人情報の一覧といった被害の大きい操作は
+  //   ACTION_POLICIES で noCache: true が付いており、今までどおり即座に効く。
+  //   それ以外は最大5分（セッションキャッシュの寿命）で取り消しが行き渡る。
+  //   すぐに全端末を止めたいときは token_version を上げれば、
+  //   キャッシュの内容に関係なくその場で無効になる。
+  const _pol = ACTION_POLICIES[String(action || "")];
+  const v = verifySession(token, _pol && _pol.noCache ? false : true);
   if (v.ok) return { ok: true, actor: v.actor };
 
   // ★同じ端末の同じ失敗を、何度も書き足さない★（2026-08-25 実測）
