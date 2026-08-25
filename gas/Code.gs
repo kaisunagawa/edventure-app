@@ -15626,7 +15626,13 @@ function jiroBumpUser_(studentEmail, deltas, absolutes) {
 // 画面側の DAY_CUTOFF_HOUR と必ず同じ値にすること。
 const DAY_CUTOFF_HOUR_GAS = 0;
 
-function classifyLogTime_(studentEmail, targetDate, body, current) {
+// helpers … 呼び出し側がすでに引き当て済みの場合に渡す（同じシートを2度読まないため）。
+//            渡されなければ従来どおり自分で引き当てる。
+function classifyLogTime_(studentEmail, targetDate, body, current, helpers) {
+  const _rw = (helpers && helpers.resolveWeekly)
+    || function (id) { return resolvePrimaryWeeklyGoal(studentEmail, id); };
+  const _tr = (helpers && helpers.taskRow)
+    || function (id) { return p1OwnedRow("Tasks", "task_id", id, studentEmail); };
   // 1. 本人の選択（保存時でも、あとからの修正でも最優先）
   const want = String(body.time_classification || "").toUpperCase();
   if (want && TIME_CLASSES[want]) {
@@ -15641,16 +15647,16 @@ function classifyLogTime_(studentEmail, targetDate, body, current) {
   }
 
   // 3. 強いリンクだけを根拠にする
-  if (resolvePrimaryWeeklyGoal(studentEmail, body.primary_weekly_goal_id)) {
+  if (_rw(body.primary_weekly_goal_id)) {
     return { classification: "GOAL_DIRECT", method: "RULE", reason_code: "LINKED_WEEKLY_GOAL" };
   }
   const tid = String(body.link_task_id || "").trim();
   if (tid) {
-    const t = p1OwnedRow("Tasks", "task_id", tid, studentEmail);
+    const t = _tr(tid);
     if (t) {
       if (String(t.link_daily_focus_id || "").trim())
         return { classification: "GOAL_DIRECT", method: "RULE", reason_code: "LINKED_DAILY_FOCUS" };
-      if (resolvePrimaryWeeklyGoal(studentEmail, t.link_weekly_goal_id))
+      if (_rw(t.link_weekly_goal_id))
         return { classification: "GOAL_DIRECT", method: "RULE", reason_code: "LINKED_TASK_TO_WEEKLY_GOAL" };
     }
   }
@@ -15934,15 +15940,34 @@ function writeP1LogFields(sheet, rowNum, studentEmail, targetDate, timeBlock, bo
     //   送られてこない場合だけ、日付＋時間帯から作った従来のIDを使う。
     const execId = p1Text_(body.action_execution_id, 80).replace(/[^A-Za-z0-9_\-]/g, "");
     set("action_execution_id", execId || makeExecutionId(studentEmail, targetDate, timeBlock));
+    // ★同じ引き当てを2回やらない★（2026-08-25 実測。「追加項目を書く」が3〜6秒）
+    //   週間目標とタスクの引き当ては、下の set(...) と、そのあとの
+    //   時間の5分類（classifyLogTime_）の両方から呼ばれていた。
+    //   1回の引き当てで WeeklyGoals / Tasks シートを丸ごと読むので、
+    //   同じシートを2度読んでいたことになる。1件の保存でこれが効く。
+    const _resolved = {};
+    const resolveWeeklyOnce = function (id) {
+      const k = "w:" + String(id || "");
+      if (!(k in _resolved)) _resolved[k] = resolvePrimaryWeeklyGoal(studentEmail, id);
+      return _resolved[k];
+    };
+    const taskRowOnce = function (id) {
+      const k = "t:" + String(id || "");
+      if (!(k in _resolved)) {
+        _resolved[k] = String(id || "").trim()
+          ? p1OwnedRow("Tasks", "task_id", id, studentEmail) : null;
+      }
+      return _resolved[k];
+    };
     if (body.quantity !== undefined) set("quantity", p1Num_(body.quantity));
     if (body.actual_minutes !== undefined) set("actual_minutes", p1Num_(body.actual_minutes));
     if (body.duration_confirmed !== undefined) set("duration_confirmed", String(body.duration_confirmed) === "true" ? "TRUE" : "FALSE");
     if (body.unit !== undefined) set("unit", p1Text_(body.unit, 20));
     if (body.primary_weekly_goal_id !== undefined) {
-      set("primary_weekly_goal_id", resolvePrimaryWeeklyGoal(studentEmail, body.primary_weekly_goal_id));
+      set("primary_weekly_goal_id", resolveWeeklyOnce(body.primary_weekly_goal_id));
     }
     if (body.link_task_id !== undefined) {
-      const t = p1OwnedRow("Tasks", "task_id", body.link_task_id, studentEmail);
+      const t = taskRowOnce(body.link_task_id);
       set("link_task_id", t ? String(body.link_task_id) : "");
     }
     // ── 時間の5分類 ──────────────────────────────
@@ -15954,7 +15979,8 @@ function writeP1LogFields(sheet, rowNum, studentEmail, targetDate, timeBlock, bo
         cls: String(rowVals[iCls] || ""),
         method: String(iMth === -1 ? "" : (rowVals[iMth] || ""))
       };
-      const decided = classifyLogTime_(studentEmail, targetDate, body, cur);
+      const decided = classifyLogTime_(studentEmail, targetDate, body, cur,
+                                       { resolveWeekly: resolveWeeklyOnce, taskRow: taskRowOnce });
       if (decided) {
         set("time_classification", decided.classification);
         set("classification_method", decided.method);
@@ -16183,8 +16209,17 @@ function tokenVer_(v) {
   return isFinite(n) ? n : 0;
 }
 
-const SESSION_ABSOLUTE_DAYS = 14;  // 絶対有効期限
-const SESSION_IDLE_DAYS     = 7;   // 無操作で切れるまで
+// ★セッションの寿命を延ばす★（2026-08-25 実測。使えるセッションが38人中8人しか無かった）
+//   14日で必ず切れる設定だったため、毎日使っている人でも2週間ごとに
+//   必ず再ログインになっていた。さらに7日触らないと切れるので、
+//   少し空けた人は開くたびにログインからやり直しになる。
+//   ログインは実際に詰まりやすい場所（合言葉の取り直し・Googleの往復）なので、
+//   そこを通る回数そのものを減らす。
+//   安全性は寿命ではなく「いつでも取り消せること」で担保している：
+//   Sessionsシートの revoked_at、Users の token_version、is_active のどれかで
+//   その場で全端末を無効にできる（authInspect で状況を確認できる）。
+const SESSION_ABSOLUTE_DAYS = 60;  // 絶対有効期限
+const SESSION_IDLE_DAYS     = 30;  // 無操作で切れるまで
 const SESSION_MAX_DEVICES   = 5;   // 1人あたりの同時端末数
 const CHALLENGE_TTL_MS      = 5 * 60 * 1000;
 const CHALLENGE_MAX_ATTEMPTS = 3;
