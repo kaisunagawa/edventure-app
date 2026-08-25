@@ -17472,7 +17472,20 @@ function strictTokenCheck(action, token) {
   const v = verifySession(token, false);   // 失効を即座に反映するためキャッシュを使わない
   if (v.ok) return { ok: true, actor: v.actor };
 
-  authAudit("SESSION_INVALID", { result: "DENY", failureReason: v.reason || "UNKNOWN", action: action });
+  // ★同じ端末の同じ失敗を、何度も書き足さない★（2026-08-25 実測）
+  //   失効した端末が syncTag を投げ続け、40分で103行の SESSION_INVALID が
+  //   積み上がっていた。画面側には止める仕組みが入っているが、
+  //   古い版が端末に残っている間は届かない。
+  //   1行も残さないと調査できなくなるので、
+  //   「同じトークン・同じ操作」は1時間に1回だけ残す。
+  //   これは調査用の記録であって、認可の判断には使っていない。
+  var _dup = false;
+  try {
+    var k = "sinv_" + sha256Hex(token).slice(0, 16) + "_" + String(action || "");
+    var c = CacheService.getScriptCache();
+    if (c.get(k)) _dup = true; else c.put(k, "1", 3600);
+  } catch (e) { /* キャッシュが使えないときは、これまでどおり毎回残す */ }
+  if (!_dup) authAudit("SESSION_INVALID", { result: "DENY", failureReason: v.reason || "UNKNOWN", action: action });
   // ★理由を細かく返さない★ ただしクライアントが「再ログインすれば直る」と
   // 判断できる必要があるので、SESSION_INVALID という一種類だけは返す。
   // FORBIDDEN（権限不足）と混ぜると、再ログインの無限ループになる。
