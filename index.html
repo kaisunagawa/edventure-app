@@ -10837,7 +10837,7 @@ function LineLinkSection({onToast, linked, onLinked}) {
         <span style=${{fontSize:13.5,fontWeight:700,color:"var(--text)"}}>連携済みです</span>
       </div>
       <div style=${{fontSize:12.5,color:"var(--sub)",lineHeight:1.8}}>
-        毎時間のリマインダーと、毎晩のAIレポートがLINEに届きます。<br/>
+        記録のリマインダーと、毎晩のAIレポートがLINEに届きます。<br/>
         機種変更などで連携し直したいときは、運営までご連絡ください。
       </div>`;
   }
@@ -10865,7 +10865,7 @@ function LineLinkSection({onToast, linked, onLinked}) {
 
   return html`
     <div style=${{fontSize:12.5,color:"var(--sub)",lineHeight:1.8,marginBottom:14}}>
-      LINEで毎時間のリマインダーと、毎晩のAIレポートを受け取れます。
+      LINEで記録のリマインダーと、毎晩のAIレポートを受け取れます。
     </div>
     ${!code ? html`
       <button class="btn" onClick=${issue} disabled=${busy}>${busy?"準備中…":"連携をはじめる"}</button>
@@ -11769,7 +11769,7 @@ function SettingsScreen({onToast,onLogout,onGoalSaved,profile,onProfileSaved,onC
       <${SettingsSec} k="goaltree" icon="🎯" title="目標" open=${openSec==="goaltree"} onToggle=${()=>setOpenSec(openSec==="goaltree"?"":"goaltree")}>
         <div style=${{fontSize:12,color:"var(--sub)",lineHeight:1.7,marginBottom:12}}>
           3か月後にたどり着きたい場所を決めて、その下に「今週やること」をぶら下げます。
-          毎時間の記録がどの目標につながっているかを、これから見えるようにしていきます。
+          その日の記録がどの目標につながっているかを、これから見えるようにしていきます。
         </div>
         <button class="btn" onClick=${()=>setShowGoalTree(true)}>目標を設定する</button>
       <//>`}
@@ -11871,7 +11871,7 @@ function SettingsScreen({onToast,onLogout,onGoalSaved,profile,onProfileSaved,onC
           `)}
         </div>
         <div style=${{fontSize:11,color:"var(--sub)",marginBottom:16,lineHeight:1.6,padding:"8px 10px",background:"var(--bg)",borderRadius:8}}>
-          ${interval===1?"毎時間リマインドが届きます":interval===24?"1日の開始時間に1回届きます":`${interval}時間ごとにリマインドが届きます`}（22時以降はレポートのみ）
+          ${interval===1?"1時間ごとにリマインドが届きます":interval===24?"1日の開始時間に1回届きます":`${interval}時間ごとにリマインドが届きます`}（22時以降はレポートのみ）
         </div>
         <button class="btn" onClick=${saveTimeSettings}>保存する</button>
       <//>
@@ -12353,7 +12353,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260825-163440";
+const APP_BUILD = "20260828-092530";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
@@ -12801,7 +12801,7 @@ function LoginScreen({onLogin}) {
       <div class="login-box">
         <div style=${{background:"var(--card)",borderRadius:14,padding:"20px 18px",border:"1px solid var(--border)"}}>
           <div style=${{fontSize:13,color:"var(--sub)",lineHeight:1.7,marginBottom:16}}>
-            連携すると、毎時間のリマインダーと毎晩のAIレポートがLINEに届きます。<br/>
+            連携すると、記録のリマインダーと毎晩のAIレポートがLINEに届きます。<br/>
             <b style=${{color:"var(--text)"}}>設定 →「LINE連携」</b>から連携できます。
           </div>
           <button class="btn" style=${{background:"#06C755",fontSize:15}} onClick=${openLine}>LINEを友だち追加</button>

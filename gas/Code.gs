@@ -10404,8 +10404,45 @@ function computeReportBreakdownCore_(studentEmail, logs, user, tasks, journal, w
                       daily_focus: "未設定", week_progress: null, rest_day: false,
                       estimated_axes: [] } };
   }
-  // 記録した時間帯の数。10コマで満点、それ以上は少しずつ伸びる
-  const records = clamp(n === 0 ? 0 : 20 * Math.min(1, Math.pow(n / 10, 0.85)));
+  // ★件数ではなく「説明できた時間」で見る★（2026-08-27 コンセプト確認）
+  //   これまでは記録の件数で採点していた。同じ8時間を説明しても、
+  //   1時間ごとに8件書けば16.5点、話すだけで3件にまとめれば7.2点だった。
+  //   中身が同じなのに、たくさん書いた人が勝つ。指示書の
+  //   「スコア獲得ゲーム化させない」「記録漏れを人格の問題にしない」に反していた。
+  //
+  //   ★1時間ごとの記録は、目的ではなく手段だった★
+  //   見たいのは「1日のうち、どれだけを自分で説明できるか」。
+  //   重なりを除いた実時間で数え、6時間ぶん説明できたら満点にする。
+  //
+  //   ★誰の点も下げない★ 当面は旧方式との高いほうを採る。
+  //   タイマーで短い記録を積む人（15分×10件＝2時間半）は、
+  //   時間だけで見ると下がってしまう。使い方を変えろとは言わない。
+  const coveredMin = (function () {
+    const segs = logs.map(function (l) {
+      const tb = String(l.time_block || "");
+      const m = tb.match(/^(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})$/);
+      if (!m) return null;
+      let st = Number(m[1]) * 60 + Number(m[2]);
+      let en = Number(m[3]) * 60 + Number(m[4]);
+      if (en <= st) en += 24 * 60;
+      return [st, en];
+    }).filter(Boolean).sort(function (x, y) { return x[0] - y[0]; });
+    let total = 0, curS = null, curE = null;
+    segs.forEach(function (g) {
+      if (curS === null) { curS = g[0]; curE = g[1]; return; }
+      if (g[0] <= curE) { curE = Math.max(curE, g[1]); return; }
+      total += curE - curS; curS = g[0]; curE = g[1];
+    });
+    if (curS !== null) total += curE - curS;
+    // 時間帯の書式でない記録（タイマー等）は、長さぶんを足す
+    const noSpan = logs.filter(function (l) {
+      return !/^\d{1,2}:\d{2}\s*-\s*\d{1,2}:\d{2}$/.test(String(l.time_block || ""));
+    }).reduce(function (a2, l) { return a2 + timeBlockMinutes(l.time_block); }, 0);
+    return total + noSpan;
+  })();
+  const byCount = 20 * Math.min(1, Math.pow(n / 10, 0.85));
+  const byTime  = 20 * Math.min(1, Math.pow(coveredMin / 360, 0.85));
+  const records = clamp(n === 0 ? 0 : Math.max(byCount, byTime));
   // メモ。書いた割合(4割)と、書いた量(6割)の両方を見る
   const memoLogs = logs.filter(function (l) { return String(l.memo || "").trim(); });
   const memoChars = memoLogs.reduce(function (a, l) { return a + String(l.memo).trim().length; }, 0);
@@ -10547,7 +10584,7 @@ ${logsText}
 - 記録していない項目（例: 集中度を入れていない、目標に関連づけていない）は
   「できていない」ではなく「まだ測れていない」として書く。責めない
 【採点の観点（各0〜20点・合計100点）】
-- records（20点）: 記録した時間帯の数の多さ
+- records（20点）: 1日のうち、記録で説明できた時間の多さ（件数ではない）
 - memo（20点）: 振り返りメモの深さと量
 - focus（20点）: 自己評価（集中度）の平均の高さ
 - goal（20点）: 目標関連の記録の割合の高さ
