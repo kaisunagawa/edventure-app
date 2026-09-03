@@ -17941,7 +17941,11 @@ const ADMIN_SECRET_ALLOWLIST = {
   igStatus:1, igAuthUrl:1, igFetchNow:1, igDisconnect:1, igResetMetrics:1, igConfigure:1, adminAiUsage:1, adminPropsCheck:1, adminBackfillReports:1, adminDeleteTrigger:1, adminStudioLimit:1, adminOnboardingAudit:1, adminStats:1,
   authSetMode:1, authSetEnforce:1, authRoleApply:1, authRoleDryRun:1, authRevokeAll:1,
   authCleanupTestData:1, adminPurgeTestUsers:1, adminMigrateTasks:1, authBreakerReset:1, rotateSessionSecret:1,
-  p1Backup:1, p1BackupInfo:1, p1PurgeArchived:1, weeklyBackup:1
+  p1Backup:1, p1BackupInfo:1, p1PurgeArchived:1, weeklyBackup:1,
+  // 招待コードの発行・一覧・停止（2026-09-02）
+  //   ブラウザを開かずに済ませたい運用作業なので、鍵で通してよい。
+  //   ここに入れないと ops.sh から叩けない（AUTH_REQUIRED で止まる）。
+  inviteCreate:1, inviteList:1, inviteRevoke:1
 };
 
 // ── 署名付きの運用リクエスト ──
