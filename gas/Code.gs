@@ -1821,6 +1821,27 @@ function doGet(e) {
         result = p1PurgeArchived(studentEmail, String(e.parameter.dryRun || "") === "1");
         break;
       }
+      // ★招待コードは ops.sh から叩く＝GET★（2026-09-02）
+      //   最初 doPost 側にだけ置いたので、ops.sh（GET）からは届かず
+      //   AUTH_REQUIRED になっていた。運用で使うのはこちら。
+      case "inviteCreate": {
+        var _iv1 = verifyP1Admin(studentEmail, e.parameter.secret, e.parameter);
+        if (!_iv1.ok) { result = _iv1; break; }
+        result = inviteCreate(e.parameter);
+        break;
+      }
+      case "inviteList": {
+        var _iv2 = verifyP1Admin(studentEmail, e.parameter.secret, e.parameter);
+        if (!_iv2.ok) { result = _iv2; break; }
+        result = inviteList();
+        break;
+      }
+      case "inviteRevoke": {
+        var _iv3 = verifyP1Admin(studentEmail, e.parameter.secret, e.parameter);
+        if (!_iv3.ok) { result = _iv3; break; }
+        result = inviteRevoke(e.parameter);
+        break;
+      }
       case "p1Status": {
         // 基盤の状態確認。件数のみを返すが、全体情報なので同様に保護する
         var _a2 = verifyP1Admin(studentEmail, e.parameter.secret, e.parameter);
@@ -17456,8 +17477,11 @@ const INVITE_COLUMNS = ["code", "label", "max_uses", "used_count", "expires_at",
 function getInviteSheet_() {
   const ss = getSpreadsheet();
   let sh = ss.getSheetByName("InviteCodes");
-  if (!sh) {
-    sh = ss.insertSheet("InviteCodes");
+  if (!sh) sh = ss.insertSheet("InviteCodes");
+  // ★見出しが無い状態を許さない★
+  //   作りかけで止まると、列が0枚のシートだけが残る。そのまま使うと
+  //   getRange(1,1,1,0) で「列数には1以上を」で落ちる（実際に落ちた）。
+  if (sh.getLastColumn() < 1 || !String(sh.getRange(1, 1).getValue() || "").trim()) {
     sh.getRange(1, 1, 1, INVITE_COLUMNS.length).setValues([INVITE_COLUMNS]);
     sh.setFrozenRows(1);
   }
