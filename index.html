@@ -2657,7 +2657,22 @@ const getLogHours = () => JSON.parse(localStorage.getItem("jiroku_log_hours")||'
 // 1日の目標時間（目標に関連した記録を何時間積むか）。固定の8h基準ではなく、
 // 本人が自分で決めた目標に対する達成度を測れるようにする。デフォルトは2時間
 const getDailyGoalHours = () => Number(localStorage.getItem("jiroku_daily_goal_hours")) || 2;
-const getTimeBlocks = () => { const {start,end}=getLogHours(); return ALL_TIME_BLOCKS.filter(b=>parseInt(b)>=start&&parseInt(b)<=end); };
+// ★深夜〜午前3時は、設定にかかわらず必ず出す★（2026-09-03 Kai要望）
+//   既定の記録範囲は 6:00〜23:00。夜中に作業した人は枠が無く、
+//   その時間を記録できなかった（連続記録も切れる）。
+//   通知の時間帯（notify_start/end）はここでは変えない。
+//   夜中にリマインダーを送りたいわけではなく、
+//   「起きていたなら書ける」ようにするだけ。
+//   ★日付の扱いは変えていない★ 02:00の枠は「その日の未明」であって
+//   前日の続きではない。前日の続きとして書きたい日は、記録画面で
+//   日付を1日戻してから入れる。
+const LATE_NIGHT_BLOCKS = ["00:00-01:00","01:00-02:00","02:00-03:00"];
+const getTimeBlocks = () => {
+  const {start,end}=getLogHours();
+  const inRange = ALL_TIME_BLOCKS.filter(b=>parseInt(b)>=start&&parseInt(b)<=end);
+  const late = LATE_NIGHT_BLOCKS.filter(b=>inRange.indexOf(b)===-1);
+  return late.concat(inRange).sort((a,b)=>parseInt(a)-parseInt(b));
+};
 const TIME_BLOCKS = getTimeBlocks();
 
 // ── 記録の時間帯キーを扱う道具 ────────────────────────────────
@@ -12375,7 +12390,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260903-142347";
+const APP_BUILD = "20260903-144051";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
