@@ -2188,6 +2188,24 @@ function doPost(e) {
       case "carryOverTask": return jsonResponse(carryOverTask(studentEmail, body));
       // ── Auth CP1 ──
       case "login":  return jsonResponse(authLogin(body));
+      // 招待コードで入る（新規の入口。login と同じ検証を通す）
+      case "redeemInvite": return jsonResponse(redeemInvite(body));
+      // 発行・一覧・停止は管理者だけ（ops.sh から署名付きで）
+      case "inviteCreate": {
+        const _ic = verifyP1Admin(studentEmail, body.secret, body);
+        if (!_ic.ok) return jsonResponse(_ic);
+        return jsonResponse(inviteCreate(body));
+      }
+      case "inviteList": {
+        const _il = verifyP1Admin(studentEmail, body.secret, body);
+        if (!_il.ok) return jsonResponse(_il);
+        return jsonResponse(inviteList());
+      }
+      case "inviteRevoke": {
+        const _ir = verifyP1Admin(studentEmail, body.secret, body);
+        if (!_ir.ok) return jsonResponse(_ir);
+        return jsonResponse(inviteRevoke(body));
+      }
       case "loginAccess": return jsonResponse(authLoginAccess(body));
       // LINE連携用のワンタイムトークン発行（認証済みセッション必須）
       case "issueLineLinkToken": return jsonResponse(issueLineLinkToken(body.token));
@@ -9160,11 +9178,30 @@ function preloadContextBundles() {
   });
 }
 
+// ★止まっている人には、毎日の通知を送らない★（2026-08-30）
+//   記録が20人止まっているのに、AI費用は先月の3倍（$5.64→$17.83）だった。
+//   朝の予定通知と毎時間リマインダーは、記録していない人にも毎日AIを回して
+//   送り続けていた。届いても開かれていないものに、いちばん払っていた。
+//
+//   ★復帰のきっかけまでは消さない★
+//   夜のレポートと、週1のLINE復帰案内はそのまま。
+//   1件でも記録すれば、翌日から自動でまた届く。
+function isDormant_(user, days) {
+  const n = days > 0 ? days : 7;
+  const last = String((user && user.last_log_date) || "").slice(0, 10);
+  if (!last) return true;                       // 一度も記録していない
+  const d = new Date(last + "T00:00:00+09:00").getTime();
+  if (isNaN(d)) return true;
+  return (Date.now() - d) > n * 86400000;
+}
+
 function morningScheduleNotify() {
   const getContextBundle = preloadContextBundles();
   sheetToObjects(getSheet("Users")).filter(u => u.is_active.toUpperCase() === "TRUE").forEach(user => {
     try {
       if (!user.line_user_id && !user.fcm_token) return;
+      // 7日以上記録が無い人には送らない（AIも呼ばない）
+      if (isDormant_(user, 7)) return;
 
       const apiKey = PropertiesService.getScriptProperties().getProperty("CLAUDE_API_KEY");
       if (!apiKey) return;
@@ -9219,6 +9256,8 @@ function hourlyReminder() {
   const timeBlock = String(hour).padStart(2, "0") + ":00";
   const getContextBundle = preloadContextBundles();
   sheetToObjects(getSheet("Users")).filter(u => u.is_active.toUpperCase() === "TRUE").forEach(user => {
+    // 7日以上記録が無い人には送らない（AIも呼ばない）
+    if (isDormant_(user, 7)) return;
     const start = Number(user.notify_start) || 7;
     const end = Number(user.notify_end) || 23;
     const interval = Number(user.notify_interval) || 2;
@@ -16278,7 +16317,9 @@ const AUTH_SHEETS = {
               "session_id","credential_fingerprint","action","result","failure_reason",
               "deployment_id","environment"]
 };
-const AUTH_USER_COLUMNS = ["user_id","google_sub","token_version","role","organization_id","auth_linked_at"];
+const AUTH_USER_COLUMNS = ["user_id","google_sub","token_version","role","organization_id","auth_linked_at",
+                           // 誰の招待で入ったか。あとから「このコードで何人来たか」を数えるため
+                           "invited_by_code"];
 
 // ★token_version は必ずこれを通して読む★（2026-08-05 本番で5人がログインできなくなった）
 //   シートのセルが時刻書式になっていると、0 が Date（00:00）として返ってくる。
@@ -17391,6 +17432,218 @@ function revokeSession(token) {
   return { ok: true, notFound: true }; // 存在しなくても成功扱い（情報を漏らさない）
 }
 
+// ══════════════════════════════════════════════════════════════════
+// 招待コード（2026-09-02）
+//
+// ★なぜ「コード」なのか★
+//   2026-08-01に registerUser を外した。誰でも任意のメールで有効な利用者を
+//   作れる穴だったからで、あの判断は正しい。ただ副作用として、
+//   新しい人は必ずKaiが手でUsersに行を書くまで入れなくなった。
+//   申し込みのたびに手作業が挟まるので、案内した人が待たされる。
+//
+//   そこで「Kaiが先に発行したコードを持っている人だけ、自分で入れる」
+//   に変える。穴は塞いだまま、待ち時間だけ無くす。
+//
+// ★絶対に守ること★
+//   ・行を作るメールアドレスは、必ず Googleが検証した v.email を使う。
+//     リクエストのbodyから受け取らない。ここを間違えると穴が元に戻る。
+//   ・コードは使用回数と期限で必ず尽きるようにする（無期限・無制限を作らない）。
+//   ・数え上げは LockService の中で行う（同時に来ても上限を超えない）。
+// ══════════════════════════════════════════════════════════════════
+const INVITE_COLUMNS = ["code", "label", "max_uses", "used_count", "expires_at",
+                        "revoked_at", "created_at", "created_by", "note"];
+
+function getInviteSheet_() {
+  const ss = getSpreadsheet();
+  let sh = ss.getSheetByName("InviteCodes");
+  if (!sh) {
+    sh = ss.insertSheet("InviteCodes");
+    sh.getRange(1, 1, 1, INVITE_COLUMNS.length).setValues([INVITE_COLUMNS]);
+    sh.setFrozenRows(1);
+  }
+  return sh;
+}
+
+// 読み違えない文字だけを使う（0/O、1/I/l を入れない）
+function newInviteCode_() {
+  const A = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  const pick = function (n) {
+    let out = "";
+    for (let i = 0; i < n; i++) {
+      out += A.charAt(Math.floor(Math.random() * A.length));
+    }
+    return out;
+  };
+  return "JRK-" + pick(4) + "-" + pick(4);
+}
+
+function normInvite_(v) {
+  return String(v || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+}
+
+// コードが今使えるかどうかだけを見る。行番号も返す（あとで数えるため）
+function findUsableInvite_(code) {
+  const want = normInvite_(code);
+  if (!want) return { ok: false, reason: "NO_CODE" };
+  const sh = getInviteSheet_();
+  const data = sh.getDataRange().getValues();
+  const h = data[0];
+  const iC = h.indexOf("code"), iMax = h.indexOf("max_uses"), iUsed = h.indexOf("used_count"),
+        iExp = h.indexOf("expires_at"), iRev = h.indexOf("revoked_at");
+  for (let i = 1; i < data.length; i++) {
+    if (normInvite_(data[i][iC]) !== want) continue;
+    if (String(data[i][iRev] || "").trim()) return { ok: false, reason: "REVOKED" };
+    const exp = data[i][iExp];
+    if (exp) {
+      const t = (exp instanceof Date) ? exp.getTime() : Date.parse(String(exp));
+      if (!isNaN(t) && t < Date.now()) return { ok: false, reason: "EXPIRED" };
+    }
+    const max = Number(data[i][iMax] || 0);
+    const used = Number(data[i][iUsed] || 0);
+    if (max > 0 && used >= max) return { ok: false, reason: "USED_UP" };
+    return { ok: true, row: i + 1, iUsed: iUsed, used: used, max: max, sheet: sh };
+  }
+  return { ok: false, reason: "NOT_FOUND" };
+}
+
+// ── 招待コードで入る（公開アクション）──
+//   login とまったく同じ検証を通したうえで、Usersに行が無ければ作る。
+//   失敗理由は利用者に返さない（当たりを探されないため）。監査には残す。
+function redeemInvite(body) {
+  const generic = { ok: false, error: "この招待コードは使えません。発行元にご確認ください" };
+  const fp = body.idToken ? sha256Hex(body.idToken).slice(0, 16) : "";
+  const fail = function (reason) {
+    if (fp) rateFail("fp_" + fp);
+    authAudit("REGISTER", { result: "FAIL", failureReason: reason, action: "redeemInvite",
+                            credentialFingerprint: fp });
+    return generic;
+  };
+
+  const brk = breakerState();
+  if (brk.open) return { ok: false, error: "ただいま混み合っています。数分後にもう一度お試しください" };
+  if (fp && rateCheck("fp_" + fp, LOGIN_FP_MAX_PER_HOUR).exceeded) return fail("FP_RATE_LIMIT");
+
+  // ★コードの総当たりを止める★ 1時間に20回まで
+  const codeKey = "inv_" + normInvite_(body.code);
+  if (rateCheck(codeKey, 20).exceeded) return fail("CODE_RATE_LIMIT");
+
+  const ch = consumeChallenge(body.challenge_id, body.state);
+  if (!ch.ok) return fail(ch.reason);
+
+  const v = verifyIdToken(body.idToken, ch.nonceHash);
+  breakerRecord(!v.ok && String(v.reason).indexOf("TOKENINFO_") === 0);
+  if (!v.ok) return fail(v.reason);
+  if (rateCheck("sub_" + v.sub, LOGIN_SUB_MAX_PER_HOUR).exceeded) return fail("SUB_RATE_LIMIT");
+  if (isTestDeployment() && v.email !== String(adminEmail()).toLowerCase()) return fail("TEST_ENV_ADMIN_ONLY");
+
+  // ★行を作るのは、検証済みのメールだけ★ bodyのメールは一切見ない
+  const email = String(v.email || "").trim().toLowerCase();
+  if (!email) return fail("NO_EMAIL");
+
+  const lock = LockService.getScriptLock();
+  try { lock.waitLock(15000); } catch (e) { return fail("LOCK_TIMEOUT"); }
+  try {
+    const usersSheet = getSheet("Users");
+    const rows = sheetToObjects(usersSheet);
+    const already = rows.find(function (r) {
+      return String(r.student_email || "").trim().toLowerCase() === email;
+    });
+
+    // すでに居る人がコードを入れた場合は、コードを消費せずそのままログインさせる
+    if (!already) {
+      const inv = findUsableInvite_(body.code);
+      if (!inv.ok) return fail("CODE_" + inv.reason);
+
+      const headers = usersSheet.getRange(1, 1, 1, usersSheet.getLastColumn()).getValues()[0];
+      const now = new Date().toISOString();
+      const row = headers.map(function (c) {
+        if (c === "user_id") return "u_" + Utilities.getUuid().slice(0, 8);
+        if (c === "student_email") return email;
+        if (c === "name" || c === "nickname") return String(v.name || email.split("@")[0]);
+        if (c === "is_active") return "true";
+        if (c === "avatar") return "🦊";
+        if (c === "token_version") return 1;
+        if (c === "role") return "USER";
+        if (c === "created_at") return now;
+        if (c === "invited_by_code") return normInvite_(body.code);
+        return "";
+      });
+      usersSheet.appendRow(row);
+      inv.sheet.getRange(inv.row, inv.iUsed + 1).setValue(inv.used + 1);
+      _sheetHandles["Users"] = null;   // 読み直させる
+    }
+  } finally {
+    try { lock.releaseLock(); } catch (e) {}
+  }
+
+  // ここから先は通常のログインと同じ道を通る
+  const u = resolveUserByIdentity(v.sub, v.email, v.hd);
+  if (!u.ok) return fail("RESOLVE_" + u.reason);
+  const userRow = sheetToObjects(getSheet("Users")).find(function (x) {
+    return String(x.user_id) === String(u.userId);
+  }) || {};
+  const sess = issueSession({ userId: u.userId, sub: v.sub, role: userRow.role || "USER",
+                              organizationId: userRow.organization_id || "",
+                              tokenVersion: tokenVer_(userRow.token_version) },
+                            String((body && body.device) || ""));
+  if (fp) rateClear("fp_" + fp);
+  rateClear("sub_" + v.sub);
+  rateClear(codeKey);
+  authAudit("REGISTER", { result: "SUCCESS", actorUserId: u.userId, action: "redeemInvite",
+                          credentialFingerprint: fp });
+  return { ok: true, token: sess.token, expiresAt: sess.expiresAt,
+           user: { email: u.email, role: userRow.role || "USER" } };
+}
+
+// ── 発行・一覧・停止（管理者のみ。ops.sh から署名付きで叩く）──
+function inviteCreate(params) {
+  const sh = getInviteSheet_();
+  const label = String((params && params.label) || "").slice(0, 60);
+  const maxUses = Math.max(1, Math.min(500, Number((params && params.maxUses) || 1)));
+  const days = Math.max(1, Math.min(365, Number((params && params.days) || 30)));
+  const code = newInviteCode_();
+  const exp = new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString();
+  const h = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0];
+  const row = h.map(function (c) {
+    if (c === "code") return code;
+    if (c === "label") return label;
+    if (c === "max_uses") return maxUses;
+    if (c === "used_count") return 0;
+    if (c === "expires_at") return exp;
+    if (c === "created_at") return new Date().toISOString();
+    if (c === "created_by") return String((params && params.email) || adminEmail());
+    if (c === "note") return String((params && params.note) || "").slice(0, 200);
+    return "";
+  });
+  sh.appendRow(row);
+  return { ok: true, code: code, maxUses: maxUses, expiresAt: exp, label: label,
+           url: (typeof APP_URL === "string" ? APP_URL : "") + "?invite=" + encodeURIComponent(code) };
+}
+
+function inviteList() {
+  const sh = getInviteSheet_();
+  const rows = sheetToObjects(sh).map(function (r) {
+    return { code: r.code, label: r.label, used: Number(r.used_count || 0),
+             max: Number(r.max_uses || 0), expiresAt: String(r.expires_at || ""),
+             revokedAt: String(r.revoked_at || "") };
+  });
+  return { ok: true, data: rows };
+}
+
+function inviteRevoke(params) {
+  const want = normInvite_(params && params.code);
+  const sh = getInviteSheet_();
+  const data = sh.getDataRange().getValues();
+  const h = data[0];
+  const iC = h.indexOf("code"), iRev = h.indexOf("revoked_at");
+  for (let i = 1; i < data.length; i++) {
+    if (normInvite_(data[i][iC]) !== want) continue;
+    sh.getRange(i + 1, iRev + 1).setValue(new Date().toISOString());
+    return { ok: true, code: String(data[i][iC]) };
+  }
+  return { ok: false, error: "そのコードは見つかりません" };
+}
+
 // ── ログイン（公開アクション）──
 // 失敗理由はユーザーへ返さず、AuthAuditにだけ残す
 function authLogin(body) {
@@ -17628,7 +17881,12 @@ function policyFor(action) {
 // ここを絞りすぎると「新規登録できない」「失効した人がログインできない」
 // という詰みが起きるので、入口だけは必ず開けておく。
 const SESSION_REQUIRED_EXEMPT = {
-  authChallenge: 1, login: 1, loginAccess: 1, authConfig: 1, healthCheck: 1
+  authChallenge: 1, login: 1, loginAccess: 1, authConfig: 1, healthCheck: 1,
+  // ★redeemInvite は免除してよい★（2026-09-02）
+  //   registerUser を外した理由は「誰でも任意のメールで行を作れた」こと。
+  //   こちらは Googleが検証したメールでしか行を作らず、さらに
+  //   Kaiが発行したコード（回数と期限あり）が要る。穴は開かない。
+  redeemInvite: 1
   // ★registerUser は外した★（2026-08-01）
   //   招待制なので「登録で行を作る」必要が無い。Kaiが先に行を用意し、
   //   その人がログインするとセッションが出る。プロフィールの記入は
@@ -19748,10 +20006,14 @@ function dailyOpsHealthCheck(dryRun) {
     const reps = reportsByEmailDesc[u.student_email] || [];
     const latest = reps[0] ? Number(reps[0].score) : null;
     const prev = reps[1] ? Number(reps[1].score) : null;
+    // ★今日声をかける意味がある人だけ★（2026-08-30 Kai指示「厳選して」）
+    //   45日止まっている人を毎朝20人並べても、誰にも連絡しない。
+    //   声をかけて戻る見込みがあるのは「最近まで書いていたのに止まった人」。
+    //   長く止まっている人は、名前ではなく件数だけ出す（下の離脱リスク）。
     let reason = null, sev = 0;
-    if (ago >= 3) { reason = ago + "日記録なし"; sev = 100 + ago; }
-    else if (prev !== null && latest !== null && prev - latest >= 15) { reason = "スコア下降 " + prev + "→" + latest; sev = 50; }
-    else if (latest !== null && latest < 50) { reason = "直近スコア " + latest + "点"; sev = 40; }
+    if (ago >= 3 && ago <= 10) { reason = ago + "日記録なし"; sev = 200 - ago; }
+    else if (prev !== null && latest !== null && prev - latest >= 15) { reason = "スコア下降 " + prev + "→" + latest; sev = 120; }
+    else if (ago <= 2 && latest !== null && latest < 40) { reason = "直近スコア " + latest + "点"; sev = 60; }
     if (reason) followup.push({ em: u.student_email, reason: reason, sev: sev });
   });
   followup.sort((a, b) => b.sev - a.sev);
@@ -19804,10 +20066,12 @@ function dailyOpsHealthCheck(dryRun) {
   lines.push("");
 
   // ③ 要フォロー（コーチが今日声をかけるべき人）
-  lines.push("🔔 要フォロー " + followup.length + "人");
+  // ★出すのは最大5人★ 並べるほど、誰にも連絡しなくなる
+  const SHOW = 5;
+  lines.push("🔔 今日声をかける " + Math.min(followup.length, SHOW) + "人"
+             + (followup.length > SHOW ? "（ほか" + (followup.length - SHOW) + "人）" : ""));
   if (followup.length) {
-    followup.slice(0, 20).forEach(f => lines.push("・" + tag(f.em) + nameOf(f.em) + "（" + f.reason + "）"));
-    if (followup.length > 20) lines.push("…ほか" + (followup.length - 20) + "人");
+    followup.slice(0, SHOW).forEach(f => lines.push("・" + tag(f.em) + nameOf(f.em) + "（" + f.reason + "）"));
   } else {
     lines.push("該当なし👍");
   }
@@ -19815,6 +20079,7 @@ function dailyOpsHealthCheck(dryRun) {
 
   // ④ 離脱リスク・ファネル（件数サマリ。名前は要フォローに集約済み）
   lines.push("📉 離脱リスク: 7日以上記録なし " + churnRisk + "人 / 一度も記録なし " + neverLogged.length + "人（うち🎓" + neverLoggedStudent + "）");
+  lines.push("　（11日以上止まっている人は名前を出しません。通知も送っていません）");
   lines.push("");
 
   // ⑤ システム

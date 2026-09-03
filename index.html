@@ -1020,10 +1020,32 @@ scheduleSyncPoll();
 // ★ログインが通らない理由を、一か所で言い換える★（2026-08-20）
 //   同じ理由を2か所で別々に文章にしていたため、あとから書いた側が
 //   本当の理由を「ログインを確認できませんでした」で塗りつぶしていた。
+// ★招待コードは端末に預ける★（2026-09-02）
+//   Googleの画面へ出て戻ってくるので、画面の状態は消える。
+//   入力してもらったコードは、使い終わるまで端末に置いておく。
+function readInviteCode(){
+  try{ return String(localStorage.getItem("invite_code")||"").trim(); }catch(e){ return ""; }
+}
+function saveInviteCode(v){
+  try{ localStorage.setItem("invite_code", String(v||"").trim().toUpperCase()); }catch(e){}
+}
+function clearInviteCode(){
+  try{ localStorage.removeItem("invite_code"); }catch(e){}
+}
+// リンクに ?invite=JRK-XXXX-XXXX が付いていたら、そのまま覚える
+(function(){
+  try{
+    const u = new URL(location.href);
+    const c = u.searchParams.get("invite");
+    if(c) saveInviteCode(c);
+  }catch(e){}
+})();
+
 function loginFailMessage(code){
   const em = String(code || "");
   if (em.indexOf("NOT_INVITED") !== -1)
-    return "このGoogleアカウントは登録されていません。別のアカウントで試すか、管理者へご連絡ください";
+    return "このGoogleアカウントはまだ登録されていません。招待コードをお持ちの方は、下の欄に入れてからもう一度お試しください";
+  if (em.indexOf("招待コード") !== -1) return em;
   if (em === "" || em === "UNKNOWN" || em.indexOf("CHALLENGE") !== -1)
     return "ログインの有効期限が切れました。もう一度ボタンを押してください";
   if (em === "NETWORK") return "通信できませんでした。電波の良いところでもう一度お試しください";
@@ -12353,7 +12375,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260828-092530";
+const APP_BUILD = "20260903-131531";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
@@ -12433,6 +12455,9 @@ function LoginScreen({onLogin}) {
   // リダイレクト方式は、公式ボタンを出せない環境（LINE内ブラウザ等）のための
   // 予備として残す。
   const [gsiReady,setGsiReady]=useState(false);
+  // 招待コード。リンクに ?invite= が付いていれば、開いた状態で出す
+  const [invite,setInvite]=useState(readInviteCode);
+  const [inviteOpen,setInviteOpen]=useState(()=>!!readInviteCode());
   // ログインに失敗したら、理由を出して合言葉を取り直す
   useEffect(()=>{
     // ★理由ごとに、やることを書く★（2026-08-20 Kai報告「サインインができない」）
@@ -12444,6 +12469,8 @@ function LoginScreen({onLogin}) {
       setLoading(false);
       let em = String((ev && ev.detail && ev.detail.error) || "");
       if (!em) { try{ em = localStorage.getItem("auth_last_error") || ""; }catch{} }
+      // 登録されていない人には、その場でコード欄を開いて見せる
+      if (em.indexOf("NOT_INVITED") !== -1 || em.indexOf("招待コード") !== -1) setInviteOpen(true);
       setError(loginFailMessage(em));
     };
     window.addEventListener("jiroku:loginfail",on);
@@ -12616,12 +12643,14 @@ function LoginScreen({onLogin}) {
     const sep=raw.indexOf("~");
     const sessionPromise = (sep>0)
       ? fetch(GAS_URL,{ method:"POST", headers:{"Content-Type":"text/plain"},
-          body: JSON.stringify({ action:"login", idToken:res.credential,
+          body: JSON.stringify({ action: readInviteCode() ? "redeemInvite" : "login",
+                                 code: readInviteCode(),
+                                 idToken:res.credential,
                                  challenge_id:raw.slice(0,sep), state:raw.slice(sep+1),
                                  device: deviceLabel(res.method) }) })
           .then(r=>r.json())
           .then(j=>{
-            if(j&&j.ok&&j.token) setSessionToken(j.token);
+            if(j&&j.ok&&j.token){ setSessionToken(j.token); clearInviteCode(); }
             else {
               const emsg = String((j&&j.error)||"UNKNOWN");
               try{ localStorage.setItem("auth_last_error", emsg); }catch{}
@@ -12923,6 +12952,27 @@ function LoginScreen({onLogin}) {
             </button>`
         }
         ${error&&html`<div class="login-err">${error}</div>`}
+
+        <!-- ★招待コード★（2026-09-02）
+             招待制なので、はじめての人はサインインしても入れない。
+             コードを持っている人だけ、自分で入れるようにする。
+             入れたコードは端末に置いて、Googleから戻るまで持たせる。 -->
+        <div style=${{marginTop:18,width:280,textAlign:"center"}}>
+          ${inviteOpen ? html`
+            <input class="inp" value=${invite}
+              onInput=${(e)=>{ setInvite(e.target.value); saveInviteCode(e.target.value); }}
+              placeholder="JRK-XXXX-XXXX"
+              style=${{textAlign:"center",letterSpacing:".08em",textTransform:"uppercase"}}/>
+            <div style=${{fontSize:11.5,color:"var(--sub)",lineHeight:1.7,marginTop:8}}>
+              コードを入れてから、上の<b>Googleでサインイン</b>を押してください
+            </div>`
+          : html`
+            <button onClick=${()=>setInviteOpen(true)}
+              style=${{background:"none",border:"none",color:"var(--sub)",fontSize:12.5,
+                       textDecoration:"underline",cursor:"pointer",fontFamily:"inherit"}}>
+              招待コードをお持ちの方
+            </button>`}
+        </div>
       </div>
     </div>
   `;
