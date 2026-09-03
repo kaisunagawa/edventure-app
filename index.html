@@ -12375,7 +12375,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260903-133018";
+const APP_BUILD = "20260903-142347";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
@@ -13894,7 +13894,18 @@ function App() {
     // サーバーに SESSION_INVALID で弾かれた直後は、その場で再ログインへ誘導する。
     // 従来は「トークンを持っていない人」しか対象にしていなかったため、
     // 失効したトークンを持ったまま使い続けられてしまった
-    try { return localStorage.getItem("jiroku_reauth_needed")==="1"; } catch { return false; }
+    try { if (localStorage.getItem("jiroku_reauth_needed")==="1") return true; } catch {}
+    // ★合言葉が無いなら、通信を待たずに再ログインへ★（2026-09-03 実測）
+    //   これまでは authConfig の応答を待ってから判定していた。その数百ミリ秒の
+    //   あいだに本体の画面を描き、getUser・getLogs・getGoalTree など10本前後を
+    //   トークン無しで投げていた。監査ログに NO_TOKEN が9,273件たまっていたのは
+    //   ほぼこれ。利用者から見ると「開く → 一瞬中身 → やっぱりログイン画面」で、
+    //   何度もログインさせられている感じになる。
+    //   すでに認証が要ると分かっている端末なら、最初からログイン画面でよい。
+    try {
+      if (!getSessionToken() && (AUTH_RANK[rememberedAuthMode()]||0) >= 1) return true;
+    } catch {}
+    return false;
   });
   // 通信中に失効した場合も、画面を切り替える（次の操作まで待たせない）
   // ★戻す側も必ず用意する★
@@ -14108,6 +14119,9 @@ function App() {
 
   useEffect(()=>{
     if(!CURRENT_USER) return;
+    // ★合言葉が無いなら、そもそも聞きに行かない★（2026-09-03）
+    //   断られるだけの通信で、起動を遅くしていた
+    if(!getSessionToken() && (AUTH_RANK[rememberedAuthMode()]||0) >= 1) return;
     // バックグラウンドで最新プロフィール取得＋存在確認（起動はブロックしない）
     authedApi("getUser").then(r=>{
       if(r.ok&&r.data){

@@ -17361,11 +17361,17 @@ function issueSession(user, device) {
   const data = sh.getDataRange().getValues();
   const h = data[0];
   const iUid = h.indexOf("user_id"), iRev = h.indexOf("revoked_at"), iCreated = h.indexOf("created_at");
+  // ★検査用のセッションは端末数に数えない★（2026-09-03）
+  //   login_test.sh が作る localtest が枠(5)を食っていた。
+  //   その状態でKaiが実機からログインすると、本物の端末が古い順に
+  //   失効させられる。検査するたびに手元が1台ログアウトしていた。
+  const iDev = h.indexOf("device");
   const alive = [];
   for (let i = 1; i < data.length; i++) {
-    if (String(data[i][iUid]) === String(user.userId) && !String(data[i][iRev] || "").trim()) {
-      alive.push({ row: i + 1, created: String(data[i][iCreated]) });
-    }
+    if (String(data[i][iUid]) !== String(user.userId)) continue;
+    if (String(data[i][iRev] || "").trim()) continue;
+    if (iDev !== -1 && String(data[i][iDev] || "") === "localtest") continue;
+    alive.push({ row: i + 1, created: String(data[i][iCreated]) });
   }
   alive.sort((a, b) => a.created > b.created ? 1 : -1);
   while (alive.length >= SESSION_MAX_DEVICES) {
