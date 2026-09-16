@@ -93,6 +93,12 @@ function jsonResponse(data, callback) {
 // GET ハンドラー
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 function doGet(e) {
+  // ★応答の通り道だけを確かめる入口★（2026-09-15 返事が届かない件の切り分け）
+  //   シートにも認証にも触れずに返す。これが届かなければ、原因はコードではなく
+  //   Google側の配達（script.googleusercontent.com）にある。
+  if (e && e.parameter && e.parameter.action === "__ping") {
+    return ContentService.createTextOutput("pong").setMimeType(ContentService.MimeType.TEXT);
+  }
   resetPerRequestState_();
   const action = e.parameter.action;
   let studentEmail = e.parameter.studentEmail;
