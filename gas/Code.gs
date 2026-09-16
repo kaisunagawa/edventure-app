@@ -1939,6 +1939,8 @@ function doGet(e) {
         ? (dailyOpsHealthCheck(e.parameter.send !== "1") || {ok:true})
         : {ok:false,error:"not admin"}; break;
       case "adminInstallTrigger": result = adminInstallTrigger(e.parameter.coachEmail, e.parameter.handler, e.parameter.replace); break;
+      // 分類の自動付与を今すぐ1回まわす（結果を見る用）  bash gas/ops.sh adminAutoClassify
+      case "adminAutoClassify": result = verifyAdmin(e.parameter.coachEmail) ? autoClassifyPending() : {ok:false,error:"not admin"}; break;
       case "adminSendStudentCampaign": result = adminSendStudentCampaign(e.parameter.coachEmail, e.parameter); break;
       case "adminSystemHealth": result = verifyAdmin(e.parameter.coachEmail) ? systemHealthCheck(e.parameter.deep === "1") : {ok:false,error:"not admin"}; break;
       case "generateTalentReport": result = generateTalentReport(e.parameter.coachEmail, e.parameter.targetEmail); break;
@@ -15817,6 +15819,157 @@ function classifyLogTime_(studentEmail, targetDate, body, current, helpers) {
 }
 
 // ══════════════════════════════════════════════════════════════════
+// ★分類をAIが自動で付ける★（2026-09-16 Kai指示「分類分けを自動でしてほしい」）
+//
+// これまでは「推測しない」設計で、目標やタスクに紐づいた記録と休憩だけを
+// ルールで決め、残りは本人に選ばせていた。実際には選ばれないまま残り、
+// 「まだ分類していない記録が6件」「分類できた時間 0%」になっていた。
+//
+// ★保存を待たせない★ 記録の保存時にはAIを呼ばない（1〜2秒遅くなるため）。
+//   5分おきの定期処理で、未分類の記録をまとめて1回で分類する。
+// ★本人の選択は絶対に上書きしない★ method=USER の行には触らない。
+//   AIが外していたら、本人が「分類を選ぶ」で直せばそれが最優先になる。
+// ★費用★ Haiku で1回に最大40件。1回あたり約0.5円。直近14日ぶんだけを対象にする。
+// ══════════════════════════════════════════════════════════════════
+const AUTO_CLASS_DAYS = 14;
+const AUTO_CLASS_BATCH = 40;
+const AUTO_CLASS_KEYS = ["GOAL_DIRECT", "ASSET_BUILD", "RECOVERY", "RELATIONSHIP", "OPERATIONS", "UNPLANNED_LEAKAGE"];
+
+function autoClassifyPending() {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(2000)) return { ok: true, skipped: "LOCKED" };
+  try {
+    return autoClassifyPendingInner_();
+  } finally {
+    try { lock.releaseLock(); } catch (e) {}
+  }
+}
+
+function autoClassifyPendingInner_() {
+  const apiKey = PropertiesService.getScriptProperties().getProperty("CLAUDE_API_KEY");
+  if (!apiKey) return { ok: false, error: "NO_API_KEY" };
+  const sheet = getSheet("DailyLog");
+  const data = sheet.getDataRange().getValues();
+  const h = data[0];
+  const col = function (n) { return h.indexOf(n); };
+  const iEm = col("student_email"), iDate = col("date"), iTb = col("time_block"), iTask = col("task"),
+        iMemo = col("memo"), iId = col("log_id"), iDel = col("deleted_at"),
+        iCls = col("time_classification"), iMth = col("classification_method"),
+        iVer = col("classification_version"), iRsn = col("classification_reason_code");
+  if (iCls === -1 || iMth === -1 || iId === -1) return { ok: false, error: "COLUMN_MISSING" };
+  const cutoff = formatDate(new Date(Date.now() - AUTO_CLASS_DAYS * 86400000));
+
+  const pending = [];
+  for (let r = data.length - 1; r >= 1 && pending.length < AUTO_CLASS_BATCH; r--) {
+    const row = data[r];
+    if (String(row[iCls] || "").trim()) continue;                         // もう分類がある
+    if (String(row[iMth] || "").toUpperCase() === "USER") continue;       // 本人が決めた
+    if (iRsn !== -1 && String(row[iRsn] || "") === "AI_UNSURE") continue; // AIが一度決めきれなかった
+    if (iDel !== -1 && String(row[iDel] || "").trim()) continue;
+    const task = String(row[iTask] || "").trim();
+    if (!task) continue;
+    const raw = row[iDate];
+    const d = raw instanceof Date ? Utilities.formatDate(raw, "Asia/Tokyo", "yyyy-MM-dd") : String(raw).slice(0, 10);
+    if (d < cutoff) continue;
+    pending.push({ r: r + 1, id: String(row[iId]), email: String(row[iEm]), date: d,
+                   tb: String(row[iTb] || ""), task: task.slice(0, 120),
+                   memo: String(iMemo === -1 ? "" : (row[iMemo] || "")).slice(0, 120) });
+  }
+  if (!pending.length) return { ok: true, classified: 0 };
+
+  // その人の3か月目標。「目標に直結」かどうかの判断材料にする
+  const goalsOf = {};
+  pending.forEach(function (p) {
+    if (goalsOf[p.email] !== undefined) return;
+    try {
+      goalsOf[p.email] = p1ListMine_("Goals", p.email)
+        .filter(function (g) { return p1Status_(g.status, "ACTIVE") !== "ARCHIVED"; })
+        .map(function (g) { return String(g.title || "").slice(0, 60); }).filter(String).join(" / ");
+    } catch (e) { goalsOf[p.email] = ""; }
+  });
+
+  const lines = pending.map(function (p, i) {
+    return i + "\t目標:" + (goalsOf[p.email] || "（未設定）") + "\t時間:" + p.tb +
+           "\tやったこと:" + p.task + (p.memo ? "\tメモ:" + p.memo : "");
+  }).join("\n");
+  const prompt =
+    "時間の使い方の記録を、次の6分類のどれか1つに振り分けてください。\n\n" +
+    "GOAL_DIRECT … その人の3か月目標に直接効いた時間\n" +
+    "ASSET_BUILD … すぐ効かないが将来のためになる学習・仕込み\n" +
+    "RECOVERY … 休息・睡眠・食事・運動・散歩など、充電になった時間\n" +
+    "RELATIONSHIP … 人と会う・話す・つながりを保つ時間（仕事の商談や面談を除く私的な交流）\n" +
+    "OPERATIONS … やらないと回らない日常の業務・家事・移動・事務\n" +
+    "UNPLANNED_LEAKAGE … 予定になかった割り込み・だらだら流された時間\n\n" +
+    "判断の決まり:\n" +
+    "・仕事の打ち合わせ・面談・コンサルは、目標に効くなら GOAL_DIRECT、そうでなければ OPERATIONS\n" +
+    "・「ゆっくり過ごした」「休んだ」は RECOVERY\n" +
+    "・決めきれないときは \"c\":\"\" にする（無理に当てはめない）\n\n" +
+    "記録（番号<TAB>中身）:\n" + lines + "\n\n" +
+    "JSONだけを返してください。形: {\"items\":[{\"i\":0,\"c\":\"GOAL_DIRECT\"}]}";
+
+  let parsed = null, result = null;
+  try {
+    const res = UrlFetchApp.fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
+      payload: JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: 1500,
+                                messages: [{ role: "user", content: prompt }] }),
+      muteHttpExceptions: true
+    });
+    result = JSON.parse(res.getContentText());
+    logAiUsage(result, "分類の自動付与");
+    const text = result && result.content && result.content[0] ? result.content[0].text : "";
+    parsed = text ? parseAiJson(text) : null;
+  } catch (e) {
+    return { ok: false, error: "AI_ERROR: " + String(e).slice(0, 100) };
+  }
+  const items = (parsed && Array.isArray(parsed.items)) ? parsed.items : null;
+  if (!items) return { ok: false, error: "AI_BAD_JSON" };
+
+  const byIndex = {};
+  items.forEach(function (it) {
+    const n = Number(it && it.i);
+    const c = String((it && it.c) || "").toUpperCase();
+    if (isFinite(n) && n >= 0 && n < pending.length) byIndex[n] = c;
+  });
+
+  const now = new Date().toISOString();
+  const jiroByUser = {}, touchedUsers = {};
+  let done = 0, unsure = 0;
+  pending.forEach(function (p, i) {
+    // ★書く直前に、その行がまだ同じ記録かを確かめる★
+    //   読んでから書くまでの間に行が消されると、下の行が1つずつ上にずれる。
+    //   確かめずに書くと、別の記録に分類を付けてしまう。
+    if (String(sheet.getRange(p.r, iId + 1).getValue()) !== p.id) return;
+    // 本人がこの数秒の間に選んでいたら触らない
+    if (String(sheet.getRange(p.r, iMth + 1).getValue() || "").toUpperCase() === "USER") return;
+    const c = byIndex[i];
+    if (c && AUTO_CLASS_KEYS.indexOf(c) !== -1) {
+      sheet.getRange(p.r, iCls + 1).setValue(c);
+      sheet.getRange(p.r, iMth + 1).setValue("AI");
+      if (iVer !== -1) sheet.getRange(p.r, iVer + 1).setValue(TIME_CLASS_VERSION);
+      if (iRsn !== -1) sheet.getRange(p.r, iRsn + 1).setValue("AI_AUTO");
+      jiroByUser[p.email] = jiroByUser[p.email] || {};
+      jiroByUser[p.email][c] = (jiroByUser[p.email][c] || 0) + 1;
+      touchedUsers[p.email] = true;
+      try { queueOwnerCalendarWrite_(p.email, p.date, p.tb, p.task, c); } catch (e) {}
+      done++;
+    } else {
+      // 決めきれなかった行は、次から何度もAIに聞き直さない（費用を積み上げない）
+      if (iRsn !== -1) sheet.getRange(p.r, iRsn + 1).setValue("AI_UNSURE");
+      unsure++;
+    }
+  });
+  Object.keys(touchedUsers).forEach(function (em) {
+    try { smpBumpEpoch_(em); } catch (e) {}
+    try { jiroCollect_(em, jiroByUser[em], false); } catch (e) {}
+    try { bumpSyncTag_(em); } catch (e) {}
+  });
+  return { ok: true, classified: done, unsure: unsure, looked: pending.length,
+           model: result && result.model, usage: result && result.usage };
+}
+
+// ══════════════════════════════════════════════════════════════════
 // 1日の設計（DayPlan）と、曜日ごとの使える時間
 //   休息日を「未達」「0点」にしないための土台。
 //   ★推測しない★ 設定が無い日は insufficient_data のままにする。
@@ -17981,7 +18134,9 @@ const ADMIN_SECRET_ALLOWLIST = {
   // 招待コードの発行・一覧・停止（2026-09-02）
   //   ブラウザを開かずに済ませたい運用作業なので、鍵で通してよい。
   //   ここに入れないと ops.sh から叩けない（AUTH_REQUIRED で止まる）。
-  inviteCreate:1, inviteList:1, inviteRevoke:1
+  inviteCreate:1, inviteList:1, inviteRevoke:1,
+  // 分類の自動付与を手動で1回まわす（2026-09-16）
+  adminAutoClassify:1
 };
 
 // ── 署名付きの運用リクエスト ──
@@ -19694,7 +19849,9 @@ function adminInstallTrigger(email, handler, replaceFlag) {
     // 控えておいたカレンダー書き込みを流す（記録の保存を待たせないため）
     flushOwnerCalendarQueue: function (b) { return b.timeBased().everyMinutes(1); },
     // 古いchallengeの掃除（ログインが遅くなるのを防ぐ）
-    authPurgeOldChallenges: function (b) { return b.timeBased().everyDays(1).atHour(4); }
+    authPurgeOldChallenges: function (b) { return b.timeBased().everyDays(1).atHour(4); },
+    // 未分類の記録にAIで分類を付ける（2026-09-16）
+    autoClassifyPending: function (b) { return b.timeBased().everyMinutes(5); }
   };
   if (!allowed[name]) return { ok: false, error: "許可されていないハンドラ: " + name };
   // ★時刻を変えたいときは張り直す★（2026-08-05）
@@ -19726,6 +19883,8 @@ function setupTriggers() {
   // 週次バックアップ。利用が最も少ない日曜の早朝に取る
   ScriptApp.newTrigger("weeklyBackup").timeBased().everyWeeks(1).onWeekDay(ScriptApp.WeekDay.SUNDAY).atHour(3).create();
   ScriptApp.newTrigger("checkTimerQueue").timeBased().everyMinutes(1).create();
+  // 未分類の記録にAIで分類を付ける（2026-09-16）
+  ScriptApp.newTrigger("autoClassifyPending").timeBased().everyMinutes(5).create();
   ScriptApp.newTrigger("hourlyReminder").timeBased().everyHours(1).create();
   ScriptApp.newTrigger("syncStripeTotals").timeBased().everyDays(1).atHour(4).create();
   ScriptApp.newTrigger("syncChatworkMessages").timeBased().everyHours(1).create();
