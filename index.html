@@ -585,8 +585,15 @@ const RESEND_SAFE_ACTIONS = {
   saveLog:1,                 // 日付＋時間帯で上書き
   setLogClassification:1,    // log_id で上書き
   saveTaskMutations:1,       // client_mutation_id で二重実行を防いでいる
-  saveSettings:1, saveIntent:1, saveDayPlan:1, saveWeeklyAvailable:1
+  saveSettings:1, saveIntent:1, saveDayPlan:1, saveWeeklyAvailable:1,
+  // op_id を付けて送るので、サーバー側が二度目を弾く（下の newOpId_ 参照）
+  quickLog:1, saveLogMulti:1
 };
+// 送り直しても二重にならないよう、1回の操作に1つの合言葉を付ける
+const OPID_ACTIONS = { quickLog:1, saveLogMulti:1 };
+function newOpId_() {
+  return "op" + Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
+}
 async function fetchJsonOnce_(payload) {
   const r = await fetch(GAS_URL, {
     method: "POST", headers: { "Content-Type": "text/plain" },
@@ -596,14 +603,32 @@ async function fetchJsonOnce_(payload) {
   try { return { ok: true, json: JSON.parse(text) }; }
   catch (e) { return { ok: false, head: String(text).slice(0, 60) }; }
 }
+// ★送り直しは3回まで★（2026-10-01）
+//   Google側の配達失敗は、こちらからは止められない。
+//   実測5%なら、1回送り直しで0.25%、3回で0.0125%（8000回に1回）。
+//   待ち時間を少しずつ延ばすのは、混んでいるときに追い打ちをかけないため。
+const RESEND_WAITS_MS = [400, 1200, 2500];
 async function postJsonResend_(action, payload) {
+  // ★同じ合言葉のまま送り直す★ 変えるとサーバーが別の操作だと思って二重に実行する
+  if (OPID_ACTIONS[action] && !payload.op_id) payload = Object.assign({}, payload, { op_id: newOpId_() });
   let res = await fetchJsonOnce_(payload);
   if (res.ok) return res.json;
   if (!RESEND_SAFE_ACTIONS[action]) throw new Error("BAD_RESPONSE " + res.head);
-  await new Promise(function (r) { setTimeout(r, 400); });
-  res = await fetchJsonOnce_(payload);
-  if (res.ok) return res.json;
-  throw new Error("BAD_RESPONSE_TWICE " + res.head);
+  for (let i = 0; i < RESEND_WAITS_MS.length; i++) {
+    await new Promise(function (r) { setTimeout(r, RESEND_WAITS_MS[i]); });
+    res = await fetchJsonOnce_(payload);
+    if (res.ok) {
+      // 何回目で通ったかを控えておく（後から頻度を数えるため。送信はしない）
+      try {
+        const k = "delivery_retry_log";
+        const a = JSON.parse(localStorage.getItem(k) || "[]");
+        a.push({ at: new Date().toISOString(), action: action, tries: i + 2 });
+        localStorage.setItem(k, JSON.stringify(a.slice(-30)));
+      } catch (e) {}
+      return res.json;
+    }
+  }
+  throw new Error("BAD_RESPONSE_x4 " + res.head);
 }
 
 async function publicApi(action, params = {}) {
@@ -12419,7 +12444,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260930-220807";
+const APP_BUILD = "20260930-232150";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 

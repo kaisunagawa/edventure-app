@@ -1959,11 +1959,11 @@ function doGet(e) {
       case "getDayPlan":   result = getDayPlan(studentEmail, e.parameter); break;
       case "saveDayPlan":  result = saveDayPlan(studentEmail, e.parameter); break;
       case "saveWeeklyAvailable": result = saveWeeklyAvailable(studentEmail, e.parameter); break;
-      case "quickLog":     result = quickLog(studentEmail, e.parameter); break;
+      case "quickLog":     result = withOpId_(e.parameter, "quickLog", function(){ return quickLog(studentEmail, e.parameter); }); break;
       case "parseTasks":   result = parseTasks(studentEmail, e.parameter); break;
       case "saveCondition": result = saveCondition(studentEmail, e.parameter); break;
       case "getCondition":  result = getCondition(studentEmail); break;
-      case "saveLogMulti": result = saveLogMulti(studentEmail, e.parameter); break;
+      case "saveLogMulti": result = withOpId_(e.parameter, "saveLogMulti", function(){ return saveLogMulti(studentEmail, e.parameter); }); break;
       case "coachGetStudents":      result = coachGetStudents(e.parameter.coachEmail); break;
       case "adminTagCohortByJoinDate": result = adminTagCohortByJoinDate(e.parameter.coachEmail, e.parameter.date, e.parameter.cohort); break;
       case "adminListRecentRegistrations": result = adminListRecentRegistrations(e.parameter.coachEmail, e.parameter.days); break;
@@ -2216,11 +2216,11 @@ function doPost(e) {
       case "getDayPlan":   return jsonResponse(getDayPlan(studentEmail, body));
       case "saveDayPlan":  return jsonResponse(saveDayPlan(studentEmail, body));
       case "saveWeeklyAvailable": return jsonResponse(saveWeeklyAvailable(studentEmail, body));
-      case "quickLog":     return jsonResponse(quickLog(studentEmail, body));
+      case "quickLog":     return jsonResponse(withOpId_(body, "quickLog", function(){ return quickLog(studentEmail, body); }));
       case "parseTasks":   return jsonResponse(parseTasks(studentEmail, body));
       case "saveCondition": return jsonResponse(saveCondition(studentEmail, body));
       case "getCondition":  return jsonResponse(getCondition(studentEmail));
-      case "saveLogMulti": return jsonResponse(saveLogMulti(studentEmail, body));
+      case "saveLogMulti": return jsonResponse(withOpId_(body, "saveLogMulti", function(){ return saveLogMulti(studentEmail, body); }));
       case "sendMessage":  return jsonResponse(sendMessage(studentEmail, body));
       case "saveSettings": return jsonResponse(saveSettings(studentEmail, body));
       case "saveOnboarding": return jsonResponse(saveOnboarding(studentEmail, body));
@@ -4723,6 +4723,30 @@ function quickLogNoteTiming_(ms) {
     props.setProperty("QUICKLOG_TIMINGS", JSON.stringify(prev.slice(-5)));
   } catch (e) { /* 測れなくても記録は成功させる */ }
   return ms;
+}
+
+// ★同じ操作を二度実行しない★（2026-10-01）
+//   Googleの配達が落ちると、処理は終わっているのに端末には返事が届かない。
+//   端末はそれを「失敗」と見て送り直す。何も対策しないと、話すだけ記録が
+//   2件できる。端末が付けてきた op_id を覚えておき、2回目以降は
+//   前と同じ返事をそのまま返す（処理はしない）。
+//   覚えておくのは10分。送り直しは数秒以内に起きるので十分。
+function withOpId_(body, feature, fn) {
+  const id = String((body && body.op_id) || "").trim();
+  if (!id || id.length > 64) return fn();
+  const cache = CacheService.getScriptCache();
+  const key = "op_" + feature + "_" + id;
+  try {
+    const hit = cache.get(key);
+    if (hit) {
+      const prev = JSON.parse(hit);
+      prev.deduped = true;   // 2回目だと分かるようにしておく
+      return prev;
+    }
+  } catch (e) { /* 読めなければ普通に実行する */ }
+  const out = fn();
+  try { cache.put(key, JSON.stringify(out), 600); } catch (e) {}
+  return out;
 }
 
 function quickLog(studentEmail, body) {
