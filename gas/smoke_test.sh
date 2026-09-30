@@ -658,10 +658,13 @@ if [ "$MODE" = "live" ] || [ "$MODE" = "all" ]; then
   # 「壊れていないのにデプロイが止まる」誤検知になるため、空のときだけ2回まで再試行する。
   call() {
     local r
-    for _t in 1 2 3; do
+    for _t in 1 2 3 4; do
       r=$(curl -sL --max-time 120 "${URL}?_=$(date +%s%N)$1")
-      [ -n "$r" ] && { printf '%s' "$r"; return 0; }
-      sleep 5
+      # ★空だけでなく「JSONでない」も再試行する★（2026-10-01）
+      #   Google側の配達が落ちるとHTMLのエラーページが返る（実測5%）。
+      #   これを応答として扱うと、壊れていないのに検査が落ちてデプロイが止まる。
+      case "$r" in '{'*) printf '%s' "$r"; return 0;; esac
+      sleep 3
     done
     printf '%s' ""
   }
@@ -743,10 +746,12 @@ PYEOF
     #   以前はこれで「リプレイが通ってしまう」と誤検知し、正常な本番デプロイを止めた
     callSigned() {   # $1=action $2=who [$3=extra]  → 応答を返す。空なら空文字
       local r
-      for _t in 1 2 3; do
+      for _t in 1 2 3 4; do
+        # 署名は毎回作り直す。同じ署名で送り直すと、1回目が届いていた場合に
+        # 「使い回し」として正しく拒否され、検査の前提が崩れるため
         r=$(curl -sL --max-time 120 "${URL}?$(sign "$1" "$2" "${3:-}")")
-        [ -n "$r" ] && { printf '%s' "$r"; return 0; }
-        sleep 5
+        case "$r" in '{'*) printf '%s' "$r"; return 0;; esac
+        sleep 3
       done
       printf '%s' ""
     }
@@ -776,12 +781,22 @@ PYEOF
 
     # 同じ署名の使い回し（リプレイ）が拒否されること。
     # 1回目が実際に通ったことを確認してから2回目を試す（前提が崩れた状態で判定しない）
-    Q=$(sign p1Status "$ADMIN")
-    first=$(curl -sL --max-time 120 "${URL}?$Q")
+    first=""; Q=""
+    for _t in 1 2 3 4; do
+      Q=$(sign p1Status "$ADMIN")
+      first=$(curl -sL --max-time 120 "${URL}?$Q")
+      case "$first" in '{'*) break;; esac
+      sleep 3          # 配達が落ちただけ。署名を作り直してやり直す
+    done
     if ! echo "$first" | grep -q '"ok":true'; then
       ng "リプレイ検査の前提が崩れた（1回目が通らない）: $(echo "$first" | head -c 100)"
     else
-      second=$(curl -sL --max-time 120 "${URL}?$Q")
+      second=""
+      for _t in 1 2 3 4; do
+        second=$(curl -sL --max-time 120 "${URL}?$Q")
+        case "$second" in '{'*) break;; esac
+        sleep 3        # ここは同じ署名のまま。使い回しが拒否されることを見たいので
+      done
       if [ -z "$second" ]; then ng "リプレイ検査の2回目が空応答（判定不能）"
       elif echo "$second" | grep -q '"ok":false'; then ok "署名の使い回しを拒否"
       else ng "リプレイが通ってしまう: $(echo "$second" | head -c 140)"; fi
