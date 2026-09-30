@@ -565,14 +565,51 @@ async function enablePushNotifications() {
 // サーバーの PUBLIC_ACTIONS と同じ顔ぶれにすること（片方だけ変えない）
 const PUBLIC_ACTIONS = { authChallenge:1, login:1, loginAccess:1, authConfig:1, healthCheck:1 };
 
+// ★Googleが返事を配達しそこねたときだけ、1回だけ送り直す★（2026-09-30 実測）
+//   GASの応答は script.googleusercontent.com 経由で届く。ここがときどき
+//   HTMLのエラーページを返す。2026-09-30 21:55の実測で本番15回中2回（13%）。
+//   サーバー側の実行ログは「完了」なので、落ちているのは配達だけ。
+//   これまではJSONとして読めずにそのまま失敗扱いで、利用者からは
+//   「たまに画面が空になる・保存に失敗する」に見えていた。
+//
+//   ★何でも送り直してはいけない★
+//   処理そのものは終わっているので、話すだけ記録のように
+//   「呼ぶたびに1件増える」ものを送り直すと二重に記録される。
+//   同じ内容で呼び直しても結果が変わらない操作だけを送り直す。
+const RESEND_SAFE_ACTIONS = {
+  // 読み取りは何度呼んでも増えない
+  getUser:1, getLogs:1, getLogsRange:1, getReport:1, getReportList:1, getHomeData:1,
+  getTasks:1, getGoalTree:1, getSchedule:1, getWeeklySummary:1, getRoadmap:1,
+  getDayPlan:1, getCommunity:1, getRanking:1, getAiInsight:1, syncTag:1, authWhoAmI:1,
+  // 書き込みでも「同じ鍵で上書き」するものは、二重にならない
+  saveLog:1,                 // 日付＋時間帯で上書き
+  setLogClassification:1,    // log_id で上書き
+  saveTaskMutations:1,       // client_mutation_id で二重実行を防いでいる
+  saveSettings:1, saveIntent:1, saveDayPlan:1, saveWeeklyAvailable:1
+};
+async function fetchJsonOnce_(payload) {
+  const r = await fetch(GAS_URL, {
+    method: "POST", headers: { "Content-Type": "text/plain" },
+    body: JSON.stringify(payload)
+  });
+  const text = await r.text();
+  try { return { ok: true, json: JSON.parse(text) }; }
+  catch (e) { return { ok: false, head: String(text).slice(0, 60) }; }
+}
+async function postJsonResend_(action, payload) {
+  let res = await fetchJsonOnce_(payload);
+  if (res.ok) return res.json;
+  if (!RESEND_SAFE_ACTIONS[action]) throw new Error("BAD_RESPONSE " + res.head);
+  await new Promise(function (r) { setTimeout(r, 400); });
+  res = await fetchJsonOnce_(payload);
+  if (res.ok) return res.json;
+  throw new Error("BAD_RESPONSE_TWICE " + res.head);
+}
+
 async function publicApi(action, params = {}) {
   if (!GAS_URL) return mockApi(action, params);
   try {
-    const r = await fetch(GAS_URL, {
-      method: "POST", headers: { "Content-Type": "text/plain" },
-      body: JSON.stringify({ action, ...params })
-    });
-    return await r.json();
+    return await postJsonResend_(action, { action, ...params });
   } catch { return { ok:false }; }
 }
 
@@ -584,19 +621,15 @@ async function publicApi(action, params = {}) {
 async function authedApi(action, params = {}) {
   if (!GAS_URL) return mockApi(action, params);
   try {
-    const r = await fetch(GAS_URL, {
-      method: "POST", headers: { "Content-Type": "text/plain" },
-      body: JSON.stringify({
-        action,
-        // ★CURRENT_USER が未確定のことがある★
-        //   ログイン直後は、まだ全体の利用者が決まっていない。
-        //   そこで落ちると「ログインできたのに画面が出ない」になる。
-        studentEmail: (CURRENT_USER && CURRENT_USER.email) || "",
-        token: getSessionToken() || undefined,   // 無ければ入れない（互換段階のため）
-        ...params
-      })
+    const j = await postJsonResend_(action, {
+      action,
+      // ★CURRENT_USER が未確定のことがある★
+      //   ログイン直後は、まだ全体の利用者が決まっていない。
+      //   そこで落ちると「ログインできたのに画面が出ない」になる。
+      studentEmail: (CURRENT_USER && CURRENT_USER.email) || "",
+      token: getSessionToken() || undefined,   // 無ければ入れない（互換段階のため）
+      ...params
     });
-    const j = await r.json();
     handleSessionInvalid(j, action, params);
     return j;
   } catch { return { ok:false, data:[] }; }
@@ -620,12 +653,8 @@ async function gasPost(action, body = {}) {
 async function gasPostJson(action, body = {}) {
   if (!GAS_URL) return mockPost(action, body);
   try {
-    const r = await fetch(GAS_URL, {
-      method: "POST",
-      headers: { "Content-Type": "text/plain" },
-      body: JSON.stringify({ action, studentEmail: CURRENT_USER.email, token: getSessionToken(), ...body })
-    });
-    const j = await r.json();
+    const j = await postJsonResend_(action,
+      { action, studentEmail: CURRENT_USER.email, token: getSessionToken(), ...body });
     // 書き込みは印を進める。自分で進めた印に自分が反応しないよう、時刻を控える
     if (action !== "syncTag") { __selfWriteAt = Date.now(); resetSyncPace(); }
     // セッション切れで弾かれた保存操作は、捨てずに預かっておく。
@@ -12390,7 +12419,7 @@ function dueLabel(dueAt, overdue){
 // ★このファイルの版★
 // 更新検知に使う。index.html を変えたら必ずここも変える
 // （スモークテストが、変え忘れたら落とす）。
-const APP_BUILD = "20260903-144051";
+const APP_BUILD = "20260930-220807";
 
 const GOOGLE_CLIENT_ID = "476804060858-n3afj7ipmc81vq8cq71u0u3jdpolshea.apps.googleusercontent.com";
 
