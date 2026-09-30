@@ -9478,12 +9478,21 @@ function dailyLineWinback() {
     const wbStr = rawWB instanceof Date ? formatDate(rawWB) : String(rawWB || "");
     if (wbStr === today) continue; // 今日はもう送信済み
 
+    // ★呼び戻しは30日で打ち切る★（2026-09-30）
+    //   以前は休眠が何か月続いても毎週送り、そのたびにClaudeで文面を作っていた。
+    //   30日戻らない人にはほぼ効かず、LINEの通数（無料枠は月200通）とAPI代だけが積み上がる。
+    const WINBACK_MAX_DAYS = 30;
     let send = false;
     if (days === null) {
-      // 一度も記録がない人：3日おきに最初の一歩を促す
+      // 一度も記録がない人：登録から30日までは3日おきに最初の一歩を促す
+      // 登録日が読めない人は従来どおり（新しく入った人を取りこぼさないため）
+      const rawJ = user.joined_at;
+      const joinedStr = rawJ instanceof Date ? formatDate(rawJ) : String(rawJ || "").slice(0, 10);
+      const sinceJoin = /^\d{4}-\d{2}-\d{2}$/.test(joinedStr)
+        ? Math.round((todayD - new Date(joinedStr + "T00:00:00")) / 86400000) : null;
       const gap = wbStr ? Math.round((todayD - new Date(wbStr + "T00:00:00")) / 86400000) : 999;
-      if (gap >= 3) send = true;
-    } else if (days >= 2 && ([2, 3, 5, 7, 10, 14].indexOf(days) !== -1 || (days > 14 && days % 7 === 0))) {
+      if (gap >= 3 && (sinceJoin === null || sinceJoin <= WINBACK_MAX_DAYS)) send = true;
+    } else if (days >= 2 && days <= WINBACK_MAX_DAYS && ([2, 3, 5, 7, 10, 14].indexOf(days) !== -1 || (days > 14 && days % 7 === 0))) {
       send = true;
     }
     if (!send) continue;
@@ -18131,6 +18140,8 @@ const ADMIN_SECRET_ALLOWLIST = {
   authSetMode:1, authSetEnforce:1, authRoleApply:1, authRoleDryRun:1, authRevokeAll:1,
   authCleanupTestData:1, adminPurgeTestUsers:1, adminMigrateTasks:1, authBreakerReset:1, rotateSessionSecret:1,
   p1Backup:1, p1BackupInfo:1, p1PurgeArchived:1, weeklyBackup:1,
+  // LINEの今月の送信数（読むだけ）。プラン判断用（2026-09-30）
+  lineQuota:1,
   // 招待コードの発行・一覧・停止（2026-09-02）
   //   ブラウザを開かずに済ませたい運用作業なので、鍵で通してよい。
   //   ここに入れないと ops.sh から叩けない（AUTH_REQUIRED で止まる）。
