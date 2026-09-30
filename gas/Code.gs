@@ -182,6 +182,43 @@ function doGet(e) {
         return jsonResponse({ ok: true, key: key, dry_run: dryG, granted: target,
                               already_had: already, skipped_inactive: skipped, emails: changed.slice(0, 50) });
       }
+      // ★連続記録を手で直す★（2026-09-30 Kai依頼）
+      //   recomputeStreak_ は記録の日付から計算し直すので、
+      //   「この日はなかったことにする」を表現できない（休みは曜日単位のため）。
+      //   直した値は updateStreak がそのまま引き継いで翌日+1される。
+      //   誰がいつ何を何に変えたかは監査ログに必ず残す。
+      case "adminStreakSet": {
+        if (!verifyAdmin(e.parameter.coachEmail)) { result = { ok: false, error: "not admin" }; break; }
+        const emS = String(e.parameter.email || "").trim();
+        const vS = Number(e.parameter.streak);
+        if (!emS || !isFinite(vS) || vS < 0 || vS > 3650) { result = { ok: false, error: "bad params" }; break; }
+        const shS = getSheet("Users");
+        const dS = shS.getDataRange().getValues();
+        const hS = dS[0];
+        const iEmS = hS.indexOf("student_email"), iStS = hS.indexOf("streak"),
+              iFzS = hS.indexOf("streak_freeze"), iLlS = hS.indexOf("last_log_date");
+        if (iStS === -1) { result = { ok: false, error: "no streak column" }; break; }
+        result = { ok: false, error: "no user" };
+        for (let z = 1; z < dS.length; z++) {
+          if (String(dS[z][iEmS]) !== emS) continue;
+          const beforeS = Number(dS[z][iStS] || 0);
+          shS.getRange(z + 1, iStS + 1).setValue(vS);
+          let fzAfter = null;
+          const fzP = String(e.parameter.freeze || "");
+          if (fzP !== "" && !isNaN(Number(fzP)) && iFzS !== -1) {
+            fzAfter = Math.max(0, Math.min(2, Number(fzP)));
+            shS.getRange(z + 1, iFzS + 1).setValue(fzAfter);
+          }
+          const llP = String(e.parameter.lastLogDate || "");
+          if (/^\d{4}-\d{2}-\d{2}$/.test(llP) && iLlS !== -1) shS.getRange(z + 1, iLlS + 1).setValue(llP);
+          authAudit("STREAK_SET", { result: "APPLIED", action: "adminStreakSet",
+            failureReason: emS + " streak " + beforeS + "->" + vS + (fzAfter === null ? "" : " freeze->" + fzAfter) });
+          smpBumpEpoch_(emS);
+          result = { ok: true, email: emS, streak_before: beforeS, streak_after: vS, freeze_after: fzAfter };
+          break;
+        }
+        break;
+      }
       case "adminStreakRecalc": {
         if (!verifyAdmin(e.parameter.coachEmail)) return jsonResponse({ ok: false, error: "not admin" });
         const em2 = String(e.parameter.email || "").trim();
@@ -18147,7 +18184,9 @@ const ADMIN_SECRET_ALLOWLIST = {
   //   ここに入れないと ops.sh から叩けない（AUTH_REQUIRED で止まる）。
   inviteCreate:1, inviteList:1, inviteRevoke:1,
   // 分類の自動付与を手動で1回まわす（2026-09-16）
-  adminAutoClassify:1
+  adminAutoClassify:1,
+  // 連続記録の手直し（2026-09-30）
+  adminStreakSet:1
 };
 
 // ── 署名付きの運用リクエスト ──
